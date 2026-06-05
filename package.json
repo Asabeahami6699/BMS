@@ -8,7 +8,9 @@
   ],
   "scripts": {
     "build": "npm run -w @bms/shared build && npm run -w @bms/backend build && npm run -w @bms/frontend build",
+    "build:backend": "npm run -w @bms/shared build && npm run -w @bms/backend build",
     "build:frontend": "npm run -w @bms/shared build && npm run -w @bms/frontend build",
+    "start": "npm run -w @bms/backend start",
     "dev": "npm run -w @bms/backend dev",
     "typecheck": "npm run -w @bms/shared typecheck && npm run -w @bms/backend typecheck && npm run -w @bms/frontend typecheck",
     "test": "npm run -w @bms/backend test"
