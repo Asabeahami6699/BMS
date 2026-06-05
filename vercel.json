@@ -1,7 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
   "installCommand": "npm install",
-  "buildCommand": "npm run -w @bms/shared build && npm run -w @bms/frontend build",
-  "outputDirectory": "apps/frontend/dist",
+  "buildCommand": "npm run vercel-build",
+  "outputDirectory": "dist",
   "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
 }
