@@ -1,0 +1,251 @@
+import { useEffect, useMemo, useState } from "react";
+import type { AppRole, Branch, UserRecord } from "./api";
+import { deleteUser, exportUsersCsv, getTenantId, listBranches, listUsers, updateUser } from "./api";
+import { AdminDataTable, filterRowsBySearch } from "../components/AdminDataTable";
+import { RowActionsMenu } from "../components/RowActionsMenu";
+import { ResetPasswordModal } from "./ResetPasswordModal";
+import { UserFormModal } from "./UserFormModal";
+import { useToast } from "../components/Toast";
+import { subscribeToTenantRealtime } from "./realtime";
+
+type Props = {
+  role: AppRole;
+};
+
+function formatDate(value?: string): string {
+  if (!value) {
+    return "—";
+  }
+  try {
+    return new Date(value).toLocaleString();
+  } catch {
+    return value;
+  }
+}
+
+function branchLabel(branchId: string | undefined, branches: Branch[]): string {
+  if (!branchId) {
+    return "—";
+  }
+  const match = branches.find((b) => b.id === branchId);
+  return match ? `${match.name} (${match.code})` : branchId;
+}
+
+export function UserManagementCard({ role }: Props) {
+  const canManage = role === "admin";
+  const { showToast } = useToast();
+  const [users, setUsers] = useState<UserRecord[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalMode, setModalMode] = useState<"create" | "edit">("create");
+  const [editingUser, setEditingUser] = useState<UserRecord | null>(null);
+  const [resetOpen, setResetOpen] = useState(false);
+  const [passwordResetUser, setPasswordResetUser] = useState<UserRecord | null>(null);
+
+  async function loadUsers() {
+    setLoading(true);
+    try {
+      const [userRows, branchRows] = await Promise.all([listUsers(), listBranches().catch(() => [])]);
+      setUsers(userRows);
+      setBranches(branchRows);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Failed to load users", "error");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadUsers();
+    const unsubscribe = subscribeToTenantRealtime({
+      tenantId: getTenantId(),
+      tables: ["users"],
+      onChange: () => {
+        void loadUsers();
+      }
+    });
+
+    return () => unsubscribe();
+  }, [role]);
+
+  const filtered = useMemo(
+    () =>
+      filterRowsBySearch(users, search, [
+        "userId",
+        "email",
+        "fullName",
+        "role",
+        "scopeType",
+        "branchId",
+        "status",
+        "createdBy"
+      ]),
+    [users, search]
+  );
+
+  function openCreate() {
+    setModalMode("create");
+    setEditingUser(null);
+    setModalOpen(true);
+  }
+
+  function openEdit(user: UserRecord) {
+    setModalMode("edit");
+    setEditingUser(user);
+    setModalOpen(true);
+  }
+
+  function openReset(user: UserRecord) {
+    setPasswordResetUser(user);
+    setResetOpen(true);
+  }
+
+  async function toggleStatus(user: UserRecord) {
+    const next = user.status === "active" ? "inactive" : "active";
+    try {
+      await updateUser(user.userId, { status: next });
+      showToast(`User ${next === "active" ? "activated" : "deactivated"}`, "success");
+      await loadUsers();
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Failed to update status", "error");
+    }
+  }
+
+  async function handleDelete(user: UserRecord) {
+    if (!window.confirm(`Delete user "${user.fullName ?? user.email}"? This cannot be undone.`)) {
+      return;
+    }
+    try {
+      await deleteUser(user.userId);
+      showToast("User deleted", "success");
+      await loadUsers();
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Failed to delete user", "error");
+    }
+  }
+
+  async function handleExportCsv() {
+    try {
+      const csv = await exportUsersCsv();
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", "users.csv");
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      showToast("Users CSV exported", "success");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Failed to export users CSV", "error");
+    }
+  }
+
+  return (
+    <>
+      <section className="card admin-mgmt-card">
+        <div className="admin-mgmt-head">
+          <div>
+            <h2>User management</h2>
+            <p className="muted">Staff accounts with roles, scope, and login access.</p>
+          </div>
+          {canManage ? (
+            <div className="admin-mgmt-head-actions">
+              <button type="button" className="button secondary" onClick={() => void handleExportCsv()}>
+                Export CSV
+              </button>
+              <button type="button" className="button" onClick={openCreate}>
+                + Add user
+              </button>
+            </div>
+          ) : null}
+        </div>
+
+        {loading ? <p className="muted">Loading users…</p> : null}
+
+        <AdminDataTable
+          columns={[
+            { key: "fullName", label: "Name", render: (row) => row.fullName ?? "—" },
+            { key: "email", label: "Email" },
+            {
+              key: "role",
+              label: "Role",
+              render: (row) => row.role.replace(/_/g, " ")
+            },
+            {
+              key: "scopeType",
+              label: "Scope",
+              render: (row) => (row.scopeType === "head_office" ? "Head office" : "Branch")
+            },
+            {
+              key: "branchId",
+              label: "Branch",
+              render: (row) => branchLabel(row.branchId, branches)
+            },
+            {
+              key: "status",
+              label: "Status",
+              render: (row) => (
+                <span className={`status-pill status-pill--${row.status === "active" ? "active" : "inactive"}`}>
+                  {row.status}
+                </span>
+              )
+            },
+            { key: "userId", label: "User ID", className: "admin-table-mono" },
+            { key: "createdBy", label: "Created by", className: "admin-table-mono" },
+            {
+              key: "createdAt",
+              label: "Created",
+              render: (row) => formatDate(row.createdAt)
+            }
+          ]}
+          rows={filtered}
+          rowKey={(row) => row.userId}
+          search={search}
+          onSearchChange={setSearch}
+          searchPlaceholder="Search name, email, role, branch…"
+          emptyMessage={loading ? "Loading…" : "No users match your search."}
+          actions={
+            canManage
+              ? (row) => (
+                  <RowActionsMenu
+                    ariaLabel={`Actions for ${row.fullName ?? row.email}`}
+                    items={[
+                      { label: "Edit", onClick: () => openEdit(row) },
+                      { label: "Reset password", onClick: () => openReset(row) },
+                      {
+                        label: row.status === "active" ? "Deactivate" : "Activate",
+                        onClick: () => void toggleStatus(row)
+                      },
+                      { label: "Delete", onClick: () => void handleDelete(row), danger: true }
+                    ]}
+                  />
+                )
+              : undefined
+          }
+        />
+      </section>
+
+      {canManage ? (
+        <>
+          <UserFormModal
+            open={modalOpen}
+            mode={modalMode}
+            user={editingUser}
+            branches={branches}
+            onClose={() => setModalOpen(false)}
+            onSaved={() => void loadUsers()}
+          />
+          <ResetPasswordModal
+            open={resetOpen}
+            user={passwordResetUser}
+            onClose={() => setResetOpen(false)}
+          />
+        </>
+      ) : null}
+    </>
+  );
+}
