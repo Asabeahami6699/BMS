@@ -32,12 +32,14 @@ export const env = parsed.success
       BOOTSTRAP_DEMO_ADMIN: true
     };
 
+const IS_TEST = Boolean(process.env.VITEST) || process.env.NODE_ENV === "test";
+
 export function hasSupabaseConfig(): boolean {
-  return Boolean(env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY);
+  return !IS_TEST && Boolean(env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY);
 }
 
 export function hasSupabaseAuthConfig(): boolean {
-  return Boolean(env.SUPABASE_URL && env.SUPABASE_ANON_KEY);
+  return !IS_TEST && Boolean(env.SUPABASE_URL && env.SUPABASE_ANON_KEY);
 }
 
 export function getSupabaseJwtSecret(): string | undefined {

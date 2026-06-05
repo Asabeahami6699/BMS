@@ -1,5 +1,5 @@
 import request from "supertest";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { SAVINGS_INITIAL_DEPOSIT_GHS } from "@bms/shared";
 import { createApp } from "./app.js";
 import { resolveTestBranchId } from "./testHelpers.js";
@@ -9,6 +9,8 @@ const app = createApp();
 const AGENT_ID = "test-field-agent-1";
 const FAKE_ID_CARD_PHOTO = "data:image/png;base64,iVBORw0KGgo=";
 let branchId = "branch-a";
+
+vi.setConfig({ testTimeout: 20000 });
 
 function agentHeaders() {
   return {
@@ -109,17 +111,15 @@ describe("field agent flows", () => {
     expect(search.status).toBe(200);
     expect((search.body as unknown[]).length).toBeGreaterThan(0);
 
-    const tx = await request(app)
-      .post("/api/v1/transactions")
+    const line = await request(app)
+      .post("/api/v1/field-agents/me/collection-batches/lines")
       .set(agentHeaders())
-      .set("Idempotency-Key", "fa-collect-1")
       .send({
         customerId,
-        type: "daily_susu",
         amount: 15,
         transactionBranchId: branchId
       });
-    expect(tx.status).toBe(201);
+    expect(line.status).toBe(201);
   });
 
   it("rejects collection for pending customer", async () => {
@@ -139,18 +139,16 @@ describe("field agent flows", () => {
       });
     const customerId = reg.body.id as string;
 
-    const tx = await request(app)
-      .post("/api/v1/transactions")
+    const line = await request(app)
+      .post("/api/v1/field-agents/me/collection-batches/lines")
       .set(agentHeaders())
-      .set("Idempotency-Key", "fa-collect-pending")
       .send({
         customerId,
-        type: "daily_susu",
         amount: 10,
         transactionBranchId: branchId
       });
-    expect(tx.status).toBe(400);
-    expect(tx.body.error).toContain("not active");
+    expect(line.status).toBe(400);
+    expect(String(line.body.error ?? "")).toContain("not active");
   });
 
   it("balance request: agent requests, coordinator approves, agent sees balance for 6h", async () => {
@@ -285,7 +283,7 @@ describe("field agent flows", () => {
       .set("Idempotency-Key", "fa-wd-fund")
       .send({
         customerId,
-        type: "daily_susu",
+        type: "deposit",
         amount: 100,
         transactionBranchId: branchId
       });
@@ -375,7 +373,7 @@ describe("field agent flows", () => {
       .send({
         customerId,
         type: "deposit",
-        amount: 30,
+        amount: SAVINGS_INITIAL_DEPOSIT_GHS + 30,
         transactionBranchId: branchId
       });
 

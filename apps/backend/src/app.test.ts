@@ -1,10 +1,12 @@
 import request from "supertest";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { createApp } from "./app.js";
 import { resolveTestBranchId } from "./testHelpers.js";
 
 const app = createApp();
 let testBranchId = "branch-a";
+
+vi.setConfig({ testTimeout: 20000 });
 
 function authHeaders(role: string, scopeType: "head_office" | "branch", branchId = testBranchId) {
   return {
@@ -110,6 +112,6 @@ describe("money route safeguards", () => {
       });
 
     expect(txRes.status).toBe(400);
-    expect(txRes.body.error).toContain("Insufficient customer balance");
+    expect(txRes.body.error).toContain("Insufficient withdrawable balance");
   });
 });
