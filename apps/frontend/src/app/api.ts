@@ -1,6 +1,18 @@
 import type {
   AccountType,
   CustomerRegistrationInput,
+  LoanApplication,
+  LoanBorrowerRegistration,
+  LoanGuarantor,
+  LoanGroup,
+  LoanGroupMember,
+  LoanGroupMemberRole,
+  LoanIncomeSource,
+  LoanProduct,
+  LoanPurpose,
+  LoanRepayment,
+  LoanScheduleInstallment,
+  LoanType,
   NextOfKinDetails,
   Permission,
   Role,
@@ -9,6 +21,7 @@ import type {
   TenantProductModule
 } from "@bms/shared";
 import { isNetworkError, toUserFacingError } from "../lib/networkError";
+import { SESSION_UNAUTHORIZED_EVENT } from "../auth/sessionIdleConfig";
 
 export type { AccountType, TenantProductModule };
 
@@ -491,6 +504,28 @@ export type AuthMe = {
   susuNavVisibility?: SusuNavVisibilityRow[];
 };
 
+/** Stable compare key so auth state updates skip when /auth/me payload is unchanged. */
+export function authMeSignature(me: AuthMe | null | undefined): string {
+  if (!me) {
+    return "";
+  }
+  return JSON.stringify({
+    userId: me.userId,
+    tenantId: me.tenantId,
+    role: me.role,
+    scopeType: me.scopeType,
+    branchId: me.branchId ?? "",
+    permissions: me.permissions,
+    subscribedModules: me.subscribedModules ?? [],
+    subscribedAddons: me.subscribedAddons ?? [],
+    reportsAnalytics: me.reportsAnalytics ?? true,
+    fullName: me.fullName ?? "",
+    email: me.email ?? "",
+    tenantName: me.tenantName ?? "",
+    susuNavVisibility: me.susuNavVisibility ?? null
+  });
+}
+
 type AuthSession = {
   accessToken: string;
   user: AuthMe;
@@ -539,6 +574,19 @@ export function clearAuthSession(): void {
   persistSession(null);
 }
 
+function notifySessionUnauthorized(): void {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(SESSION_UNAUTHORIZED_EVENT));
+  }
+}
+
+function handleUnauthorizedResponse(): void {
+  if (authSession?.accessToken) {
+    clearAuthSession();
+    notifySessionUnauthorized();
+  }
+}
+
 function formatApiError(
   body: {
     error?: string;
@@ -575,6 +623,9 @@ export async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> 
           formErrors?: string[];
         };
       };
+      if (response.status === 401) {
+        handleUnauthorizedResponse();
+      }
       if (response.status === 413) {
         throw new Error(body.error ?? "Photo or request data is too large. Try a smaller image.");
       }
@@ -620,6 +671,25 @@ export async function logout(): Promise<void> {
   clearAuthSession();
 }
 
+export async function refreshAuthSession(): Promise<boolean> {
+  if (!authSession?.accessToken) {
+    return false;
+  }
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/v1/auth/refresh`, {
+      method: "POST",
+      headers: authHeaders()
+    });
+    if (response.status === 401) {
+      handleUnauthorizedResponse();
+      return false;
+    }
+    return response.ok;
+  } catch {
+    return Boolean(authSession?.accessToken);
+  }
+}
+
 export function getTenantId(): string {
   return runtimeContext.tenantId;
 }
@@ -642,7 +712,7 @@ export async function getAuthMe(): Promise<AuthMe> {
     throw error;
   }
   if (response.status === 401) {
-    clearAuthSession();
+    handleUnauthorizedResponse();
     throw new Error("Session expired");
   }
   if (!response.ok) {
@@ -2008,4 +2078,264 @@ export async function createTenantAdmin(
     throw new Error(body.error ?? "Failed to create company admin");
   }
   return response.json() as Promise<AuthMe>;
+}
+
+export type LoansBootstrap = {
+  products: LoanProduct[];
+  applications: LoanApplication[];
+  groups: LoanGroup[];
+  summary: {
+    pendingApproval: number;
+    approved: number;
+    disbursed: number;
+    closed: number;
+    totalOutstanding: number;
+    totalRepaid: number;
+    overdueInstallments: number;
+  };
+};
+
+export type LoanDetail = {
+  application: LoanApplication;
+  schedule: LoanScheduleInstallment[];
+  repayments: LoanRepayment[];
+  customer?: {
+    fullName: string;
+    email?: string;
+    phone: string;
+    location?: string;
+    houseNumber?: string;
+    idCardNumber?: string;
+    accountNumber?: string;
+    photoUrl?: string;
+    idCardPhotoUrl?: string;
+    nextOfKin?: NextOfKinDetails;
+  };
+};
+
+export async function getLoansBootstrap(): Promise<LoansBootstrap> {
+  return fetchJson<LoansBootstrap>(`${API_BASE_URL}/api/v1/loans/bootstrap`, {
+    headers: authHeaders()
+  });
+}
+
+export async function listLoanProducts(): Promise<LoanProduct[]> {
+  const payload = await fetchJson<{ products: LoanProduct[] }>(`${API_BASE_URL}/api/v1/loans/products`, {
+    headers: authHeaders()
+  });
+  return payload.products;
+}
+
+export async function createLoanProduct(payload: {
+  name: string;
+  description?: string;
+  interestRatePercent: number;
+  termMonths: number;
+  repaymentFrequency?: "weekly" | "monthly";
+  minAmount: number;
+  maxAmount: number;
+  loanType?: LoanType;
+  minGroupMembers?: number;
+  maxGroupMembers?: number;
+  status?: "active" | "inactive";
+}): Promise<LoanProduct> {
+  const body = await fetchJson<{ product: LoanProduct }>(`${API_BASE_URL}/api/v1/loans/products`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(payload)
+  });
+  return body.product;
+}
+
+export async function updateLoanProduct(
+  productId: string,
+  payload: Partial<{
+    name: string;
+    description: string;
+    interestRatePercent: number;
+    termMonths: number;
+    repaymentFrequency?: "weekly" | "monthly";
+    minAmount: number;
+    maxAmount: number;
+    loanType?: LoanType;
+    minGroupMembers?: number;
+    maxGroupMembers?: number;
+    status: "active" | "inactive";
+  }>
+): Promise<LoanProduct> {
+  const body = await fetchJson<{ product: LoanProduct }>(
+    `${API_BASE_URL}/api/v1/loans/products/${productId}`,
+    {
+      method: "PATCH",
+      headers: authHeaders(),
+      body: JSON.stringify(payload)
+    }
+  );
+  return body.product;
+}
+
+export async function listLoanApplications(): Promise<LoanApplication[]> {
+  const payload = await fetchJson<{ applications: LoanApplication[] }>(
+    `${API_BASE_URL}/api/v1/loans/applications`,
+    { headers: authHeaders() }
+  );
+  return payload.applications;
+}
+
+export async function getLoanDetail(loanId: string): Promise<LoanDetail> {
+  return fetchJson<LoanDetail>(`${API_BASE_URL}/api/v1/loans/applications/${loanId}`, {
+    headers: authHeaders()
+  });
+}
+
+export async function createLoanApplication(payload: {
+  customerId?: string;
+  newCustomer?: LoanBorrowerRegistration;
+  productId: string;
+  branchId: string;
+  principalAmount: number;
+  applicationNotes?: string;
+  loanPurpose: LoanPurpose;
+  loanPurposeOther?: string;
+  sourceOfIncome: LoanIncomeSource;
+  sourceOfIncomeOther?: string;
+  occupation: string;
+  employerOrBusiness?: string;
+  monthlyIncome: number;
+  monthlyExpenses?: number;
+  existingLoanBalance?: number;
+  yearsAtCurrentJob?: number;
+  guarantor: LoanGuarantor;
+  photoUrl?: string;
+  idCardPhotoUrl?: string;
+  groupId?: string;
+}): Promise<LoanApplication> {
+  const body = await fetchJson<{ application: LoanApplication }>(
+    `${API_BASE_URL}/api/v1/loans/applications`,
+    {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify(payload)
+    }
+  );
+  return body.application;
+}
+
+export async function approveLoanApplication(loanId: string): Promise<LoanApplication> {
+  const body = await fetchJson<{ application: LoanApplication }>(
+    `${API_BASE_URL}/api/v1/loans/applications/${loanId}/approve`,
+    { method: "POST", headers: authHeaders() }
+  );
+  return body.application;
+}
+
+export async function rejectLoanApplication(
+  loanId: string,
+  rejectionReason: string
+): Promise<LoanApplication> {
+  const body = await fetchJson<{ application: LoanApplication }>(
+    `${API_BASE_URL}/api/v1/loans/applications/${loanId}/reject`,
+    {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ rejectionReason })
+    }
+  );
+  return body.application;
+}
+
+export async function disburseLoan(loanId: string): Promise<LoanApplication> {
+  const body = await fetchJson<{ application: LoanApplication }>(
+    `${API_BASE_URL}/api/v1/loans/applications/${loanId}/disburse`,
+    { method: "POST", headers: authHeaders() }
+  );
+  return body.application;
+}
+
+export async function recordLoanRepayment(
+  loanId: string,
+  payload: { amount: number; branchId: string; notes?: string; settleAll?: boolean }
+): Promise<{ application: LoanApplication; repayment: LoanRepayment; schedule: LoanScheduleInstallment[] }> {
+  return fetchJson<{ application: LoanApplication; repayment: LoanRepayment; schedule: LoanScheduleInstallment[] }>(
+    `${API_BASE_URL}/api/v1/loans/applications/${loanId}/repayments`,
+    {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify(payload)
+    }
+  );
+}
+
+export async function listLoanGroups(): Promise<LoanGroup[]> {
+  const payload = await fetchJson<{ groups: LoanGroup[] }>(`${API_BASE_URL}/api/v1/loans/groups`, {
+    headers: authHeaders()
+  });
+  return payload.groups;
+}
+
+export async function getLoanGroup(groupId: string): Promise<LoanGroup> {
+  const payload = await fetchJson<{ group: LoanGroup }>(`${API_BASE_URL}/api/v1/loans/groups/${groupId}`, {
+    headers: authHeaders()
+  });
+  return payload.group;
+}
+
+export async function createLoanGroup(payload: {
+  name: string;
+  branchId: string;
+  description?: string;
+  meetingDay?: string;
+  minMembers?: number;
+  maxMembers?: number;
+  assignedFieldAgentId?: string;
+}): Promise<LoanGroup> {
+  const body = await fetchJson<{ group: LoanGroup }>(`${API_BASE_URL}/api/v1/loans/groups`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(payload)
+  });
+  return body.group;
+}
+
+export async function updateLoanGroup(
+  groupId: string,
+  payload: Partial<{
+    name: string;
+    branchId: string;
+    description: string;
+    meetingDay: string;
+    minMembers: number;
+    maxMembers: number;
+    assignedFieldAgentId: string;
+    status: "active" | "inactive";
+  }>
+): Promise<LoanGroup> {
+  const body = await fetchJson<{ group: LoanGroup }>(`${API_BASE_URL}/api/v1/loans/groups/${groupId}`, {
+    method: "PATCH",
+    headers: authHeaders(),
+    body: JSON.stringify(payload)
+  });
+  return body.group;
+}
+
+export async function addLoanGroupMember(
+  groupId: string,
+  payload: { customerId: string; role?: LoanGroupMemberRole }
+): Promise<LoanGroupMember> {
+  const body = await fetchJson<{ member: LoanGroupMember }>(
+    `${API_BASE_URL}/api/v1/loans/groups/${groupId}/members`,
+    {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify(payload)
+    }
+  );
+  return body.member;
+}
+
+export async function removeLoanGroupMember(groupId: string, memberId: string): Promise<void> {
+  await fetch(`${API_BASE_URL}/api/v1/loans/groups/${groupId}/members/${memberId}`, {
+    method: "DELETE",
+    headers: authHeaders()
+  });
 }

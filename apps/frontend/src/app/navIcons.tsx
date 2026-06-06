@@ -1,4 +1,5 @@
 const iconByLabel: Record<string, string> = {
+  Dashboard: "◫",
   Overview: "◫",
   "Reports & Analytics": "▤",
   Settings: "⚙",
@@ -16,7 +17,9 @@ const iconByLabel: Record<string, string> = {
 };
 
 const iconByPath: Record<string, string> = {
+  dashboard: "◫",
   overview: "◫",
+  "susu/overview": "◫",
   reports: "▤",
   profile: "👤",
   "susu/customers": "◎",

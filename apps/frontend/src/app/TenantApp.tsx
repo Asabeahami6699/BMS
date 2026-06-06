@@ -28,11 +28,21 @@ import { PerformancePage } from "./PerformancePage";
 import { BranchCounterCard } from "./BranchCounterCard";
 import { BranchFloatAdminPage } from "./BranchFloatAdminPage";
 import { CalloverBatchesPage } from "./CalloverBatchesPage";
+import { LoansOverviewPage } from "./LoansOverviewPage";
+import { LoanProductsPage } from "./LoanProductsPage";
+import { LoanApplicationsPage } from "./LoanApplicationsPage";
+import { LoanApplyWizard } from "./loans/LoanApplyWizard";
+import { LoanGroupApplyWizard } from "./loans/LoanGroupApplyWizard";
+import { LoanBlankFormPage } from "./loans/LoanBlankFormPage";
+import { LoanGroupsPage } from "./LoanGroupsPage";
+import { LoansPermissionGate } from "./loans/LoansPermissionGate";
+import { LoanDetailPage } from "./LoanDetailPage";
 import { TransactionLedgerCard } from "./TransactionLedgerCard";
 import { UserManagementCard } from "./UserManagementCard";
-import { getRuntimeBranchId, listBranches, setRuntimeBranchId, syncRuntimeContext } from "./api";
+import { getRuntimeBranchId, listBranches, setRuntimeBranchId } from "./api";
 import { FieldAgentApp } from "../agent/FieldAgentApp";
 import { OverviewPage } from "./OverviewPage";
+import { TenantDashboardPage } from "./TenantDashboardPage";
 import { PendingApprovalsCard } from "./PendingApprovalsCard";
 import { PendingBalanceApprovalsCard } from "./PendingBalanceApprovalsCard";
 
@@ -47,53 +57,45 @@ export function TenantApp() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const role = (user?.role ?? "admin") as AppRole;
-  const [me, setMe] = useState<AuthMe | null>(user);
-  const [authStatus, setAuthStatus] = useState("Resolving tenant context...");
   const [selectedBranch, setSelectedBranch] = useState(getRuntimeBranchId());
   const [branches, setBranches] = useState<Branch[]>([]);
 
   useEffect(() => {
-    async function loadMe() {
-      try {
-        const context = await syncRuntimeContext();
-        setMe(context);
-        if (context.branchId) {
-          setSelectedBranch(context.branchId);
-          setRuntimeBranchId(context.branchId);
-        }
-        if (role !== "field_agent") {
-          const tenantBranches = await listBranches().catch(() => []);
-          setBranches(tenantBranches);
-          if (!context.branchId && tenantBranches.length > 0) {
-            setSelectedBranch(tenantBranches[0].id);
-            setRuntimeBranchId(tenantBranches[0].id);
-          }
-        }
-        setAuthStatus("Signed in.");
-      } catch (error) {
-        setAuthStatus(error instanceof Error ? error.message : "Failed to sync tenant context");
-      }
+    if (!user?.userId || role === "field_agent") {
+      return;
     }
-    void loadMe();
-  }, [user?.userId, role]);
+    if (user.branchId) {
+      setSelectedBranch(user.branchId);
+      setRuntimeBranchId(user.branchId);
+    }
+    void listBranches()
+      .then((tenantBranches) => {
+        setBranches(tenantBranches);
+        if (!user.branchId && tenantBranches.length > 0) {
+          setSelectedBranch(tenantBranches[0].id);
+          setRuntimeBranchId(tenantBranches[0].id);
+        }
+      })
+      .catch(() => setBranches([]));
+  }, [user?.userId, user?.branchId, role]);
 
-  const modules = me?.subscribedModules;
-  const addons = me?.subscribedAddons;
-  const reportsAnalytics = me?.reportsAnalytics !== false;
+  const modules = user?.subscribedModules;
+  const addons = user?.subscribedAddons;
+  const reportsAnalytics = user?.reportsAnalytics !== false;
 
   const isAdminLike = role === "admin" || role === "accountant" || role === "auditor";
   const isCoordinatorLike = role === "coordinator" || role === "admin";
   const canOperateTransactions =
     role === "admin" || role === "field_agent" || role === "coordinator" || role === "teller";
 
-  const showBranchSelector = Boolean(me?.scopeType === "head_office");
-  const displayName = me?.fullName ?? me?.email?.split("@")[0] ?? role;
+  const showBranchSelector = Boolean(user?.scopeType === "head_office");
+  const displayName = user?.fullName ?? user?.email?.split("@")[0] ?? role;
 
-  const permissions = me?.permissions;
+  const permissions = user?.permissions;
 
   const navItems = useMemo(
-    () => buildTenantNav(role, modules, addons, reportsAnalytics, permissions, me?.susuNavVisibility),
-    [role, modules, addons, reportsAnalytics, permissions, me?.susuNavVisibility]
+    () => buildTenantNav(role, modules, addons, reportsAnalytics, permissions, user?.susuNavVisibility),
+    [role, modules, addons, reportsAnalytics, permissions, user?.susuNavVisibility]
   );
 
   const canSearchCustomers = Boolean(permissions?.includes("customers.read"));
@@ -135,7 +137,17 @@ export function TenantApp() {
     return <>{children}</>;
   }
 
-  const companyName = me?.tenantName ?? me?.tenantId ?? undefined;
+  function LoansRoute({ route, children }: { route: string; children: ReactNode }) {
+    return (
+      <ModuleGate module="loans_credit">
+        <LoansPermissionGate permissions={permissions} route={route} denied={<AccessDenied />}>
+          {children}
+        </LoansPermissionGate>
+      </ModuleGate>
+    );
+  }
+
+  const companyName = user?.tenantName ?? user?.tenantId ?? undefined;
 
   if (role === "field_agent") {
     return (
@@ -179,33 +191,32 @@ export function TenantApp() {
       }
     >
       <Routes>
-        <Route path="/" element={<Navigate to="overview" replace />} />
+        <Route path="/" element={<Navigate to="dashboard" replace />} />
         <Route
-          path="/overview"
+          path="/dashboard"
           element={
-            <OverviewPage
+            <TenantDashboardPage
               role={role}
               modules={modules}
-              reportsAnalytics={reportsAnalytics}
-              isAdminLike={isAdminLike}
-              isCoordinatorLike={isCoordinatorLike}
-              me={me}
+              permissions={permissions}
+              me={user}
               branches={branches}
               displayName={displayName}
             />
           }
         />
+        <Route path="/overview" element={<Navigate to="/app/dashboard" replace />} />
         <Route
           path="/profile"
-          element={<UserProfilePage me={me} branches={branches} role={role} />}
+          element={<UserProfilePage me={user} branches={branches} role={role} />}
         />
         <Route
           path="/reports"
           element={
             canReports ? (
-              <ReportsAnalyticsPage role={role} me={me} />
+              <ReportsAnalyticsPage role={role} me={user} />
             ) : reportsAnalytics === false ? (
-              <ReportsAnalyticsPage role={role} me={me} />
+              <ReportsAnalyticsPage role={role} me={user} />
             ) : (
               <AccessDenied />
             )
@@ -213,7 +224,24 @@ export function TenantApp() {
         />
 
         {/* Susu Management */}
-        <Route path="/susu/dashboard" element={<Navigate to="/app/overview" replace />} />
+        <Route path="/susu/dashboard" element={<Navigate to="/app/susu/overview" replace />} />
+        <Route
+          path="/susu/overview"
+          element={
+            <ModuleGate module="susu_management">
+              <OverviewPage
+                role={role}
+                modules={modules}
+                reportsAnalytics={reportsAnalytics}
+                isAdminLike={isAdminLike}
+                isCoordinatorLike={isCoordinatorLike}
+                me={user}
+                branches={branches}
+                displayName={displayName}
+              />
+            </ModuleGate>
+          }
+        />
         <Route
           path="/susu/customers"
           element={
@@ -369,7 +397,40 @@ export function TenantApp() {
 
         {/* Other departments */}
         <Route path="/banking" element={<ModuleGate module="banking"><ModulePlaceholderCard module="banking" /></ModuleGate>} />
-        <Route path="/loans" element={<ModuleGate module="loans_credit"><ModulePlaceholderCard module="loans_credit" /></ModuleGate>} />
+        <Route path="/loans" element={<LoansRoute route="loans"><LoansOverviewPage role={role} /></LoansRoute>} />
+        <Route
+          path="/loans/products"
+          element={<LoansRoute route="loans/products"><LoanProductsPage role={role} /></LoansRoute>}
+        />
+        <Route
+          path="/loans/applications"
+          element={<LoansRoute route="loans/applications"><LoanApplicationsPage role={role} /></LoansRoute>}
+        />
+        <Route
+          path="/loans/applications/:loanId"
+          element={
+            <LoansRoute route="loans/applications/detail">
+              <LoanDetailPage role={role} />
+            </LoansRoute>
+          }
+        />
+        <Route
+          path="/loans/groups"
+          element={<LoansRoute route="loans/groups"><LoanGroupsPage role={role} /></LoansRoute>}
+        />
+        <Route
+          path="/loans/apply/group"
+          element={<LoansRoute route="loans/apply/group"><LoanGroupApplyWizard role={role} /></LoansRoute>}
+        />
+        <Route path="/loans/apply" element={<LoansRoute route="loans/apply"><LoanApplyWizard role={role} /></LoansRoute>} />
+        <Route
+          path="/loans/form"
+          element={
+            <LoansRoute route="loans/form">
+              <LoanBlankFormPage role={role} companyName={user?.tenantName} />
+            </LoansRoute>
+          }
+        />
         <Route path="/treasury" element={<ModuleGate module="treasury"><ModulePlaceholderCard module="treasury" /></ModuleGate>} />
 
         {/* Settings */}
@@ -464,7 +525,7 @@ export function TenantApp() {
         <Route path="/payroll" element={<Navigate to="susu/payroll" replace />} />
         <Route path="/susu/commission" element={<Navigate to="susu/commissions" replace />} />
 
-        <Route path="*" element={<Navigate to="overview" replace />} />
+        <Route path="*" element={<Navigate to="dashboard" replace />} />
       </Routes>
     </DashboardShell>
   );

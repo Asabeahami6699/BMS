@@ -1,5 +1,11 @@
 import type { Permission, SusuNavVisibilityRow, TenantAddon, TenantProductModule } from "@bms/shared";
-import { hasAnyPermission, hasTenantModule, MODULE_LABELS, SUSU_NAV_VISIBILITY } from "@bms/shared";
+import {
+  hasAnyPermission,
+  hasTenantModule,
+  LOANS_NAV_VISIBILITY,
+  MODULE_LABELS,
+  SUSU_NAV_VISIBILITY
+} from "@bms/shared";
 import type { AppRole } from "../app/api";
 
 export type DashboardNavLink = {
@@ -42,6 +48,17 @@ function filterChildren(
     .map(({ to, label }) => ({ to, label }));
 }
 
+const SUSU_OVERVIEW_CHILD: NavChildDef = {
+  to: "susu/overview",
+  label: "Overview",
+  roleCheck: (r) =>
+    r === "admin" ||
+    r === "coordinator" ||
+    r === "accountant" ||
+    r === "auditor" ||
+    r === "teller"
+};
+
 function buildSusuChildren(susuNav?: SusuNavVisibilityRow[]): NavChildDef[] {
   const rows = susuNav?.length ? susuNav : SUSU_NAV_VISIBILITY;
   return rows.map((row) => ({
@@ -50,6 +67,10 @@ function buildSusuChildren(susuNav?: SusuNavVisibilityRow[]): NavChildDef[] {
     roleCheck: (r) => row.roles.includes(r as AppRole),
     anyPermissions: row.anyPermissions
   }));
+}
+
+function buildSusuNavChildren(susuNav?: SusuNavVisibilityRow[]): NavChildDef[] {
+  return [SUSU_OVERVIEW_CHILD, ...buildSusuChildren(susuNav)];
 }
 
 /** Always shown under Settings when the tenant has any subscribed product */
@@ -88,9 +109,18 @@ const BANKING_CHILDREN: NavChildDef[] = [
   { to: "banking", label: "Department overview", roleCheck: (r) => r === "admin" || r === "accountant" }
 ];
 
-const LOANS_CHILDREN: NavChildDef[] = [
-  { to: "loans", label: "Department overview", roleCheck: (r) => r === "admin" || r === "accountant" }
-];
+const STAFF_NAV_ROLE_CHECK = () => true;
+
+const LOANS_NAV_CHILDREN: NavChildDef[] = LOANS_NAV_VISIBILITY.map((row) => ({
+  to: row.navPath,
+  label: row.label,
+  roleCheck: STAFF_NAV_ROLE_CHECK,
+  anyPermissions: [...row.anyPermissions]
+}));
+
+function buildLoansChildren(): NavChildDef[] {
+  return LOANS_NAV_CHILDREN;
+}
 
 const TREASURY_CHILDREN: NavChildDef[] = [
   { to: "treasury", label: "Department overview", roleCheck: (r) => r === "admin" || r === "accountant" }
@@ -127,12 +157,12 @@ export function buildTenantNav(
   permissions?: Permission[],
   susuNavVisibility?: SusuNavVisibilityRow[]
 ): DashboardNavItem[] {
-  const items: DashboardNavItem[] = [{ kind: "link", to: "overview", label: "Overview" }];
+  const items: DashboardNavItem[] = [{ kind: "link", to: "dashboard", label: "Dashboard" }];
 
   const susu = buildGroup(
     "susu_management",
     MODULE_LABELS.susu_management,
-    buildSusuChildren(susuNavVisibility),
+    buildSusuNavChildren(susuNavVisibility),
     role,
     permissions,
     subscribedModules,
@@ -158,7 +188,7 @@ export function buildTenantNav(
   const loans = buildGroup(
     "loans_credit",
     MODULE_LABELS.loans_credit,
-    LOANS_CHILDREN,
+    buildLoansChildren(),
     role,
     permissions,
     subscribedModules,

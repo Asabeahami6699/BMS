@@ -131,6 +131,19 @@ export function resolveSession(token: string): StoredAuthUser | undefined {
   return findUserById(session.userId);
 }
 
+export function extendSession(token: string, ttlMs = 1000 * 60 * 60 * 12): boolean {
+  const session = sessions.get(token);
+  if (!session) {
+    return false;
+  }
+  if (session.expiresAt < Date.now()) {
+    sessions.delete(token);
+    return false;
+  }
+  session.expiresAt = Date.now() + ttlMs;
+  return true;
+}
+
 export function revokeSession(token: string): void {
   sessions.delete(token);
 }

@@ -1,4 +1,5 @@
 import type { Permission, Role } from "./auth.js";
+import { hasTenantModule, MODULE_LABELS, type TenantProductModule } from "./modules.js";
 
 export type PermissionGroupId =
   | "platform"
@@ -12,7 +13,74 @@ export type PermissionGroupId =
   | "payroll"
   | "commission"
   | "audit"
+  | "loans"
   | "workspace";
+
+export type PermissionProductScope = TenantProductModule | "core";
+
+/** Which subscribed product each permission group belongs to (`core` = always shown). */
+export const PERMISSION_GROUP_PRODUCT: Record<PermissionGroupId, PermissionProductScope> = {
+  platform: "core",
+  roles: "core",
+  users: "core",
+  branches: "core",
+  customers: "susu_management",
+  transactions: "susu_management",
+  ledger: "susu_management",
+  reports: "core",
+  payroll: "susu_management",
+  commission: "susu_management",
+  audit: "core",
+  loans: "loans_credit",
+  workspace: "core"
+};
+
+export const PERMISSION_GROUP_ORDER: PermissionGroupId[] = [
+  "roles",
+  "users",
+  "branches",
+  "customers",
+  "transactions",
+  "ledger",
+  "loans",
+  "reports",
+  "payroll",
+  "commission",
+  "audit",
+  "workspace"
+];
+
+export const PERMISSION_GROUP_LABELS: Record<PermissionGroupId, string> = {
+  platform: "Platform",
+  roles: "Roles",
+  users: "Users",
+  branches: "Branches",
+  customers: "Customers",
+  transactions: "Transactions & till",
+  ledger: "Ledger",
+  loans: "Loans & credit",
+  reports: "Reports",
+  payroll: "Payroll",
+  commission: "Commission",
+  audit: "Audit",
+  workspace: "Workspace"
+};
+
+export const PERMISSION_PRODUCT_SECTION_ORDER: PermissionProductScope[] = [
+  "core",
+  "susu_management",
+  "loans_credit",
+  "banking",
+  "treasury"
+];
+
+export const PERMISSION_PRODUCT_LABELS: Record<PermissionProductScope, string> = {
+  core: "Core & admin",
+  susu_management: MODULE_LABELS.susu_management,
+  loans_credit: MODULE_LABELS.loans_credit,
+  banking: MODULE_LABELS.banking,
+  treasury: MODULE_LABELS.treasury
+};
 
 export type PermissionCatalogEntry = {
   id: Permission;
@@ -217,10 +285,109 @@ export const PERMISSION_CATALOG: PermissionCatalogEntry[] = [
     group: "audit"
   },
   {
+    id: "loans.read",
+    label: "View loans",
+    description: "See loan products, applications, balances, and repayment history.",
+    group: "loans"
+  },
+  {
+    id: "loans.products.manage",
+    label: "Manage loan products",
+    description: "Create and edit loan product templates (rates, terms, limits).",
+    group: "loans",
+    requires: ["loans.read"]
+  },
+  {
+    id: "loans.applications.create",
+    label: "Create loan applications",
+    description: "Submit loan applications for customers at a branch.",
+    group: "loans",
+    requires: ["loans.read"],
+    suggests: ["customers.read"]
+  },
+  {
+    id: "loans.applications.approve",
+    label: "Approve or reject loans",
+    description: "Credit committee / loans officer approval workflow.",
+    group: "loans",
+    requires: ["loans.read"]
+  },
+  {
+    id: "loans.disburse",
+    label: "Disburse approved loans",
+    description: "Release funds for approved loan applications.",
+    group: "loans",
+    requires: ["loans.read", "loans.applications.approve"]
+  },
+  {
+    id: "loans.repayments.create",
+    label: "Record loan repayments",
+    description: "Post customer repayments against active loans.",
+    group: "loans",
+    requires: ["loans.read"]
+  },
+  {
     id: "workspace.notifications",
     label: "Workspace notifications",
     description: "Bell icon: pending approvals, float requests, and important activity.",
     group: "workspace"
+  }
+];
+
+export type LoansNavKey = "overview" | "products" | "groups" | "applications" | "apply" | "applyGroup";
+
+export type LoansNavVisibilityRow = {
+  navPath: string;
+  navKey: LoansNavKey;
+  label: string;
+  description: string;
+  /** User must hold at least one of these permissions to see this nav item. */
+  anyPermissions: Permission[];
+};
+
+/** Loans sidebar + in-module subnav — visibility is permission-driven only (no role gate). */
+export const LOANS_NAV_VISIBILITY: LoansNavVisibilityRow[] = [
+  {
+    navPath: "loans",
+    navKey: "overview",
+    label: "Overview",
+    description: "Loan KPIs and department summary.",
+    anyPermissions: ["loans.read"]
+  },
+  {
+    navPath: "loans/products",
+    navKey: "products",
+    label: "Loan products",
+    description: "View and configure loan product templates.",
+    anyPermissions: ["loans.read"]
+  },
+  {
+    navPath: "loans/groups",
+    navKey: "groups",
+    label: "Solidarity groups",
+    description: "Group rosters for solidarity lending.",
+    anyPermissions: ["loans.read"]
+  },
+  {
+    navPath: "loans/applications",
+    navKey: "applications",
+    label: "Portfolio",
+    description: "Applications, disbursements, and repayments.",
+    anyPermissions: ["loans.read"]
+  },
+  {
+    navPath: "loans/apply",
+    navKey: "apply",
+    label: "New application",
+    description: "Individual loan application wizard.",
+    anyPermissions: ["loans.applications.create"]
+  },
+  {
+    navPath: "loans/apply/group",
+    navKey: "applyGroup",
+    label: "Group application",
+    description: "Solidarity group member loan application.",
+    anyPermissions: ["loans.applications.create"]
   }
 ];
 
@@ -345,6 +512,81 @@ export function hasAnyPermission(
   }
   const set = new Set(permissions ?? []);
   return required.some((p) => set.has(p));
+}
+
+export function filterLoansNavByPermissions(
+  permissions: Permission[] | undefined
+): LoansNavVisibilityRow[] {
+  return LOANS_NAV_VISIBILITY.filter((row) => hasAnyPermission(permissions, row.anyPermissions));
+}
+
+/** Resolve minimum permissions for a tenant app loans route (e.g. /loans/applications/:id). */
+export function resolveLoansRoutePermissions(routePath: string): Permission[] {
+  const normalized = routePath.replace(/^\/+/, "").replace(/^app\//, "").split("?")[0] ?? "";
+  if (/^loans\/applications\/[^/]+$/.test(normalized)) {
+    return ["loans.read"];
+  }
+  if (normalized === "loans/form") {
+    return ["loans.read"];
+  }
+  const exact = LOANS_NAV_VISIBILITY.find((row) => row.navPath === normalized);
+  if (exact) {
+    return exact.anyPermissions;
+  }
+  const prefix = LOANS_NAV_VISIBILITY.find((row) => normalized.startsWith(`${row.navPath}/`));
+  return prefix?.anyPermissions ?? ["loans.read"];
+}
+
+export function isPermissionGroupVisibleForTenant(
+  groupId: PermissionGroupId,
+  subscribedModules: TenantProductModule[] | undefined
+): boolean {
+  if (groupId === "platform") {
+    return false;
+  }
+  const scope = PERMISSION_GROUP_PRODUCT[groupId];
+  if (scope === "core") {
+    return true;
+  }
+  return hasTenantModule(subscribedModules, scope);
+}
+
+export function catalogEntriesForTenant(
+  subscribedModules: TenantProductModule[] | undefined
+): PermissionCatalogEntry[] {
+  return PERMISSION_CATALOG.filter(
+    (entry) =>
+      entry.group !== "platform" && isPermissionGroupVisibleForTenant(entry.group, subscribedModules)
+  );
+}
+
+export type PermissionProductSection = {
+  scope: PermissionProductScope;
+  label: string;
+  groupIds: PermissionGroupId[];
+};
+
+export function permissionProductSectionsForTenant(
+  subscribedModules: TenantProductModule[] | undefined
+): PermissionProductSection[] {
+  const sections: PermissionProductSection[] = [];
+  for (const scope of PERMISSION_PRODUCT_SECTION_ORDER) {
+    if (scope !== "core" && !hasTenantModule(subscribedModules, scope)) {
+      continue;
+    }
+    const groupIds = PERMISSION_GROUP_ORDER.filter(
+      (groupId) => groupId !== "platform" && PERMISSION_GROUP_PRODUCT[groupId] === scope
+    );
+    if (groupIds.length === 0) {
+      continue;
+    }
+    sections.push({
+      scope,
+      label: PERMISSION_PRODUCT_LABELS[scope],
+      groupIds
+    });
+  }
+  return sections;
 }
 
 export function validateDutySelection(duties: Permission[]): {

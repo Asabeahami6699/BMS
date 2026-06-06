@@ -4,7 +4,17 @@ import { BrowserRouter } from "react-router-dom";
 import { App } from "./app/App";
 import { AuthProvider } from "./auth/AuthContext";
 import { ToastProvider } from "./components/Toast";
+import faviconUrl from "./favIconBms.png";
 import "./styles.css";
+
+const favicon =
+  document.querySelector<HTMLLinkElement>('link[rel="icon"]') ?? document.createElement("link");
+favicon.rel = "icon";
+favicon.type = "image/png";
+favicon.href = faviconUrl;
+if (!favicon.parentElement) {
+  document.head.appendChild(favicon);
+}
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

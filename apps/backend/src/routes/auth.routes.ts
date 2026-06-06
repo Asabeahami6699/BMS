@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { changeOwnPassword, loginWithCredentials, logoutAccessToken } from "../services/authService.js";
+import { extendSession } from "../services/authStore.js";
 import { resolveEffectiveSusuNavVisibility } from "../services/susuNavVisibilityService.js";
 
 export const authRouter = Router();
@@ -41,6 +42,22 @@ authRouter.get("/me", async (req, res) => {
     ...context,
     susuNavVisibility
   });
+});
+
+authRouter.post("/refresh", (req, res) => {
+  if (!req.userContext) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  const authHeader = req.header("authorization");
+  const token = authHeader?.startsWith("Bearer ") ? authHeader.slice("Bearer ".length).trim() : "";
+  if (token.startsWith("sess_") && !extendSession(token)) {
+    res.status(401).json({ error: "Session expired" });
+    return;
+  }
+
+  res.json({ ok: true });
 });
 
 authRouter.post("/change-password", async (req, res) => {

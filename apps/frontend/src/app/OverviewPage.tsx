@@ -169,7 +169,7 @@ export function OverviewPage({
         <header className="overview-hero">
           <div>
             <p className="overview-hero__eyebrow">Workspace</p>
-            <h1 className="overview-hero__title">Overview</h1>
+            <h1 className="overview-hero__title">Susu overview</h1>
             <p className="overview-hero__sub muted">
               Welcome back, {displayName}. Your subscribed products appear in the sidebar.
             </p>
@@ -203,7 +203,7 @@ export function OverviewPage({
         <header className="overview-hero">
           <div>
             <p className="overview-hero__eyebrow">Susu management</p>
-            <h1 className="overview-hero__title">Overview</h1>
+            <h1 className="overview-hero__title">Susu overview</h1>
             <p className="overview-hero__sub muted">Hello, {displayName}. Use the shortcuts below for your daily work.</p>
           </div>
         </header>
@@ -224,7 +224,7 @@ export function OverviewPage({
       <header className="overview-hero">
         <div>
           <p className="overview-hero__eyebrow">Susu management</p>
-          <h1 className="overview-hero__title">Overview</h1>
+          <h1 className="overview-hero__title">Susu overview</h1>
           <p className="overview-hero__sub muted">
             {updatedLabel}
             {me?.tenantName ? ` · ${me.tenantName}` : ""}

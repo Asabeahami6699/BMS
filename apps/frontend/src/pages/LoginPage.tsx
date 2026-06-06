@@ -8,6 +8,7 @@ import { useAuth } from "../auth/AuthContext";
 
 import { getHomePathForRole } from "../auth/roleRedirect";
 
+import { BmsBrandIcon } from "../components/BmsBrandIcon";
 import { toUserFacingError } from "../lib/networkError";
 
 
@@ -82,11 +83,7 @@ export function LoginPage() {
 
         <div className="dash-brand" style={{ marginBottom: "1rem" }}>
 
-          <div className="dash-brand-icon" aria-hidden>
-
-            B
-
-          </div>
+          <BmsBrandIcon />
 
           <div>
 

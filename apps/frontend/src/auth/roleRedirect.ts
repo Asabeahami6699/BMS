@@ -5,7 +5,7 @@ export function getHomePathForRole(role: AppRole): string {
     case "super_admin":
       return "/platform/companies";
     case "admin":
-      return "/app/overview";
+      return "/app/dashboard";
     case "field_agent":
       return "/app/agent/home";
     case "coordinator":
@@ -18,6 +18,6 @@ export function getHomePathForRole(role: AppRole): string {
     case "customer_service":
       return "/app/customers";
     default:
-      return "/app/overview";
+      return "/app/dashboard";
   }
 }

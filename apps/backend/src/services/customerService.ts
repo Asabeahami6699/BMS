@@ -3,6 +3,7 @@ import {
   createCustomerInputSchema,
   customerRegistrationInputSchema,
   customerSchema,
+  loanBorrowerRegistrationSchema,
   rejectCustomerSchema,
   type Customer,
   type CustomerRegistrationInput,
@@ -301,7 +302,54 @@ export async function createCustomer(
 
 }
 
+export async function registerLoanBorrower(
+  tenantId: string,
+  createdByUserId: string,
+  input: unknown
+): Promise<Customer> {
+  const payload = loanBorrowerRegistrationSchema.parse(input);
+  const homeBranchId = await resolveHomeBranchId(tenantId, undefined, payload.homeBranchId);
+  if (!homeBranchId) {
+    throw new Error("Invalid branch");
+  }
 
+  const nextCustomer: Customer = customerSchema.parse({
+    id: randomUUID(),
+    tenantId,
+    fullName: payload.fullName,
+    email: payload.email,
+    phone: payload.phone,
+    location: payload.location,
+    houseNumber: payload.houseNumber,
+    accountType: "savings",
+    idCardNumber: payload.idCardNumber,
+    photoUrl: payload.photoUrl,
+    idCardPhotoUrl: payload.idCardPhotoUrl,
+    savingsOpeningFeeCollected: false,
+    savingsOpeningFeeRecovered: 0,
+    nextOfKin: payload.nextOfKin,
+    homeBranchId,
+    assignedFieldAgentId: payload.assignedFieldAgentId ?? createdByUserId,
+    createdByFieldAgentId: createdByUserId,
+    dailyContributionAmount: 0,
+    status: "active"
+  });
+
+  const supabase = getSupabaseAdminClient();
+  if (supabase) {
+    const accountNumber = await generateCustomerAccountNumber(tenantId);
+    nextCustomer.accountNumber = accountNumber;
+    const { error } = await supabase.from("customers").insert(insertRowFromCustomer(nextCustomer));
+    if (error) {
+      throw new Error(`Failed to register borrower: ${error.message}`);
+    }
+  } else {
+    const customers = getTenantCustomers(tenantId);
+    setTenantCustomers(tenantId, [...customers, nextCustomer]);
+  }
+
+  return enrichCustomerWithAgentNames(tenantId, nextCustomer);
+}
 
 export async function submitCustomerRegistration(
 
@@ -855,6 +903,47 @@ export async function getCustomerById(tenantId: string, customerId: string): Pro
     mapCustomerRow(data as Record<string, unknown>)
   );
 
+}
+
+export async function patchCustomerKycPhotos(
+  tenantId: string,
+  customerId: string,
+  photos: { photoUrl?: string; idCardPhotoUrl?: string }
+): Promise<Customer> {
+  const customer = await getCustomerById(tenantId, customerId);
+  if (!customer) {
+    throw new Error("Customer not found");
+  }
+  const updated = customerSchema.parse({
+    ...customer,
+    photoUrl: photos.photoUrl ?? customer.photoUrl,
+    idCardPhotoUrl: photos.idCardPhotoUrl ?? customer.idCardPhotoUrl
+  });
+
+  const supabase = getSupabaseAdminClient();
+  if (supabase) {
+    const { error } = await supabase
+      .from("customers")
+      .update({
+        photo_url: updated.photoUrl ?? null,
+        id_card_photo_url: updated.idCardPhotoUrl ?? null
+      })
+      .eq("tenant_id", tenantId)
+      .eq("id", customerId);
+    if (error) {
+      throw new Error(`Failed to update customer photos: ${error.message}`);
+    }
+  } else {
+    const customers = getTenantCustomers(tenantId);
+    const idx = customers.findIndex((c) => c.id === customerId);
+    if (idx < 0) {
+      throw new Error("Customer not found");
+    }
+    customers[idx] = updated;
+    setTenantCustomers(tenantId, customers);
+  }
+
+  return enrichCustomerWithAgentNames(tenantId, updated);
 }
 
 export async function assignCustomerFieldAgent(

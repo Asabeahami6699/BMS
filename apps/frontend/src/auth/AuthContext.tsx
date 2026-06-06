@@ -1,8 +1,17 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { AppRole, AuthMe } from "../app/api";
-import { clearAuthSession, getAuthMe, getAuthSession, login as apiLogin, logout as apiLogout } from "../app/api";
+import {
+  authMeSignature,
+  clearAuthSession,
+  getAuthMe,
+  getAuthSession,
+  login as apiLogin,
+  logout as apiLogout
+} from "../app/api";
 import { isOfflineOrNetworkError } from "../lib/useNetworkStatus";
 import { getHomePathForRole } from "./roleRedirect";
+import { SessionIdleGuard } from "./SessionIdleGuard";
+import { SESSION_UNAUTHORIZED_EVENT } from "./sessionIdleConfig";
 
 type AuthContextValue = {
   user: AuthMe | null;
@@ -17,29 +26,64 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthMe | null>(getAuthSession()?.user ?? null);
   const [loading, setLoading] = useState(Boolean(getAuthSession()?.accessToken));
+  const refreshInFlightRef = useRef<Promise<AuthMe | null> | null>(null);
+  const didBootstrapRef = useRef(false);
 
-  const refreshMe = useCallback(async () => {
-    if (!getAuthSession()?.accessToken) {
-      setUser(null);
-      return null;
-    }
-    try {
-      const me = await getAuthMe();
-      setUser(me);
-      return me;
-    } catch (error) {
-      const cached = getAuthSession();
-      if (cached?.user && isOfflineOrNetworkError(error)) {
-        setUser(cached.user);
-        return cached.user;
+  const applyUser = useCallback((next: AuthMe | null) => {
+    setUser((prev) => {
+      if (authMeSignature(prev) === authMeSignature(next)) {
+        return prev;
       }
-      clearAuthSession();
-      setUser(null);
-      return null;
-    }
+      return next;
+    });
   }, []);
 
+  const refreshMe = useCallback(async () => {
+    if (refreshInFlightRef.current) {
+      return refreshInFlightRef.current;
+    }
+
+    const task = (async () => {
+      if (!getAuthSession()?.accessToken) {
+        applyUser(null);
+        return null;
+      }
+      try {
+        const me = await getAuthMe();
+        applyUser(me);
+        return me;
+      } catch (error) {
+        const cached = getAuthSession();
+        if (cached?.user && isOfflineOrNetworkError(error)) {
+          applyUser(cached.user);
+          return cached.user;
+        }
+        clearAuthSession();
+        applyUser(null);
+        return null;
+      } finally {
+        refreshInFlightRef.current = null;
+      }
+    })();
+
+    refreshInFlightRef.current = task;
+    return task;
+  }, [applyUser]);
+
   useEffect(() => {
+    function onUnauthorized() {
+      applyUser(null);
+    }
+    window.addEventListener(SESSION_UNAUTHORIZED_EVENT, onUnauthorized);
+    return () => window.removeEventListener(SESSION_UNAUTHORIZED_EVENT, onUnauthorized);
+  }, [applyUser]);
+
+  useEffect(() => {
+    if (didBootstrapRef.current) {
+      return;
+    }
+    didBootstrapRef.current = true;
+
     if (!getAuthSession()?.accessToken) {
       setLoading(false);
       return;
@@ -47,16 +91,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void refreshMe().finally(() => setLoading(false));
   }, [refreshMe]);
 
-  const login = useCallback(async (email: string, password: string) => {
-    const session = await apiLogin(email, password);
-    setUser(session.user);
-    return getHomePathForRole(session.user.role as AppRole);
-  }, []);
+  const login = useCallback(
+    async (email: string, password: string) => {
+      const session = await apiLogin(email, password);
+      applyUser(session.user);
+      return getHomePathForRole(session.user.role as AppRole);
+    },
+    [applyUser]
+  );
 
   const logout = useCallback(async () => {
     await apiLogout();
-    setUser(null);
-  }, []);
+    applyUser(null);
+  }, [applyUser]);
 
   const value = useMemo(
     () => ({
@@ -69,7 +116,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [user, loading, login, logout, refreshMe]
   );
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={value}>
+      <SessionIdleGuard />
+      {children}
+    </AuthContext.Provider>
+  );
 }
 
 export function useAuth(): AuthContextValue {

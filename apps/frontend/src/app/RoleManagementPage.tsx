@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
-import type { Permission, Role } from "@bms/shared";
+import type { Permission, PermissionCatalogEntry, PermissionGroupId, Role } from "@bms/shared";
 import {
   BUILTIN_ROLE_LABELS,
   NAV_MATRIX_ASSIGNABLE_ROLES,
+  PERMISSION_GROUP_LABELS,
   PERMISSION_CATALOG,
   TENANT_EDITABLE_BUILTIN_ROLES,
+  catalogEntriesForTenant,
+  permissionProductSectionsForTenant,
   validateDutySelection,
-  validateSusuNavVisibilityItems,
-  type PermissionGroupId
+  validateSusuNavVisibilityItems
 } from "@bms/shared";
 import type { AppRole, BuiltinRolePermissionView, SusuNavVisibilityConfigItem } from "./api";
 import {
@@ -26,38 +28,10 @@ import {
 import { subscribeToTenantRealtime } from "./realtime";
 import { useToast } from "../components/Toast";
 import { toUserFacingError } from "../lib/networkError";
+import { useAuth } from "../auth/AuthContext";
 
 type Props = {
   role: AppRole;
-};
-
-const GROUP_ORDER: PermissionGroupId[] = [
-  "roles",
-  "users",
-  "branches",
-  "customers",
-  "transactions",
-  "ledger",
-  "reports",
-  "payroll",
-  "commission",
-  "audit",
-  "workspace"
-];
-
-const GROUP_LABELS: Record<PermissionGroupId, string> = {
-  platform: "Platform",
-  roles: "Roles",
-  users: "Users",
-  branches: "Branches",
-  customers: "Customers",
-  transactions: "Transactions & till",
-  ledger: "Ledger",
-  reports: "Reports",
-  payroll: "Payroll",
-  commission: "Commission",
-  audit: "Audit",
-  workspace: "Workspace"
 };
 
 function toastValidation(
@@ -78,6 +52,8 @@ function toastValidation(
 
 export function RoleManagementPage({ role }: Props) {
   const { showToast } = useToast();
+  const { user } = useAuth();
+  const subscribedModules = user?.subscribedModules;
   const canManageRoles = role === "admin";
   const [roleKey, setRoleKey] = useState("branch_supervisor");
   const [displayName, setDisplayName] = useState("Branch Supervisor");
@@ -94,31 +70,73 @@ export function RoleManagementPage({ role }: Props) {
   const [navSaving, setNavSaving] = useState(false);
   const [expandedNavPath, setExpandedNavPath] = useState<string | null>(null);
 
-  const navPermissionOptions = useMemo(
-    () => PERMISSION_CATALOG.filter((e) => e.group !== "platform").map((e) => e.id),
-    []
+  const tenantCatalog = useMemo(
+    () => catalogEntriesForTenant(subscribedModules),
+    [subscribedModules]
   );
+
+  const productSections = useMemo(
+    () => permissionProductSectionsForTenant(subscribedModules),
+    [subscribedModules]
+  );
+
+  const navPermissionOptions = useMemo(() => tenantCatalog.map((e) => e.id), [tenantCatalog]);
 
   const validation = useMemo(() => validateDutySelection(duties), [duties]);
   const builtinValidation = useMemo(() => validateDutySelection(builtinDraft), [builtinDraft]);
 
   const catalogByGroup = useMemo(() => {
-    const map = new Map<PermissionGroupId, typeof PERMISSION_CATALOG>();
-    for (const entry of PERMISSION_CATALOG) {
-      if (entry.group === "platform") {
-        continue;
-      }
+    const map = new Map<PermissionGroupId, PermissionCatalogEntry[]>();
+    for (const entry of tenantCatalog) {
       const list = map.get(entry.group) ?? [];
       list.push(entry);
       map.set(entry.group, list);
     }
     return map;
-  }, []);
+  }, [tenantCatalog]);
 
-  const allCatalogPermissions = useMemo(
-    () => PERMISSION_CATALOG.filter((e) => e.group !== "platform").map((e) => e.id),
-    []
-  );
+  const allCatalogPermissions = useMemo(() => tenantCatalog.map((e) => e.id), [tenantCatalog]);
+
+  function renderPermissionGroups(
+    selected: Permission[],
+    onToggle: (duty: Permission) => void,
+    disabled?: boolean
+  ) {
+    return productSections.map((section) => (
+      <div key={section.scope} className="roles-page__product-section">
+        <h3 className="roles-page__product-heading">{section.label}</h3>
+        <div className="roles-page__duty-groups">
+          {section.groupIds.map((groupId) => {
+            const entries = catalogByGroup.get(groupId);
+            if (!entries?.length) {
+              return null;
+            }
+            return (
+              <div key={groupId} className="roles-page__duty-group">
+                <h4>{PERMISSION_GROUP_LABELS[groupId]}</h4>
+                <div className="duty-grid">
+                  {entries.map((entry) => (
+                    <label key={entry.id} className="duty-item" title={entry.description}>
+                      <input
+                        type="checkbox"
+                        checked={selected.includes(entry.id)}
+                        disabled={disabled}
+                        onChange={() => onToggle(entry.id)}
+                      />
+                      <span>
+                        <strong>{entry.label}</strong>
+                        <small>{entry.id}</small>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    ));
+  }
 
   async function loadRoles() {
     try {
@@ -365,6 +383,10 @@ export function RoleManagementPage({ role }: Props) {
         <h3>How to set up without conflicts</h3>
         <ol className="roles-page__steps">
           <li>
+            Permissions are grouped by your subscribed products (Susu, Loans, etc.). Only duties for enabled
+            departments are listed here.
+          </li>
+          <li>
             Assign the correct <strong>job title</strong> under Settings → Users, then use <strong>Edit permissions</strong>{" "}
             below to add or remove duties for that title (saved per company).
           </li>
@@ -459,34 +481,7 @@ export function RoleManagementPage({ role }: Props) {
                 ) : (
                   <div className="roles-page__builtin-editor">
                     {renderDutyCheckAllToolbar(builtinDraft, setBuiltinDraft, builtinSaving)}
-                    <div className="roles-page__duty-groups">
-                      {GROUP_ORDER.map((groupId) => {
-                        const entries = catalogByGroup.get(groupId);
-                        if (!entries?.length) {
-                          return null;
-                        }
-                        return (
-                          <div key={groupId} className="roles-page__duty-group">
-                            <h4>{GROUP_LABELS[groupId]}</h4>
-                            <div className="duty-grid">
-                              {entries.map((entry) => (
-                                <label key={entry.id} className="duty-item" title={entry.description}>
-                                  <input
-                                    type="checkbox"
-                                    checked={builtinDraft.includes(entry.id)}
-                                    onChange={() => toggleBuiltinDuty(entry.id)}
-                                  />
-                                  <span>
-                                    <strong>{entry.label}</strong>
-                                    <small>{entry.id}</small>
-                                  </span>
-                                </label>
-                              ))}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
+                    {renderPermissionGroups(builtinDraft, toggleBuiltinDuty, builtinSaving)}
                     <button
                       type="button"
                       className="button"
@@ -629,35 +624,7 @@ export function RoleManagementPage({ role }: Props) {
         </label>
 
         {renderDutyCheckAllToolbar(duties, setDuties, !canManageRoles)}
-        <div className="roles-page__duty-groups">
-          {GROUP_ORDER.map((groupId) => {
-            const entries = catalogByGroup.get(groupId);
-            if (!entries?.length) {
-              return null;
-            }
-            return (
-              <div key={groupId} className="roles-page__duty-group">
-                <h4>{GROUP_LABELS[groupId]}</h4>
-                <div className="duty-grid">
-                  {entries.map((entry) => (
-                    <label key={entry.id} className="duty-item" title={entry.description}>
-                      <input
-                        type="checkbox"
-                        checked={duties.includes(entry.id)}
-                        disabled={!canManageRoles}
-                        onChange={() => toggleDuty(entry.id)}
-                      />
-                      <span>
-                        <strong>{entry.label}</strong>
-                        <small>{entry.id}</small>
-                      </span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+        {renderPermissionGroups(duties, toggleDuty, !canManageRoles)}
 
         <button
           type="button"

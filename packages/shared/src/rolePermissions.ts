@@ -35,6 +35,12 @@ export const permissionsByRole: Record<Role, Permission[]> = {
     "commission_policy.update",
     "commission_policy.read",
     "audit.read",
+    "loans.read",
+    "loans.products.manage",
+    "loans.applications.create",
+    "loans.applications.approve",
+    "loans.disburse",
+    "loans.repayments.create",
     "workspace.notifications"
   ],
   coordinator: [
@@ -75,6 +81,7 @@ export const permissionsByRole: Record<Role, Permission[]> = {
     "payroll.read",
     "commission_policy.read",
     "audit.read",
+    "loans.read",
     "workspace.notifications"
   ],
   accountant: [
@@ -87,6 +94,12 @@ export const permissionsByRole: Record<Role, Permission[]> = {
     "payroll.read",
     "payroll.run",
     "commission_policy.read",
+    "loans.read",
+    "loans.products.manage",
+    "loans.applications.create",
+    "loans.applications.approve",
+    "loans.disburse",
+    "loans.repayments.create",
     "workspace.notifications"
   ],
   teller: [

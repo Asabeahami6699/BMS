@@ -28,6 +28,7 @@ import { collectionBatchesRouter } from "./routes/collectionBatches.routes.js";
 import { fieldAgentsRouter } from "./routes/fieldAgents.routes.js";
 import { routesRouter } from "./routes/routes.routes.js";
 import { auditRouter } from "./routes/audit.routes.js";
+import { loansRouter } from "./routes/loans.routes.js";
 
 export function createApp() {
   const app = express();
@@ -61,6 +62,7 @@ export function createApp() {
   app.use("/api/v1/collection-batches", moneyMutationRateLimit, collectionBatchesRouter);
   app.use("/api/v1/routes", routesRouter);
   app.use("/api/v1/audit-logs", auditRouter);
+  app.use("/api/v1/loans", moneyMutationRateLimit, loansRouter);
 
   return app;
 }

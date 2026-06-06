@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import type { DashboardNavItem } from "../config/tenantModules";
 import { getNavIcon } from "./navIcons";
+import { BmsBrandIcon } from "../components/BmsBrandIcon";
 import { GlobalSearch } from "./components/GlobalSearch";
 import { DashboardNotifications } from "./components/DashboardNotifications";
 
@@ -68,7 +69,17 @@ export function DashboardShell({
       }
     }
     if (active.size > 0) {
-      setOpenGroups((prev) => new Set([...prev, ...active]));
+      setOpenGroups((prev) => {
+        let changed = false;
+        const next = new Set(prev);
+        for (const id of active) {
+          if (!next.has(id)) {
+            next.add(id);
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
     }
   }, [currentPath, navItems]);
 
@@ -101,9 +112,7 @@ export function DashboardShell({
       <aside className="dash-sidebar">
         <div className="dash-brand">
           <div className="dash-brand-title-row">
-            <div className="dash-brand-icon" aria-hidden>
-              B
-            </div>
+            <BmsBrandIcon />
             <p className="dash-brand-name">BMS</p>
           </div>
           <div className="dash-brand-text">
@@ -139,7 +148,6 @@ export function DashboardShell({
               <div
                 key={item.id}
                 className={`dash-nav-group${isOpen ? " is-open" : ""}${isActiveGroup ? " has-active" : ""}`}
-                onMouseEnter={() => setOpenGroups((prev) => new Set(prev).add(item.id))}
               >
                 <button
                   type="button"

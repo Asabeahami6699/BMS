@@ -3,6 +3,7 @@ import { BMS_CONTACT_EMAIL } from "../app/chatApi";
 import { getAuthSession } from "../app/api";
 import { useAuth } from "../auth/AuthContext";
 import { getHomePathForRole } from "../auth/roleRedirect";
+import { BmsBrandIcon } from "../components/BmsBrandIcon";
 import { LiveChatWidget } from "../components/LiveChatWidget";
 import { RevealOnScroll } from "../components/RevealOnScroll";
 
@@ -99,9 +100,7 @@ export function LandingPage() {
     <div className="landing">
       <header className="landing-nav landing-animate-in landing-animate-in--nav">
         <Link to="/" className="landing-nav-brand">
-          <span className="dash-brand-icon" aria-hidden>
-            B
-          </span>
+          <BmsBrandIcon />
           <span>
             <strong>BMS</strong>
             <small>Banking Management System</small>

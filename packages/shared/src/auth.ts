@@ -175,7 +175,13 @@ export const permissionSchema = z.enum([
   "commission_policy.read",
   "audit.read",
   "branch_float.manage",
-  "workspace.notifications"
+  "workspace.notifications",
+  "loans.read",
+  "loans.products.manage",
+  "loans.applications.create",
+  "loans.applications.approve",
+  "loans.disburse",
+  "loans.repayments.create"
 ]);
 
 export type Permission = z.infer<typeof permissionSchema>;

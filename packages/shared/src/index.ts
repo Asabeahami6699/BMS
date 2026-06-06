@@ -11,3 +11,5 @@ export * from "./commission.js";
 export * from "./domain.js";
 export * from "./savings.js";
 export * from "./payroll.js";
+export * from "./loans.js";
+export * from "./loanCalculations.js";
