@@ -15,9 +15,73 @@ import {
   markThreadRead,
   type StoredThread
 } from "./chatStore.js";
+import { generatePublicChatReply } from "./ai/aiService.js";
 
 function newId(prefix: string): string {
   return `${prefix}_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
+}
+
+async function persistChatMessage(message: ChatMessage, unreadForAdmin?: number): Promise<void> {
+  const supabase = getSupabaseAdminClient();
+  if (!supabase) {
+    return;
+  }
+
+  const { error: insertError } = await supabase.from("live_chat_messages").insert({
+    id: message.id,
+    thread_id: message.threadId,
+    sender_type: message.senderType,
+    body: message.body
+  });
+  if (insertError) {
+    console.warn(`[chat] Supabase message insert failed: ${insertError.message}`);
+    return;
+  }
+
+  const thread = getThread(message.threadId);
+  await supabase
+    .from("live_chat_threads")
+    .update({
+      updated_at: message.createdAt,
+      unread_for_admin: unreadForAdmin ?? thread?.unreadForAdmin ?? 0
+    })
+    .eq("id", message.threadId);
+}
+
+async function maybeReplyWithAssistant(threadId: string, visitorMessage: string): Promise<ChatMessage | null> {
+  const history = listMessages(threadId);
+  const ai = await generatePublicChatReply({
+    visitorMessage,
+    history
+  });
+
+  if (!ai?.reply) {
+    return null;
+  }
+
+  let body = ai.reply;
+  if (ai.escalated) {
+    body = `${body}\n\nA platform team member will follow up with you here or by email if needed.`;
+  }
+
+  const message: ChatMessage = {
+    id: newId("msg_ai"),
+    threadId,
+    senderType: "admin",
+    body,
+    createdAt: new Date().toISOString()
+  };
+
+  appendMessage(message);
+
+  const thread = getThread(threadId);
+  if (thread && ai.escalated) {
+    thread.unreadForAdmin += 1;
+  }
+
+  await persistChatMessage(message, getThread(threadId)?.unreadForAdmin);
+
+  return message;
 }
 
 function mapMessageRow(row: {
@@ -148,7 +212,11 @@ export async function startVisitorThread(raw: unknown): Promise<{ thread: ChatTh
     }
   }
 
-  return { thread: { ...thread, lastMessage: visitorMsg.body }, messages: listMessages(threadId) };
+  await maybeReplyWithAssistant(threadId, parsed.data.message);
+
+  const allMessages = listMessages(threadId);
+  const last = allMessages[allMessages.length - 1];
+  return { thread: { ...thread, lastMessage: last?.body ?? visitorMsg.body }, messages: allMessages };
 }
 
 export async function getVisitorMessages(threadId: string, since?: string): Promise<ChatMessage[]> {
@@ -197,6 +265,8 @@ export async function sendVisitorMessage(threadId: string, raw: unknown): Promis
         .eq("id", threadId);
     }
   }
+
+  await maybeReplyWithAssistant(threadId, parsed.data.message);
 
   return message;
 }

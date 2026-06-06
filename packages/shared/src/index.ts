@@ -7,6 +7,7 @@ export * from "./auditActivity.js";
 export * from "./modules.js";
 export * from "./platform.js";
 export * from "./chat.js";
+export * from "./ai.js";
 export * from "./commission.js";
 export * from "./domain.js";
 export * from "./savings.js";

@@ -33,3 +33,12 @@ export const adminMutationRateLimit = rateLimit({
   keyGenerator: clientKey,
   message: { error: "Too many admin actions. Try again later." }
 });
+
+export const aiRateLimit = rateLimit({
+  windowMs: 60_000,
+  limit: 20,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  keyGenerator: clientKey,
+  message: { error: "Too many AI requests. Try again shortly." }
+});

@@ -18,7 +18,9 @@ const envSchema = z.object({
   BOOTSTRAP_DEMO_ADMIN: z
     .enum(["true", "false"])
     .default("true")
-    .transform((v) => v === "true")
+    .transform((v) => v === "true"),
+  OLLAMA_BASE_URL: z.string().url().default("http://127.0.0.1:11434"),
+  OLLAMA_MODEL: z.string().min(1).default("llama3.2:3b")
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -29,7 +31,9 @@ export const env = parsed.success
       SUPER_ADMIN_EMAIL: "super@bms.com",
       SUPER_ADMIN_PASSWORD: "ChangeMe123!",
       SUPER_ADMIN_FULL_NAME: "Platform Super Admin",
-      BOOTSTRAP_DEMO_ADMIN: true
+      BOOTSTRAP_DEMO_ADMIN: true,
+      OLLAMA_BASE_URL: "http://127.0.0.1:11434",
+      OLLAMA_MODEL: "llama3.2:3b"
     };
 
 const IS_TEST = Boolean(process.env.VITEST) || process.env.NODE_ENV === "test";
@@ -51,5 +55,12 @@ export function getSuperAdminCredentials() {
     email: env.SUPER_ADMIN_EMAIL ?? "super@bms.com",
     password: env.SUPER_ADMIN_PASSWORD ?? "ChangeMe123!",
     fullName: env.SUPER_ADMIN_FULL_NAME ?? "Platform Super Admin"
+  };
+}
+
+export function getOllamaConfig() {
+  return {
+    baseUrl: (env.OLLAMA_BASE_URL ?? "http://127.0.0.1:11434").replace(/\/$/, ""),
+    model: env.OLLAMA_MODEL ?? "llama3.2:3b"
   };
 }

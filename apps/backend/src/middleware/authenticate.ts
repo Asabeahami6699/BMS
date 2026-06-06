@@ -15,9 +15,13 @@ function isPublicChatPath(path: string, method: string): boolean {
   return false;
 }
 
+function isPublicAiPath(path: string, method: string): boolean {
+  return path === "/api/v1/ai/status" && method === "GET";
+}
+
 export async function authenticate(req: Request, res: Response, next: NextFunction): Promise<void> {
   const path = req.originalUrl.split("?")[0] ?? req.path;
-  if ((PUBLIC_PATHS.has(path) && req.method === "POST") || isPublicChatPath(path, req.method)) {
+  if ((PUBLIC_PATHS.has(path) && req.method === "POST") || isPublicChatPath(path, req.method) || isPublicAiPath(path, req.method)) {
     next();
     return;
   }

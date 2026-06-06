@@ -150,6 +150,14 @@ const ACTIVITY_RULES: ActivityRule[] = [
   { methods: ["POST"], pattern: /^\/chat\/threads\/[^/]+\/messages$/i, action: "Sent chat message" },
   { methods: ["POST"], pattern: /^\/chat\/inbox\/[^/]+\/messages$/i, action: "Sent inbox message" },
 
+  { methods: ["POST"], pattern: /^\/ai\/help$/i, action: "Used AI workspace help" },
+  {
+    methods: ["POST"],
+    pattern: /^\/ai\/loan-application-review$/i,
+    action: "Used AI loan application review"
+  },
+  { methods: ["POST"], pattern: /^\/ai\/public-chat$/i, action: "AI public chat reply generated" },
+
   { methods: ["POST"], pattern: /^\/sync\//i, action: "Synced offline data" }
 ];
 

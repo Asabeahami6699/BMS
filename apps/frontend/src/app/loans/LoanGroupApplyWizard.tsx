@@ -11,6 +11,7 @@ import { useLoansStore } from "../stores/loansStore";
 import { AgentPhotoField } from "../../agent/components/AgentPhotoField";
 import { preparePhoto } from "../../lib/preparePhoto";
 import { buildWizardReviewSnapshot, LoanApplicationReview } from "./LoanApplicationReview";
+import { LoanAiReviewAssist } from "./LoanAiReviewAssist";
 import { printLoanDocument } from "./loanPrint";
 import { LoanQualificationForm, EMPTY_QUALIFICATION } from "./LoanQualificationForm";
 import { LoansLayout } from "./LoansLayout";
@@ -468,6 +469,7 @@ export function LoanGroupApplyWizard({ role: _role }: Props) {
               Review group member details before submission. Use print preview for a draft copy.
             </p>
             <LoanApplicationReview snapshot={reviewSnapshot} />
+            <LoanAiReviewAssist snapshot={reviewSnapshot} loanType="group_solidarity" />
           </>
         ) : null}
 

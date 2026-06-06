@@ -3,6 +3,7 @@ import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import type { DashboardNavItem } from "../config/tenantModules";
 import { getNavIcon } from "./navIcons";
 import { BmsBrandIcon } from "../components/BmsBrandIcon";
+import { AiHelpPanel } from "../components/AiHelpPanel";
 import { GlobalSearch } from "./components/GlobalSearch";
 import { DashboardNotifications } from "./components/DashboardNotifications";
 
@@ -266,6 +267,7 @@ export function DashboardShell({
 
         <section className="dash-content">{children}</section>
       </div>
+      <AiHelpPanel />
     </div>
   );
 }

@@ -12,6 +12,7 @@ import { useLoansStore } from "../stores/loansStore";
 import { AgentPhotoField } from "../../agent/components/AgentPhotoField";
 import { preparePhoto } from "../../lib/preparePhoto";
 import { buildWizardReviewSnapshot, LoanApplicationReview } from "./LoanApplicationReview";
+import { LoanAiReviewAssist } from "./LoanAiReviewAssist";
 import { printLoanDocument } from "./loanPrint";
 import { LoanBorrowerForm, EMPTY_BORROWER } from "./LoanBorrowerForm";
 import { LoanQualificationForm, EMPTY_QUALIFICATION } from "./LoanQualificationForm";
@@ -524,6 +525,7 @@ export function LoanApplyWizard({ role: _role }: Props) {
               loan record print is available after approval.
             </p>
             <LoanApplicationReview snapshot={reviewSnapshot} />
+            <LoanAiReviewAssist snapshot={reviewSnapshot} loanType="individual" />
           </>
         ) : null}
 

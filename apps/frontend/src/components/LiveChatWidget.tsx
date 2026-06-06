@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
+import { isAiAssistantChatMessage } from "../app/aiApi";
 import {
   BMS_CONTACT_EMAIL,
   ChatThreadNotFoundError,
@@ -169,8 +170,8 @@ export function LiveChatWidget() {
           {!threadId ? (
             <form className="livechat-start-form" onSubmit={handleStartChat}>
               <p className="muted livechat-intro">
-                Interested in onboarding your cooperative or MFI? Start a conversation — super admin support will
-                respond here.
+                Interested in onboarding your cooperative or MFI? Our free local AI assistant answers common
+                questions instantly; a platform team member can follow up for registration details.
               </p>
               <label className="field">
                 <span>Your name</span>
@@ -217,7 +218,11 @@ export function LiveChatWidget() {
                     className={`livechat-bubble livechat-bubble--${msg.senderType === "visitor" ? "visitor" : "admin"}`}
                   >
                     <p className="livechat-bubble-sender">
-                      {msg.senderType === "visitor" ? "You" : "BMS Platform support"}
+                      {msg.senderType === "visitor"
+                        ? "You"
+                        : isAiAssistantChatMessage(msg.id)
+                          ? "BMS AI Assistant"
+                          : "BMS Platform support"}
                     </p>
                     <p>{msg.body}</p>
                     <time>{new Date(msg.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>
