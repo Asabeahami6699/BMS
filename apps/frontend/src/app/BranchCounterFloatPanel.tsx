@@ -1,6 +1,6 @@
 import { FormEvent, useState } from "react";
 import { Link } from "react-router-dom";
-import type { AppRole, Branch, BranchFloatSession } from "./api";
+import type { AppRole, Branch, BranchFloatSession, BranchFloatSummary } from "./api";
 import {
   allocateBranchFloat,
   closeBranchFloat,
@@ -16,7 +16,7 @@ type Props = {
   branches: Branch[];
   transactionBranchId: string;
   floatSession: BranchFloatSession | null;
-  floatSummary: { expectedCash: number; canTransact: boolean; statusLabel: string } | null;
+  floatSummary: BranchFloatSummary;
   pendingFloatRequests: BranchFloatSession[];
   onUpdated: () => void;
 };
@@ -37,6 +37,7 @@ export function BranchCounterFloatPanel({
   onUpdated
 }: Props) {
   const { showToast } = useToast();
+  const [expanded, setExpanded] = useState(false);
   const [requestAmount, setRequestAmount] = useState("500");
   const [requestNote, setRequestNote] = useState("");
   const [actualClosing, setActualClosing] = useState("");
@@ -118,179 +119,249 @@ export function BranchCounterFloatPanel({
   }
 
   return (
-    <section className="branch-float card">
-      <header className="branch-float__head">
-        <div>
-          <h2 className="branch-float__title">Branch counter till (Susu)</h2>
+    <section className={`branch-float card branch-float--${expanded ? "expanded" : "collapsed"}`}>
+      <button
+        type="button"
+        className="branch-float__toggle"
+        onClick={() => setExpanded((open) => !open)}
+        aria-expanded={expanded}
+      >
+        <div className="branch-float__toggle-main">
+          <div>
+            <h2 className="branch-float__title">Branch till · {branchLabel}</h2>
+            <p className="branch-float__toggle-hint muted">
+              {expanded ? "Click to minimize" : "Click to expand float details & balancing"}
+            </p>
+          </div>
+          <div className="branch-float__toggle-meta">
+            {floatSummary?.canTransact ? (
+              <span
+                className={`branch-float__toggle-balance${floatSummary.isLowFloat ? " branch-float__toggle-balance--low" : ""}`}
+              >
+                Float {formatMoney(floatSummary.floatBalance)}
+              </span>
+            ) : null}
+            {floatSummary ? (
+              <span
+                className={`branch-float__status branch-float__status--${floatSession?.status ?? "none"}`}
+              >
+                {floatSummary.statusLabel}
+              </span>
+            ) : needsFloat ? (
+              <span className="branch-float__status branch-float__status--requested">No float today</span>
+            ) : null}
+          </div>
+        </div>
+        <span className="branch-float__chevron" aria-hidden>
+          {expanded ? "▾" : "▸"}
+        </span>
+      </button>
+
+      {expanded ? (
+        <div className="branch-float__body">
           <p className="muted branch-float__sub">
-            Daily float for tellers at <strong>{branchLabel}</strong>. Field agents do not use this
-            till — they collect in the field.
+            Daily float for tellers. Deposits &amp; Susu reduce float; withdrawals restore float. Field
+            agents collect in the field — not this till.
           </p>
-        </div>
-        {floatSummary ? (
-          <span
-            className={`branch-float__status branch-float__status--${floatSession?.status ?? "none"}`}
-          >
-            {floatSummary.statusLabel}
-          </span>
-        ) : null}
-      </header>
 
-      {needsFloat && !floatSession ? (
-        <div className="branch-float__alert">
-          <p>
-            <strong>No float for today.</strong> Request opening cash from admin before customer
-            deposits or withdrawals.
-          </p>
-          <form className="branch-float__request-form" onSubmit={(e) => void handleRequest(e)}>
-            <label className="field">
-              <span>Amount needed (GHS)</span>
-              <input
-                type="number"
-                min={0}
-                step="0.01"
-                value={requestAmount}
-                onChange={(e) => setRequestAmount(e.target.value)}
-                required
-              />
-            </label>
-            <label className="field">
-              <span>Note (optional)</span>
-              <input value={requestNote} onChange={(e) => setRequestNote(e.target.value)} />
-            </label>
-            <button type="submit" className="button" disabled={busy}>
-              Request daily float
-            </button>
-          </form>
-        </div>
-      ) : null}
-
-      {floatSession ? (
-        <div className="branch-float__metrics">
-          <div>
-            <span className="muted">Opening float</span>
-            <strong>{formatMoney(floatSession.openingFloat)}</strong>
-          </div>
-          <div>
-            <span className="muted">Cash in (dep + Susu)</span>
-            <strong>
-              {formatMoney(floatSession.totalDeposits + floatSession.totalDailySusu)}
-            </strong>
-          </div>
-          <div>
-            <span className="muted">Cash out</span>
-            <strong>{formatMoney(floatSession.totalWithdrawals)}</strong>
-          </div>
-          <div>
-            <span className="muted">Expected in till</span>
-            <strong>{formatMoney(floatSummary?.expectedCash ?? 0)}</strong>
-          </div>
-          <div>
-            <span className="muted">Transactions</span>
-            <strong>{floatSession.transactionCount}</strong>
-          </div>
-          {floatSession.variance != null ? (
-            <div>
-              <span className="muted">Variance</span>
-              <strong className={floatSession.variance !== 0 ? "branch-float__variance" : ""}>
-                {formatMoney(floatSession.variance)}
-              </strong>
+          {floatSummary && floatSession?.status === "open" ? (
+            <div
+              className={`branch-float__balance-card${floatSummary.isLowFloat ? " branch-float__balance-card--low" : ""}`}
+            >
+              <div className="branch-float__balance-main">
+                <div>
+                  <span className="branch-float__balance-label">Float balance remaining</span>
+                  <strong className="branch-float__balance-value">
+                    {formatMoney(floatSummary.floatBalance)}
+                  </strong>
+                </div>
+                <div className="branch-float__balance-stats">
+                  <div>
+                    <span>Opening float</span>
+                    <strong>{formatMoney(floatSummary.openingFloat)}</strong>
+                  </div>
+                  <div>
+                    <span>Deposits + Susu</span>
+                    <strong>
+                      − {formatMoney(floatSummary.totalDeposits + floatSummary.totalDailySusu)}
+                    </strong>
+                  </div>
+                  <div>
+                    <span>Withdrawals</span>
+                    <strong>+ {formatMoney(floatSummary.totalWithdrawals)}</strong>
+                  </div>
+                  <div>
+                    <span>Cash in till</span>
+                    <strong>{formatMoney(floatSummary.expectedCash)}</strong>
+                  </div>
+                </div>
+              </div>
+              {floatSummary.isLowFloat ? (
+                <p className="branch-float__balance-warn" role="status">
+                  Float is running low (below GHS {floatSummary.lowFloatThreshold.toFixed(2)}). Request
+                  additional float from admin before large deposits.
+                </p>
+              ) : null}
             </div>
           ) : null}
-        </div>
-      ) : null}
 
-      {floatSession?.status === "requested" && needsFloat ? (
-        <p className="muted">Waiting for admin or coordinator to release your float.</p>
-      ) : null}
-
-      {floatSession?.status === "open" && needsFloat ? (
-        <form className="branch-float__close-form" onSubmit={(e) => void handleClose(e)}>
-          <h3>End of day balancing</h3>
-          <p className="muted">
-            Count physical cash in your drawer. Expected:{" "}
-            <strong>{formatMoney(floatSummary?.expectedCash ?? 0)}</strong>
-          </p>
-          <label className="field">
-            <span>Actual cash counted (GHS)</span>
-            <input
-              type="number"
-              min={0}
-              step="0.01"
-              value={actualClosing}
-              onChange={(e) => setActualClosing(e.target.value)}
-              required
-            />
-          </label>
-          <label className="field">
-            <span>Variance note (if any)</span>
-            <input value={varianceNote} onChange={(e) => setVarianceNote(e.target.value)} />
-          </label>
-          <button type="submit" className="button secondary" disabled={busy}>
-            Close till for today
-          </button>
-        </form>
-      ) : null}
-
-      {floatSession?.status === "closed" && isAdminLike ? (
-        <button
-          type="button"
-          className="button"
-          disabled={busy}
-          onClick={() => void handleSettle(floatSession)}
-        >
-          Settle &amp; approve balancing
-        </button>
-      ) : null}
-
-      {isAdminLike ? (
-        <p className="branch-float__admin-link muted">
-          Manage all requests and push float from{" "}
-          <Link to="/app/susu/till-float">Susu → Till float</Link> in the sidebar.
-        </p>
-      ) : null}
-
-      {isAdminLike && pendingFloatRequests.length > 0 ? (
-        <div className="branch-float__pending">
-          <h3>Pending float requests (quick approve)</h3>
-          <ul className="branch-float__pending-list">
-            {pendingFloatRequests.map((s) => (
-              <li key={s.id} className="branch-float__pending-item">
-                <span>
-                  Cashier {s.cashierUserId.slice(0, 8)}… · {s.businessDate} · requested{" "}
-                  {formatMoney(s.openingFloat)}
-                </span>
-                <div className="branch-float__pending-actions">
+          {needsFloat && !floatSession ? (
+            <div className="branch-float__alert">
+              <p>
+                <strong>No float for today.</strong> Request opening cash from admin before customer
+                deposits or withdrawals.
+              </p>
+              <form className="branch-float__request-form" onSubmit={(e) => void handleRequest(e)}>
+                <label className="field">
+                  <span>Amount needed (GHS)</span>
                   <input
                     type="number"
                     min={0}
                     step="0.01"
-                    className="branch-float__allocate-input"
-                    placeholder="Release amount"
-                    value={allocateAmount[s.id] ?? String(s.openingFloat)}
-                    onChange={(e) =>
-                      setAllocateAmount((prev) => ({ ...prev, [s.id]: e.target.value }))
-                    }
+                    value={requestAmount}
+                    onChange={(e) => setRequestAmount(e.target.value)}
+                    required
                   />
-                  <button
-                    type="button"
-                    className="button"
-                    disabled={busy}
-                    onClick={() => void handleAllocate(s)}
-                  >
-                    Release float
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
+                </label>
+                <label className="field">
+                  <span>Note (optional)</span>
+                  <input value={requestNote} onChange={(e) => setRequestNote(e.target.value)} />
+                </label>
+                <button type="submit" className="button" disabled={busy}>
+                  Request daily float
+                </button>
+              </form>
+            </div>
+          ) : null}
 
-      {needsFloat && floatSummary && !floatSummary.canTransact ? (
-        <p className="branch-float__block muted">
-          Customer cash transactions are blocked until your till float is open.
-        </p>
+          {floatSession ? (
+            <div className="branch-float__metrics">
+              <div>
+                <span className="muted">Opening float</span>
+                <strong>{formatMoney(floatSession.openingFloat)}</strong>
+              </div>
+              <div>
+                <span className="muted">Cash in (dep + Susu)</span>
+                <strong>
+                  {formatMoney(floatSession.totalDeposits + floatSession.totalDailySusu)}
+                </strong>
+              </div>
+              <div>
+                <span className="muted">Cash out</span>
+                <strong>{formatMoney(floatSession.totalWithdrawals)}</strong>
+              </div>
+              <div>
+                <span className="muted">Expected in till</span>
+                <strong>{formatMoney(floatSummary?.expectedCash ?? 0)}</strong>
+              </div>
+              <div>
+                <span className="muted">Transactions</span>
+                <strong>{floatSession.transactionCount}</strong>
+              </div>
+              {floatSession.variance != null ? (
+                <div>
+                  <span className="muted">Variance</span>
+                  <strong className={floatSession.variance !== 0 ? "branch-float__variance" : ""}>
+                    {formatMoney(floatSession.variance)}
+                  </strong>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {floatSession?.status === "requested" && needsFloat ? (
+            <p className="muted">Waiting for admin or coordinator to release your float.</p>
+          ) : null}
+
+          {floatSession?.status === "open" && needsFloat ? (
+            <form className="branch-float__close-form" onSubmit={(e) => void handleClose(e)}>
+              <h3>End of day balancing</h3>
+              <p className="muted">
+                Count physical cash in your drawer. Expected:{" "}
+                <strong>{formatMoney(floatSummary?.expectedCash ?? 0)}</strong>
+              </p>
+              <label className="field">
+                <span>Actual cash counted (GHS)</span>
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={actualClosing}
+                  onChange={(e) => setActualClosing(e.target.value)}
+                  required
+                />
+              </label>
+              <label className="field">
+                <span>Variance note (if any)</span>
+                <input value={varianceNote} onChange={(e) => setVarianceNote(e.target.value)} />
+              </label>
+              <button type="submit" className="button secondary" disabled={busy}>
+                Close till for today
+              </button>
+            </form>
+          ) : null}
+
+          {floatSession?.status === "closed" && isAdminLike ? (
+            <button
+              type="button"
+              className="button"
+              disabled={busy}
+              onClick={() => void handleSettle(floatSession)}
+            >
+              Settle &amp; approve balancing
+            </button>
+          ) : null}
+
+          {isAdminLike ? (
+            <p className="branch-float__admin-link muted">
+              Manage all requests and push float from{" "}
+              <Link to="/app/susu/till-float">Susu → Till float</Link> in the sidebar.
+            </p>
+          ) : null}
+
+          {isAdminLike && pendingFloatRequests.length > 0 ? (
+            <div className="branch-float__pending">
+              <h3>Pending float requests (quick approve)</h3>
+              <ul className="branch-float__pending-list">
+                {pendingFloatRequests.map((s) => (
+                  <li key={s.id} className="branch-float__pending-item">
+                    <span>
+                      Cashier {s.cashierUserId.slice(0, 8)}… · {s.businessDate} · requested{" "}
+                      {formatMoney(s.openingFloat)}
+                    </span>
+                    <div className="branch-float__pending-actions">
+                      <input
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        className="branch-float__allocate-input"
+                        placeholder="Release amount"
+                        value={allocateAmount[s.id] ?? String(s.openingFloat)}
+                        onChange={(e) =>
+                          setAllocateAmount((prev) => ({ ...prev, [s.id]: e.target.value }))
+                        }
+                      />
+                      <button
+                        type="button"
+                        className="button"
+                        disabled={busy}
+                        onClick={() => void handleAllocate(s)}
+                      >
+                        Release float
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {needsFloat && floatSummary && !floatSummary.canTransact ? (
+            <p className="branch-float__block muted">
+              Customer cash transactions are blocked until your till float is open.
+            </p>
+          ) : null}
+        </div>
       ) : null}
     </section>
   );

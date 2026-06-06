@@ -4,10 +4,16 @@ import { useShallow } from "zustand/react/shallow";
 import { SAVINGS_INITIAL_DEPOSIT_GHS } from "@bms/shared";
 import type { AppRole } from "./api";
 import { BranchCounterFloatPanel } from "./BranchCounterFloatPanel";
+import { BranchCounterCashCalculator } from "./BranchCounterCashCalculator";
 import { BranchCounterStatementPanel } from "./BranchCounterStatement";
 import { filterRowsBySearch } from "../components/AdminDataTable";
 import { useToast } from "../components/Toast";
 import { balancesFromLedger } from "../lib/customerBalance";
+import {
+  checkTillFloatForTransaction,
+  projectedFloatBalance,
+  roleRequiresBranchFloat
+} from "../lib/branchFloatBalance";
 import { downloadCustomerLedgerCsv } from "../lib/customerLedgerCsv";
 import { toUserFacingError } from "../lib/networkError";
 import {
@@ -62,6 +68,7 @@ export function BranchCounterCard({ role }: Props) {
   const [amount, setAmount] = useState("");
   const [notes, setNotes] = useState("");
   const [confirmWithdraw, setConfirmWithdraw] = useState(false);
+  const [calculatorOpen, setCalculatorOpen] = useState(false);
 
   const {
     customers,
@@ -128,9 +135,22 @@ export function BranchCounterCard({ role }: Props) {
   );
 
   const tillBlocksPosting =
-    (role === "teller" || role === "coordinator") &&
+    roleRequiresBranchFloat(role) &&
     floatSummary != null &&
     !floatSummary.canTransact;
+
+  const parsedAmount = Number(amount);
+  const amountValid = Number.isFinite(parsedAmount) && parsedAmount > 0;
+  const floatCheck =
+    amountValid && floatSummary
+      ? checkTillFloatForTransaction({ role, type, amount: parsedAmount, floatSummary })
+      : null;
+  const floatInsufficient = floatCheck != null && !floatCheck.ok;
+  const projectedTillBalance =
+    amountValid && floatSummary
+      ? projectedFloatBalance(floatSummary, type, parsedAmount)
+      : null;
+  const showFloatBalance = roleRequiresBranchFloat(role) && floatSummary?.canTransact;
 
   const ledger = useBranchCounterStore(
     useShallow((s) => selectLedgerForCustomer(s, selectedCustomerId))
@@ -194,6 +214,13 @@ export function BranchCounterCard({ role }: Props) {
     setConfirmWithdraw(false);
   }
 
+  function applyCalculatorAmount(value: number) {
+    setAmount(value.toFixed(2));
+    setConfirmWithdraw(false);
+    setCalculatorOpen(false);
+    showToast(`Amount set to GHS ${value.toFixed(2)}`, "success");
+  }
+
   async function handlePost() {
     if (sessionExpired) {
       showToast("Sign in again to post transactions", "error");
@@ -210,6 +237,16 @@ export function BranchCounterCard({ role }: Props) {
     }
     if (!transactionBranchId) {
       showToast("Select the branch where this transaction is handled", "error");
+      return;
+    }
+    const floatGate = checkTillFloatForTransaction({
+      role,
+      type,
+      amount: parsedAmount,
+      floatSummary
+    });
+    if (!floatGate.ok) {
+      showToast(floatGate.message, "error");
       return;
     }
     if (type === "withdrawal" && parsedAmount > balances.withdrawableBalance) {
@@ -273,19 +310,40 @@ export function BranchCounterCard({ role }: Props) {
             Susu teller desk — walk-in deposits, withdrawals &amp; daily Susu · {updatedLabel}
           </p>
         </div>
-        <button
-          type="button"
-          className="button secondary"
-          disabled={showCatalogLoader || refreshing || sessionExpired}
-          onClick={() => {
-            void useBranchCounterStore.getState().refreshSilent().then(() => {
-              showToast("Refreshed", "success");
-            });
-          }}
-        >
-          {refreshing ? "Syncing…" : "Refresh"}
-        </button>
+        <div className="branch-counter__toolbar-actions">
+          <button
+            type="button"
+            className="button secondary branch-counter__calc-btn"
+            disabled={sessionExpired}
+            onClick={() => setCalculatorOpen(true)}
+            aria-label="Open cash calculator"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+              <rect x="4" y="2" width="16" height="20" rx="2" />
+              <path d="M8 6h8M8 10h2M12 10h2M16 10h0M8 14h2M12 14h2M16 14h0M8 18h2M12 18h4" />
+            </svg>
+            Calculator
+          </button>
+          <button
+            type="button"
+            className="button secondary"
+            disabled={showCatalogLoader || refreshing || sessionExpired}
+            onClick={() => {
+              void useBranchCounterStore.getState().refreshSilent().then(() => {
+                showToast("Refreshed", "success");
+              });
+            }}
+          >
+            {refreshing ? "Syncing…" : "Refresh"}
+          </button>
+        </div>
       </header>
+
+      <BranchCounterCashCalculator
+        open={calculatorOpen}
+        onClose={() => setCalculatorOpen(false)}
+        onApply={applyCalculatorAmount}
+      />
 
       {sessionExpired || error ? (
         <div className="branch-counter__alert" role="alert">
@@ -449,6 +507,34 @@ export function BranchCounterCard({ role }: Props) {
             </div>
 
             <div className="branch-counter__amount-row">
+              {showFloatBalance ? (
+                <div
+                  className={`branch-counter__float-balance${floatSummary.isLowFloat ? " branch-counter__float-balance--low" : ""}`}
+                  role="status"
+                >
+                  <div className="branch-counter__float-balance-head">
+                    <span>Float balance</span>
+                    <strong>GHS {floatSummary.floatBalance.toFixed(2)}</strong>
+                  </div>
+                  {floatSummary.isLowFloat ? (
+                    <p className="branch-counter__float-reminder">
+                      Low float — request more from admin before large deposits or Susu collections.
+                    </p>
+                  ) : null}
+                  {projectedTillBalance != null ? (
+                    <p className="muted branch-counter__float-projected">
+                      Float after this {TX_LABELS[type].toLowerCase()}: GHS{" "}
+                      {projectedTillBalance.toFixed(2)}
+                      {type === "withdrawal"
+                        ? ` · Cash in till: GHS ${(floatSummary.expectedCash - parsedAmount).toFixed(2)}`
+                        : null}
+                    </p>
+                  ) : null}
+                  {floatInsufficient && floatCheck && !floatCheck.ok ? (
+                    <p className="branch-counter__float-warn">{floatCheck.message}</p>
+                  ) : null}
+                </div>
+              ) : null}
               <label className="field branch-counter__amount-field">
                 <span>Amount (GHS)</span>
                 <input
@@ -537,7 +623,8 @@ export function BranchCounterCard({ role }: Props) {
                   posting ||
                   sessionExpired ||
                   txTypes.length === 0 ||
-                  tillBlocksPosting
+                  tillBlocksPosting ||
+                  floatInsufficient
                 }
                 onClick={() => void handlePost()}
               >

@@ -66,6 +66,16 @@ function expectedCash(session: BranchFloatSession): number {
   );
 }
 
+/** Remaining allocated float: reduced by deposits/Susu, increased by withdrawals. */
+function remainingFloatBalance(session: BranchFloatSession): number {
+  return (
+    session.openingFloat -
+    session.totalDeposits -
+    session.totalDailySusu +
+    session.totalWithdrawals
+  );
+}
+
 function rowToSession(row: Record<string, unknown>): BranchFloatSession {
   return {
     id: String(row.id),
@@ -554,6 +564,24 @@ export async function applyTransactionToFloat(
     return;
   }
 
+  if (transaction.type === "deposit" || transaction.type === "daily_susu") {
+    const availableFloat = remainingFloatBalance(session);
+    if (transaction.amount > availableFloat + 1e-9) {
+      throw new Error(
+        `Insufficient till float balance. Available float: GHS ${availableFloat.toFixed(2)}. Request more float from admin.`
+      );
+    }
+  }
+
+  if (transaction.type === "withdrawal") {
+    const cashInTill = expectedCash(session);
+    if (transaction.amount > cashInTill + 1e-9) {
+      throw new Error(
+        `Insufficient cash in till for this withdrawal. Available: GHS ${cashInTill.toFixed(2)}.`
+      );
+    }
+  }
+
   if (transaction.type === "withdrawal") {
     session.totalWithdrawals += transaction.amount;
   } else if (transaction.type === "daily_susu") {
@@ -577,6 +605,14 @@ export async function applyTransactionToFloat(
 
 export function floatSessionSummary(session: BranchFloatSession | null): {
   expectedCash: number;
+  floatBalance: number;
+  openingFloat: number;
+  totalDeposits: number;
+  totalWithdrawals: number;
+  totalDailySusu: number;
+  remainingOpeningFloat: number;
+  lowFloatThreshold: number;
+  isLowFloat: boolean;
   canTransact: boolean;
   statusLabel: string;
 } | null {
@@ -584,6 +620,8 @@ export function floatSessionSummary(session: BranchFloatSession | null): {
     return null;
   }
   const expected = expectedCash(session);
+  const floatBalance = remainingFloatBalance(session);
+  const lowFloatThreshold = Math.max(50, session.openingFloat * 0.2);
   const statusLabels: Record<FloatSessionStatus, string> = {
     requested: "Awaiting float release",
     approved: "Approved — not yet open",
@@ -594,6 +632,14 @@ export function floatSessionSummary(session: BranchFloatSession | null): {
   };
   return {
     expectedCash: expected,
+    floatBalance,
+    openingFloat: session.openingFloat,
+    totalDeposits: session.totalDeposits,
+    totalWithdrawals: session.totalWithdrawals,
+    totalDailySusu: session.totalDailySusu,
+    remainingOpeningFloat: floatBalance,
+    lowFloatThreshold,
+    isLowFloat: session.status === "open" && floatBalance < lowFloatThreshold,
     canTransact: session.status === "open",
     statusLabel: statusLabels[session.status]
   };

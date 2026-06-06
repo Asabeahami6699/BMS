@@ -1620,6 +1620,14 @@ export type BranchFloatSession = {
 
 export type BranchFloatSummary = {
   expectedCash: number;
+  floatBalance: number;
+  openingFloat: number;
+  totalDeposits: number;
+  totalWithdrawals: number;
+  totalDailySusu: number;
+  remainingOpeningFloat: number;
+  lowFloatThreshold: number;
+  isLowFloat: boolean;
   canTransact: boolean;
   statusLabel: string;
 } | null;
