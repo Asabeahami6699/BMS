@@ -73,6 +73,26 @@ export type InitiateAgencyWithdrawalInput = z.infer<typeof initiateAgencyWithdra
 
 export const AGENCY_WALK_IN_CUSTOMER_NAME = "Agency banking (walk-in)";
 
+/** Prefer account-holder name from workflow over the shared walk-in customer record. */
+export function resolveAgencyDepositCustomerName(input: {
+  customerFullName?: string | null;
+  workflow?: Record<string, unknown> | null;
+  fallback?: string;
+}): string {
+  const holder =
+    typeof input.workflow?.account_holder_name === "string"
+      ? input.workflow.account_holder_name.trim()
+      : "";
+  if (holder) {
+    return holder;
+  }
+  const fullName = input.customerFullName?.trim();
+  if (fullName && fullName !== AGENCY_WALK_IN_CUSTOMER_NAME) {
+    return fullName;
+  }
+  return input.fallback ?? "Walk-in customer";
+}
+
 export function isManualPartnerWithdrawal(disclosure: {
   workflowData?: Record<string, unknown>;
   customerName?: string;

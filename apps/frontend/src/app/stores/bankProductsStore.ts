@@ -6,6 +6,10 @@ import type {
   TenantBankProduct
 } from "@bms/shared";
 import {
+  COMPANY_ACCOUNT_DEFAULT_EXECUTION_LIMIT,
+  STANDARD_DEPOSIT_EXECUTION_FIELDS
+} from "@bms/shared";
+import {
   createBankProduct,
   getActiveBranchFilter,
   getTenantId,
@@ -57,16 +61,27 @@ type BankProductsState = {
   formOpen: boolean;
   editingId: string | null;
   formDraft: BankProductFormDraft;
+  companyAccountModalOpen: boolean;
+  editingCompanyAccount: TenantBankProduct | null;
 
   setBranchFilter: (branchId: string) => void;
   syncBranchContextFromNav: () => void;
   openCreateForm: () => void;
+  openCompanyAccountModal: () => void;
+  openEditCompanyAccountModal: (product: TenantBankProduct) => void;
+  closeCompanyAccountModal: () => void;
   openEditForm: (product: TenantBankProduct) => void;
   closeForm: () => void;
   patchFormDraft: (patch: Partial<BankProductFormDraft>) => void;
   hydrate: (options?: { force?: boolean }) => void;
   refresh: () => Promise<void>;
   refreshSilent: () => Promise<void>;
+  createCompanyAccount: (payload: {
+    name: string;
+    bankLabel: string;
+    executionLimitAmount: number;
+    branchId: string;
+  }) => Promise<TenantBankProduct[]>;
   createProduct: (payload: {
     name: string;
     code?: string;
@@ -76,6 +91,8 @@ type BankProductsState = {
     isActive?: boolean;
     sortOrder?: number;
     workflowFields?: BankProductWorkflowField[];
+    isCompanyBankAccount?: boolean;
+    executionLimitAmount?: number | null;
   }) => Promise<TenantBankProduct[]>;
   updateProduct: (
     productId: string,
@@ -88,6 +105,8 @@ type BankProductsState = {
       isActive: boolean;
       sortOrder: number;
       workflowFields: BankProductWorkflowField[];
+      isCompanyBankAccount: boolean;
+      executionLimitAmount: number | null;
     }>
   ) => Promise<TenantBankProduct>;
   startLiveSync: () => void;
@@ -109,9 +128,23 @@ export const useBankProductsStore = create<BankProductsState>((set, get) => ({
   formOpen: false,
   editingId: null,
   formDraft: emptyBankProductFormDraft(),
+  companyAccountModalOpen: false,
+  editingCompanyAccount: null,
 
   openCreateForm: () => {
     set({ formOpen: true, editingId: null, formDraft: emptyBankProductFormDraft() });
+  },
+
+  openCompanyAccountModal: () => {
+    set({ companyAccountModalOpen: true, editingCompanyAccount: null });
+  },
+
+  openEditCompanyAccountModal: (product) => {
+    set({ companyAccountModalOpen: true, editingCompanyAccount: product });
+  },
+
+  closeCompanyAccountModal: () => {
+    set({ companyAccountModalOpen: false, editingCompanyAccount: null });
   },
 
   openEditForm: (product) => {
@@ -139,7 +172,13 @@ export const useBankProductsStore = create<BankProductsState>((set, get) => ({
   },
 
   patchFormDraft: (patch) => {
-    set((state) => ({ formDraft: { ...state.formDraft, ...patch } }));
+    set((state) => {
+      const next = { ...state.formDraft, ...patch };
+      if (patch.isCompanyBankAccount === true && !next.executionLimitAmount.trim()) {
+        next.executionLimitAmount = String(COMPANY_ACCOUNT_DEFAULT_EXECUTION_LIMIT);
+      }
+      return { formDraft: next };
+    });
   },
 
   setBranchFilter: (branchId) => {
@@ -211,6 +250,33 @@ export const useBankProductsStore = create<BankProductsState>((set, get) => ({
       }
     })();
     return fetchInFlight;
+  },
+
+  createCompanyAccount: async (payload) => {
+    set({ saving: true, error: null });
+    try {
+      const created = await createBankProduct({
+        name: payload.name,
+        bankLabel: payload.bankLabel,
+        direction: "deposit",
+        branchId: payload.branchId,
+        isCompanyBankAccount: true,
+        executionLimitAmount: payload.executionLimitAmount,
+        workflowFields: [...STANDARD_DEPOSIT_EXECUTION_FIELDS],
+        sortOrder: 0,
+        isActive: true
+      });
+      set((state) => ({
+        products: [...created, ...state.products],
+        saving: false,
+        lastFetchedAt: Date.now()
+      }));
+      return created;
+    } catch (error) {
+      const message = toUserFacingError(error, "Could not create company account");
+      set({ saving: false, error: message });
+      throw error;
+    }
   },
 
   createProduct: async (payload) => {

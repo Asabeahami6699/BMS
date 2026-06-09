@@ -42,7 +42,7 @@ type State = {
   setBusinessDate: (date: string) => void;
   setExecutionAccount: (depositId: string, bankProductId: string) => void;
   openDay: (payload: OpenBackOfficeDayInput) => Promise<void>;
-  markDepositDone: (transactionId: string) => Promise<void>;
+  markDepositDone: (transactionId: string, executionBankProductId?: string) => Promise<void>;
   approveAccountantDeposit: (transactionId: string) => Promise<void>;
   requestEcash: (payload: {
     branchId: string;
@@ -77,7 +77,9 @@ export const useBackOfficeStore = create<State>((set, get) => ({
     const branchId = options?.branchId ?? options?.fallbackBranchId ?? get().branchId;
     if (branchId) {
       set({ branchId });
-      setRuntimeBranchId(branchId);
+      if (branchId !== "all") {
+        setRuntimeBranchId(branchId);
+      }
     }
     const { loading, lastFetchedAt } = get();
     runHydrate({
@@ -131,7 +133,9 @@ export const useBackOfficeStore = create<State>((set, get) => ({
 
   setBranchId: (branchId) => {
     set({ branchId });
-    setRuntimeBranchId(branchId);
+    if (branchId && branchId !== "all") {
+      setRuntimeBranchId(branchId);
+    }
     void get().refresh();
   },
 
@@ -159,15 +163,16 @@ export const useBackOfficeStore = create<State>((set, get) => ({
     }
   },
 
-  markDepositDone: async (transactionId) => {
-    const accountId = get().executionAccountByDeposit[transactionId];
+  markDepositDone: async (transactionId, executionBankProductId) => {
+    const explicit = executionBankProductId?.trim();
+    const accountId = explicit || get().executionAccountByDeposit[transactionId]?.trim() || "";
     if (!accountId) {
       throw new Error("Select the company bank account used for this deposit");
     }
     set({ busyId: transactionId, error: null });
     try {
-      const data = await executeBackOfficeDepositDone(transactionId, accountId);
-      set({ data, lastFetchedAt: Date.now() });
+      await executeBackOfficeDepositDone(transactionId, accountId);
+      await get().refreshSilent();
     } catch (error) {
       set({ error: toUserFacingError(error, "Failed to mark deposit done") });
       throw error;

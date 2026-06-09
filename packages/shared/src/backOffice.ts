@@ -9,6 +9,8 @@ export const backOfficeDepositQueueItemSchema = z.object({
   customerName: z.string().optional(),
   amount: z.number(),
   transactionBranchId: z.string(),
+  branchName: z.string().optional(),
+  branchCode: z.string().optional(),
   recordedByUserId: z.string(),
   recordedByName: z.string().optional(),
   createdAt: z.string(),
@@ -16,6 +18,7 @@ export const backOfficeDepositQueueItemSchema = z.object({
   bankProductId: z.string().optional(),
   bankProductName: z.string().optional(),
   bankLabel: z.string().optional(),
+  partnerAccountNumber: z.string().optional(),
   executionStatus: agencyExecutionStatusSchema,
   workflowData: z.record(z.string(), z.unknown()).optional()
 });
@@ -31,7 +34,10 @@ export const backOfficeAccountBalanceRowSchema = z.object({
   computedTotalEntries: z.number(),
   manualTotalEntries: z.number().nullable(),
   totalEntries: z.number(),
-  closingBalance: z.number()
+  closingBalance: z.number(),
+  executionLimit: z.number().optional(),
+  headroom: z.number().optional(),
+  limitReached: z.boolean().optional()
 });
 
 export type BackOfficeAccountBalanceRow = z.infer<typeof backOfficeAccountBalanceRowSchema>;
@@ -39,6 +45,9 @@ export type BackOfficeAccountBalanceRow = z.infer<typeof backOfficeAccountBalanc
 export const backOfficeTellerReconRowSchema = z.object({
   tellerUserId: z.string(),
   tellerName: z.string(),
+  branchId: z.string().optional(),
+  branchName: z.string().optional(),
+  branchCode: z.string().optional(),
   tellerDeposits: z.number(),
   backOfficeExecuted: z.number(),
   difference: z.number(),
@@ -65,6 +74,7 @@ export type BackOfficeEcashRequest = z.infer<typeof backOfficeEcashRequestSchema
 export const backOfficeBootstrapSchema = z.object({
   businessDate: z.string(),
   branchId: z.string(),
+  viewAllBranches: z.boolean().optional(),
   sessionId: z.string().nullable(),
   sessionOpen: z.boolean(),
   companyAccounts: z.array(
@@ -72,6 +82,8 @@ export const backOfficeBootstrapSchema = z.object({
       id: z.string(),
       name: z.string(),
       bankLabel: z.string(),
+      branchId: z.string().nullable().optional(),
+      branchName: z.string().optional(),
       executionLimitAmount: z.number().nullable().optional()
     })
   ),

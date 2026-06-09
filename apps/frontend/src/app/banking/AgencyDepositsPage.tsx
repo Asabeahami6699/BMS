@@ -781,7 +781,7 @@ export function AgencyDepositsPage() {
                 <div className="branch-counter__post-grid">
                   {bankProducts.length > 0 ? (
                     <label className="field">
-                      <span>Bank product</span>
+                      <span>Deposit product</span>
                       <select
                         value={bankProductId}
                         disabled={posting}
@@ -793,6 +793,9 @@ export function AgencyDepositsPage() {
                           </option>
                         ))}
                       </select>
+                      <small className="muted">
+                        Teller deposit type (e.g. GCB cash deposit) — not the company settlement account.
+                      </small>
                     </label>
                   ) : null}
                   <label className="field">
@@ -908,13 +911,13 @@ export function AgencyDepositsPage() {
             </div>
           )}
         </section>
-
-        <TellerDepositStatusList
-          deposits={recentDeposits}
-          loading={loading && recentDeposits.length === 0}
-          businessDate={depositsBusinessDate}
-        />
       </div>
+
+      <TellerDepositStatusList
+        deposits={recentDeposits}
+        loading={loading && recentDeposits.length === 0}
+        businessDate={depositsBusinessDate}
+      />
     </div>
   );
 

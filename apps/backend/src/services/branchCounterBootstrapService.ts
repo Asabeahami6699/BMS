@@ -96,10 +96,14 @@ export async function getBranchCounterBootstrap(
   const pendingFloatRequests =
     options.includePending ? await listPendingFloatRequests(tenantId) : [];
 
+  const tellerBankProducts = bankProducts.filter(
+    (p) => !p.isCompanyBankAccount
+  );
+
   return {
     customers,
     branches,
-    bankProducts,
+    bankProducts: tellerBankProducts,
     statement,
     floatSession,
     floatSummary: floatSessionSummary(floatSession),

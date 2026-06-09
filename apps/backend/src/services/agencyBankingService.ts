@@ -4,6 +4,7 @@ import {
   balanceDisclosureSchema,
   initiateAgencyWithdrawalSchema,
   isManualPartnerWithdrawal,
+  resolveAgencyDepositCustomerName,
   transactionSchema,
   tellerAgencyDepositsSchema,
   type AgencyBootstrap,
@@ -24,6 +25,7 @@ import {
   getBankProductById,
   resolveBankProductForWithdrawalApproval
 } from "./bankProductService.js";
+import { evaluateAgencyDepositExecutionStatus } from "./companyAccountLimitService.js";
 import {
   validateWorkflowFieldValues,
   workflowFieldsForStage
@@ -52,23 +54,21 @@ function mapTransactionRow(row: Record<string, unknown>): Transaction {
 }
 
 export function usesAgencyDepositFlow(context: TransactionRequestContext): boolean {
-  return context.role === "teller";
+  if (context.role === "teller") {
+    return true;
+  }
+  return context.permissions?.includes("agency.deposits.record") ?? false;
 }
 
 export async function createAgencyPendingDeposit(
   context: TransactionRequestContext,
   transaction: Transaction
 ): Promise<Transaction> {
-  let executionStatus: "pending_bank" | "pending_accountant" = "pending_bank";
-  if (transaction.bankProductId) {
-    const product = await getBankProductById(context.tenantId, transaction.bankProductId);
-    if (
-      product?.executionLimitAmount != null &&
-      transaction.amount > product.executionLimitAmount
-    ) {
-      executionStatus = "pending_accountant";
-    }
-  }
+  const executionStatus = await evaluateAgencyDepositExecutionStatus(
+    context.tenantId,
+    transaction.transactionBranchId,
+    transaction.amount
+  );
 
   const pending = transactionSchema.parse({
     ...transaction,
@@ -109,8 +109,8 @@ export async function createAgencyPendingDeposit(
         roles: ["accountant", "admin"],
         kind: "deposit_pending_accountant",
         customerId: pending.customerId,
-        title: "Large deposit needs accountant approval",
-        body: `GHS ${pending.amount.toFixed(2)} exceeds limit — accountant must approve before back office execution.`
+        title: "Deposit over agency account cap",
+        body: `GHS ${pending.amount.toFixed(2)} exceeds the company account daily cap (GHS 1,000,000) or available headroom — accountant must approve or arrange agent-to-agent transfer.`
       });
     } else {
       await notifyTenantStaff({
@@ -181,8 +181,10 @@ export async function listTellerAgencyDeposits(
     rows = data ?? [];
   }
 
-  const customers = await listCustomers(context.tenantId, { branchId, light: true });
+  const customers = await listCustomers(context.tenantId, { light: true });
   const customerById = new Map(customers.map((c) => [c.id, c]));
+  const branches = await (await import("./branchService.js")).listBranches(context.tenantId).catch(() => []);
+  const branchById = new Map(branches.map((b) => [b.id, b]));
 
   const deposits = await enrichTransactionsWithBankProducts(
     context.tenantId,
@@ -194,14 +196,23 @@ export async function listTellerAgencyDeposits(
       const partnerAccountNumber =
         typeof workflow?.account_number === "string" ? workflow.account_number : undefined;
       const customer = customerById.get(String(row.customer_id));
+      const customerName = resolveAgencyDepositCustomerName({
+        customerFullName: customer?.fullName,
+        workflow,
+        fallback: "Customer"
+      });
+      const rowBranchId = String(row.transaction_branch_id);
+      const branch = branchById.get(rowBranchId);
       return {
         id: String(row.id),
         createdAt: String(row.created_at),
         amount: Number(row.amount),
-        customerName: customer?.fullName ?? "Customer",
+        customerName,
         executionStatus: String(row.execution_status ?? "completed"),
         bankProductId: row.bank_product_id != null ? String(row.bank_product_id) : undefined,
-        partnerAccountNumber
+        partnerAccountNumber,
+        branchName: branch?.name,
+        branchCode: branch?.code
       };
     })
   );
@@ -217,7 +228,9 @@ export async function listTellerAgencyDeposits(
       executionStatus: row.executionStatus,
       bankLabel: row.bankLabel,
       bankProductName: row.bankProductName,
-      partnerAccountNumber: row.partnerAccountNumber
+      partnerAccountNumber: row.partnerAccountNumber,
+      branchName: row.branchName,
+      branchCode: row.branchCode
     }))
   });
 }

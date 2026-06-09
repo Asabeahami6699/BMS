@@ -2,6 +2,7 @@ import {
   backOfficeBootstrapSchema,
   createBackOfficeEcashRequestSchema,
   openBackOfficeDaySchema,
+  resolveAgencyDepositCustomerName,
   updateBackOfficeAccountEntriesSchema,
   type BackOfficeBootstrap
 } from "@bms/shared";
@@ -9,13 +10,14 @@ import { randomUUID } from "node:crypto";
 import { getSupabaseAdminClient } from "../config/supabaseClient.js";
 import { assertBranchAccess } from "../middleware/branchScope.js";
 import { executeBankDeposit } from "./agencyBankingService.js";
-import { listUsersByTenant } from "./authStore.js";
+import { fetchTenantUserNameMap } from "./userNameResolver.js";
 import { enrichTransactionsWithBankProducts, getBankProductById, listBankProducts } from "./bankProductService.js";
 import { listCustomers } from "./customerService.js";
 import { createAgentNotification, notifyTenantStaff } from "./notificationService.js";
-import { resolveBranchId } from "./branchService.js";
+import { listBranches, resolveBranchId } from "./branchService.js";
+import { assertCompanyAccountCanExecute } from "./companyAccountLimitService.js";
+import { resolveCompanyAccountExecutionLimit } from "@bms/shared";
 import type { TransactionRequestContext } from "./transactionService.js";
-import { userDisplayName } from "./userNameResolver.js";
 
 function todayDate(): string {
   return new Date().toISOString().slice(0, 10);
@@ -42,27 +44,55 @@ async function resolveSession(
   return data ? { id: String(data.id), status: String(data.status) } : null;
 }
 
-async function sumExecutedByAccount(
+async function sumExecutedByAccountsBatch(
   tenantId: string,
   branchId: string,
   businessDate: string,
-  executionBankProductId: string
-): Promise<number> {
+  executionBankProductIds: string[]
+): Promise<Map<string, number>> {
+  const totals = new Map<string, number>();
+  for (const id of executionBankProductIds) {
+    totals.set(id, 0);
+  }
+  if (executionBankProductIds.length === 0) {
+    return totals;
+  }
   const supabase = getSupabaseAdminClient();
-  if (!supabase) return 0;
+  if (!supabase) {
+    return totals;
+  }
   const dayStart = `${businessDate}T00:00:00.000Z`;
   const dayEnd = `${businessDate}T23:59:59.999Z`;
   const { data } = await supabase
     .from("customer_transactions")
-    .select("amount")
+    .select("execution_bank_product_id, amount")
     .eq("tenant_id", tenantId)
     .eq("transaction_branch_id", branchId)
     .eq("type", "deposit")
     .eq("execution_status", "completed")
-    .eq("execution_bank_product_id", executionBankProductId)
+    .in("execution_bank_product_id", executionBankProductIds)
     .gte("bank_executed_at", dayStart)
     .lte("bank_executed_at", dayEnd);
-  return (data ?? []).reduce((sum, row) => sum + Number(row.amount ?? 0), 0);
+  for (const row of data ?? []) {
+    const productId = String(row.execution_bank_product_id);
+    totals.set(productId, (totals.get(productId) ?? 0) + Number(row.amount ?? 0));
+  }
+  return totals;
+}
+
+const RECON_KEY_SEP = "\u001f";
+
+function reconKey(branchId: string, tellerUserId: string): string {
+  return `${branchId}${RECON_KEY_SEP}${tellerUserId}`;
+}
+
+function tellerUserIdFromReconKey(key: string): string {
+  const idx = key.indexOf(RECON_KEY_SEP);
+  return idx >= 0 ? key.slice(idx + 1) : key;
+}
+
+function isAllBranchesRequest(branchId?: string): boolean {
+  return branchId?.trim().toLowerCase() === "all";
 }
 
 export async function getBackOfficeBootstrap(
@@ -70,163 +100,281 @@ export async function getBackOfficeBootstrap(
   options?: { branchId?: string; businessDate?: string }
 ): Promise<BackOfficeBootstrap> {
   const businessDate = options?.businessDate?.trim() || todayDate();
-  let branchId = options?.branchId
-    ? await resolveBranchId(context.tenantId, options.branchId)
-    : undefined;
-  if (!branchId && context.scopeType === "branch" && context.branchId) {
-    branchId = await resolveBranchId(context.tenantId, context.branchId);
-  }
-  if (!branchId) {
-    throw new Error("Select a branch for back office");
-  }
-  assertBranchAccess(context, branchId);
+  const rawBranchId = options?.branchId?.trim();
+  const viewAllBranches =
+    context.scopeType === "head_office" && (!rawBranchId || isAllBranchesRequest(rawBranchId));
 
-  const products = await listBankProducts(context.tenantId, { activeOnly: true });
+  let branchId: string | undefined;
+  if (viewAllBranches) {
+    branchId = "all";
+  } else {
+    branchId = rawBranchId
+      ? await resolveBranchId(context.tenantId, rawBranchId)
+      : undefined;
+    if (!branchId && context.scopeType === "branch" && context.branchId) {
+      branchId = await resolveBranchId(context.tenantId, context.branchId);
+    }
+    if (!branchId) {
+      throw new Error("Select a branch for back office");
+    }
+    assertBranchAccess(context, branchId);
+  }
+
+  const [branches, products, customers] = await Promise.all([
+    listBranches(context.tenantId).catch(() => []),
+    listBankProducts(context.tenantId, { activeOnly: true }),
+    listCustomers(context.tenantId, { light: true })
+  ]);
+  const branchById = new Map(branches.map((b) => [b.id, b]));
+  const customerById = new Map(customers.map((c) => [c.id, c]));
+  const operationalBranchId = viewAllBranches ? undefined : branchId;
   const companyAccounts = products
     .filter((p) => p.isCompanyBankAccount)
+    .filter((p) => {
+      if (!operationalBranchId) {
+        return true;
+      }
+      return p.branchId == null || p.branchId === operationalBranchId;
+    })
     .map((p) => ({
       id: p.id,
       name: p.name,
       bankLabel: p.bankLabel,
+      branchId: p.branchId ?? null,
+      branchName: p.branchName,
       executionLimitAmount: p.executionLimitAmount ?? null
     }));
 
   const supabase = getSupabaseAdminClient();
-  const session = await resolveSession(context.tenantId, branchId, businessDate);
+  const dayStart = `${businessDate}T00:00:00.000Z`;
+  const dayEnd = `${businessDate}T23:59:59.999Z`;
 
-  const users = listUsersByTenant(context.tenantId);
-  const nameById = new Map(
-    users.map((u) => [u.id, userDisplayName(u.fullName, u.email, u.id)])
-  );
+  const sessionPromise = operationalBranchId
+    ? resolveSession(context.tenantId, operationalBranchId, businessDate)
+    : Promise.resolve(null);
 
-  let depositRows: Record<string, unknown>[] = [];
-  if (supabase) {
-    const { data } = await supabase
+  const pendingDepositsPromise = (async () => {
+    if (!supabase) {
+      return [] as Record<string, unknown>[];
+    }
+    let query = supabase
       .from("customer_transactions")
       .select("*")
       .eq("tenant_id", context.tenantId)
-      .eq("transaction_branch_id", branchId)
       .eq("type", "deposit")
       .in("execution_status", ["pending_bank", "pending_accountant"])
       .order("created_at", { ascending: false })
       .limit(200);
-    depositRows = data ?? [];
-  }
+    if (operationalBranchId) {
+      query = query.eq("transaction_branch_id", operationalBranchId);
+    }
+    const { data } = await query;
+    return data ?? [];
+  })();
 
-  const customers = await listCustomers(context.tenantId, { branchId, light: true });
-  const customerById = new Map(customers.map((c) => [c.id, c]));
+  const tellerDepositsPromise = (async () => {
+    if (!supabase) {
+      return [] as Record<string, unknown>[];
+    }
+    let query = supabase
+      .from("customer_transactions")
+      .select("recorded_by_user_id, transaction_branch_id, amount")
+      .eq("tenant_id", context.tenantId)
+      .eq("type", "deposit")
+      .gte("created_at", dayStart)
+      .lte("created_at", dayEnd);
+    if (operationalBranchId) {
+      query = query.eq("transaction_branch_id", operationalBranchId);
+    }
+    const { data } = await query;
+    return data ?? [];
+  })();
 
-  const depositQueue = await enrichTransactionsWithBankProducts(
+  const executedDepositsPromise = (async () => {
+    if (!supabase) {
+      return [] as Record<string, unknown>[];
+    }
+    let query = supabase
+      .from("customer_transactions")
+      .select("recorded_by_user_id, transaction_branch_id, amount")
+      .eq("tenant_id", context.tenantId)
+      .eq("type", "deposit")
+      .eq("execution_status", "completed")
+      .gte("bank_executed_at", dayStart)
+      .lte("bank_executed_at", dayEnd);
+    if (operationalBranchId) {
+      query = query.eq("transaction_branch_id", operationalBranchId);
+    }
+    const { data } = await query;
+    return data ?? [];
+  })();
+
+  const userNamesPromise = fetchTenantUserNameMap(context.tenantId);
+
+  const executedTotalsPromise =
+    operationalBranchId && companyAccounts.length > 0
+      ? sumExecutedByAccountsBatch(
+          context.tenantId,
+          operationalBranchId,
+          businessDate,
+          companyAccounts.map((account) => account.id)
+        )
+      : Promise.resolve(new Map<string, number>());
+
+  const ecashRowsPromise = (async () => {
+    if (!supabase) {
+      return [] as Record<string, unknown>[];
+    }
+    let query = supabase
+      .from("back_office_ecash_requests")
+      .select("*")
+      .eq("tenant_id", context.tenantId)
+      .order("created_at", { ascending: false })
+      .limit(50);
+    if (operationalBranchId) {
+      query = query.eq("branch_id", operationalBranchId);
+    }
+    const { data } = await query;
+    return data ?? [];
+  })();
+
+  const [
+    session,
+    depositRows,
+    tellerDeposits,
+    executedDeposits,
+    ecashRows,
+    nameById,
+    executedTotalsByAccount
+  ] = await Promise.all([
+    sessionPromise,
+    pendingDepositsPromise,
+    tellerDepositsPromise,
+    executedDepositsPromise,
+    ecashRowsPromise,
+    userNamesPromise,
+    executedTotalsPromise
+  ]);
+
+  const openingsPromise =
+    session && supabase
+      ? supabase
+          .from("back_office_account_opening")
+          .select("*")
+          .eq("session_id", session.id)
+          .then((result) => result.data ?? [])
+      : Promise.resolve([] as Record<string, unknown>[]);
+
+  const [depositQueue, openings] = await Promise.all([
+    enrichTransactionsWithBankProducts(
     context.tenantId,
-    depositRows.map((row) => ({
-      id: String(row.id),
-      customerId: String(row.customer_id),
-      customerName: customerById.get(String(row.customer_id))?.fullName,
-      amount: Number(row.amount),
-      transactionBranchId: String(row.transaction_branch_id),
-      recordedByUserId: String(row.recorded_by_user_id),
-      recordedByName: nameById.get(String(row.recorded_by_user_id)),
-      createdAt: String(row.created_at),
-      notes: row.notes != null ? String(row.notes) : undefined,
-      bankProductId: row.bank_product_id != null ? String(row.bank_product_id) : undefined,
-      executionStatus: String(row.execution_status ?? "pending_bank") as
-        | "pending_bank"
-        | "pending_accountant",
-      workflowData:
+    depositRows.map((row) => {
+      const workflow =
         row.workflow_data && typeof row.workflow_data === "object"
           ? (row.workflow_data as Record<string, unknown>)
-          : undefined
-    }))
-  );
+          : undefined;
+      const transactionBranchId = String(row.transaction_branch_id);
+      const branch = branchById.get(transactionBranchId);
+      const partnerAccountNumber =
+        typeof workflow?.account_number === "string" ? workflow.account_number : undefined;
+      return {
+        id: String(row.id),
+        customerId: String(row.customer_id),
+        customerName: resolveAgencyDepositCustomerName({
+          customerFullName: customerById.get(String(row.customer_id))?.fullName,
+          workflow
+        }),
+        amount: Number(row.amount),
+        transactionBranchId,
+        branchName: branch?.name,
+        branchCode: branch?.code,
+        recordedByUserId: String(row.recorded_by_user_id),
+        recordedByName: nameById.get(String(row.recorded_by_user_id)),
+        createdAt: String(row.created_at),
+        notes: row.notes != null ? String(row.notes) : undefined,
+        bankProductId: row.bank_product_id != null ? String(row.bank_product_id) : undefined,
+        executionStatus: String(row.execution_status ?? "pending_bank") as
+          | "pending_bank"
+          | "pending_accountant",
+        partnerAccountNumber,
+        workflowData: workflow
+      };
+    })
+  ),
+    openingsPromise
+  ]);
 
+  const openingsByProduct = new Map(
+    openings.map((opening) => [String(opening.bank_product_id), opening])
+  );
   const accountBalances = [];
-  if (session) {
-    const { data: openings } = await supabase!
-      .from("back_office_account_opening")
-      .select("*")
-      .eq("session_id", session.id);
-    for (const opening of openings ?? []) {
-      const productId = String(opening.bank_product_id);
-      const product = products.find((p) => p.id === productId);
-      const openingBalance = Number(opening.opening_balance ?? 0);
-      const extraCash = Number(opening.extra_cash ?? 0);
-      const computedTotalEntries = await sumExecutedByAccount(
-        context.tenantId,
-        branchId,
-        businessDate,
-        productId
-      );
+  if (operationalBranchId) {
+    for (const account of companyAccounts) {
+      const opening = openingsByProduct.get(account.id);
+      const openingBalance = opening ? Number(opening.opening_balance ?? 0) : 0;
+      const extraCash = opening ? Number(opening.extra_cash ?? 0) : 0;
+      const computedTotalEntries = executedTotalsByAccount.get(account.id) ?? 0;
       const manualTotalEntries =
-        opening.manual_total_entries != null ? Number(opening.manual_total_entries) : null;
-      const totalEntries = manualTotalEntries ?? computedTotalEntries;
+        opening?.manual_total_entries != null ? Number(opening.manual_total_entries) : null;
+      const totalEntries = computedTotalEntries;
+      const executionLimit = resolveCompanyAccountExecutionLimit(account.executionLimitAmount);
+      const headroom = Math.max(0, executionLimit - totalEntries);
       accountBalances.push({
-        bankProductId: productId,
-        accountName: product?.name ?? productId,
-        bankLabel: product?.bankLabel ?? "—",
+        bankProductId: account.id,
+        accountName: account.name,
+        bankLabel: account.bankLabel,
         openingBalance,
         extraCash,
         computedTotalEntries,
         manualTotalEntries,
         totalEntries,
-        closingBalance: openingBalance + extraCash - totalEntries
+        closingBalance: openingBalance + extraCash - totalEntries,
+        executionLimit,
+        headroom,
+        limitReached: totalEntries >= executionLimit
       });
     }
   }
 
-  let tellerDeposits: Record<string, unknown>[] = [];
-  let executedDeposits: Record<string, unknown>[] = [];
-  if (supabase) {
-    const dayStart = `${businessDate}T00:00:00.000Z`;
-    const dayEnd = `${businessDate}T23:59:59.999Z`;
-    const { data: tellerRows } = await supabase
-      .from("customer_transactions")
-      .select("recorded_by_user_id, amount")
-      .eq("tenant_id", context.tenantId)
-      .eq("transaction_branch_id", branchId)
-      .eq("type", "deposit")
-      .gte("created_at", dayStart)
-      .lte("created_at", dayEnd);
-    tellerDeposits = tellerRows ?? [];
-
-    const { data: executedRows } = await supabase
-      .from("customer_transactions")
-      .select("recorded_by_user_id, amount")
-      .eq("tenant_id", context.tenantId)
-      .eq("transaction_branch_id", branchId)
-      .eq("type", "deposit")
-      .eq("execution_status", "completed")
-      .gte("bank_executed_at", dayStart)
-      .lte("bank_executed_at", dayEnd);
-    executedDeposits = executedRows ?? [];
-  }
-
-  const tellerMap = new Map<string, { deposits: number; count: number }>();
+  const tellerMap = new Map<string, { deposits: number; count: number; branchId: string }>();
   for (const row of tellerDeposits) {
-    const id = String(row.recorded_by_user_id);
-    const prev = tellerMap.get(id) ?? { deposits: 0, count: 0 };
-    tellerMap.set(id, {
+    const tellerUserId = String(row.recorded_by_user_id);
+    const rowBranchId = String(row.transaction_branch_id);
+    const key = reconKey(rowBranchId, tellerUserId);
+    const prev = tellerMap.get(key) ?? { deposits: 0, count: 0, branchId: rowBranchId };
+    tellerMap.set(key, {
       deposits: prev.deposits + Number(row.amount ?? 0),
-      count: prev.count + 1
+      count: prev.count + 1,
+      branchId: rowBranchId
     });
   }
 
-  const executedMap = new Map<string, { amount: number; count: number }>();
+  const executedMap = new Map<string, { amount: number; count: number; branchId: string }>();
   for (const row of executedDeposits) {
-    const id = String(row.recorded_by_user_id);
-    const prev = executedMap.get(id) ?? { amount: 0, count: 0 };
-    executedMap.set(id, {
+    const tellerUserId = String(row.recorded_by_user_id);
+    const rowBranchId = String(row.transaction_branch_id);
+    const key = reconKey(rowBranchId, tellerUserId);
+    const prev = executedMap.get(key) ?? { amount: 0, count: 0, branchId: rowBranchId };
+    executedMap.set(key, {
       amount: prev.amount + Number(row.amount ?? 0),
-      count: prev.count + 1
+      count: prev.count + 1,
+      branchId: rowBranchId
     });
   }
 
-  const tellerIds = new Set([...tellerMap.keys(), ...executedMap.keys()]);
-  const tellerReconciliation = [...tellerIds].map((tellerUserId) => {
-    const teller = tellerMap.get(tellerUserId) ?? { deposits: 0, count: 0 };
-    const executed = executedMap.get(tellerUserId) ?? { amount: 0, count: 0 };
+  const reconKeys = new Set([...tellerMap.keys(), ...executedMap.keys()]);
+  const tellerReconciliation = [...reconKeys].map((key) => {
+    const tellerUserId = tellerUserIdFromReconKey(key);
+    const branchIdKey = tellerMap.get(key)?.branchId ?? executedMap.get(key)?.branchId ?? "";
+    const branch = branchById.get(branchIdKey);
+    const teller = tellerMap.get(key) ?? { deposits: 0, count: 0, branchId: branchIdKey };
+    const executed = executedMap.get(key) ?? { amount: 0, count: 0, branchId: branchIdKey };
     return {
       tellerUserId,
       tellerName: nameById.get(tellerUserId) ?? tellerUserId,
+      branchId: branchIdKey || undefined,
+      branchName: branch?.name,
+      branchCode: branch?.code,
       tellerDeposits: teller.deposits,
       backOfficeExecuted: executed.amount,
       difference: teller.deposits - executed.amount,
@@ -235,27 +383,17 @@ export async function getBackOfficeBootstrap(
     };
   });
 
-  let ecashRequests: BackOfficeBootstrap["ecashRequests"] = [];
-  if (supabase) {
-    const { data } = await supabase
-      .from("back_office_ecash_requests")
-      .select("*")
-      .eq("tenant_id", context.tenantId)
-      .eq("branch_id", branchId)
-      .order("created_at", { ascending: false })
-      .limit(50);
-    ecashRequests = (data ?? []).map((row) => ({
-      id: String(row.id),
-      branchId: String(row.branch_id),
-      bankProductId: row.bank_product_id != null ? String(row.bank_product_id) : undefined,
-      amount: Number(row.amount),
-      status: row.status as "pending" | "approved" | "rejected",
-      notes: row.notes != null ? String(row.notes) : undefined,
-      requestedByUserId: String(row.requested_by_user_id),
-      requestedByName: nameById.get(String(row.requested_by_user_id)),
-      createdAt: String(row.created_at)
-    }));
-  }
+  const ecashRequests: BackOfficeBootstrap["ecashRequests"] = ecashRows.map((row) => ({
+    id: String(row.id),
+    branchId: String(row.branch_id),
+    bankProductId: row.bank_product_id != null ? String(row.bank_product_id) : undefined,
+    amount: Number(row.amount),
+    status: row.status as "pending" | "approved" | "rejected",
+    notes: row.notes != null ? String(row.notes) : undefined,
+    requestedByUserId: String(row.requested_by_user_id),
+    requestedByName: nameById.get(String(row.requested_by_user_id)),
+    createdAt: String(row.created_at)
+  }));
 
   const pendingAccountantCount = depositQueue.filter(
     (d) => d.executionStatus === "pending_accountant"
@@ -263,7 +401,8 @@ export async function getBackOfficeBootstrap(
 
   return backOfficeBootstrapSchema.parse({
     businessDate,
-    branchId,
+    branchId: operationalBranchId ?? "all",
+    viewAllBranches,
     sessionId: session?.id ?? null,
     sessionOpen: session?.status === "open",
     companyAccounts,
@@ -546,10 +685,12 @@ export async function executeBackOfficeDeposit(
   }
 
   const supabase = getSupabaseAdminClient();
+  let transactionBranchId = "";
+  let transactionAmount = 0;
   if (supabase) {
     const { data: row } = await supabase
       .from("customer_transactions")
-      .select("execution_status, transaction_branch_id")
+      .select("execution_status, transaction_branch_id, amount")
       .eq("tenant_id", context.tenantId)
       .eq("id", transactionId)
       .maybeSingle();
@@ -562,6 +703,16 @@ export async function executeBackOfficeDeposit(
     if (row.execution_status !== "pending_bank") {
       throw new Error("Only pending teller deposits can be marked done");
     }
+    transactionBranchId = String(row.transaction_branch_id);
+    transactionAmount = Number(row.amount ?? 0);
+    const businessDate = todayDate();
+    await assertCompanyAccountCanExecute(
+      context.tenantId,
+      transactionBranchId,
+      businessDate,
+      executionBankProductId,
+      transactionAmount
+    );
 
     await supabase
       .from("customer_transactions")

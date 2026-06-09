@@ -4,6 +4,7 @@ import {
   normalizeBankProductCode,
   suggestBankProductCode,
   bankProductAppliesToBranch,
+  resolveCompanyAccountExecutionLimit,
   workflowFieldsSchema,
   type BankProductDirection,
   type TenantBankProduct,
@@ -257,7 +258,10 @@ async function createSingleBankProduct(
     sortOrder: payload.sortOrder ?? 0,
     workflowFields: payload.workflowFields ?? [],
     isCompanyBankAccount: payload.isCompanyBankAccount ?? false,
-    executionLimitAmount: payload.executionLimitAmount ?? null,
+    executionLimitAmount:
+      payload.isCompanyBankAccount && payload.executionLimitAmount == null
+        ? resolveCompanyAccountExecutionLimit(null)
+        : (payload.executionLimitAmount ?? null),
     createdAt: now,
     updatedAt: now
   });
@@ -352,10 +356,19 @@ export async function updateBankProduct(
     sortOrder: payload.sortOrder ?? existing.sortOrder,
     workflowFields: payload.workflowFields ?? existing.workflowFields,
     isCompanyBankAccount: payload.isCompanyBankAccount ?? existing.isCompanyBankAccount,
-    executionLimitAmount:
-      payload.executionLimitAmount !== undefined
-        ? payload.executionLimitAmount
-        : existing.executionLimitAmount,
+    executionLimitAmount: (() => {
+      const isCompany =
+        payload.isCompanyBankAccount !== undefined
+          ? payload.isCompanyBankAccount
+          : existing.isCompanyBankAccount;
+      if (payload.executionLimitAmount !== undefined) {
+        return payload.executionLimitAmount;
+      }
+      if (isCompany && existing.executionLimitAmount == null) {
+        return resolveCompanyAccountExecutionLimit(null);
+      }
+      return existing.executionLimitAmount;
+    })(),
     updatedAt: new Date().toISOString()
   });
 

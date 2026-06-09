@@ -53,6 +53,8 @@ export const tellerDepositStatusSchema = z.object({
   amount: z.number(),
   customerName: z.string(),
   executionStatus: agencyExecutionStatusSchema,
+  branchName: z.string().optional(),
+  branchCode: z.string().optional(),
   bankLabel: z.string().optional(),
   bankProductName: z.string().optional(),
   partnerAccountNumber: z.string().optional()

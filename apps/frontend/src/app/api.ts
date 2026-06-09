@@ -2814,6 +2814,8 @@ export async function createBankProduct(payload: {
   isActive?: boolean;
   sortOrder?: number;
   workflowFields?: import("@bms/shared").BankProductWorkflowField[];
+  isCompanyBankAccount?: boolean;
+  executionLimitAmount?: number | null;
 }): Promise<import("@bms/shared").TenantBankProduct[]> {
   const body = await fetchJson<{ products: import("@bms/shared").TenantBankProduct[] }>(
     `${API_BASE_URL}/api/v1/banking/products`,
@@ -2833,6 +2835,8 @@ export async function updateBankProduct(
     isActive: boolean;
     sortOrder: number;
     workflowFields: import("@bms/shared").BankProductWorkflowField[];
+    isCompanyBankAccount: boolean;
+    executionLimitAmount: number | null;
   }>
 ): Promise<import("@bms/shared").TenantBankProduct> {
   const body = await fetchJson<{ product: import("@bms/shared").TenantBankProduct }>(

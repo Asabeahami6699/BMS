@@ -20,6 +20,37 @@ export function userDisplayName(
   return id;
 }
 
+/** One query — all staff names for a tenant (back office, statements, reconciliation). */
+export async function fetchTenantUserNameMap(tenantId: string): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  const supabase = getSupabaseAdminClient();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from("users")
+        .select("id, full_name, email")
+        .eq("tenant_id", tenantId);
+      if (error) {
+        console.warn(`[userNameResolver] Tenant user lookup failed: ${error.message}`);
+      } else {
+        for (const row of data ?? []) {
+          const id = String(row.id);
+          map.set(id, userDisplayName(row.full_name, row.email, id));
+        }
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[userNameResolver] Could not load tenant users: ${message}`);
+    }
+  }
+  for (const user of listUsersByTenant(tenantId)) {
+    if (!map.has(user.id)) {
+      map.set(user.id, userDisplayName(user.fullName, user.email, user.id));
+    }
+  }
+  return map;
+}
+
 export async function fetchUserNameMap(tenantId: string, userIds: string[]): Promise<Map<string, string>> {
   const unique = [...new Set(userIds.filter((id) => id.length > 0))];
   const map = new Map<string, string>();

@@ -129,6 +129,18 @@ export type WorkflowData = z.infer<typeof workflowDataSchema>;
 
 
 
+/** Ecobank-style agency settlement cap — cumulative executed deposits per company account per day. */
+export const COMPANY_ACCOUNT_DEFAULT_EXECUTION_LIMIT = 1_000_000;
+
+export function resolveCompanyAccountExecutionLimit(
+  limit: number | null | undefined
+): number {
+  if (limit != null && Number.isFinite(limit) && limit >= 0) {
+    return limit;
+  }
+  return COMPANY_ACCOUNT_DEFAULT_EXECUTION_LIMIT;
+}
+
 export const bankProductSchema = z.object({
 
   id: z.string().min(1),

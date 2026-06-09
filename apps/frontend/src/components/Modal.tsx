@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
 
 type Props = {
   open: boolean;
@@ -11,11 +11,23 @@ type Props = {
   panelClassName?: string;
 };
 
+type DragState = {
+  pointerId: number;
+  startX: number;
+  startY: number;
+  origX: number;
+  origY: number;
+};
+
 export function Modal({ open, title, subtitle, onClose, children, footer, panelClassName }: Props) {
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const dragRef = useRef<DragState | null>(null);
+
   useEffect(() => {
     if (!open) {
       return;
     }
+    setOffset({ x: 0, y: 0 });
     function onKey(event: KeyboardEvent) {
       if (event.key === "Escape") {
         onClose();
@@ -29,6 +41,47 @@ export function Modal({ open, title, subtitle, onClose, children, footer, panelC
     };
   }, [open, onClose]);
 
+  function startDrag(event: PointerEvent<HTMLElement>) {
+    if (event.button !== 0) {
+      return;
+    }
+    const target = event.target as HTMLElement;
+    if (target.closest(".modal-close") || target.closest("button, a, input, select, textarea, label")) {
+      return;
+    }
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      origX: offset.x,
+      origY: offset.y
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  }
+
+  function moveDrag(event: PointerEvent<HTMLElement>) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+    setOffset({
+      x: drag.origX + event.clientX - drag.startX,
+      y: drag.origY + event.clientY - drag.startY
+    });
+  }
+
+  function endDrag(event: PointerEvent<HTMLElement>) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+    dragRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
+
   if (!open) {
     return null;
   }
@@ -40,10 +93,17 @@ export function Modal({ open, title, subtitle, onClose, children, footer, panelC
         role="dialog"
         aria-modal="true"
         aria-labelledby="modal-title"
+        style={{ transform: `translate(${offset.x}px, ${offset.y}px)` }}
         onClick={(event) => event.stopPropagation()}
       >
-        <header className="modal-header">
-          <div>
+        <header
+          className="modal-header modal-header--draggable"
+          onPointerDown={startDrag}
+          onPointerMove={moveDrag}
+          onPointerUp={endDrag}
+          onPointerCancel={endDrag}
+        >
+          <div className="modal-header__text">
             <h2 id="modal-title">{title}</h2>
             {subtitle ? <p className="muted modal-subtitle">{subtitle}</p> : null}
           </div>

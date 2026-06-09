@@ -121,7 +121,7 @@ export const useAgencyTellerStore = create<AgencyTellerState>((set, get) => ({
           customers: data.customers,
           branches: data.branches,
           bankProducts: (data.bankProducts ?? []).filter(
-            (p) => p.direction === "deposit" && p.isActive
+            (p) => p.direction === "deposit" && p.isActive && !p.isCompanyBankAccount
           ),
           transactionBranchId: nextBranchId,
           recentDeposits: depositsData?.deposits ?? [],
@@ -168,7 +168,7 @@ export const useAgencyTellerStore = create<AgencyTellerState>((set, get) => ({
           customers: data.customers,
           branches: data.branches,
           bankProducts: (data.bankProducts ?? []).filter(
-            (p) => p.direction === "deposit" && p.isActive
+            (p) => p.direction === "deposit" && p.isActive && !p.isCompanyBankAccount
           ),
           transactionBranchId: resolvedBranchId,
           recentDeposits: depositsData?.deposits ?? get().recentDeposits,
