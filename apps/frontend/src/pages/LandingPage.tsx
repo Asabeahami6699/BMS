@@ -6,6 +6,7 @@ import { getHomePathForRole } from "../auth/roleRedirect";
 import { BmsBrandIcon } from "../components/BmsBrandIcon";
 import { LiveChatWidget } from "../components/LiveChatWidget";
 import { RevealOnScroll } from "../components/RevealOnScroll";
+import { ThemeToggle } from "../components/ThemeToggle";
 
 const heroBadges = [
   "Daily Susu collections",
@@ -211,6 +212,7 @@ export function LandingPage() {
         </nav>
 
         <div className="landing-nav-actions">
+          <ThemeToggle />
           {session?.accessToken && user ? (
             <button type="button" className="button" onClick={handlePrimaryCta}>
               Go to dashboard

@@ -13,6 +13,11 @@ import {
   recordOpeningFeeRecovery
 } from "./savingsOpeningFeeService.js";
 import { applyTransactionToFloat } from "./branchFloatService.js";
+import { createAgencyPendingDeposit, usesAgencyDepositFlow } from "./agencyBankingService.js";
+import {
+  getBankProductById,
+  resolveBankProductForTransaction
+} from "./bankProductService.js";
 
 const transactionStore = new Map<string, Transaction[]>();
 
@@ -22,6 +27,7 @@ export type TransactionRequestContext = {
   role: string;
   scopeType: "head_office" | "branch";
   branchId?: string;
+  permissions?: string[];
 };
 
 function getTenantTransactions(tenantId: string): Transaction[] {
@@ -30,6 +36,44 @@ function getTenantTransactions(tenantId: string): Transaction[] {
 
 function setTenantTransactions(tenantId: string, transactions: Transaction[]): void {
   transactionStore.set(tenantId, transactions);
+}
+
+async function persistBankProductId(
+  transactionId: string,
+  bankProductId: string | undefined
+): Promise<void> {
+  if (!bankProductId) {
+    return;
+  }
+  const supabase = getSupabaseAdminClient();
+  if (!supabase) {
+    return;
+  }
+  const { error } = await supabase
+    .from("customer_transactions")
+    .update({ bank_product_id: bankProductId })
+    .eq("id", transactionId);
+  if (error && !/bank_product_id|column/.test(error.message)) {
+    console.warn(`[transaction] bank_product_id update skipped: ${error.message}`);
+  }
+}
+
+async function enrichTransactionProduct(
+  tenantId: string,
+  transaction: Transaction
+): Promise<Transaction> {
+  if (!transaction.bankProductId) {
+    return transaction;
+  }
+  const product = await getBankProductById(tenantId, transaction.bankProductId);
+  if (!product) {
+    return transaction;
+  }
+  return {
+    ...transaction,
+    bankProductName: product.name,
+    bankLabel: product.bankLabel
+  };
 }
 
 function canRecordAtBranch(
@@ -293,6 +337,11 @@ export async function createTransaction(
   }
 
   if (payload.type === "withdrawal") {
+    if (context.role === "teller") {
+      throw new Error(
+        "Tellers pay approved withdrawals from the payout queue after Customer Service and Back Officer steps."
+      );
+    }
     const withdrawable = await getCustomerWithdrawableBalance(
       context.tenantId,
       payload.customerId
@@ -320,6 +369,31 @@ export async function createTransaction(
   );
   const combinedNotes = noteParts.length > 0 ? noteParts.join(" · ") : undefined;
 
+  const bankProductId = await resolveBankProductForTransaction(
+    context.tenantId,
+    payload.type,
+    payload.bankProductId,
+    payload.transactionBranchId
+  );
+
+  let workflowData: Record<string, unknown> | undefined = payload.workflowData;
+  if (bankProductId && payload.type === "deposit" && usesAgencyDepositFlow(context)) {
+    const { getBankProductById } = await import("./bankProductService.js");
+    const { validateWorkflowFieldValues, workflowFieldsForStage } = await import("@bms/shared");
+    const product = await getBankProductById(context.tenantId, bankProductId);
+    if (product) {
+      const validation = validateWorkflowFieldValues(
+        workflowFieldsForStage(product, "capture"),
+        payload.workflowData ?? {},
+        "capture"
+      );
+      if (!validation.ok) {
+        throw new Error(validation.errors.join("; "));
+      }
+      workflowData = validation.data;
+    }
+  }
+
   const transaction = transactionSchema.parse({
     id: randomUUID(),
     tenantId: context.tenantId,
@@ -331,7 +405,9 @@ export async function createTransaction(
     recordedByUserId: context.userId,
     fieldAgentId,
     createdAt: new Date().toISOString(),
-    notes: combinedNotes
+    notes: combinedNotes,
+    bankProductId,
+    workflowData
   });
 
   if (feeDeduction) {
@@ -342,8 +418,12 @@ export async function createTransaction(
       feeDeduction.feeSettled
     );
     if (ledgerAmount <= 0) {
-      return transaction;
+      return enrichTransactionProduct(context.tenantId, transaction);
     }
+  }
+
+  if (payload.type === "deposit" && usesAgencyDepositFlow(context)) {
+    return createAgencyPendingDeposit(context, transaction);
   }
 
   const supabase = getSupabaseAdminClient();
@@ -373,7 +453,8 @@ export async function createTransaction(
         home_branch_id: transaction.homeBranchId,
         recorded_by_user_id: transaction.recordedByUserId,
         field_agent_id: transaction.fieldAgentId,
-        notes: transaction.notes
+        notes: transaction.notes,
+        bank_product_id: bankProductId ?? null
       });
       if (error) {
         throw new Error(`Failed to save transaction: ${error.message}`);
@@ -387,6 +468,7 @@ export async function createTransaction(
         transactionBranchId: transaction.transactionBranchId
       });
     } else {
+      await persistBankProductId(transaction.id, bankProductId);
       const { data: ledgerRow, error: ledgerCheckError } = await supabase
         .from("ledger_entries")
         .select("id")
@@ -421,20 +503,30 @@ export async function createTransaction(
 
   await applyTransactionToFloat(context, transaction);
 
-  return transaction;
+  return enrichTransactionProduct(context.tenantId, transaction);
 }
 
-export async function listTransactions(tenantId: string): Promise<Transaction[]> {
+export async function listTransactions(
+  tenantId: string,
+  options?: { branchId?: string }
+): Promise<Transaction[]> {
   const supabase = getSupabaseAdminClient();
+  const branchId = options?.branchId?.trim() || undefined;
   if (!supabase) {
-    return getTenantTransactions(tenantId);
+    const rows = getTenantTransactions(tenantId);
+    return branchId ? rows.filter((tx) => tx.transactionBranchId === branchId) : rows;
   }
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("customer_transactions")
     .select("*")
-    .eq("tenant_id", tenantId)
-    .order("created_at", { ascending: false });
+    .eq("tenant_id", tenantId);
+
+  if (branchId) {
+    query = query.eq("transaction_branch_id", branchId);
+  }
+
+  const { data, error } = await query.order("created_at", { ascending: false });
 
   if (error) {
     throw new Error(`Failed to list transactions: ${error.message}`);
@@ -452,7 +544,11 @@ export async function listTransactions(tenantId: string): Promise<Transaction[]>
       recordedByUserId: row.recorded_by_user_id,
       fieldAgentId: row.field_agent_id,
       createdAt: row.created_at,
-      notes: row.notes ?? undefined
+      notes: row.notes ?? undefined,
+      executionStatus: row.execution_status ?? "completed",
+      bankExecutedByUserId: row.bank_executed_by_user_id ?? undefined,
+      bankExecutedAt: row.bank_executed_at ?? undefined,
+      bankProductId: row.bank_product_id ?? undefined
     })
   );
 }

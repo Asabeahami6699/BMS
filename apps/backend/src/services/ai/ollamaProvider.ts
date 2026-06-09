@@ -48,9 +48,10 @@ export async function ollamaChat(options: {
         model,
         messages,
         stream: false,
+        keep_alive: "15m",
         options: {
           temperature: 0.4,
-          num_predict: 600
+          num_predict: 400
         }
       }),
       signal: AbortSignal.timeout(120_000)

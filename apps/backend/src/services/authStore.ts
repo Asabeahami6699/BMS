@@ -1,11 +1,11 @@
-import type { Role, ScopeType, SubscriptionStatus, TenantProductModule } from "@bms/shared";
+import type { ScopeType, SubscriptionStatus, TenantProductModule } from "@bms/shared";
 import { hashPassword } from "./password.js";
 
 export type StoredAuthUser = {
   id: string;
   email: string;
   passwordHash: string;
-  role: Role;
+  role: string;
   tenantId: string | null;
   scopeType: ScopeType;
   branchId?: string;

@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { askAiHelp, getAiStatus } from "../app/aiApi";
+import { askAiAnalyze, getAiStatus } from "../app/aiApi";
 import { toUserFacingError } from "../lib/networkError";
 
 type ChatLine = { role: "user" | "assistant"; text: string };
@@ -13,7 +13,7 @@ export function AiHelpPanel() {
   const [lines, setLines] = useState<ChatLine[]>([
     {
       role: "assistant",
-      text: "Ask how to use BMS — Susu collections, loans, groups, permissions, and reports. Powered by local Ollama (free)."
+      text: "Ask about your platform data or how to use BMS — Susu, Agency Banking, loans, treasury, and reports. Analysis uses live data from the last 30 days (scoped to your role and branch)."
     }
   ]);
   const listRef = useRef<HTMLDivElement>(null);
@@ -44,7 +44,7 @@ export function AiHelpPanel() {
     setLines((prev) => [...prev, { role: "user", text: message }]);
     setBusy(true);
     try {
-      const result = await askAiHelp(message);
+      const result = await askAiAnalyze(message);
       setLines((prev) => [...prev, { role: "assistant", text: result.reply }]);
       setAvailable(true);
       setModel(result.model);
@@ -107,7 +107,7 @@ export function AiHelpPanel() {
             <input
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
-              placeholder="Ask about Susu, loans, roles…"
+              placeholder="e.g. Susu analysis for my branch, pending loans, treasury cash…"
               disabled={busy}
             />
             <button type="submit" className="button" disabled={busy || !draft.trim()}>

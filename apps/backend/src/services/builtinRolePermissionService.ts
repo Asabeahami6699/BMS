@@ -1,5 +1,6 @@
 import {
   getPermissionsForRole,
+  isBuiltinRole,
   isTenantEditableBuiltinRole,
   permissionSchema,
   resolveRolePermissions,
@@ -10,6 +11,7 @@ import {
 } from "@bms/shared";
 import { z } from "zod";
 import { getSupabaseAdminClient } from "../config/supabaseClient.js";
+import { loadTenantJobTitleDuties } from "./tenantJobTitleService.js";
 
 export type BuiltinRolePermissionView = {
   role: TenantEditableBuiltinRole;
@@ -65,12 +67,69 @@ async function loadOverrideRow(
   return { duties };
 }
 
+async function loadCustomRoleDuties(tenantId: string, userId: string): Promise<Permission[]> {
+  const supabase = getSupabaseAdminClient();
+  if (!supabase) {
+    return [];
+  }
+
+  const { data: assignments, error: assignError } = await supabase
+    .from("user_role_assignments")
+    .select("role_key")
+    .eq("tenant_id", tenantId)
+    .eq("user_id", userId);
+
+  if (assignError) {
+    throw new Error(`Failed to load custom role assignments: ${assignError.message}`);
+  }
+
+  const roleKeys = (assignments ?? []).map((row) => row.role_key).filter(Boolean);
+  if (!roleKeys.length) {
+    return [];
+  }
+
+  const { data: roles, error: rolesError } = await supabase
+    .from("tenant_roles")
+    .select("duties")
+    .eq("tenant_id", tenantId)
+    .eq("role_kind", "extra_duties")
+    .in("role_key", roleKeys);
+
+  if (rolesError) {
+    throw new Error(`Failed to load custom role duties: ${rolesError.message}`);
+  }
+
+  const merged: Permission[] = [];
+  for (const row of roles ?? []) {
+    const parsed = z.array(permissionSchema).safeParse(row.duties ?? []);
+    if (parsed.success) {
+      merged.push(...parsed.data);
+    }
+  }
+  return [...new Set(merged)];
+}
+
 export async function resolvePermissionsForTenantUser(
   tenantId: string,
-  role: Role
+  role: string,
+  userId?: string
 ): Promise<Permission[]> {
-  const row = await loadOverrideRow(tenantId, role);
-  return resolveRolePermissions(role, row?.duties ?? null);
+  let base: Permission[];
+  if (isBuiltinRole(role)) {
+    const row = await loadOverrideRow(tenantId, role);
+    base = resolveRolePermissions(role, row?.duties ?? null);
+  } else {
+    base = await loadTenantJobTitleDuties(tenantId, role);
+  }
+
+  if (!userId) {
+    return base;
+  }
+  const custom = await loadCustomRoleDuties(tenantId, userId);
+  if (!custom.length) {
+    return base;
+  }
+  return [...new Set([...base, ...custom])];
 }
 
 export async function listBuiltinRolePermissions(

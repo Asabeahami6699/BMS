@@ -1,4 +1,5 @@
 import { Navigate } from "react-router-dom";
+import { isBuiltinRole } from "@bms/shared";
 import type { AppRole } from "../app/api";
 import { getAuthSession } from "../app/api";
 import { getHomePathForRole } from "./roleRedirect";
@@ -28,11 +29,11 @@ export function ProtectedRoute({ children, allowedRoles, forbiddenRoles }: Props
     return <Navigate to="/login" replace />;
   }
 
-  if (allowedRoles && !allowedRoles.includes(effectiveUser.role)) {
+  if (allowedRoles && isBuiltinRole(effectiveUser.role) && !allowedRoles.includes(effectiveUser.role as AppRole)) {
     return <Navigate to={getHomePathForRole(effectiveUser.role)} replace />;
   }
 
-  if (forbiddenRoles?.includes(effectiveUser.role)) {
+  if (forbiddenRoles && isBuiltinRole(effectiveUser.role) && forbiddenRoles.includes(effectiveUser.role as AppRole)) {
     return <Navigate to={getHomePathForRole(effectiveUser.role)} replace />;
   }
 

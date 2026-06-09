@@ -3,6 +3,7 @@ import express from "express";
 import helmet from "helmet";
 import { auditLog } from "./middleware/auditLog.js";
 import { authenticate } from "./middleware/authenticate.js";
+import { attachBranchScope } from "./middleware/branchScope.js";
 import { requireTenantModuleForRequest } from "./middleware/requireTenantModule.js";
 import {
   adminMutationRateLimit,
@@ -30,6 +31,9 @@ import { routesRouter } from "./routes/routes.routes.js";
 import { auditRouter } from "./routes/audit.routes.js";
 import { loansRouter } from "./routes/loans.routes.js";
 import { aiRouter } from "./routes/ai.routes.js";
+import { treasuryRouter } from "./routes/treasury.routes.js";
+import { agencyRouter } from "./routes/agency.routes.js";
+import { bankProductsRouter } from "./routes/bankProducts.routes.js";
 
 export function createApp() {
   const app = express();
@@ -41,6 +45,7 @@ export function createApp() {
   app.use(globalRateLimit);
   app.use(auditLog);
   app.use(authenticate);
+  app.use(attachBranchScope);
   app.use(requireTenantModuleForRequest);
 
   app.use("/health", healthRouter);
@@ -65,6 +70,9 @@ export function createApp() {
   app.use("/api/v1/audit-logs", auditRouter);
   app.use("/api/v1/loans", moneyMutationRateLimit, loansRouter);
   app.use("/api/v1/ai", aiRouter);
+  app.use("/api/v1/treasury", moneyMutationRateLimit, treasuryRouter);
+  app.use("/api/v1/agency", moneyMutationRateLimit, agencyRouter);
+  app.use("/api/v1/banking/products", adminMutationRateLimit, bankProductsRouter);
 
   return app;
 }

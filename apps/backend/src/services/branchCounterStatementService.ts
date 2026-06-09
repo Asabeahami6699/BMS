@@ -1,4 +1,5 @@
 import type { Role, Transaction } from "@bms/shared";
+import { transactionSchema } from "@bms/shared";
 import { getSupabaseAdminClient } from "../config/supabaseClient.js";
 import { findUserById, listUsersByTenant } from "./authStore.js";
 import { getCustomerById } from "./customerService.js";
@@ -18,6 +19,7 @@ export type BranchCounterStatementLine = Transaction & {
   customerAccountNumber?: string;
   recordedByName: string;
   recordedByRole: string;
+  workflowData?: Record<string, unknown>;
 };
 
 type UserMeta = {
@@ -78,19 +80,22 @@ function isBranchCounterPost(tx: Transaction, userMeta: Map<string, UserMeta>): 
 }
 
 function mapTransactionRow(row: Record<string, unknown>): Transaction {
-  return {
+  return transactionSchema.parse({
     id: String(row.id),
     tenantId: String(row.tenant_id),
     customerId: String(row.customer_id),
-    type: row.type as Transaction["type"],
+    type: row.type,
     amount: Number(row.amount),
     transactionBranchId: String(row.transaction_branch_id),
     homeBranchId: String(row.home_branch_id),
     recordedByUserId: String(row.recorded_by_user_id),
     fieldAgentId: String(row.field_agent_id),
     createdAt: String(row.created_at),
-    notes: row.notes ? String(row.notes) : undefined
-  };
+    notes: row.notes ? String(row.notes) : undefined,
+    executionStatus: row.execution_status ?? "completed",
+    bankProductId: row.bank_product_id != null ? String(row.bank_product_id) : undefined,
+    workflowData: (row.workflow_data as Record<string, unknown>) ?? undefined
+  });
 }
 
 export async function listBranchCounterStatement(
@@ -145,7 +150,8 @@ export async function listBranchCounterStatement(
       customerName: customer?.fullName ?? tx.customerId,
       customerAccountNumber: customer?.accountNumber,
       recordedByName: recorder?.name ?? tx.recordedByUserId,
-      recordedByRole: recorder?.role ?? "—"
+      recordedByRole: recorder?.role ?? "—",
+      workflowData: tx.workflowData
     });
   }
 

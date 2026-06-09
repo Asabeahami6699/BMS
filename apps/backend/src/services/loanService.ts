@@ -295,15 +295,22 @@ export async function updateLoanProduct(
   return updated;
 }
 
-export async function listLoanApplications(tenantId: string): Promise<LoanApplication[]> {
+export async function listLoanApplications(
+  tenantId: string,
+  options?: { branchId?: string }
+): Promise<LoanApplication[]> {
   const supabase = getSupabaseAdminClient();
+  const branchId = options?.branchId?.trim() || undefined;
   let applications: LoanApplication[] = [];
   if (supabase) {
-    const { data, error } = await supabase
+    let query = supabase
       .from("loan_applications")
       .select("*")
-      .eq("tenant_id", tenantId)
-      .order("applied_at", { ascending: false });
+      .eq("tenant_id", tenantId);
+    if (branchId) {
+      query = query.eq("branch_id", branchId);
+    }
+    const { data, error } = await query.order("applied_at", { ascending: false });
     if (error) {
       if (isMissingSupabaseResource(error.message)) {
         applications = ensureMemory(tenantId).applications;
@@ -315,6 +322,9 @@ export async function listLoanApplications(tenantId: string): Promise<LoanApplic
     }
   } else {
     applications = ensureMemory(tenantId).applications;
+    if (branchId) {
+      applications = applications.filter((a) => a.branchId === branchId);
+    }
   }
   const products = await listLoanProducts(tenantId);
   return enrichApplications(tenantId, applications, products);
@@ -957,7 +967,10 @@ export async function recordLoanRepayment(
   return { application: updated, repayment, schedule };
 }
 
-export async function getLoansBootstrap(tenantId: string): Promise<{
+export async function getLoansBootstrap(
+  tenantId: string,
+  branchId?: string
+): Promise<{
   products: LoanProduct[];
   applications: LoanApplication[];
   groups: Awaited<ReturnType<typeof listLoanGroups>>;
@@ -973,7 +986,7 @@ export async function getLoansBootstrap(tenantId: string): Promise<{
 }> {
   const [products, applications, groups] = await Promise.all([
     listLoanProducts(tenantId),
-    listLoanApplications(tenantId),
+    listLoanApplications(tenantId, { branchId }),
     listLoanGroups(tenantId)
   ]);
 

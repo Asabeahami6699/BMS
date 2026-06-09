@@ -8,7 +8,7 @@ export const PLATFORM_NAV: DashboardNavItem[] = [
     id: "products",
     label: "Products",
     children: [
-      { to: "products/banking", label: "Banking" },
+      { to: "products/banking", label: "Agency Banking" },
       { to: "products/susu", label: "Susu Management" },
       { to: "products/loans", label: "Loans" },
       { to: "products/treasury", label: "Treasury" },

@@ -6,6 +6,7 @@ import {
 } from "@bms/shared";
 
 import { Router } from "express";
+import { resolveRequestBranchFilter } from "../middleware/branchScope.js";
 
 import { z } from "zod";
 
@@ -378,7 +379,7 @@ usersRouter.get("/agents-bootstrap", requirePermission("users.read"), async (req
     return;
   }
 
-  const branchFilter = typeof req.query.branchId === "string" ? req.query.branchId : undefined;
+  const branchFilter = resolveRequestBranchFilter(req);
   try {
     const data = await getAgentsBootstrap(
       context.tenantId,

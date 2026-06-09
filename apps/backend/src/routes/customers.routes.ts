@@ -6,6 +6,7 @@ import {
 } from "@bms/shared";
 
 import { Router } from "express";
+import { resolveRequestBranchFilter } from "../middleware/branchScope.js";
 
 import { requireAnyPermission, requirePermission } from "../middleware/requirePermission.js";
 
@@ -150,8 +151,10 @@ customersRouter.get("/bootstrap", requirePermission("customers.read"), async (re
 
   try {
     const agentOnly = context.role === "field_agent";
+    const branchId = resolveRequestBranchFilter(req);
     const data = await getCustomerBootstrap(context.tenantId, {
-      agentId: agentOnly ? context.userId : undefined
+      agentId: agentOnly ? context.userId : undefined,
+      branchId
     });
     res.json(data);
   } catch (error) {
@@ -180,6 +183,7 @@ customersRouter.get("/", requirePermission("customers.read"), async (req, res) =
     const agentOnly = context.role === "field_agent";
 
     const status = typeof req.query.status === "string" ? req.query.status : undefined;
+    const branchId = resolveRequestBranchFilter(req);
 
     res.json(
 
@@ -187,7 +191,8 @@ customersRouter.get("/", requirePermission("customers.read"), async (req, res) =
 
         agentId: agentOnly ? context.userId : undefined,
 
-        status
+        status,
+        branchId
 
       })
 
@@ -374,15 +379,11 @@ customersRouter.get("/balance-disclosures/pending", requirePermission("customers
 
 customersRouter.patch(
   "/balance-disclosures/:disclosureId/approve",
-  requirePermission("customers.create"),
+  requirePermission("customers.read"),
   async (req, res) => {
     const context = req.userContext;
     if (!context) {
       res.status(401).json({ error: "Unauthorized" });
-      return;
-    }
-    if (context.role !== "admin" && context.role !== "coordinator") {
-      res.status(403).json({ error: "Only admin or coordinator can approve balance requests" });
       return;
     }
 
@@ -391,7 +392,20 @@ customersRouter.patch(
       : req.params.disclosureId;
 
     try {
-      res.json(await approveBalanceDisclosure(context, disclosureId, req.body));
+      res.json(
+        await approveBalanceDisclosure(
+          {
+            userId: context.userId,
+            tenantId: context.tenantId,
+            role: context.role,
+            scopeType: context.scopeType,
+            branchId: context.branchId,
+            permissions: context.permissions
+          },
+          disclosureId,
+          req.body
+        )
+      );
     } catch (error) {
       res.status(400).json({
         error: error instanceof Error ? error.message : "Failed to approve balance request"

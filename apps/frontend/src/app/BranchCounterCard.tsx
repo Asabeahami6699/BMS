@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useShallow } from "zustand/react/shallow";
-import { SAVINGS_INITIAL_DEPOSIT_GHS } from "@bms/shared";
+import { SAVINGS_INITIAL_DEPOSIT_GHS, bankProductDisplayLabel } from "@bms/shared";
 import type { AppRole } from "./api";
 import { BranchCounterFloatPanel } from "./BranchCounterFloatPanel";
 import { BranchCounterCashCalculator } from "./BranchCounterCashCalculator";
@@ -34,7 +34,7 @@ const QUICK_AMOUNTS = [20, 50, 100, 200, 500];
 
 function allowedTransactionTypes(role: AppRole): TxType[] {
   if (role === "teller") {
-    return ["deposit", "withdrawal"];
+    return ["deposit"];
   }
   if (role === "coordinator" || role === "admin" || role === "field_agent") {
     return ["deposit", "withdrawal", "daily_susu"];
@@ -67,6 +67,7 @@ export function BranchCounterCard({ role }: Props) {
   const [type, setType] = useState<TxType>(txTypes[0] ?? "deposit");
   const [amount, setAmount] = useState("");
   const [notes, setNotes] = useState("");
+  const [bankProductId, setBankProductId] = useState("");
   const [confirmWithdraw, setConfirmWithdraw] = useState(false);
   const [calculatorOpen, setCalculatorOpen] = useState(false);
 
@@ -99,6 +100,7 @@ export function BranchCounterCard({ role }: Props) {
     floatSession,
     floatSummary,
     pendingFloatRequests,
+    bankProducts,
     refresh
   } = useBranchCounterStore(
     useShallow((s) => ({
@@ -130,6 +132,7 @@ export function BranchCounterCard({ role }: Props) {
       floatSession: s.floatSession,
       floatSummary: s.floatSummary,
       pendingFloatRequests: s.pendingFloatRequests,
+      bankProducts: s.bankProducts,
       refresh: s.refresh
     }))
   );
@@ -176,6 +179,23 @@ export function BranchCounterCard({ role }: Props) {
       setType(txTypes[0] ?? "deposit");
     }
   }, [txTypes, type]);
+
+  const productsForType = useMemo(() => {
+    if (type === "daily_susu") {
+      return [];
+    }
+    return bankProducts.filter((p) => p.direction === type && p.isActive);
+  }, [bankProducts, type]);
+
+  useEffect(() => {
+    if (productsForType.length === 0) {
+      setBankProductId("");
+      return;
+    }
+    if (!productsForType.some((p) => p.id === bankProductId)) {
+      setBankProductId(productsForType[0]?.id ?? "");
+    }
+  }, [productsForType, bankProductId]);
 
   const activeCustomers = useMemo(() => selectActiveCustomers(customers), [customers]);
 
@@ -260,6 +280,10 @@ export function BranchCounterCard({ role }: Props) {
       setConfirmWithdraw(true);
       return;
     }
+    if (productsForType.length > 0 && !bankProductId) {
+      showToast(`Select a ${TX_LABELS[type].toLowerCase()} bank product`, "error");
+      return;
+    }
 
     try {
       await postTransaction({
@@ -267,7 +291,8 @@ export function BranchCounterCard({ role }: Props) {
         type,
         amount: parsedAmount,
         transactionBranchId,
-        notes: notes.trim() || undefined
+        notes: notes.trim() || undefined,
+        bankProductId: bankProductId || undefined
       });
       showToast(
         `${TX_LABELS[type]} of GHS ${parsedAmount.toFixed(2)} posted for ${selectedCustomer.fullName}`,
@@ -568,6 +593,22 @@ export function BranchCounterCard({ role }: Props) {
             </div>
 
             <div className="branch-counter__post-grid">
+              {productsForType.length > 0 ? (
+                <label className="field">
+                  <span>Bank product</span>
+                  <select
+                    value={bankProductId}
+                    disabled={!selectedCustomer || posting || sessionExpired}
+                    onChange={(e) => setBankProductId(e.target.value)}
+                  >
+                    {productsForType.map((product) => (
+                      <option key={product.id} value={product.id}>
+                        {bankProductDisplayLabel(product)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
               <label className="field">
                 <span>Branch</span>
                 <select

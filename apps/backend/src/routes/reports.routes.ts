@@ -11,6 +11,8 @@ import { getPerformanceBootstrap } from "../services/performanceBootstrapService
 import { getWithdrawalsBootstrap } from "../services/withdrawalsBootstrapService.js";
 import { getReportsAnalyticsBootstrap } from "../services/reportsAnalyticsBootstrapService.js";
 
+import { resolveRequestBranchFilter } from "../middleware/branchScope.js";
+
 export const reportsRouter = Router();
 
 reportsRouter.get("/analytics-bootstrap", requirePermission("reports.read"), async (req, res) => {
@@ -20,7 +22,7 @@ reportsRouter.get("/analytics-bootstrap", requirePermission("reports.read"), asy
     return;
   }
 
-  const branchFilter = typeof req.query.branchId === "string" ? req.query.branchId : undefined;
+  const branchFilter = resolveRequestBranchFilter(req);
   try {
     res.json(
       await getReportsAnalyticsBootstrap(
@@ -47,7 +49,7 @@ reportsRouter.get("/withdrawals-bootstrap", requirePermission("customers.read"),
     return;
   }
 
-  const branchFilter = typeof req.query.branchId === "string" ? req.query.branchId : undefined;
+  const branchFilter = resolveRequestBranchFilter(req);
   try {
     res.json(
       await getWithdrawalsBootstrap(
@@ -75,7 +77,7 @@ reportsRouter.get("/group-savings-bootstrap", requirePermission("customers.read"
     return;
   }
 
-  const branchFilter = typeof req.query.branchId === "string" ? req.query.branchId : undefined;
+  const branchFilter = resolveRequestBranchFilter(req);
   try {
     res.json(
       await getGroupSavingsBootstrap(
@@ -101,7 +103,7 @@ reportsRouter.get("/performance-bootstrap", requirePermission("reports.read"), a
     return;
   }
 
-  const branchFilter = typeof req.query.branchId === "string" ? req.query.branchId : undefined;
+  const branchFilter = resolveRequestBranchFilter(req);
   try {
     res.json(
       await getPerformanceBootstrap(
@@ -128,7 +130,7 @@ reportsRouter.get("/coordinator-bootstrap", requirePermission("reports.read"), a
     return;
   }
 
-  const branchFilter = typeof req.query.branchId === "string" ? req.query.branchId : undefined;
+  const branchFilter = resolveRequestBranchFilter(req);
   try {
     const data = await getCoordinatorBootstrap(
       context.tenantId,
@@ -166,7 +168,7 @@ reportsRouter.get("/summary", requirePermission("reports.read"), async (req, res
     return;
   }
 
-  const branchIdFilter = typeof req.query.branchId === "string" ? req.query.branchId : undefined;
+  const branchIdFilter = resolveRequestBranchFilter(req);
   try {
     const summary = await getBranchPerformanceSummary(context.tenantId, {
       role: context.role,
@@ -187,7 +189,7 @@ reportsRouter.get("/agents", requirePermission("reports.read"), async (req, res)
     return;
   }
 
-  const branchIdFilter = typeof req.query.branchId === "string" ? req.query.branchId : undefined;
+  const branchIdFilter = resolveRequestBranchFilter(req);
   try {
     const result = await getAgentPerformance(context.tenantId, {
       role: context.role,
@@ -208,7 +210,7 @@ reportsRouter.get("/branches", requirePermission("reports.read"), async (req, re
     return;
   }
 
-  const branchIdFilter = typeof req.query.branchId === "string" ? req.query.branchId : undefined;
+  const branchIdFilter = resolveRequestBranchFilter(req);
   try {
     const result = await getBranchBreakdown(context.tenantId, {
       role: context.role,
@@ -229,7 +231,7 @@ reportsRouter.get("/export.csv", requirePermission("reports.read"), async (req, 
     return;
   }
 
-  const branchIdFilter = typeof req.query.branchId === "string" ? req.query.branchId : undefined;
+  const branchIdFilter = resolveRequestBranchFilter(req);
   try {
     const [summary, agents, branches] = await Promise.all([
       getBranchPerformanceSummary(context.tenantId, {

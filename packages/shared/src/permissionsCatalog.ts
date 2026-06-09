@@ -1,5 +1,7 @@
+import { z } from "zod";
 import type { Permission, Role } from "./auth.js";
-import { hasTenantModule, MODULE_LABELS, type TenantProductModule } from "./modules.js";
+import { isBuiltinRole } from "./auth.js";
+import { hasTenantModule, MODULE_LABELS, tenantProductModuleSchema, type TenantProductModule } from "./modules.js";
 
 export type PermissionGroupId =
   | "platform"
@@ -14,6 +16,7 @@ export type PermissionGroupId =
   | "commission"
   | "audit"
   | "loans"
+  | "agency_banking"
   | "workspace";
 
 export type PermissionProductScope = TenantProductModule | "core";
@@ -32,6 +35,7 @@ export const PERMISSION_GROUP_PRODUCT: Record<PermissionGroupId, PermissionProdu
   commission: "susu_management",
   audit: "core",
   loans: "loans_credit",
+  agency_banking: "banking",
   workspace: "core"
 };
 
@@ -43,6 +47,7 @@ export const PERMISSION_GROUP_ORDER: PermissionGroupId[] = [
   "transactions",
   "ledger",
   "loans",
+  "agency_banking",
   "reports",
   "payroll",
   "commission",
@@ -59,6 +64,7 @@ export const PERMISSION_GROUP_LABELS: Record<PermissionGroupId, string> = {
   transactions: "Transactions & till",
   ledger: "Ledger",
   loans: "Loans & credit",
+  agency_banking: "Agency operations",
   reports: "Reports",
   payroll: "Payroll",
   commission: "Commission",
@@ -327,6 +333,75 @@ export const PERMISSION_CATALOG: PermissionCatalogEntry[] = [
     requires: ["loans.read"]
   },
   {
+    id: "treasury.read",
+    label: "View treasury & cash positions",
+    description: "Vault, teller drawer, and bank cash balances plus trial balance.",
+    group: "transactions"
+  },
+  {
+    id: "treasury.cash.move",
+    label: "Record cash movements",
+    description: "Vault ↔ teller, vault ↔ bank, and internal cash transfers.",
+    group: "transactions",
+    requires: ["treasury.read"]
+  },
+  {
+    id: "treasury.reconcile",
+    label: "Reconcile cash accounts",
+    description: "End-of-day settlement and variance resolution for branch cash.",
+    group: "transactions",
+    requires: ["treasury.read"]
+  },
+  {
+    id: "agency.withdrawals.approve",
+    label: "Verify withdrawal requests",
+    description:
+      "Customer Service initiates walk-in withdrawals (straight to teller) and verifies BMS member requests before teller payout.",
+    group: "agency_banking",
+    requires: ["customers.read"]
+  },
+  {
+    id: "agency.bank.execute",
+    label: "Execute bank-side deposits (Back Officer)",
+    description: "Credit customer accounts at the bank after teller deposit.",
+    group: "agency_banking",
+    requires: ["customers.read", "transactions.read"]
+  },
+  {
+    id: "agency.withdrawals.pay",
+    label: "Pay approved withdrawals (Teller)",
+    description: "Hand physical cash after Customer Service verification (ledger debit at payout).",
+    group: "agency_banking",
+    requires: ["customers.read", "transactions.read"]
+  },
+  {
+    id: "agency.deposits.record",
+    label: "Record teller deposits (pending bank)",
+    description: "Accept customer cash at till — Back Officer must credit account before SUCCESS.",
+    group: "agency_banking",
+    requires: ["customers.read"]
+  },
+  {
+    id: "agency.accounts.create",
+    label: "Open partner bank accounts",
+    description: "Customer Service records real accounts opened on partner bank platforms.",
+    group: "agency_banking",
+    requires: ["customers.read", "banking.products.read"]
+  },
+  {
+    id: "banking.products.read",
+    label: "View bank products",
+    description: "See tenant-configured deposit and withdrawal products (Ecobank, GCB, etc.).",
+    group: "agency_banking"
+  },
+  {
+    id: "banking.products.manage",
+    label: "Manage bank products",
+    description: "Create and edit agency banking deposit/withdrawal product types.",
+    group: "agency_banking",
+    requires: ["banking.products.read"]
+  },
+  {
     id: "workspace.notifications",
     label: "Workspace notifications",
     description: "Bell icon: pending approvals, float requests, and important activity.",
@@ -475,10 +550,10 @@ export const SUSU_NAV_VISIBILITY: SusuNavVisibilityRow[] = [
   },
   {
     navPath: "susu/withdrawals",
-    label: "Withdrawals",
-    description: "Withdrawal fulfillment and MoMo receipts.",
-    anyPermissions: ["customers.read", "transactions.read"],
-    roles: ["admin", "coordinator", "field_agent"]
+    label: "Withdrawal gate",
+    description: "Review and approve MoMo withdrawal requests.",
+    anyPermissions: ["agency.withdrawals.approve"],
+    roles: ["admin", "customer_service"]
   },
   {
     navPath: "susu/group-savings",
@@ -537,6 +612,360 @@ export function resolveLoansRoutePermissions(routePath: string): Permission[] {
   return prefix?.anyPermissions ?? ["loans.read"];
 }
 
+const SUSU_OVERVIEW_ACCESS: Pick<SusuNavVisibilityRow, "anyPermissions" | "roles"> = {
+  anyPermissions: ["reports.read", "customers.read"],
+  roles: ["admin", "coordinator", "accountant", "auditor", "teller"]
+};
+
+function normalizeAppRoute(routePath: string): string {
+  return routePath.replace(/^\/+/, "").replace(/^app\//, "").split("?")[0] ?? "";
+}
+
+function resolveSusuNavRow(
+  routePath: string,
+  susuNavVisibility?: SusuNavVisibilityRow[]
+): SusuNavVisibilityRow | null {
+  const normalized = normalizeAppRoute(routePath);
+  if (normalized === "susu/overview") {
+    return {
+      navPath: normalized,
+      label: "Overview",
+      description: "Susu department summary.",
+      ...SUSU_OVERVIEW_ACCESS
+    };
+  }
+  const rows = susuNavVisibility?.length ? susuNavVisibility : SUSU_NAV_VISIBILITY;
+  return rows.find((row) => row.navPath === normalized) ?? null;
+}
+
+/** Minimum permissions for a tenant Susu route (aligns with sidebar matrix). */
+export function resolveSusuRoutePermissions(
+  routePath: string,
+  susuNavVisibility?: SusuNavVisibilityRow[]
+): Permission[] {
+  const row = resolveSusuNavRow(routePath, susuNavVisibility);
+  return row?.anyPermissions ?? ["customers.read"];
+}
+
+/** Route access: built-in role gate + permission check (matches nav rules). */
+export function canAccessSusuRoute(
+  role: Role | string | undefined,
+  permissions: Permission[] | undefined,
+  routePath: string,
+  susuNavVisibility?: SusuNavVisibilityRow[]
+): boolean {
+  const row = resolveSusuNavRow(routePath, susuNavVisibility);
+  if (!row || !role) {
+    return false;
+  }
+  if (isBuiltinRole(role) && !row.roles.includes(role)) {
+    return false;
+  }
+  return hasAnyPermission(permissions, row.anyPermissions);
+}
+
+export type SettingsRouteVisibilityRow = {
+  routePath: string;
+  label: string;
+  anyPermissions: Permission[];
+  roles: Role[];
+};
+
+export const SETTINGS_ROUTE_VISIBILITY: SettingsRouteVisibilityRow[] = [
+  {
+    routePath: "settings",
+    label: "Settings hub",
+    anyPermissions: ["users.read", "branches.read", "roles.read", "audit.read"],
+    roles: ["admin"]
+  },
+  {
+    routePath: "settings/profile",
+    label: "Company profile",
+    anyPermissions: ["users.read"],
+    roles: ["admin"]
+  },
+  {
+    routePath: "settings/branches",
+    label: "Branches",
+    anyPermissions: ["branches.read"],
+    roles: ["admin"]
+  },
+  {
+    routePath: "settings/account-numbers",
+    label: "Account numbers",
+    anyPermissions: ["customers.create"],
+    roles: ["admin"]
+  },
+  {
+    routePath: "settings/subscription",
+    label: "Product subscription",
+    anyPermissions: ["roles.read"],
+    roles: ["admin"]
+  },
+  {
+    routePath: "settings/users",
+    label: "Users",
+    anyPermissions: ["users.read"],
+    roles: ["admin"]
+  },
+  {
+    routePath: "settings/roles",
+    label: "Roles & permissions",
+    anyPermissions: ["roles.read"],
+    roles: ["admin"]
+  },
+  {
+    routePath: "settings/approval-workflows",
+    label: "Approval workflows",
+    anyPermissions: ["customers.read"],
+    roles: ["admin"]
+  },
+  {
+    routePath: "settings/notifications",
+    label: "Notifications",
+    anyPermissions: ["workspace.notifications"],
+    roles: ["admin"]
+  },
+  {
+    routePath: "settings/audit-logs",
+    label: "Audit logs",
+    anyPermissions: ["audit.read"],
+    roles: ["admin", "auditor"]
+  }
+];
+
+export function resolveSettingsRoutePermissions(routePath: string): Permission[] {
+  const normalized = normalizeAppRoute(routePath);
+  const row = SETTINGS_ROUTE_VISIBILITY.find((r) => r.routePath === normalized);
+  return row?.anyPermissions ?? ["users.read"];
+}
+
+export function canAccessSettingsRoute(
+  role: Role | string | undefined,
+  permissions: Permission[] | undefined,
+  routePath: string
+): boolean {
+  const normalized = normalizeAppRoute(routePath);
+  const row = SETTINGS_ROUTE_VISIBILITY.find((r) => r.routePath === normalized);
+  if (!row || !role) {
+    return false;
+  }
+  if (isBuiltinRole(role) && !row.roles.includes(role)) {
+    return false;
+  }
+  return hasAnyPermission(permissions, row.anyPermissions);
+}
+
+export type TreasuryNavVisibilityRow = {
+  navPath: string;
+  label: string;
+  anyPermissions: Permission[];
+};
+
+export const TREASURY_NAV_VISIBILITY: TreasuryNavVisibilityRow[] = [
+  {
+    navPath: "treasury",
+    label: "Cash positions",
+    anyPermissions: ["treasury.read"]
+  },
+  {
+    navPath: "treasury/movements",
+    label: "Cash movements",
+    anyPermissions: ["treasury.cash.move"]
+  },
+  {
+    navPath: "treasury/trial-balance",
+    label: "Trial balance",
+    anyPermissions: ["treasury.read"]
+  }
+];
+
+/** Agency banking transactional routes (permission gates). */
+export const AGENCY_NAV_VISIBILITY: Array<{
+  navPath: string;
+  label: string;
+  anyPermissions: Permission[];
+}> = [
+  {
+    navPath: "banking/teller",
+    label: "Teller desk",
+    anyPermissions: ["agency.deposits.record", "agency.withdrawals.pay"]
+  },
+  {
+    navPath: "banking/deposits",
+    label: "Record deposits",
+    anyPermissions: ["agency.deposits.record"]
+  },
+  {
+    navPath: "banking/customer-service",
+    label: "Customer service",
+    anyPermissions: ["agency.withdrawals.approve"]
+  },
+  {
+    navPath: "banking/withdrawals",
+    label: "Withdrawals",
+    anyPermissions: ["agency.withdrawals.approve"]
+  },
+  {
+    navPath: "banking/account-opening",
+    label: "Account opening",
+    anyPermissions: ["agency.accounts.create"]
+  },
+  {
+    navPath: "banking/back-office",
+    label: "Back office",
+    anyPermissions: ["agency.bank.execute"]
+  },
+  {
+    navPath: "banking/products",
+    label: "Bank products",
+    anyPermissions: ["banking.products.read"]
+  },
+  {
+    navPath: "banking/accountant",
+    label: "Accountant desk",
+    anyPermissions: ["ledger.read", "reports.read"]
+  },
+  {
+    navPath: "banking/auditor",
+    label: "Auditor desk",
+    anyPermissions: ["audit.read", "transactions.read"]
+  },
+  {
+    navPath: "banking/hrm",
+    label: "HR desk",
+    anyPermissions: ["users.read"]
+  },
+  {
+    navPath: "banking/operations",
+    label: "Branch operations",
+    anyPermissions: ["reports.read", "treasury.read"]
+  }
+];
+
+/** Banking sidebar — visibility by job title; route gates still enforce permissions. */
+export const BANKING_NAV_VISIBILITY: Array<{
+  navPath: string;
+  label: string;
+  anyPermissions: Permission[];
+  roles: Role[];
+}> = [
+  {
+    navPath: "banking",
+    label: "Overview",
+    anyPermissions: ["transactions.read"],
+    roles: ["admin", "accountant", "back_officer", "teller", "customer_service", "coordinator", "auditor"]
+  },
+  {
+    navPath: "banking/teller",
+    label: "Teller desk",
+    anyPermissions: ["agency.deposits.record", "agency.withdrawals.pay"],
+    roles: ["admin", "teller"]
+  },
+  {
+    navPath: "banking/deposits",
+    label: "Record deposits",
+    anyPermissions: ["agency.deposits.record"],
+    roles: ["admin", "teller"]
+  },
+  {
+    navPath: "banking/reconciliation",
+    label: "Teller reconciliation",
+    anyPermissions: ["agency.deposits.record"],
+    roles: ["admin", "teller", "coordinator"]
+  },
+  {
+    navPath: "banking/till-daybook",
+    label: "Till daybook",
+    anyPermissions: ["agency.deposits.record"],
+    roles: ["admin", "teller"]
+  },
+  {
+    navPath: "banking/customer-service",
+    label: "Customer service",
+    anyPermissions: ["agency.withdrawals.approve"],
+    roles: ["admin", "customer_service"]
+  },
+  {
+    navPath: "banking/withdrawals",
+    label: "Withdrawals",
+    anyPermissions: ["agency.withdrawals.approve"],
+    roles: ["admin", "customer_service"]
+  },
+  {
+    navPath: "banking/account-opening",
+    label: "Account opening",
+    anyPermissions: ["agency.accounts.create"],
+    roles: ["admin", "customer_service"]
+  },
+  {
+    navPath: "banking/back-office",
+    label: "Back office",
+    anyPermissions: ["agency.bank.execute"],
+    roles: ["admin", "back_officer"]
+  },
+  {
+    navPath: "banking/products",
+    label: "Bank products",
+    anyPermissions: ["banking.products.read"],
+    roles: ["admin"]
+  },
+  {
+    navPath: "banking/accountant",
+    label: "Accountant desk",
+    anyPermissions: ["ledger.read", "reports.read"],
+    roles: ["admin", "accountant"]
+  },
+  {
+    navPath: "banking/auditor",
+    label: "Auditor desk",
+    anyPermissions: ["audit.read", "transactions.read"],
+    roles: ["admin", "auditor"]
+  },
+  {
+    navPath: "banking/hrm",
+    label: "HR desk",
+    anyPermissions: ["users.read"],
+    roles: ["admin", "coordinator"]
+  },
+  {
+    navPath: "banking/operations",
+    label: "Branch operations",
+    anyPermissions: ["reports.read", "treasury.read"],
+    roles: ["admin", "coordinator"]
+  }
+];
+
+export function resolveBankingRoutePermissions(routePath: string): Permission[] {
+  const normalized = normalizeAppRoute(routePath);
+  if (normalized === "banking") {
+    return ["transactions.read"];
+  }
+  return resolveAgencyRoutePermissions(routePath);
+}
+
+export function resolveAgencyRoutePermissions(routePath: string): Permission[] {
+  const normalized = normalizeAppRoute(routePath);
+  const row = AGENCY_NAV_VISIBILITY.find((r) => r.navPath === normalized);
+  if (row) {
+    return [...row.anyPermissions] as Permission[];
+  }
+  const bankingRow = BANKING_NAV_VISIBILITY.find((r) => r.navPath === normalized);
+  if (bankingRow) {
+    return [...bankingRow.anyPermissions];
+  }
+  if (normalized === "banking/products") {
+    return ["banking.products.read"];
+  }
+  return ["transactions.read"];
+}
+
+export function resolveTreasuryRoutePermissions(routePath: string): Permission[] {
+  const normalized = normalizeAppRoute(routePath);
+  const row = TREASURY_NAV_VISIBILITY.find((r) => r.navPath === normalized);
+  return row?.anyPermissions ?? ["treasury.read"];
+}
+
 export function isPermissionGroupVisibleForTenant(
   groupId: PermissionGroupId,
   subscribedModules: TenantProductModule[] | undefined
@@ -551,13 +980,177 @@ export function isPermissionGroupVisibleForTenant(
   return hasTenantModule(subscribedModules, scope);
 }
 
+function isCatalogEntryVisibleForTenant(
+  entry: PermissionCatalogEntry,
+  subscribedModules: TenantProductModule[] | undefined
+): boolean {
+  if (entry.group === "platform") {
+    return false;
+  }
+  if (entry.group === "agency_banking") {
+    if (hasTenantModule(subscribedModules, "banking")) {
+      return true;
+    }
+    return (
+      entry.id === "agency.withdrawals.approve" &&
+      hasTenantModule(subscribedModules, "susu_management")
+    );
+  }
+  return isPermissionGroupVisibleForTenant(entry.group, subscribedModules);
+}
+
 export function catalogEntriesForTenant(
   subscribedModules: TenantProductModule[] | undefined
 ): PermissionCatalogEntry[] {
-  return PERMISSION_CATALOG.filter(
-    (entry) =>
-      entry.group !== "platform" && isPermissionGroupVisibleForTenant(entry.group, subscribedModules)
+  return PERMISSION_CATALOG.filter((entry) =>
+    isCatalogEntryVisibleForTenant(entry, subscribedModules)
   );
+}
+
+/** Scope for custom tenant roles — `all` spans every subscribed product plus core duties. */
+export const customRoleProductScopeSchema = z.union([z.literal("all"), tenantProductModuleSchema]);
+export type CustomRoleProductScope = z.infer<typeof customRoleProductScopeSchema>;
+
+const TREASURY_PERMISSION_IDS = new Set<Permission>([
+  "treasury.read",
+  "treasury.cash.move",
+  "treasury.reconcile"
+]);
+
+/** Product department a permission belongs to (core duties are shared across products). */
+export function permissionScopeForCatalogEntry(entry: PermissionCatalogEntry): PermissionProductScope {
+  if (TREASURY_PERMISSION_IDS.has(entry.id)) {
+    return "treasury";
+  }
+  return PERMISSION_GROUP_PRODUCT[entry.group];
+}
+
+export function customRoleProductScopeLabel(scope: CustomRoleProductScope): string {
+  return scope === "all" ? "All subscribed products" : PERMISSION_PRODUCT_LABELS[scope];
+}
+
+function isCatalogEntryInCustomRoleScope(
+  entry: PermissionCatalogEntry,
+  roleScope: CustomRoleProductScope,
+  subscribedModules: TenantProductModule[] | undefined
+): boolean {
+  if (entry.group === "platform") {
+    return false;
+  }
+  if (roleScope === "all") {
+    return isCatalogEntryVisibleForTenant(entry, subscribedModules);
+  }
+  const entryScope = permissionScopeForCatalogEntry(entry);
+  if (entryScope === "core") {
+    return true;
+  }
+  if (entryScope === roleScope) {
+    return isCatalogEntryVisibleForTenant(entry, subscribedModules);
+  }
+  if (
+    roleScope === "susu_management" &&
+    entry.id === "agency.withdrawals.approve" &&
+    hasTenantModule(subscribedModules, "susu_management")
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export function catalogEntriesForCustomRoleScope(
+  subscribedModules: TenantProductModule[] | undefined,
+  roleScope: CustomRoleProductScope
+): PermissionCatalogEntry[] {
+  return PERMISSION_CATALOG.filter((entry) =>
+    isCatalogEntryInCustomRoleScope(entry, roleScope, subscribedModules)
+  );
+}
+
+function buildPermissionProductSections(
+  visibleEntries: PermissionCatalogEntry[]
+): PermissionProductSection[] {
+  const sections: PermissionProductSection[] = [];
+  for (const scope of PERMISSION_PRODUCT_SECTION_ORDER) {
+    const groupIds = PERMISSION_GROUP_ORDER.filter((groupId) => {
+      if (groupId === "platform") {
+        return false;
+      }
+      if (PERMISSION_GROUP_PRODUCT[groupId] !== scope) {
+        return false;
+      }
+      return visibleEntries.some((entry) => entry.group === groupId);
+    });
+    if (groupIds.length === 0) {
+      continue;
+    }
+    sections.push({
+      scope,
+      label: PERMISSION_PRODUCT_LABELS[scope],
+      groupIds
+    });
+  }
+  return sections;
+}
+
+export function permissionProductSectionsForCustomRoleScope(
+  subscribedModules: TenantProductModule[] | undefined,
+  roleScope: CustomRoleProductScope
+): PermissionProductSection[] {
+  if (roleScope === "all") {
+    return permissionProductSectionsForTenant(subscribedModules);
+  }
+
+  const visibleEntries = catalogEntriesForCustomRoleScope(subscribedModules, roleScope);
+  const sections: PermissionProductSection[] = [];
+
+  const coreGroupIds = PERMISSION_GROUP_ORDER.filter(
+    (groupId) =>
+      groupId !== "platform" &&
+      PERMISSION_GROUP_PRODUCT[groupId] === "core" &&
+      visibleEntries.some((entry) => entry.group === groupId)
+  );
+  if (coreGroupIds.length > 0) {
+    sections.push({
+      scope: "core",
+      label: PERMISSION_PRODUCT_LABELS.core,
+      groupIds: coreGroupIds
+    });
+  }
+
+  const productGroupIds = PERMISSION_GROUP_ORDER.filter(
+    (groupId) =>
+      groupId !== "platform" &&
+      PERMISSION_GROUP_PRODUCT[groupId] !== "core" &&
+      visibleEntries.some((entry) => entry.group === groupId)
+  );
+  if (productGroupIds.length > 0) {
+    sections.push({
+      scope: roleScope,
+      label: PERMISSION_PRODUCT_LABELS[roleScope],
+      groupIds: productGroupIds
+    });
+  }
+
+  return sections;
+}
+
+export function validateCustomRoleDuties(
+  duties: Permission[],
+  roleScope: CustomRoleProductScope,
+  subscribedModules?: TenantProductModule[]
+): { errors: string[]; warnings: string[] } {
+  const result = validateDutySelection(duties);
+  const allowed = new Set(
+    catalogEntriesForCustomRoleScope(subscribedModules, roleScope).map((entry) => entry.id)
+  );
+  for (const duty of duties) {
+    if (!allowed.has(duty)) {
+      result.errors.push(
+        `${duty} is outside the ${customRoleProductScopeLabel(roleScope).toLowerCase()} scope for this role`
+      );
+    }
+  }
+  return result;
 }
 
 export type PermissionProductSection = {
@@ -569,24 +1162,7 @@ export type PermissionProductSection = {
 export function permissionProductSectionsForTenant(
   subscribedModules: TenantProductModule[] | undefined
 ): PermissionProductSection[] {
-  const sections: PermissionProductSection[] = [];
-  for (const scope of PERMISSION_PRODUCT_SECTION_ORDER) {
-    if (scope !== "core" && !hasTenantModule(subscribedModules, scope)) {
-      continue;
-    }
-    const groupIds = PERMISSION_GROUP_ORDER.filter(
-      (groupId) => groupId !== "platform" && PERMISSION_GROUP_PRODUCT[groupId] === scope
-    );
-    if (groupIds.length === 0) {
-      continue;
-    }
-    sections.push({
-      scope,
-      label: PERMISSION_PRODUCT_LABELS[scope],
-      groupIds
-    });
-  }
-  return sections;
+  return buildPermissionProductSections(catalogEntriesForTenant(subscribedModules));
 }
 
 export function validateDutySelection(duties: Permission[]): {
@@ -629,6 +1205,7 @@ export const NAV_MATRIX_ASSIGNABLE_ROLES: Role[] = [
   "admin",
   "coordinator",
   "teller",
+  "back_officer",
   "accountant",
   "auditor",
   "customer_service",
@@ -700,6 +1277,7 @@ export const BUILTIN_ROLE_LABELS: Record<Role, string> = {
   field_agent: "Field agent",
   auditor: "Auditor",
   accountant: "Accountant",
-  teller: "Teller",
-  customer_service: "Customer service"
+  teller: "Teller (cash operator)",
+  back_officer: "Back Officer (bank execution)",
+  customer_service: "Customer Service (withdrawal verification)"
 };

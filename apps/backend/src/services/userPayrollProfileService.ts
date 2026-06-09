@@ -3,6 +3,7 @@ import {
   currentPayrollPeriod,
   resolveEffectivePayroll,
   roleReceivesCommission,
+  isBuiltinRole,
   staffPayrollSetupRowSchema,
   updateUserPayrollProfileSchema,
   type CommissionPolicy,
@@ -90,7 +91,7 @@ type TenantUserRow = {
   userId: string;
   email: string;
   fullName?: string;
-  role: Role;
+  role: string;
   status: "active" | "inactive";
 };
 
@@ -249,7 +250,11 @@ export async function applyRoleDefaultsToAllUsers(tenantId: string): Promise<num
   let count = 0;
 
   for (const user of users) {
-    const roleDefault = roleDefaults.get(user.role);
+    const role = user.role;
+    if (!isBuiltinRole(role)) {
+      continue;
+    }
+    const roleDefault = roleDefaults.get(role);
     if (!roleDefault) {
       continue;
     }
@@ -300,19 +305,23 @@ export async function listStaffPayrollSetup(
   const result: StaffPayrollSetupRow[] = [];
 
   for (const user of users) {
+    const role = user.role;
+    if (!isBuiltinRole(role)) {
+      continue;
+    }
     const profileRow = profiles.get(user.userId);
     const profile = profileRow ? mapProfile(profileRow) : undefined;
     const roleDefault =
-      roleDefaults.get(user.role) ??
+      roleDefaults.get(role) ??
       roleDefaults.values().next().value;
     if (!roleDefault) {
       continue;
     }
 
     const effective = resolveEffectivePayroll(roleDefault, profile);
-    const commissionsApply = roleReceivesCommission(user.role);
-    const defaultPercent = defaultCommissionPercent(user.role, policy);
-    const effectivePercent = effectiveCommissionPercent(user.role, policy, profile);
+    const commissionsApply = roleReceivesCommission(role);
+    const defaultPercent = defaultCommissionPercent(role, policy);
+    const effectivePercent = effectiveCommissionPercent(role, policy, profile);
     const collections = commissionsApply
       ? await collectionsForUserInPeriod(tenantId, user.userId, period.startIso, period.endIso)
       : 0;

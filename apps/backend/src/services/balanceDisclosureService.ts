@@ -431,13 +431,22 @@ export async function requestCustomerApproval(
       ? ` GHS ${payload.amount.toFixed(2)}`
       : "";
   try {
+    const staffRoles =
+      payload.type === "withdrawal"
+        ? payload.fulfillmentMode === "momo"
+          ? (["customer_service", "coordinator", "admin"] as const)
+          : (["customer_service", "admin"] as const)
+        : (["customer_service", "admin"] as const);
     await notifyTenantStaff({
       tenantId,
-      roles: ["admin", "coordinator"],
+      roles: [...staffRoles],
       kind: pendingKind,
       customerId,
       title: pendingTitle,
-      body: `${customer.fullName}${amountLine} — review in Pending approvals.`
+      body:
+        payload.type === "withdrawal" && payload.fulfillmentMode !== "momo"
+          ? `${customer.fullName}${amountLine} — Customer Service verifies under Susu → Withdrawals.`
+          : `${customer.fullName}${amountLine} — review in Pending approvals.`
     });
   } catch {
     // Non-blocking
@@ -639,60 +648,61 @@ export async function approveBalanceDisclosure(
     }
 
     const isMomo = row.fulfillment_mode === "momo";
-    if (isMomo) {
+    const hasCsApproval = context.permissions?.includes("agency.withdrawals.approve");
+    const isLegacyCoordinator =
+      (context.role === "admin" || context.role === "coordinator") && !hasCsApproval;
+
+    if (isMomo && isLegacyCoordinator) {
       if (!approvalPayload.transactionProofImage?.trim()) {
         throw new Error("Upload the MoMo transaction screenshot before approving.");
       }
       if (!approvalPayload.generatedReceiptImage?.trim()) {
         throw new Error("Receipt image is required for MoMo payout.");
       }
-    }
 
-    const paidAt = isMomo ? approvedAt.toISOString() : null;
-    const payoutReference = approvalPayload.payoutReference?.trim() ?? null;
+      const paidAt = approvedAt.toISOString();
+      const payoutReference = approvalPayload.payoutReference?.trim() ?? null;
 
-    await postWithdrawalForApprovedDisclosure({
-      tenantId,
-      customerId: row.customer_id,
-      homeBranchId: customer.homeBranchId,
-      amount,
-      disclosureId,
-      recordedByUserId: coordinatorId,
-      fieldAgentId: row.field_agent_id,
-      notes: withdrawalApprovalNotes(disclosureId, row.fulfillment_mode, payoutReference)
-    });
+      await postWithdrawalForApprovedDisclosure({
+        tenantId,
+        customerId: row.customer_id,
+        homeBranchId: customer.homeBranchId,
+        amount,
+        disclosureId,
+        recordedByUserId: coordinatorId,
+        fieldAgentId: row.field_agent_id,
+        notes: withdrawalApprovalNotes(disclosureId, row.fulfillment_mode, payoutReference)
+      });
 
-    const balanceAfterWithdrawal = await computeCustomerBalance(tenantId, row.customer_id);
+      const balanceAfterWithdrawal = await computeCustomerBalance(tenantId, row.customer_id);
 
-    const patch = {
-      status: "approved",
-      balance_amount: balanceAfterWithdrawal,
-      approved_at: approvedAt.toISOString(),
-      approved_by: coordinatorId,
-      paid_at: paidAt,
-      payout_reference: payoutReference,
-      transaction_proof_image: approvalPayload.transactionProofImage?.trim() ?? null,
-      generated_receipt_image: approvalPayload.generatedReceiptImage?.trim() ?? null
-    };
+      const patch = {
+        status: "approved" as const,
+        balance_amount: balanceAfterWithdrawal,
+        approved_at: approvedAt.toISOString(),
+        approved_by: coordinatorId,
+        payout_reference: payoutReference,
+        transaction_proof_image: approvalPayload.transactionProofImage ?? null,
+        generated_receipt_image: approvalPayload.generatedReceiptImage ?? null,
+        paid_at: paidAt
+      };
 
-    const supabase = getSupabaseAdminClient();
-    if (supabase) {
-      const { error } = await supabase
-        .from("customer_balance_disclosures")
-        .update(patch)
-        .eq("tenant_id", tenantId)
-        .eq("id", disclosureId);
-      if (error) {
-        throw disclosureDbError("Failed to approve withdrawal", error.message);
+      const supabase = getSupabaseAdminClient();
+      if (supabase) {
+        const { error } = await supabase
+          .from("customer_balance_disclosures")
+          .update(patch)
+          .eq("tenant_id", tenantId)
+          .eq("id", disclosureId);
+        if (error) {
+          throw disclosureDbError("Failed to approve withdrawal", error.message);
+        }
+      } else {
+        Object.assign(row, patch);
       }
-    } else {
-      Object.assign(row, patch);
-    }
 
-    const updated: DisclosureRow = { ...row, ...patch, status: "approved" };
-
-    if (isMomo) {
-      const ref = patch.payout_reference ? ` Ref: ${patch.payout_reference}.` : "";
+      const updated: DisclosureRow = { ...row, ...patch, status: "approved" };
+      const ref = payoutReference ? ` Ref: ${payoutReference}.` : "";
       await createAgentNotification({
         tenantId,
         userId: row.field_agent_id,
@@ -702,22 +712,35 @@ export async function approveBalanceDisclosure(
         body: `${customer.fullName}: GHS ${amount.toFixed(2)} sent to ${row.momo_account_name} (${row.momo_number}).${ref} Receipt attached.`,
         imageUrl: patch.generated_receipt_image ?? undefined
       });
-    } else {
-      const modeLabel =
-        row.fulfillment_mode === "agent_next_day"
-          ? "agent brings cash next day"
-          : "pay customer next day (cash)";
-      await createAgentNotification({
-        tenantId,
-        userId: row.field_agent_id,
-        customerId: row.customer_id,
-        kind: "withdrawal_request_approved",
-        title: "Withdrawal approved",
-        body: `${customer.fullName}: GHS ${amount.toFixed(2)} — ${modeLabel}.`
+
+      return mapRow(updated, { customerName: customer.fullName });
+    }
+
+    if (!isMomo) {
+      if (!hasCsApproval && context.role !== "admin") {
+        throw new Error("Only Customer Service can verify cash withdrawal requests.");
+      }
+
+      const { customerServiceApproveWithdrawal } = await import("./agencyBankingService.js");
+      return customerServiceApproveWithdrawal(context, disclosureId, {
+        bankProductId: approvalPayload.bankProductId,
+        workflowData: approvalPayload.workflowData
       });
     }
 
-    return mapRow(updated, { customerName: customer.fullName });
+    if (!hasCsApproval && context.role !== "admin") {
+      throw new Error("Only Customer Service can verify MoMo withdrawal requests.");
+    }
+
+    const { customerServiceApproveWithdrawal } = await import("./agencyBankingService.js");
+    return customerServiceApproveWithdrawal(context, disclosureId, {
+      bankProductId: approvalPayload.bankProductId,
+      workflowData: approvalPayload.workflowData
+    });
+  }
+
+  if (context.role !== "admin" && context.role !== "coordinator") {
+    throw new Error("Only admin or coordinator can approve balance visibility requests");
   }
 
   const visibleHours = approvalPayload.visibleHours ?? DEFAULT_VISIBLE_HOURS;

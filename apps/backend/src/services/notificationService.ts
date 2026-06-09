@@ -19,7 +19,14 @@ export type AgentNotificationKind =
   | "float_closed_pending_settlement"
   | "workspace_activity"
   | "collection_batch_pending"
-  | "collection_batch_posted";
+  | "collection_batch_posted"
+  | "deposit_pending_bank"
+  | "deposit_pending_accountant"
+  | "deposit_completed"
+  | "back_office_ecash_requested"
+  | "back_office_ecash_approved"
+  | "withdrawal_cs_approved"
+  | "withdrawal_ready_for_teller";
 
 export type AgentNotification = {
   id: string;

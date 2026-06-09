@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
-import { hasTenantModule, type TenantProductModule } from "@bms/shared";
+import { useShallow } from "zustand/react/shallow";
+import { hasAnyPermission } from "@bms/shared";
 import { useAuth } from "../auth/AuthContext";
 import { buildTenantNav } from "../config/tenantModules";
-import type { AppRole, AuthMe, Branch } from "./api";
+import type { AppRole, AuthMe } from "./api";
 import { BranchManagementCard } from "./BranchManagementCard";
 import { AccountNumberPolicyCard } from "./AccountNumberPolicyCard";
 import { CommissionPolicyCard } from "./CommissionPolicyCard";
@@ -35,17 +36,41 @@ import { LoanApplyWizard } from "./loans/LoanApplyWizard";
 import { LoanGroupApplyWizard } from "./loans/LoanGroupApplyWizard";
 import { LoanBlankFormPage } from "./loans/LoanBlankFormPage";
 import { LoanGroupsPage } from "./LoanGroupsPage";
-import { LoansPermissionGate } from "./loans/LoansPermissionGate";
 import { LoanDetailPage } from "./LoanDetailPage";
 import { TransactionLedgerCard } from "./TransactionLedgerCard";
 import { UserManagementCard } from "./UserManagementCard";
-import { getRuntimeBranchId, listBranches, setRuntimeBranchId } from "./api";
+import {
+  AccessDenied,
+  TenantAgencyRoute,
+  TenantBankingRoute,
+  TenantLoansRoute,
+  TenantSettingsRoute,
+  TenantSusuRoute,
+  TenantTreasuryRoute
+} from "./tenantRouteGates";
+import { TreasuryPage } from "./TreasuryPage";
+import { AgencyDepositsPage } from "./banking/AgencyDepositsPage";
+import { AgencyAccountOpeningPage } from "./banking/AgencyAccountOpeningPage";
+import { AgencyInitiateWithdrawalPage } from "./banking/AgencyInitiateWithdrawalPage";
+import { AgencyWithdrawalsPage } from "./banking/AgencyWithdrawalsPage";
+import { BackOfficeDeskPage } from "./banking/BackOfficeDeskPage";
+import { CustomerServiceDeskPage } from "./banking/CustomerServiceDeskPage";
+import { RoleDeskRoute } from "./banking/RoleDeskRoute";
+import { RolePlaceholderDeskPage } from "./banking/RolePlaceholderDeskPage";
+import { TellerDeskPage } from "./banking/TellerDeskPage";
+import { TellerReconciliationPage } from "./banking/TellerReconciliationPage";
+import { TellerTillDaybookPage } from "./banking/TellerTillDaybookPage";
+import { BankProductsPage } from "./BankProductsPage";
+import { BankingOverviewPage } from "./BankingOverviewPage";
+import { useBranchesLiveSync } from "./hooks/useBranchesLiveSync";
+import { useBranchesStore } from "./stores/branchesStore";
+import { ALL_BRANCHES_SCOPE, getRuntimeBranchId, setRuntimeBranchId } from "./api";
+import { useBranchContextSync } from "./hooks/useBranchContextSync";
 import { FieldAgentApp } from "../agent/FieldAgentApp";
 import { OverviewPage } from "./OverviewPage";
 import { TenantDashboardPage } from "./TenantDashboardPage";
 import { PendingApprovalsCard } from "./PendingApprovalsCard";
 import { PendingBalanceApprovalsCard } from "./PendingBalanceApprovalsCard";
-
 const ONBOARDING_WORKFLOW = [
   "Field Agent → Customer Registration",
   "Pending Approval",
@@ -58,37 +83,31 @@ export function TenantApp() {
   const navigate = useNavigate();
   const role = (user?.role ?? "admin") as AppRole;
   const [selectedBranch, setSelectedBranch] = useState(getRuntimeBranchId());
-  const [branches, setBranches] = useState<Branch[]>([]);
+  const branches = useBranchesStore(useShallow((s) => s.branches));
+
+  useBranchesLiveSync();
+
+  const showBranchSelector = Boolean(user?.scopeType === "head_office");
+  useBranchContextSync(showBranchSelector);
 
   useEffect(() => {
     if (!user?.userId || role === "field_agent") {
       return;
     }
-    if (user.branchId) {
+    if (user.scopeType === "branch" && user.branchId) {
       setSelectedBranch(user.branchId);
       setRuntimeBranchId(user.branchId);
+      return;
     }
-    void listBranches()
-      .then((tenantBranches) => {
-        setBranches(tenantBranches);
-        if (!user.branchId && tenantBranches.length > 0) {
-          setSelectedBranch(tenantBranches[0].id);
-          setRuntimeBranchId(tenantBranches[0].id);
-        }
-      })
-      .catch(() => setBranches([]));
-  }, [user?.userId, user?.branchId, role]);
+    const stored = getRuntimeBranchId();
+    setSelectedBranch(stored || ALL_BRANCHES_SCOPE);
+  }, [user?.userId, user?.branchId, user?.scopeType, role]);
 
   const modules = user?.subscribedModules;
   const addons = user?.subscribedAddons;
   const reportsAnalytics = user?.reportsAnalytics !== false;
 
-  const isAdminLike = role === "admin" || role === "accountant" || role === "auditor";
-  const isCoordinatorLike = role === "coordinator" || role === "admin";
-  const canOperateTransactions =
-    role === "admin" || role === "field_agent" || role === "coordinator" || role === "teller";
-
-  const showBranchSelector = Boolean(user?.scopeType === "head_office");
+  const activeBranchFilter = selectedBranch === ALL_BRANCHES_SCOPE ? undefined : selectedBranch;
   const displayName = user?.fullName ?? user?.email?.split("@")[0] ?? role;
 
   const permissions = user?.permissions;
@@ -104,47 +123,12 @@ export function TenantApp() {
     permissions?.includes("workspace.notifications") || permissions?.includes("customers.read")
   );
   const canReports =
-    reportsAnalytics !== false &&
-    (role === "admin" ||
-      role === "coordinator" ||
-      role === "accountant" ||
-      role === "auditor" ||
-      role === "teller");
+    reportsAnalytics !== false && hasAnyPermission(permissions, ["reports.read"]);
+  const canMoveTreasuryCash = hasAnyPermission(permissions, ["treasury.cash.move"]);
 
   async function handleLogout() {
     await logout();
     navigate("/login", { replace: true });
-  }
-
-  function AccessDenied() {
-    return (
-      <article className="card">
-        <h2>Access Restricted</h2>
-        <p className="muted">This page is not available for your role.</p>
-      </article>
-    );
-  }
-
-  function ModuleGate({ module, children }: { module: TenantProductModule; children: ReactNode }) {
-    if (!hasTenantModule(modules, module)) {
-      return (
-        <article className="card">
-          <h2>Product not enabled</h2>
-          <p className="muted">This department is not on your company subscription.</p>
-        </article>
-      );
-    }
-    return <>{children}</>;
-  }
-
-  function LoansRoute({ route, children }: { route: string; children: ReactNode }) {
-    return (
-      <ModuleGate module="loans_credit">
-        <LoansPermissionGate permissions={permissions} route={route} denied={<AccessDenied />}>
-          {children}
-        </LoansPermissionGate>
-      </ModuleGate>
-    );
   }
 
   const companyName = user?.tenantName ?? user?.tenantId ?? undefined;
@@ -171,22 +155,28 @@ export function TenantApp() {
       onLogout={handleLogout}
       topbarActions={
         showBranchSelector ? (
-          <label className="field dash-topbar-field">
-            <span>Active Branch Context</span>
+          <div className="dash-header-branch">
+            <label className="dash-header-branch__label" htmlFor="active-branch-context">
+              Branch context
+            </label>
             <select
-              value={selectedBranch}
+              id="active-branch-context"
+              className="dash-header-branch__select"
+              value={selectedBranch || ALL_BRANCHES_SCOPE}
               onChange={(e) => {
-                setSelectedBranch(e.target.value);
-                setRuntimeBranchId(e.target.value);
+                const next = e.target.value;
+                setSelectedBranch(next);
+                setRuntimeBranchId(next);
               }}
             >
+              <option value={ALL_BRANCHES_SCOPE}>All branches</option>
               {branches.map((b) => (
                 <option key={b.id} value={b.id}>
                   {b.name} ({b.code})
                 </option>
               ))}
             </select>
-          </label>
+          </div>
         ) : undefined
       }
     >
@@ -210,6 +200,7 @@ export function TenantApp() {
           path="/profile"
           element={<UserProfilePage me={user} branches={branches} role={role} />}
         />
+
         <Route
           path="/reports"
           element={
@@ -228,289 +219,293 @@ export function TenantApp() {
         <Route
           path="/susu/overview"
           element={
-            <ModuleGate module="susu_management">
+            <TenantSusuRoute route="susu/overview" modules={modules} role={role} permissions={permissions} susuNavVisibility={user?.susuNavVisibility}>
               <OverviewPage
                 role={role}
                 modules={modules}
                 reportsAnalytics={reportsAnalytics}
-                isAdminLike={isAdminLike}
-                isCoordinatorLike={isCoordinatorLike}
+                isAdminLike={hasAnyPermission(permissions, ["users.read", "roles.read"])}
+                isCoordinatorLike={hasAnyPermission(permissions, ["customers.create", "branch_float.manage"])}
                 me={user}
                 branches={branches}
                 displayName={displayName}
               />
-            </ModuleGate>
+            </TenantSusuRoute>
           }
         />
-        <Route
-          path="/susu/customers"
-          element={
-            <ModuleGate module="susu_management">
-              {role === "admin" || role === "coordinator" ? (
-                <CustomerOpsCard role={role} />
-              ) : (
-                <AccessDenied />
-              )}
-            </ModuleGate>
-          }
-        />
+        <Route path="/susu/customers" element={<TenantSusuRoute route="susu/customers" modules={modules} role={role} permissions={permissions} susuNavVisibility={user?.susuNavVisibility}><CustomerOpsCard role={role} /></TenantSusuRoute>} />
         <Route
           path="/susu/pending-approvals"
           element={
-            <ModuleGate module="susu_management">
-              {role === "admin" || role === "coordinator" ? (
-                <>
-                  <PendingBalanceApprovalsCard />
-                  <PendingApprovalsCard />
-                </>
-              ) : (
-                <AccessDenied />
-              )}
-            </ModuleGate>
+            <TenantSusuRoute route="susu/pending-approvals" modules={modules} role={role} permissions={permissions} susuNavVisibility={user?.susuNavVisibility}>
+              <PendingBalanceApprovalsCard />
+              <PendingApprovalsCard />
+            </TenantSusuRoute>
           }
         />
-        <Route
-          path="/susu/callover-batches"
-          element={
-            <ModuleGate module="susu_management">
-              {role === "admin" || role === "coordinator" ? (
-                <CalloverBatchesPage role={role} />
-              ) : (
-                <AccessDenied />
-              )}
-            </ModuleGate>
-          }
-        />
-        <Route
-          path="/susu/till-float"
-          element={
-            <ModuleGate module="susu_management">
-              {role === "admin" || role === "coordinator" ? (
-                <BranchFloatAdminPage role={role} />
-              ) : (
-                <AccessDenied />
-              )}
-            </ModuleGate>
-          }
-        />
-        <Route
-          path="/susu/collections"
-          element={
-            <ModuleGate module="susu_management">
-              {canOperateTransactions ? <BranchCounterCard role={role} /> : <AccessDenied />}
-            </ModuleGate>
-          }
-        />
-        <Route
-          path="/susu/commissions"
-          element={
-            <ModuleGate module="susu_management">
-              <CommissionPolicyCard role={role} />
-            </ModuleGate>
-          }
-        />
-        <Route
-          path="/susu/payroll"
-          element={
-            <ModuleGate module="susu_management">
-              <PayslipCard role={role} />
-            </ModuleGate>
-          }
-        />
-        <Route
-          path="/susu/agents"
-          element={
-            <ModuleGate module="susu_management">
-              {role === "admin" || role === "coordinator" ? (
-                <FieldAgentsPage role={role} />
-              ) : (
-                <AccessDenied />
-              )}
-            </ModuleGate>
-          }
-        />
-        <Route
-          path="/susu/coordinators"
-          element={
-            <ModuleGate module="susu_management">
-              {role === "admin" ? <CoordinatorsPage /> : <AccessDenied />}
-            </ModuleGate>
-          }
-        />
-        <Route
-          path="/susu/routes"
-          element={
-            <ModuleGate module="susu_management">
-              {role === "admin" || role === "coordinator" ? (
-                <RoutesPage role={role} />
-              ) : (
-                <AccessDenied />
-              )}
-            </ModuleGate>
-          }
-        />
-        <Route
-          path="/susu/withdrawals"
-          element={
-            <ModuleGate module="susu_management">
-              {role === "admin" || role === "coordinator" ? (
-                <WithdrawalsPage role={role} />
-              ) : (
-                <AccessDenied />
-              )}
-            </ModuleGate>
-          }
-        />
-        <Route
-          path="/susu/group-savings"
-          element={
-            <ModuleGate module="susu_management">
-              {role === "admin" || role === "coordinator" ? (
-                <GroupSavingsPage role={role} />
-              ) : (
-                <AccessDenied />
-              )}
-            </ModuleGate>
-          }
-        />
-        <Route
-          path="/susu/performance"
-          element={
-            <ModuleGate module="susu_management">
-              <PerformancePage role={role} />
-            </ModuleGate>
-          }
-        />
+        <Route path="/susu/callover-batches" element={<TenantSusuRoute route="susu/callover-batches" modules={modules} role={role} permissions={permissions} susuNavVisibility={user?.susuNavVisibility}><CalloverBatchesPage role={role} /></TenantSusuRoute>} />
+        <Route path="/susu/till-float" element={<TenantSusuRoute route="susu/till-float" modules={modules} role={role} permissions={permissions} susuNavVisibility={user?.susuNavVisibility}><BranchFloatAdminPage role={role} /></TenantSusuRoute>} />
+        <Route path="/susu/collections" element={<TenantSusuRoute route="susu/collections" modules={modules} role={role} permissions={permissions} susuNavVisibility={user?.susuNavVisibility}><BranchCounterCard role={role} /></TenantSusuRoute>} />
+        <Route path="/susu/commissions" element={<TenantSusuRoute route="susu/commissions" modules={modules} role={role} permissions={permissions} susuNavVisibility={user?.susuNavVisibility}><CommissionPolicyCard role={role} /></TenantSusuRoute>} />
+        <Route path="/susu/payroll" element={<TenantSusuRoute route="susu/payroll" modules={modules} role={role} permissions={permissions} susuNavVisibility={user?.susuNavVisibility}><PayslipCard role={role} /></TenantSusuRoute>} />
+        <Route path="/susu/agents" element={<TenantSusuRoute route="susu/agents" modules={modules} role={role} permissions={permissions} susuNavVisibility={user?.susuNavVisibility}><FieldAgentsPage role={role} /></TenantSusuRoute>} />
+        <Route path="/susu/coordinators" element={<TenantSusuRoute route="susu/coordinators" modules={modules} role={role} permissions={permissions} susuNavVisibility={user?.susuNavVisibility}><CoordinatorsPage /></TenantSusuRoute>} />
+        <Route path="/susu/routes" element={<TenantSusuRoute route="susu/routes" modules={modules} role={role} permissions={permissions} susuNavVisibility={user?.susuNavVisibility}><RoutesPage role={role} /></TenantSusuRoute>} />
+        <Route path="/susu/withdrawals" element={<TenantSusuRoute route="susu/withdrawals" modules={modules} role={role} permissions={permissions} susuNavVisibility={user?.susuNavVisibility}><WithdrawalsPage role={role} permissions={permissions} /></TenantSusuRoute>} />
+        <Route path="/susu/group-savings" element={<TenantSusuRoute route="susu/group-savings" modules={modules} role={role} permissions={permissions} susuNavVisibility={user?.susuNavVisibility}><GroupSavingsPage role={role} /></TenantSusuRoute>} />
+        <Route path="/susu/performance" element={<TenantSusuRoute route="susu/performance" modules={modules} role={role} permissions={permissions} susuNavVisibility={user?.susuNavVisibility}><PerformancePage role={role} /></TenantSusuRoute>} />
         <Route path="/susu/reports" element={<Navigate to="/app/reports" replace />} />
         <Route
           path="/susu/onboarding"
           element={
-            <ModuleGate module="susu_management">
+            <TenantSusuRoute route="susu/onboarding" modules={modules} role={role} permissions={permissions} susuNavVisibility={user?.susuNavVisibility}>
               <FeaturePlaceholderPage
                 title="Customer Onboarding"
                 description="Registration form: personal info, Ghana Card, address, account type, opening balance, assigned agent. Default status: Pending Approval."
                 workflow={ONBOARDING_WORKFLOW}
               />
-            </ModuleGate>
+            </TenantSusuRoute>
           }
         />
 
+        {/* Agency banking */}
+        <Route path="/banking" element={<TenantBankingRoute route="banking" modules={modules} permissions={permissions}><BankingOverviewPage role={role} permissions={permissions} /></TenantBankingRoute>} />
+        <Route
+          path="/banking/teller"
+          element={
+            <TenantAgencyRoute route="banking/teller" modules={modules} permissions={permissions}>
+              <RoleDeskRoute kind="teller" role={role} permissions={permissions}>
+                <TellerDeskPage displayName={displayName} />
+              </RoleDeskRoute>
+            </TenantAgencyRoute>
+          }
+        />
+        <Route
+          path="/banking/deposits"
+          element={
+            <TenantAgencyRoute route="banking/deposits" modules={modules} permissions={permissions}>
+              <AgencyDepositsPage />
+            </TenantAgencyRoute>
+          }
+        />
+        <Route
+          path="/banking/reconciliation"
+          element={
+            <TenantAgencyRoute route="banking/reconciliation" modules={modules} permissions={permissions}>
+              <TellerReconciliationPage />
+            </TenantAgencyRoute>
+          }
+        />
+        <Route
+          path="/banking/till-daybook"
+          element={
+            <TenantAgencyRoute route="banking/till-daybook" modules={modules} permissions={permissions}>
+              <TellerTillDaybookPage />
+            </TenantAgencyRoute>
+          }
+        />
+        <Route
+          path="/banking/customer-service"
+          element={
+            <TenantAgencyRoute route="banking/customer-service" modules={modules} permissions={permissions}>
+              <RoleDeskRoute kind="customer_service" role={role} permissions={permissions}>
+                <CustomerServiceDeskPage displayName={displayName} />
+              </RoleDeskRoute>
+            </TenantAgencyRoute>
+          }
+        />
+        <Route
+          path="/banking/withdrawals/initiate"
+          element={
+            <TenantAgencyRoute route="banking/withdrawals" modules={modules} permissions={permissions}>
+              <AgencyInitiateWithdrawalPage />
+            </TenantAgencyRoute>
+          }
+        />
+        <Route
+          path="/banking/withdrawals"
+          element={
+            <TenantAgencyRoute route="banking/withdrawals" modules={modules} permissions={permissions}>
+              <AgencyWithdrawalsPage role={role} permissions={permissions} />
+            </TenantAgencyRoute>
+          }
+        />
+        <Route
+          path="/banking/account-opening"
+          element={
+            <TenantAgencyRoute route="banking/account-opening" modules={modules} permissions={permissions}>
+              <AgencyAccountOpeningPage />
+            </TenantAgencyRoute>
+          }
+        />
+        <Route
+          path="/banking/back-office"
+          element={
+            <TenantAgencyRoute route="banking/back-office" modules={modules} permissions={permissions}>
+              <RoleDeskRoute kind="back_officer" role={role} permissions={permissions}>
+                <BackOfficeDeskPage displayName={displayName} />
+              </RoleDeskRoute>
+            </TenantAgencyRoute>
+          }
+        />
+        <Route
+          path="/banking/accountant"
+          element={
+            <TenantAgencyRoute route="banking/accountant" modules={modules} permissions={permissions}>
+              <RoleDeskRoute kind="accountant" role={role} permissions={permissions}>
+                <RolePlaceholderDeskPage kind="accountant" displayName={displayName} />
+              </RoleDeskRoute>
+            </TenantAgencyRoute>
+          }
+        />
+        <Route
+          path="/banking/auditor"
+          element={
+            <TenantAgencyRoute route="banking/auditor" modules={modules} permissions={permissions}>
+              <RoleDeskRoute kind="auditor" role={role} permissions={permissions}>
+                <RolePlaceholderDeskPage kind="auditor" displayName={displayName} />
+              </RoleDeskRoute>
+            </TenantAgencyRoute>
+          }
+        />
+        <Route
+          path="/banking/hrm"
+          element={
+            <TenantAgencyRoute route="banking/hrm" modules={modules} permissions={permissions}>
+              <RoleDeskRoute kind="hrm" role={role} permissions={permissions}>
+                <RolePlaceholderDeskPage kind="hrm" displayName={displayName} />
+              </RoleDeskRoute>
+            </TenantAgencyRoute>
+          }
+        />
+        <Route
+          path="/banking/operations"
+          element={
+            <TenantAgencyRoute route="banking/operations" modules={modules} permissions={permissions}>
+              <RoleDeskRoute kind="operations" role={role} permissions={permissions}>
+                <RolePlaceholderDeskPage kind="operations" displayName={displayName} />
+              </RoleDeskRoute>
+            </TenantAgencyRoute>
+          }
+        />
+        <Route path="/banking/products" element={<TenantAgencyRoute route="banking/products" modules={modules} permissions={permissions}><BankProductsPage role={role} permissions={permissions} /></TenantAgencyRoute>} />
+        <Route path="/banking/teller-payouts" element={<Navigate to="/app/banking/teller" replace />} />
+        <Route path="/workspace/teller" element={<Navigate to="/app/banking/teller" replace />} />
+        <Route path="/workspace/customer-service" element={<Navigate to="/app/banking/customer-service" replace />} />
+        <Route path="/workspace/back-office" element={<Navigate to="/app/banking/back-office" replace />} />
+        <Route path="/workspace/accountant" element={<Navigate to="/app/banking/accountant" replace />} />
+        <Route path="/workspace/auditor" element={<Navigate to="/app/banking/auditor" replace />} />
+        <Route path="/workspace/hrm" element={<Navigate to="/app/banking/hrm" replace />} />
+        <Route path="/workspace/operations" element={<Navigate to="/app/banking/operations" replace />} />
+
         {/* Other departments */}
-        <Route path="/banking" element={<ModuleGate module="banking"><ModulePlaceholderCard module="banking" /></ModuleGate>} />
-        <Route path="/loans" element={<LoansRoute route="loans"><LoansOverviewPage role={role} /></LoansRoute>} />
+        <Route path="/loans" element={<TenantLoansRoute route="loans" modules={modules} permissions={permissions}><LoansOverviewPage role={role} /></TenantLoansRoute>} />
         <Route
           path="/loans/products"
-          element={<LoansRoute route="loans/products"><LoanProductsPage role={role} /></LoansRoute>}
+          element={<TenantLoansRoute route="loans/products" modules={modules} permissions={permissions}><LoanProductsPage role={role} /></TenantLoansRoute>}
         />
         <Route
           path="/loans/applications"
-          element={<LoansRoute route="loans/applications"><LoanApplicationsPage role={role} /></LoansRoute>}
+          element={<TenantLoansRoute route="loans/applications" modules={modules} permissions={permissions}><LoanApplicationsPage role={role} /></TenantLoansRoute>}
         />
         <Route
           path="/loans/applications/:loanId"
           element={
-            <LoansRoute route="loans/applications/detail">
+            <TenantLoansRoute route="loans/applications/detail" modules={modules} permissions={permissions}>
               <LoanDetailPage role={role} />
-            </LoansRoute>
+            </TenantLoansRoute>
           }
         />
         <Route
           path="/loans/groups"
-          element={<LoansRoute route="loans/groups"><LoanGroupsPage role={role} /></LoansRoute>}
+          element={<TenantLoansRoute route="loans/groups" modules={modules} permissions={permissions}><LoanGroupsPage role={role} /></TenantLoansRoute>}
         />
         <Route
           path="/loans/apply/group"
-          element={<LoansRoute route="loans/apply/group"><LoanGroupApplyWizard role={role} /></LoansRoute>}
+          element={<TenantLoansRoute route="loans/apply/group" modules={modules} permissions={permissions}><LoanGroupApplyWizard role={role} /></TenantLoansRoute>}
         />
-        <Route path="/loans/apply" element={<LoansRoute route="loans/apply"><LoanApplyWizard role={role} /></LoansRoute>} />
+        <Route path="/loans/apply" element={<TenantLoansRoute route="loans/apply" modules={modules} permissions={permissions}><LoanApplyWizard role={role} /></TenantLoansRoute>} />
         <Route
           path="/loans/form"
           element={
-            <LoansRoute route="loans/form">
+            <TenantLoansRoute route="loans/form" modules={modules} permissions={permissions}>
               <LoanBlankFormPage role={role} companyName={user?.tenantName} />
-            </LoansRoute>
+            </TenantLoansRoute>
           }
         />
-        <Route path="/treasury" element={<ModuleGate module="treasury"><ModulePlaceholderCard module="treasury" /></ModuleGate>} />
+        <Route
+          path="/treasury"
+          element={
+            <TenantTreasuryRoute route="treasury" modules={modules} permissions={permissions}>
+              <TreasuryPage canMoveCash={canMoveTreasuryCash} defaultBranchId={activeBranchFilter} />
+            </TenantTreasuryRoute>
+          }
+        />
+        <Route
+          path="/treasury/movements"
+          element={
+            <TenantTreasuryRoute route="treasury/movements" modules={modules} permissions={permissions}>
+              <TreasuryPage canMoveCash={canMoveTreasuryCash} defaultBranchId={activeBranchFilter} />
+            </TenantTreasuryRoute>
+          }
+        />
+        <Route
+          path="/treasury/trial-balance"
+          element={
+            <TenantTreasuryRoute route="treasury/trial-balance" modules={modules} permissions={permissions}>
+              <TreasuryPage canMoveCash={false} defaultBranchId={selectedBranch || user?.branchId} />
+            </TenantTreasuryRoute>
+          }
+        />
 
         {/* Settings */}
-        <Route
-          path="/settings"
-          element={
-            role === "admin" ? (
-              <SettingsHubPage />
-            ) : (
-              <AccessDenied />
-            )
-          }
-        />
+        <Route path="/settings" element={<TenantSettingsRoute route="settings" role={role} permissions={permissions}><SettingsHubPage /></TenantSettingsRoute>} />
         <Route
           path="/settings/profile"
           element={
-            role === "admin" ? (
+            <TenantSettingsRoute route="settings/profile" role={role} permissions={permissions}>
               <FeaturePlaceholderPage title="Company Profile" description="Company name, logo, contact, address, tax, and branding." />
-            ) : (
-              <AccessDenied />
-            )
+            </TenantSettingsRoute>
           }
         />
         <Route
           path="/settings/subscription"
           element={
-            role === "admin" ? (
+            <TenantSettingsRoute route="settings/subscription" role={role} permissions={permissions}>
               <SettingsSubscriptionPage
                 subscribedModules={modules}
                 subscribedAddons={addons}
                 reportsAnalytics={reportsAnalytics}
               />
-            ) : (
-              <AccessDenied />
-            )
+            </TenantSettingsRoute>
           }
         />
         <Route path="/settings/add-ons" element={<Navigate to="/settings/subscription" replace />} />
-        <Route
-          path="/settings/branches"
-          element={role === "admin" ? <BranchManagementCard role={role} /> : <AccessDenied />}
-        />
-        <Route
-          path="/settings/account-numbers"
-          element={role === "admin" ? <AccountNumberPolicyCard role={role} /> : <AccessDenied />}
-        />
-        <Route
-          path="/settings/users"
-          element={role === "admin" ? <UserManagementCard role={role} /> : <AccessDenied />}
-        />
-        <Route
-          path="/settings/roles"
-          element={role === "admin" ? <RoleManagementPage role={role} /> : <AccessDenied />}
-        />
+        <Route path="/settings/branches" element={<TenantSettingsRoute route="settings/branches" role={role} permissions={permissions}><BranchManagementCard role={role} /></TenantSettingsRoute>} />
+        <Route path="/settings/account-numbers" element={<TenantSettingsRoute route="settings/account-numbers" role={role} permissions={permissions}><AccountNumberPolicyCard role={role} /></TenantSettingsRoute>} />
+        <Route path="/settings/users" element={<TenantSettingsRoute route="settings/users" role={role} permissions={permissions}><UserManagementCard role={role} /></TenantSettingsRoute>} />
+        <Route path="/settings/roles" element={<TenantSettingsRoute route="settings/roles" role={role} permissions={permissions}><RoleManagementPage role={role} /></TenantSettingsRoute>} />
         <Route
           path="/settings/approval-workflows"
           element={
-            role === "admin" ? (
+            <TenantSettingsRoute route="settings/approval-workflows" role={role} permissions={permissions}>
               <FeaturePlaceholderPage
                 title="Approval Workflows"
                 description="Configure customer and withdrawal approval chains."
                 workflow={ONBOARDING_WORKFLOW}
               />
-            ) : (
-              <AccessDenied />
-            )
+            </TenantSettingsRoute>
           }
         />
         <Route
           path="/settings/notifications"
           element={
-            role === "admin" ? <SettingsNotificationsPage subscribedAddons={addons} /> : <AccessDenied />
+            <TenantSettingsRoute route="settings/notifications" role={role} permissions={permissions}>
+              <SettingsNotificationsPage subscribedAddons={addons} />
+            </TenantSettingsRoute>
           }
         />
-        <Route
-          path="/settings/audit-logs"
-          element={
-            role === "admin" || role === "auditor" ? <AuditLogsPage /> : <AccessDenied />
-          }
-        />
+        <Route path="/settings/audit-logs" element={<TenantSettingsRoute route="settings/audit-logs" role={role} permissions={permissions}><AuditLogsPage /></TenantSettingsRoute>} />
 
         {/* Legacy redirects */}
         <Route path="/core-banking" element={<Navigate to="banking" replace />} />

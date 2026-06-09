@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import type { AgentNotification } from "../api";
 import { listAgentNotifications, markAgentNotificationRead } from "../api";
+import { notificationTargetPath } from "../notificationRoutes";
 import { subscribeToTenantRealtime } from "../realtime";
 import { getTenantId } from "../api";
 
@@ -22,6 +24,7 @@ type Props = {
 };
 
 export function DashboardNotifications({ enabled }: Props) {
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<AgentNotification[]>([]);
   const [loading, setLoading] = useState(false);
@@ -84,6 +87,15 @@ export function DashboardNotifications({ enabled }: Props) {
     }
   }
 
+  async function handleNotificationClick(notification: AgentNotification) {
+    await markRead(notification);
+    const target = notificationTargetPath(notification);
+    setOpen(false);
+    if (target) {
+      navigate(target);
+    }
+  }
+
   if (!enabled) {
     return null;
   }
@@ -126,18 +138,24 @@ export function DashboardNotifications({ enabled }: Props) {
             {!loading && items.length === 0 ? (
               <p className="muted">You&apos;re all caught up — no notifications yet.</p>
             ) : null}
-            {items.map((n) => (
-              <button
-                key={n.id}
-                type="button"
-                className={`dash-notifications__item${n.readAt ? " is-read" : ""}`}
-                onClick={() => void markRead(n)}
-              >
-                <span className="dash-notifications__item-title">{n.title}</span>
-                <span className="dash-notifications__item-body muted">{n.body}</span>
-                <span className="dash-notifications__item-time muted">{formatWhen(n.createdAt)}</span>
-              </button>
-            ))}
+            {items.map((n) => {
+              const target = notificationTargetPath(n);
+              return (
+                <button
+                  key={n.id}
+                  type="button"
+                  className={`dash-notifications__item${n.readAt ? " is-read" : ""}${target ? " dash-notifications__item--link" : ""}`}
+                  onClick={() => void handleNotificationClick(n)}
+                >
+                  <span className="dash-notifications__item-title">{n.title}</span>
+                  <span className="dash-notifications__item-body muted">{n.body}</span>
+                  <span className="dash-notifications__item-meta">
+                    <span className="dash-notifications__item-time muted">{formatWhen(n.createdAt)}</span>
+                    {target ? <span className="dash-notifications__item-go">Open →</span> : null}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
       ) : null}

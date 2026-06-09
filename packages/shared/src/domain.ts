@@ -178,11 +178,17 @@ export const createTransactionInputSchema = z.object({
 
   transactionBranchId: z.string().min(1),
 
-  notes: z.string().optional()
+  notes: z.string().optional(),
+
+  bankProductId: z.string().uuid().optional(),
+
+  workflowData: z.record(z.string(), z.unknown()).optional()
 
 });
 
 
+
+import { agencyExecutionStatusSchema } from "./agencyBanking.js";
 
 export const transactionSchema = z.object({
 
@@ -206,7 +212,21 @@ export const transactionSchema = z.object({
 
   createdAt: z.string().min(1),
 
-  notes: z.string().optional()
+  notes: z.string().optional(),
+
+  executionStatus: agencyExecutionStatusSchema.optional().default("completed"),
+
+  bankExecutedByUserId: z.string().optional(),
+
+  bankExecutedAt: z.string().optional(),
+
+  bankProductId: z.string().uuid().optional(),
+
+  bankProductName: z.string().optional(),
+
+  bankLabel: z.string().optional(),
+
+  workflowData: z.record(z.string(), z.unknown()).optional()
 
 });
 
@@ -285,6 +305,9 @@ export const syncBatchSchema = z.object({
 
 export const balanceDisclosureStatusSchema = z.enum([
   "pending",
+  "cs_approved",
+  "bank_executed",
+  "completed",
   "approved",
   "rejected",
   "expired"
@@ -320,7 +343,21 @@ export const balanceDisclosureSchema = z.object({
   payoutReference: z.string().optional(),
   transactionProofImage: z.string().optional(),
   generatedReceiptImage: z.string().optional(),
-  paidAt: z.string().optional()
+  paidAt: z.string().optional(),
+  csApprovedBy: z.string().optional(),
+  csApprovedAt: z.string().optional(),
+  bankExecutedBy: z.string().optional(),
+  bankExecutedAt: z.string().optional(),
+  tellerPaidBy: z.string().optional(),
+
+  bankProductId: z.string().uuid().optional(),
+
+  bankProductName: z.string().optional(),
+
+  bankLabel: z.string().optional(),
+  tellerPaidAt: z.string().optional(),
+
+  workflowData: z.record(z.string(), z.unknown()).optional()
 });
 
 export const requestBalanceDisclosureSchema = z.object({
@@ -357,8 +394,12 @@ export const approveCustomerRequestSchema = z.object({
     .number()
     .min(0.25, "Minimum visibility is 15 minutes")
     .max(168, "Maximum visibility is 7 days")
-    .optional()
+    .optional(),
+  bankProductId: z.string().uuid().optional(),
+  workflowData: z.record(z.string(), z.unknown()).optional()
 });
+
+export const approveWithdrawalWorkflowSchema = approveCustomerRequestSchema;
 
 export const rejectBalanceDisclosureSchema = z.object({
   reason: z.string().min(1).optional()

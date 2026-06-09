@@ -4,6 +4,7 @@ import { requireIdempotencyKey } from "../middleware/idempotency.js";
 import { requirePermission } from "../middleware/requirePermission.js";
 import { validateBody } from "../middleware/validateBody.js";
 import { resolveBranchId } from "../services/branchService.js";
+import { resolveRequestBranchFilter } from "../middleware/branchScope.js";
 import { getBranchCounterBootstrap } from "../services/branchCounterBootstrapService.js";
 import {
   listBranchCounterStatement,
@@ -37,9 +38,12 @@ transactionsRouter.get("/branch-counter-bootstrap", requirePermission("transacti
       ? req.query.date
       : new Date().toISOString().slice(0, 10);
 
+  const scopedBranch = resolveRequestBranchFilter(req);
   const branchRef =
     context.scopeType === "head_office"
-      ? branchIdParam || context.branchId || ""
+      ? branchIdParam && branchIdParam !== "all"
+        ? branchIdParam
+        : scopedBranch ?? ""
       : context.branchId || branchIdParam;
 
   try {
@@ -73,15 +77,14 @@ transactionsRouter.post(
   }
 
   const type = req.body?.type;
-  const permissionByType: Record<string, "transactions.create.daily_susu" | "transactions.create.deposit" | "transactions.create.withdrawal"> =
-    {
-      daily_susu: "transactions.create.daily_susu",
-      deposit: "transactions.create.deposit",
-      withdrawal: "transactions.create.withdrawal"
-    };
+  const canPost =
+    (type === "daily_susu" && context.permissions.includes("transactions.create.daily_susu")) ||
+    (type === "deposit" &&
+      (context.permissions.includes("transactions.create.deposit") ||
+        context.permissions.includes("agency.deposits.record"))) ||
+    (type === "withdrawal" && context.permissions.includes("transactions.create.withdrawal"));
 
-  const requiredPermission = permissionByType[type];
-  if (!requiredPermission || !context.permissions.includes(requiredPermission)) {
+  if (!canPost) {
     res.status(403).json({ error: "Forbidden for transaction type" });
     return;
   }
@@ -359,14 +362,18 @@ transactionsRouter.post(
 );
 
 transactionsRouter.get("/", requirePermission("transactions.read"), async (req, res) => {
-  const tenantId = req.userContext?.tenantId;
-  if (!tenantId) {
+  const context = req.userContext;
+  if (!context) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
 
   try {
-    res.json(await listTransactions(tenantId));
+    res.json(
+      await listTransactions(context.tenantId, {
+        branchId: resolveRequestBranchFilter(req)
+      })
+    );
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : "Failed to fetch transactions" });
   }

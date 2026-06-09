@@ -751,24 +751,32 @@ async function enrichCustomersWithAccountBalances(
   });
 }
 
-export async function listCustomers(tenantId: string, options?: { agentId?: string; status?: string }): Promise<Customer[]> {
-
+export async function listCustomers(
+  tenantId: string,
+  options?: { agentId?: string; status?: string; light?: boolean; branchId?: string }
+): Promise<Customer[]> {
   const supabase = getSupabaseAdminClient();
+  const branchId = options?.branchId?.trim() || undefined;
 
   if (!supabase) {
-
     let rows = getTenantCustomers(tenantId);
 
     if (options?.agentId) {
+      rows = rows.filter(
+        (c) => c.createdByFieldAgentId === options.agentId || c.assignedFieldAgentId === options.agentId
+      );
+    }
 
-      rows = rows.filter((c) => c.createdByFieldAgentId === options.agentId || c.assignedFieldAgentId === options.agentId);
-
+    if (branchId) {
+      rows = rows.filter((c) => c.homeBranchId === branchId);
     }
 
     if (options?.status) {
-
       rows = rows.filter((c) => c.status === options.status);
+    }
 
+    if (options?.light) {
+      return rows;
     }
 
     const named = await enrichCustomersWithAgentNames(tenantId, rows);
@@ -776,10 +784,7 @@ export async function listCustomers(tenantId: string, options?: { agentId?: stri
       return named;
     }
     return enrichCustomersWithAccountBalances(tenantId, named);
-
   }
-
-
 
   let query = supabase.from("customers").select("*").eq("tenant_id", tenantId);
 
@@ -791,6 +796,10 @@ export async function listCustomers(tenantId: string, options?: { agentId?: stri
 
     );
 
+  }
+
+  if (branchId) {
+    query = query.eq("home_branch_id", branchId);
   }
 
   if (options?.status) {
@@ -810,6 +819,9 @@ export async function listCustomers(tenantId: string, options?: { agentId?: stri
 
 
   const customers = (data ?? []).map((row) => mapCustomerRow(row as Record<string, unknown>));
+  if (options?.light) {
+    return customers;
+  }
   const named = await enrichCustomersWithAgentNames(tenantId, customers);
   if (options?.agentId) {
     return named;

@@ -6,16 +6,19 @@ import {
   loginSchema,
   resetUserPasswordSchema,
   roleSchema,
+  isBuiltinRole,
   scopeTypeSchema,
   updateTenantUserSchema,
   roleRequiresBranch,
   type Role,
-  type ScopeType
+  type ScopeType,
+  type UserJobTitle
 } from "@bms/shared";
 import { z } from "zod";
 import { getSupabaseJwtSecret } from "../config/env.js";
 import { getPermissionsForRole } from "../config/permissions.js";
 import { resolvePermissionsForTenantUser } from "./builtinRolePermissionService.js";
+import { assertValidUserJobTitle, parseProfileJobTitle, tenantJobTitleExists } from "./tenantJobTitleService.js";
 import { isSupabaseAuthNetworkError } from "../lib/networkError.js";
 import {
   decodeSupabaseAccessTokenClaims,
@@ -59,7 +62,9 @@ async function enrichTenantContext(
   if (context.role === "super_admin" || !context.tenantId || context.tenantId === "platform") {
     return {
       ...context,
-      permissions: getPermissionsForRole(context.role),
+      permissions: isBuiltinRole(context.role)
+        ? getPermissionsForRole(context.role)
+        : [],
       tenantName: context.tenantId === "platform" ? "BMS Platform" : undefined,
       subscribedModules: [],
       subscribedAddons: [],
@@ -67,7 +72,11 @@ async function enrichTenantContext(
     };
   }
 
-  const permissions = await resolvePermissionsForTenantUser(context.tenantId, context.role);
+  const permissions = await resolvePermissionsForTenantUser(
+    context.tenantId,
+    context.role,
+    context.userId
+  );
   const modules = await loadTenantModules(context.tenantId);
   const addons = await loadTenantAddons(context.tenantId);
   const tenant = getTenantFromStore(context.tenantId);
@@ -111,7 +120,7 @@ function toUserContext(user: StoredAuthUser): UserContext & { email: string; ful
     role: user.role,
     scopeType: user.scopeType,
     branchId: user.branchId,
-    permissions: getPermissionsForRole(user.role),
+    permissions: isBuiltinRole(user.role) ? getPermissionsForRole(user.role) : [],
     email: user.email,
     fullName: user.fullName,
     subscribedModules: modules ?? (user.role === "super_admin" ? [] : undefined),
@@ -193,10 +202,14 @@ export async function loginWithCredentials(
       throw new Error("This account is inactive. Contact your administrator.");
     }
 
-    const roleParsed = roleSchema.safeParse(profile.role);
+    const roleParsed = parseProfileJobTitle(profile.role);
     const scopeParsed = scopeTypeSchema.safeParse(profile.scope_type);
-    if (!roleParsed.success || !scopeParsed.success) {
+    if (!roleParsed || !scopeParsed.success) {
       throw new Error("User profile has invalid role or scope");
+    }
+
+    if (!roleSchema.safeParse(roleParsed).success && profile.tenant_id) {
+      await assertValidUserJobTitle(profile.tenant_id, roleParsed);
     }
 
     if (profile.tenant_id) {
@@ -213,10 +226,12 @@ export async function loginWithCredentials(
     const userContext = await enrichTenantContext({
       userId: profile.id,
       tenantId: profile.tenant_id ?? "platform",
-      role: roleParsed.data,
+      role: roleParsed,
       scopeType: scopeParsed.data,
       branchId: profile.branch_id ?? undefined,
-      permissions: getPermissionsForRole(roleParsed.data),
+      permissions: getPermissionsForRole(
+        roleSchema.safeParse(roleParsed).success ? (roleParsed as Role) : "admin"
+      ),
       email: profile.email ?? parsed.data.email,
       fullName: profile.full_name ?? undefined
     });
@@ -260,10 +275,17 @@ async function userContextFromProfile(
   profile: UserProfileRow,
   emailFallback?: string
 ): Promise<(UserContext & { email?: string; fullName?: string }) | undefined> {
-  const roleParsed = roleSchema.safeParse(profile.role);
+  const roleParsed = parseProfileJobTitle(profile.role);
   const scopeParsed = scopeTypeSchema.safeParse(profile.scope_type);
-  if (!roleParsed.success || !scopeParsed.success) {
+  if (!roleParsed || !scopeParsed.success) {
     return undefined;
+  }
+
+  if (!roleSchema.safeParse(roleParsed).success && profile.tenant_id) {
+    const valid = await tenantJobTitleExists(profile.tenant_id, roleParsed);
+    if (!valid) {
+      return undefined;
+    }
   }
 
   if (profile.status === "inactive") {
@@ -284,10 +306,10 @@ async function userContextFromProfile(
   return enrichTenantContext({
     userId: profile.id,
     tenantId: profile.tenant_id ?? "platform",
-    role: roleParsed.data,
+    role: roleParsed,
     scopeType: scopeParsed.data,
     branchId: profile.branch_id ?? undefined,
-    permissions: getPermissionsForRole(roleParsed.data),
+    permissions: [],
     email: profile.email ?? emailFallback,
     fullName: profile.full_name ?? undefined
   });
@@ -541,11 +563,11 @@ const internalCreateUserSchema = withBranchAssignmentRefine(
 
 async function assertUserBranchAssignment(
   tenantId: string,
-  role: Role,
+  role: UserJobTitle,
   scopeType: ScopeType,
   branchId?: string | null
 ): Promise<void> {
-  if (!roleRequiresBranch(role)) {
+  if (!isBuiltinRole(role) || !roleRequiresBranch(role)) {
     return;
   }
   if (scopeType !== "branch") {
@@ -568,7 +590,7 @@ async function assertUserBranchAssignment(
 export async function createAuthUser(input: {
   email: string;
   password: string;
-  role: Role;
+  role: UserJobTitle;
   scopeType: z.infer<typeof scopeTypeSchema>;
   tenantId: string;
   branchId?: string;
@@ -596,6 +618,7 @@ export async function createAuthUser(input: {
   }
 
   assertTenantActive(parsed.data.tenantId);
+  await assertValidUserJobTitle(parsed.data.tenantId, parsed.data.role);
   await assertUserBranchAssignment(
     parsed.data.tenantId,
     parsed.data.role,
@@ -660,7 +683,11 @@ export async function createAuthUser(input: {
       role: parsed.data.role,
       scopeType: parsed.data.scopeType,
       branchId: parsed.data.branchId,
-      permissions: await resolvePermissionsForTenantUser(parsed.data.tenantId, parsed.data.role),
+      permissions: await resolvePermissionsForTenantUser(
+        parsed.data.tenantId,
+        parsed.data.role,
+        userId
+      ),
       email: parsed.data.email,
       fullName: parsed.data.fullName
     };
@@ -673,7 +700,7 @@ export type TenantUserRecord = {
   userId: string;
   email: string;
   fullName?: string;
-  role: Role;
+  role: string;
   scopeType: z.infer<typeof scopeTypeSchema>;
   branchId?: string;
   tenantId: string;
@@ -753,7 +780,7 @@ export async function getTenantUser(tenantId: string, userId: string): Promise<T
       userId: data.id,
       email: data.email ?? "",
       fullName: data.full_name ?? undefined,
-      role: data.role as Role,
+      role: data.role,
       scopeType: data.scope_type as z.infer<typeof scopeTypeSchema>,
       branchId: data.branch_id ?? undefined,
       tenantId: data.tenant_id,
@@ -794,6 +821,10 @@ export async function updateTenantUser(
   const nextScope = parsed.data.scopeType ?? existing.scopeType;
   const nextBranch =
     parsed.data.branchId !== undefined ? parsed.data.branchId : (existing.branchId ?? null);
+
+  if (parsed.data.role !== undefined) {
+    await assertValidUserJobTitle(tenantId, parsed.data.role);
+  }
 
   await assertUserBranchAssignment(tenantId, nextRole, nextScope, nextBranch);
 

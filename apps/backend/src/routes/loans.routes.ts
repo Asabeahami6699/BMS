@@ -22,6 +22,8 @@ import {
   updateLoanGroup
 } from "../services/loanGroupService.js";
 
+import { resolveRequestBranchFilter } from "../middleware/branchScope.js";
+
 export const loansRouter = Router();
 
 function contextFromReq(req: Request) {
@@ -41,7 +43,7 @@ loansRouter.get("/bootstrap", requirePermission("loans.read"), async (req, res) 
       res.status(401).json({ error: "Unauthorized" });
       return;
     }
-    res.json(await getLoansBootstrap(tenantId));
+    res.json(await getLoansBootstrap(tenantId, resolveRequestBranchFilter(req)));
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : "Failed to load loans" });
   }

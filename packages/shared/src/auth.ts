@@ -30,10 +30,33 @@ export const roleSchema = z.enum([
   "auditor",
   "accountant",
   "teller",
+  "back_officer",
   "customer_service"
 ]);
 
 export type Role = z.infer<typeof roleSchema>;
+
+/** Tenant-defined job title keys stored in users.role (not platform built-ins). */
+export const customJobTitleKeySchema = z
+  .string()
+  .min(3)
+  .max(50)
+  .regex(/^[a-z][a-z0-9_]*$/)
+  .refine((key) => !roleSchema.safeParse(key).success, "Reserved system job title key");
+
+export type CustomJobTitleKey = z.infer<typeof customJobTitleKeySchema>;
+
+/** Primary job title on a user: built-in Role or tenant-defined key. */
+export const userJobTitleSchema = z.union([roleSchema, customJobTitleKeySchema]);
+
+export type UserJobTitle = z.infer<typeof userJobTitleSchema>;
+
+export function isBuiltinRole(role: string): role is Role {
+  return roleSchema.safeParse(role).success;
+}
+
+export const tenantRoleKindSchema = z.enum(["job_title", "extra_duties"]);
+export type TenantRoleKind = z.infer<typeof tenantRoleKindSchema>;
 
 export const scopeTypeSchema = z.enum(["head_office", "branch"]);
 export type ScopeType = z.infer<typeof scopeTypeSchema>;
@@ -46,10 +69,10 @@ export function roleRequiresBranch(role: Role): boolean {
 }
 
 function assertBranchAssignment(
-  data: { role: Role; scopeType: ScopeType; branchId?: string | null },
+  data: { role: UserJobTitle; scopeType: ScopeType; branchId?: string | null },
   ctx: z.RefinementCtx
 ): void {
-  if (!roleRequiresBranch(data.role)) {
+  if (!isBuiltinRole(data.role) || !roleRequiresBranch(data.role)) {
     return;
   }
   if (data.scopeType !== "branch") {
@@ -83,7 +106,7 @@ export const createTenantAdminSchema = z.object({
 export const createTenantUserBaseSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
-  role: roleSchema,
+  role: userJobTitleSchema,
   scopeType: scopeTypeSchema,
   branchId: z.string().optional(),
   fullName: z.string().min(1).optional()
@@ -102,7 +125,7 @@ export type AccountStatus = z.infer<typeof accountStatusSchema>;
 
 export const updateTenantUserBaseSchema = z.object({
   email: z.string().email().optional(),
-  role: roleSchema.optional(),
+  role: userJobTitleSchema.optional(),
   scopeType: scopeTypeSchema.optional(),
   branchId: z.string().nullable().optional(),
   fullName: z.string().min(1).optional(),
@@ -111,10 +134,12 @@ export const updateTenantUserBaseSchema = z.object({
 
 export const updateTenantUserSchema = updateTenantUserBaseSchema.superRefine((data, ctx) => {
   if (data.role !== undefined) {
+    const fallbackScope =
+      isBuiltinRole(data.role) && roleRequiresBranch(data.role) ? "branch" : "head_office";
     assertBranchAssignment(
       {
         role: data.role,
-        scopeType: data.scopeType ?? (roleRequiresBranch(data.role) ? "branch" : "head_office"),
+        scopeType: data.scopeType ?? fallbackScope,
         branchId: data.branchId
       },
       ctx
@@ -181,7 +206,17 @@ export const permissionSchema = z.enum([
   "loans.applications.create",
   "loans.applications.approve",
   "loans.disburse",
-  "loans.repayments.create"
+  "loans.repayments.create",
+  "treasury.read",
+  "treasury.cash.move",
+  "treasury.reconcile",
+  "agency.withdrawals.approve",
+  "agency.bank.execute",
+  "agency.withdrawals.pay",
+  "agency.deposits.record",
+  "agency.accounts.create",
+  "banking.products.read",
+  "banking.products.manage"
 ]);
 
 export type Permission = z.infer<typeof permissionSchema>;

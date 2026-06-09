@@ -21,6 +21,7 @@ const ROLE_LABELS: Record<AppRole, string> = {
   auditor: "Auditor",
   accountant: "Accountant",
   teller: "Teller",
+  back_officer: "Back Officer",
   customer_service: "Customer service"
 };
 

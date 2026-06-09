@@ -169,7 +169,7 @@ export async function applyRoleDefaultToStaffWithRole(
     "./userPayrollProfileService.js"
   );
   const supabase = getSupabaseAdminClient();
-  let users: Array<{ userId: string; role: Role }> = [];
+  let users: Array<{ userId: string; role: string }> = [];
 
   if (supabase) {
     const { data } = await supabase
@@ -177,7 +177,7 @@ export async function applyRoleDefaultToStaffWithRole(
       .select("id, role")
       .eq("tenant_id", tenantId)
       .eq("role", role);
-    users = (data ?? []).map((row) => ({ userId: String(row.id), role: row.role as Role }));
+    users = (data ?? []).map((row) => ({ userId: String(row.id), role: String(row.role) }));
   } else {
     users = listUsersByTenant(tenantId)
       .filter((u) => u.role === role)

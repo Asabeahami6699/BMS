@@ -5,6 +5,7 @@ import { validateBody } from "../middleware/validateBody.js";
 import { aiRateLimit } from "../middleware/rateLimit.js";
 import {
   generateLoanApplicationReview,
+  generatePlatformAnalysis,
   generateWorkspaceHelp,
   getAiStatus,
   OllamaUnavailableError
@@ -26,7 +27,9 @@ aiRouter.post("/help", validateBody(aiHelpRequestSchema), async (req, res) => {
   }
 
   try {
-    const result = await generateWorkspaceHelp(req.userContext, req.body.message);
+    const result = await generateWorkspaceHelp(req.userContext, req.body.message, {
+      includeData: req.body.includeData
+    });
     res.json(result);
   } catch (error) {
     if (error instanceof OllamaUnavailableError) {
@@ -34,6 +37,24 @@ aiRouter.post("/help", validateBody(aiHelpRequestSchema), async (req, res) => {
       return;
     }
     res.status(500).json({ error: error instanceof Error ? error.message : "AI help failed" });
+  }
+});
+
+aiRouter.post("/analyze", validateBody(aiHelpRequestSchema), async (req, res) => {
+  if (!req.userContext) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  try {
+    const result = await generatePlatformAnalysis(req.userContext, req.body.message);
+    res.json(result);
+  } catch (error) {
+    if (error instanceof OllamaUnavailableError) {
+      res.status(503).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: error instanceof Error ? error.message : "AI analysis failed" });
   }
 });
 

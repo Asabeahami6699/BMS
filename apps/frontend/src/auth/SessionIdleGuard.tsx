@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getAuthSession, refreshAuthSession } from "../app/api";
+import { withNetworkRetry } from "../lib/networkError";
 import { useAuth } from "./AuthContext";
 import {
   SESSION_ACTIVITY_THROTTLE_MS,
@@ -125,12 +126,12 @@ export function SessionIdleGuard() {
   const handleStaySignedIn = useCallback(async () => {
     setBusy(true);
     try {
-      const refreshed = await refreshAuthSession();
+      const refreshed = await withNetworkRetry(() => refreshAuthSession(), { maxMs: 10_000 });
       if (!refreshed) {
         showExpired();
         return;
       }
-      await refreshMe();
+      await withNetworkRetry(() => refreshMe(), { maxMs: 10_000 });
       setOpen(false);
       openRef.current = false;
       clearGraceTimer();

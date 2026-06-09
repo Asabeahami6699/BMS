@@ -7,6 +7,8 @@ import {
   postCollectionBatch
 } from "../services/collectionBatchService.js";
 
+import { resolveRequestBranchFilter } from "../middleware/branchScope.js";
+
 export const collectionBatchesRouter = Router();
 
 collectionBatchesRouter.get("/pending", requirePermission("transactions.read"), async (req, res) => {
@@ -22,7 +24,7 @@ collectionBatchesRouter.get("/pending", requirePermission("transactions.read"), 
 
   const businessDate = typeof req.query.businessDate === "string" ? req.query.businessDate : undefined;
   const fieldAgentId = typeof req.query.fieldAgentId === "string" ? req.query.fieldAgentId : undefined;
-  const branchId = typeof req.query.branchId === "string" ? req.query.branchId : undefined;
+  const branchId = resolveRequestBranchFilter(req);
 
   try {
     const batches = await listPendingCollectionBatches(

@@ -17,14 +17,14 @@ export const TENANT_PRODUCT_MODULES: TenantProductModule[] = [
 ];
 
 export const MODULE_LABELS: Record<TenantProductModule, string> = {
-  banking: "Banking",
+  banking: "Agency Banking",
   susu_management: "Susu Management",
   loans_credit: "Loans",
   treasury: "Treasury"
 };
 
 export const MODULE_DESCRIPTIONS: Record<TenantProductModule, string> = {
-  banking: "Retail and counter banking department.",
+  banking: "Branch treasury, teller counter, and agency banking workflows (deposits, withdrawals, bank products).",
   susu_management: "Susu desk — collections, agents, coordinators, and payroll.",
   loans_credit: "Loans department — products, disbursements, and repayments.",
   treasury: "Treasury operations — liquidity, fixed deposits, and cash management."

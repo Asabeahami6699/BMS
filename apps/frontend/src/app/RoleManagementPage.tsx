@@ -1,34 +1,62 @@
 import { useEffect, useMemo, useState } from "react";
-import type { Permission, PermissionCatalogEntry, PermissionGroupId, Role } from "@bms/shared";
+import type {
+  CustomRoleProductScope,
+  Permission,
+  PermissionCatalogEntry,
+  PermissionGroupId,
+  PermissionProductSection,
+  Role
+} from "@bms/shared";
 import {
   BUILTIN_ROLE_LABELS,
-  NAV_MATRIX_ASSIGNABLE_ROLES,
+  MODULE_LABELS,
   PERMISSION_GROUP_LABELS,
-  PERMISSION_CATALOG,
   TENANT_EDITABLE_BUILTIN_ROLES,
+  TENANT_PRODUCT_MODULES,
+  catalogEntriesForCustomRoleScope,
   catalogEntriesForTenant,
+  customRoleProductScopeLabel,
+  hasTenantModule,
+  permissionProductSectionsForCustomRoleScope,
   permissionProductSectionsForTenant,
+  validateCustomRoleDuties,
   validateDutySelection,
   validateSusuNavVisibilityItems
 } from "@bms/shared";
-import type { AppRole, BuiltinRolePermissionView, SusuNavVisibilityConfigItem } from "./api";
+import type { AppRole, Branch, BuiltinRolePermissionView, SusuNavVisibilityConfigItem, UserRecord } from "./api";
 import {
   assignRole,
   createRole,
+  createTenantJobTitle,
+  deleteTenantJobTitle,
   getBuiltinRolePermissions,
   getRoleAssignments,
   getRoles,
   getSusuNavVisibilityConfig,
   getTenantId,
+  listBranches,
+  listUsers,
   resetBuiltinRolePermissions,
   resetSusuNavVisibilityConfig,
   saveBuiltinRolePermissions,
-  saveSusuNavVisibilityConfig
+  saveSusuNavVisibilityConfig,
+  updateTenantJobTitle
 } from "./api";
+import { UserFormModal } from "./UserFormModal";
 import { subscribeToTenantRealtime } from "./realtime";
 import { useToast } from "../components/Toast";
 import { toUserFacingError } from "../lib/networkError";
 import { useAuth } from "../auth/AuthContext";
+import { RolesSectionHeader } from "./roles/RolesSectionHeader";
+import { SidebarAccessSection } from "./roles/SidebarAccessSection";
+import { RolesFormField, RolesInlineLabel, FieldHelpTip } from "./roles/RolesFormField";
+import {
+  ROLES_PAGE_GUIDE_STEPS,
+  ROLES_PAGE_TABS,
+  ROLES_FIELD_HELP,
+  ROLES_SECTION_HELP,
+  type RolesPageTab
+} from "./roles/rolesPageGuide";
 
 type Props = {
   role: AppRole;
@@ -55,19 +83,39 @@ export function RoleManagementPage({ role }: Props) {
   const { user } = useAuth();
   const subscribedModules = user?.subscribedModules;
   const canManageRoles = role === "admin";
-  const [roleKey, setRoleKey] = useState("branch_supervisor");
-  const [displayName, setDisplayName] = useState("Branch Supervisor");
+  const [activeTab, setActiveTab] = useState<RolesPageTab>("overview");
+  const [roleKey, setRoleKey] = useState("susu_cash_supervisor");
+  const [displayName, setDisplayName] = useState("Susu cash supervisor");
   const [duties, setDuties] = useState<Permission[]>(["customers.read", "transactions.read"]);
   const [assignUserId, setAssignUserId] = useState("");
-  const [assignRoleKey, setAssignRoleKey] = useState("branch_supervisor");
-  const [roles, setRoles] = useState<Array<{ roleKey: string; displayName: string; duties: string[] }>>([]);
+  const [assignRoleKey, setAssignRoleKey] = useState("");
+  const [users, setUsers] = useState<UserRecord[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [userModalOpen, setUserModalOpen] = useState(false);
+  const [roles, setRoles] = useState<
+    Array<{
+      roleKey: string;
+      displayName: string;
+      roleKind?: "job_title" | "extra_duties";
+      productScope?: CustomRoleProductScope;
+      duties: string[];
+    }>
+  >([]);
   const [assignments, setAssignments] = useState<Array<{ userId: string; roleKey: string }>>([]);
   const [builtinViews, setBuiltinViews] = useState<BuiltinRolePermissionView[]>([]);
   const [editingBuiltin, setEditingBuiltin] = useState<Role | null>(null);
   const [builtinDraft, setBuiltinDraft] = useState<Permission[]>([]);
   const [builtinSaving, setBuiltinSaving] = useState(false);
+  const [jobTitleKey, setJobTitleKey] = useState("branch_supervisor");
+  const [jobTitleName, setJobTitleName] = useState("Branch supervisor");
+  const [jobTitleScope, setJobTitleScope] = useState<CustomRoleProductScope>("susu_management");
+  const [jobTitleDuties, setJobTitleDuties] = useState<Permission[]>(["customers.read", "transactions.read"]);
+  const [editingTenantJobTitle, setEditingTenantJobTitle] = useState<string | null>(null);
+  const [tenantJobTitleDraft, setTenantJobTitleDraft] = useState<Permission[]>([]);
+  const [tenantJobTitleSaving, setTenantJobTitleSaving] = useState(false);
   const [navItems, setNavItems] = useState<SusuNavVisibilityConfigItem[]>([]);
   const [navSaving, setNavSaving] = useState(false);
+  const [customRoleScope, setCustomRoleScope] = useState<CustomRoleProductScope>("susu_management");
   const [expandedNavPath, setExpandedNavPath] = useState<string | null>(null);
 
   const tenantCatalog = useMemo(
@@ -80,31 +128,128 @@ export function RoleManagementPage({ role }: Props) {
     [subscribedModules]
   );
 
+  const customRoleCatalog = useMemo(
+    () => catalogEntriesForCustomRoleScope(subscribedModules, customRoleScope),
+    [subscribedModules, customRoleScope]
+  );
+
+  const customRoleSections = useMemo(
+    () => permissionProductSectionsForCustomRoleScope(subscribedModules, customRoleScope),
+    [subscribedModules, customRoleScope]
+  );
+
+  const customRoleScopeOptions = useMemo(() => {
+    const options: Array<{ value: CustomRoleProductScope; label: string }> = [
+      { value: "all", label: customRoleProductScopeLabel("all") }
+    ];
+    for (const module of TENANT_PRODUCT_MODULES) {
+      if (hasTenantModule(subscribedModules, module)) {
+        options.push({ value: module, label: MODULE_LABELS[module] });
+      }
+    }
+    return options;
+  }, [subscribedModules]);
+
+  const extraDutyRoles = useMemo(
+    () => roles.filter((role) => (role.roleKind ?? "extra_duties") === "extra_duties"),
+    [roles]
+  );
+
+  const tenantJobTitleRoles = useMemo(
+    () => roles.filter((role) => role.roleKind === "job_title"),
+    [roles]
+  );
+
+  const jobTitleCatalog = useMemo(
+    () => catalogEntriesForCustomRoleScope(subscribedModules, jobTitleScope),
+    [subscribedModules, jobTitleScope]
+  );
+
+  const jobTitleSections = useMemo(
+    () => permissionProductSectionsForCustomRoleScope(subscribedModules, jobTitleScope),
+    [subscribedModules, jobTitleScope]
+  );
+
+  const jobTitleCatalogByGroup = useMemo(
+    () => catalogByGroupFrom(jobTitleCatalog),
+    [jobTitleCatalog]
+  );
+
+  const allJobTitlePermissions = useMemo(
+    () => jobTitleCatalog.map((entry) => entry.id),
+    [jobTitleCatalog]
+  );
+
+  const jobTitleValidation = useMemo(
+    () => validateCustomRoleDuties(jobTitleDuties, jobTitleScope, subscribedModules),
+    [jobTitleDuties, jobTitleScope, subscribedModules]
+  );
+
+  const tenantJobTitleValidation = useMemo(
+    () => validateDutySelection(tenantJobTitleDraft),
+    [tenantJobTitleDraft]
+  );
+
   const navPermissionOptions = useMemo(() => tenantCatalog.map((e) => e.id), [tenantCatalog]);
 
-  const validation = useMemo(() => validateDutySelection(duties), [duties]);
+  const validation = useMemo(
+    () => validateCustomRoleDuties(duties, customRoleScope, subscribedModules),
+    [duties, customRoleScope, subscribedModules]
+  );
   const builtinValidation = useMemo(() => validateDutySelection(builtinDraft), [builtinDraft]);
 
-  const catalogByGroup = useMemo(() => {
+  useEffect(() => {
+    const allowed = new Set(customRoleCatalog.map((entry) => entry.id));
+    setDuties((prev) => prev.filter((duty) => allowed.has(duty as Permission)));
+  }, [customRoleCatalog]);
+
+  useEffect(() => {
+    const allowed = new Set(jobTitleCatalog.map((entry) => entry.id));
+    setJobTitleDuties((prev) => prev.filter((duty) => allowed.has(duty as Permission)));
+    setTenantJobTitleDraft((prev) => prev.filter((duty) => allowed.has(duty as Permission)));
+  }, [jobTitleCatalog]);
+
+  function catalogByGroupFrom(
+    catalog: PermissionCatalogEntry[]
+  ): Map<PermissionGroupId, PermissionCatalogEntry[]> {
     const map = new Map<PermissionGroupId, PermissionCatalogEntry[]>();
-    for (const entry of tenantCatalog) {
+    for (const entry of catalog) {
       const list = map.get(entry.group) ?? [];
       list.push(entry);
       map.set(entry.group, list);
     }
     return map;
-  }, [tenantCatalog]);
+  }
 
-  const allCatalogPermissions = useMemo(() => tenantCatalog.map((e) => e.id), [tenantCatalog]);
+  const tenantCatalogByGroup = useMemo(() => catalogByGroupFrom(tenantCatalog), [tenantCatalog]);
+  const customRoleCatalogByGroup = useMemo(
+    () => catalogByGroupFrom(customRoleCatalog),
+    [customRoleCatalog]
+  );
+
+  const allCustomRolePermissions = useMemo(
+    () => customRoleCatalog.map((entry) => entry.id),
+    [customRoleCatalog]
+  );
+
+  const allCatalogPermissions = useMemo(() => tenantCatalog.map((entry) => entry.id), [tenantCatalog]);
+
+  const subscribedProductLabels = useMemo(
+    () =>
+      TENANT_PRODUCT_MODULES.filter((m) => hasTenantModule(subscribedModules, m)).map((m) => MODULE_LABELS[m]),
+    [subscribedModules]
+  );
 
   function renderPermissionGroups(
     selected: Permission[],
     onToggle: (duty: Permission) => void,
+    sections: PermissionProductSection[],
+    catalogByGroup: Map<PermissionGroupId, PermissionCatalogEntry[]>,
     disabled?: boolean
   ) {
-    return productSections.map((section) => (
+    return sections.map((section) => (
       <div key={section.scope} className="roles-page__product-section">
-        <h3 className="roles-page__product-heading">{section.label}</h3>
+        <h4 className="roles-page__product-heading">{section.label}</h4>
         <div className="roles-page__duty-groups">
           {section.groupIds.map((groupId) => {
             const entries = catalogByGroup.get(groupId);
@@ -113,10 +258,16 @@ export function RoleManagementPage({ role }: Props) {
             }
             return (
               <div key={groupId} className="roles-page__duty-group">
-                <h4>{PERMISSION_GROUP_LABELS[groupId]}</h4>
+                <h5 className="roles-page__duty-group-title">
+                  {PERMISSION_GROUP_LABELS[groupId]}
+                  <FieldHelpTip label={`${PERMISSION_GROUP_LABELS[groupId]} duties`}>
+                    Permissions in the {PERMISSION_GROUP_LABELS[groupId].toLowerCase()} group. Grant
+                    only what this role needs; the editor warns if required companion duties are missing.
+                  </FieldHelpTip>
+                </h5>
                 <div className="duty-grid">
                   {entries.map((entry) => (
-                    <label key={entry.id} className="duty-item" title={entry.description}>
+                    <label key={entry.id} className="duty-item roles-page__duty-item">
                       <input
                         type="checkbox"
                         checked={selected.includes(entry.id)}
@@ -124,7 +275,10 @@ export function RoleManagementPage({ role }: Props) {
                         onChange={() => onToggle(entry.id)}
                       />
                       <span>
-                        <strong>{entry.label}</strong>
+                        <strong className="roles-page__duty-item-label">
+                          {entry.label}
+                          <FieldHelpTip label={entry.label}>{entry.description}</FieldHelpTip>
+                        </strong>
                         <small>{entry.id}</small>
                       </span>
                     </label>
@@ -140,16 +294,24 @@ export function RoleManagementPage({ role }: Props) {
 
   async function loadRoles() {
     try {
-      const [data, assignmentData, builtin, nav] = await Promise.all([
+      const [data, assignmentData, builtin, nav, userRows, branchRows] = await Promise.all([
         getRoles(),
         getRoleAssignments(),
         getBuiltinRolePermissions(),
-        getSusuNavVisibilityConfig()
+        getSusuNavVisibilityConfig(),
+        listUsers().catch(() => []),
+        listBranches().catch(() => [])
       ]);
       setRoles(data);
       setAssignments(assignmentData);
       setBuiltinViews(builtin);
       setNavItems(nav);
+      setUsers(userRows);
+      setBranches(branchRows);
+      const extraRoles = data.filter((role) => (role.roleKind ?? "extra_duties") === "extra_duties");
+      if (!assignRoleKey && extraRoles[0]?.roleKey) {
+        setAssignRoleKey(extraRoles[0].roleKey);
+      }
     } catch (error) {
       showToast(toUserFacingError(error, "Failed to load roles"), "error");
     }
@@ -212,6 +374,88 @@ export function RoleManagementPage({ role }: Props) {
     }
   }
 
+  function openTenantJobTitleEditor(roleKey: string) {
+    const match = tenantJobTitleRoles.find((role) => role.roleKey === roleKey);
+    setEditingTenantJobTitle(roleKey);
+    setTenantJobTitleDraft((match?.duties ?? []) as Permission[]);
+  }
+
+  function toggleTenantJobTitleDuty(duty: Permission) {
+    setTenantJobTitleDraft((prev) =>
+      prev.includes(duty) ? prev.filter((item) => item !== duty) : [...prev, duty]
+    );
+  }
+
+  function toggleJobTitleDuty(duty: Permission) {
+    setJobTitleDuties((prev) =>
+      prev.includes(duty) ? prev.filter((item) => item !== duty) : [...prev, duty]
+    );
+  }
+
+  async function handleCreateJobTitle() {
+    if (!toastValidation(showToast, jobTitleValidation)) {
+      return;
+    }
+    try {
+      await createTenantJobTitle({
+        roleKey: jobTitleKey.trim(),
+        displayName: jobTitleName.trim(),
+        productScope: jobTitleScope,
+        duties: jobTitleDuties
+      });
+      showToast(`Job title "${jobTitleName}" created.`, "success");
+      await loadRoles();
+    } catch (error) {
+      showToast(toUserFacingError(error, "Failed to create job title"), "error");
+    }
+  }
+
+  async function handleSaveTenantJobTitle() {
+    if (!editingTenantJobTitle) {
+      showToast("Select a company job title to edit first.", "error");
+      return;
+    }
+    if (!toastValidation(showToast, tenantJobTitleValidation)) {
+      return;
+    }
+    setTenantJobTitleSaving(true);
+    try {
+      const match = tenantJobTitleRoles.find((role) => role.roleKey === editingTenantJobTitle);
+      await updateTenantJobTitle(editingTenantJobTitle, {
+        displayName: match?.displayName,
+        productScope: match?.productScope,
+        duties: tenantJobTitleDraft
+      });
+      showToast("Saved company job title permissions. Staff should refresh or sign in again.", "success");
+      await loadRoles();
+    } catch (error) {
+      showToast(toUserFacingError(error, "Failed to save job title"), "error");
+    } finally {
+      setTenantJobTitleSaving(false);
+    }
+  }
+
+  async function handleDeleteTenantJobTitle(roleKey: string, displayName: string) {
+    if (!window.confirm(`Delete job title "${displayName}"? Users must be reassigned first.`)) {
+      return;
+    }
+    try {
+      await deleteTenantJobTitle(roleKey);
+      if (editingTenantJobTitle === roleKey) {
+        setEditingTenantJobTitle(null);
+      }
+      showToast(`Deleted job title "${displayName}".`, "success");
+      await loadRoles();
+    } catch (error) {
+      showToast(toUserFacingError(error, "Failed to delete job title"), "error");
+    }
+  }
+
+  function tenantJobTitleLabel(roleKey: string): string {
+    const match = tenantJobTitleRoles.find((role) => role.roleKey === roleKey);
+    return match?.displayName ?? roleKey;
+  }
+
   useEffect(() => {
     void loadRoles();
     const unsubscribe = subscribeToTenantRealtime({
@@ -236,32 +480,36 @@ export function RoleManagementPage({ role }: Props) {
   function renderDutyCheckAllToolbar(
     selected: Permission[],
     onChange: (next: Permission[]) => void,
+    allPermissions: Permission[],
     disabled?: boolean
   ) {
     return (
       <div className="roles-page__check-all">
-        <button
-          type="button"
-          className="button-link"
-          disabled={disabled}
-          onClick={() => onChange([...allCatalogPermissions])}
-        >
-          Check all
-        </button>
-        <span className="muted" aria-hidden>
-          ·
-        </span>
-        <button
-          type="button"
-          className="button-link"
-          disabled={disabled}
-          onClick={() => onChange([])}
-        >
-          Uncheck all
-        </button>
-        <span className="muted roles-page__check-count">
-          {selected.length} / {allCatalogPermissions.length} selected
-        </span>
+        <RolesInlineLabel label="Duty selection" help={ROLES_FIELD_HELP.dutyCheckAll} />
+        <div className="roles-page__check-all-actions">
+          <button
+            type="button"
+            className="button-link"
+            disabled={disabled}
+            onClick={() => onChange([...allPermissions])}
+          >
+            Check all
+          </button>
+          <span className="muted" aria-hidden>
+            ·
+          </span>
+          <button
+            type="button"
+            className="button-link"
+            disabled={disabled}
+            onClick={() => onChange([])}
+          >
+            Uncheck all
+          </button>
+          <span className="muted roles-page__check-count">
+            {selected.length} / {allPermissions.length} selected
+          </span>
+        </div>
       </div>
     );
   }
@@ -271,7 +519,13 @@ export function RoleManagementPage({ role }: Props) {
       return;
     }
     try {
-      await createRole({ roleKey, displayName, duties });
+      await createRole({
+        roleKey,
+        displayName,
+        roleKind: "extra_duties",
+        productScope: customRoleScope,
+        duties
+      });
       showToast(`Custom role "${displayName}" created.`, "success");
       await loadRoles();
     } catch (error) {
@@ -293,10 +547,10 @@ export function RoleManagementPage({ role }: Props) {
     if (!item) {
       return;
     }
-    const roles = item.roles.includes(jobRole)
+    const nextRoles = item.roles.includes(jobRole)
       ? item.roles.filter((r) => r !== jobRole)
       : [...item.roles, jobRole];
-    updateNavItem(navPath, { roles });
+    updateNavItem(navPath, { roles: nextRoles });
   }
 
   function toggleNavPermission(navPath: string, permission: Permission) {
@@ -356,7 +610,7 @@ export function RoleManagementPage({ role }: Props) {
 
   async function handleAssignRole() {
     if (!assignUserId.trim() || !assignRoleKey.trim()) {
-      showToast("Enter a user ID and custom role key.", "error");
+      showToast("Select a user and custom role.", "error");
       return;
     }
     try {
@@ -368,313 +622,532 @@ export function RoleManagementPage({ role }: Props) {
     }
   }
 
+  function userLabel(userId: string): string {
+    const match = users.find((u) => u.userId === userId);
+    if (!match) {
+      return userId;
+    }
+    return match.fullName ? `${match.fullName} (${match.email})` : match.email;
+  }
+
+  function customRoleLabel(roleKey: string): string {
+    const match = extraDutyRoles.find((r) => r.roleKey === roleKey);
+    return match ? match.displayName : roleKey;
+  }
+
   return (
     <div className="roles-page">
-      <header className="roles-page__header card">
-        <h2>Roles &amp; permissions</h2>
-        <p className="muted">
-          Staff <strong>job titles</strong> (admin, coordinator, teller, etc.) are set on each user and control API
-          access. <strong>Custom roles</strong> below add extra duty bundles for reporting — they do not replace the
-          user&apos;s job title yet.
-        </p>
+      <header className="roles-page__hero card roles-animate-in">
+        <div className="roles-page__hero-text">
+          <p className="roles-page__eyebrow">Settings · Access control</p>
+          <h2>Roles &amp; permissions</h2>
+          <p className="muted">
+            Configure job titles, department menus, and optional custom duty bundles for{" "}
+            {subscribedProductLabels.length > 0
+              ? subscribedProductLabels.join(", ")
+              : "your subscribed products"}
+            .
+          </p>
+        </div>
+        <nav className="roles-page__tabs" aria-label="Roles page sections">
+          {ROLES_PAGE_TABS.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              className={`roles-page__tab${activeTab === tab.id ? " is-active" : ""}`}
+              onClick={() => setActiveTab(tab.id)}
+            >
+              <span className="roles-page__tab-label">{tab.label}</span>
+              <span className="roles-page__tab-short">{tab.short}</span>
+            </button>
+          ))}
+        </nav>
       </header>
 
-      <section className="card roles-page__guide">
-        <h3>How to set up without conflicts</h3>
-        <ol className="roles-page__steps">
-          <li>
-            Permissions are grouped by your subscribed products (Susu, Loans, etc.). Only duties for enabled
-            departments are listed here.
-          </li>
-          <li>
-            Assign the correct <strong>job title</strong> under Settings → Users, then use <strong>Edit permissions</strong>{" "}
-            below to add or remove duties for that title (saved per company).
-          </li>
-          <li>
-            Use the <strong>Susu sidebar matrix</strong> below to see which menu items each title can access when they
-            hold the listed permissions.
-          </li>
-          <li>
-            Optional: create a <strong>custom role</strong> only when you need a named duty bundle; avoid duplicating
-            permissions already granted by the job title.
-          </li>
-          <li>
-            Grant <strong>requires</strong> dependencies together (e.g. <code>users.update</code> needs{" "}
-            <code>users.read</code>) — the editor warns you before saving.
-          </li>
-          <li>
-            Till float: coordinators need <code>branch_float.manage</code> + <code>transactions.read</code>; tellers need{" "}
-            <code>transactions.read</code> only at the counter.
-          </li>
-        </ol>
-      </section>
-
-      <section className="card roles-page__builtin">
-        <h3>Built-in job titles (tenant)</h3>
-        <p className="muted">
-          Check or uncheck permissions for each title. Changes apply to every user with that job title after they refresh
-          or sign in again.
-        </p>
-        <div className="roles-page__builtin-grid">
-          {TENANT_EDITABLE_BUILTIN_ROLES.map((builtinRole) => {
-            const view = builtinViews.find((v) => v.role === builtinRole);
-            const effective = view?.effectiveDuties ?? [];
-            const isEditing = editingBuiltin === builtinRole;
-            return (
-              <article
-                key={builtinRole}
-                className={`roles-page__builtin-card${isEditing ? " is-editing" : ""}`}
-              >
-                <div className="roles-page__builtin-card-head">
-                  <div>
-                    <h4>{BUILTIN_ROLE_LABELS[builtinRole]}</h4>
-                    <p className="muted">
-                      <code>{builtinRole}</code> · {effective.length} active
-                      {view?.isCustomized ? (
-                        <span className="roles-page__custom-badge"> Customized</span>
-                      ) : (
-                        <span> · defaults</span>
-                      )}
-                    </p>
-                  </div>
-                  {canManageRoles ? (
-                    <div className="roles-page__builtin-actions">
-                      {!isEditing ? (
-                        <button
-                          type="button"
-                          className="button secondary"
-                          onClick={() => openBuiltinEditor(builtinRole)}
-                        >
-                          Edit permissions
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          className="button-link"
-                          onClick={() => setEditingBuiltin(null)}
-                        >
-                          Close
-                        </button>
-                      )}
-                      {view?.isCustomized ? (
-                        <button
-                          type="button"
-                          className="button-link"
-                          disabled={builtinSaving}
-                          onClick={() => void handleResetBuiltin(builtinRole)}
-                        >
-                          Reset to defaults
-                        </button>
-                      ) : null}
-                    </div>
-                  ) : null}
+      {activeTab === "overview" ? (
+        <section className="card roles-page__section roles-animate-in roles-animate-in--2">
+          <RolesSectionHeader
+            title="User guide for new tenants"
+            subtitle="Follow these steps in order. Hover the i icon on any tab for section-specific help."
+            help={ROLES_SECTION_HELP.overview}
+          />
+          <ol className="roles-page__guide-steps">
+            {ROLES_PAGE_GUIDE_STEPS.map((step, index) => (
+              <li key={step.title} className="roles-page__guide-step roles-animate-in" style={{ animationDelay: `${index * 60}ms` }}>
+                <span className="roles-page__guide-step-num">{index + 1}</span>
+                <div>
+                  <strong>{step.title}</strong>
+                  <p className="muted">{step.body}</p>
                 </div>
-
-                {!isEditing ? (
-                  <ul className="roles-page__perm-list">
-                    {effective.map((p) => (
-                      <li key={p}>
-                        <code>{p}</code>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <div className="roles-page__builtin-editor">
-                    {renderDutyCheckAllToolbar(builtinDraft, setBuiltinDraft, builtinSaving)}
-                    {renderPermissionGroups(builtinDraft, toggleBuiltinDuty, builtinSaving)}
-                    <button
-                      type="button"
-                      className="button"
-                      disabled={builtinSaving || !canManageRoles}
-                      onClick={() => void handleSaveBuiltin()}
-                    >
-                      {builtinSaving ? "Saving…" : "Save permissions"}
-                    </button>
-                  </div>
-                )}
-              </article>
-            );
-          })}
-        </div>
-      </section>
-
-      <section className="card roles-page__nav-matrix">
-        <div className="roles-page__nav-matrix-head">
-          <div>
-            <h3>Susu Management sidebar — who sees what</h3>
-            <p className="muted">
-              Choose which <strong>job titles</strong> can see each menu item and which <strong>permissions</strong> are
-              required. Example: restrict Till float to admin only even if coordinators have till permissions.
-            </p>
+              </li>
+            ))}
+          </ol>
+          <div className="roles-page__guide-cards">
+            <button type="button" className="roles-page__guide-card" onClick={() => setActiveTab("job-titles")}>
+              <strong>Job titles</strong>
+              <span className="muted">Edit permissions for admin, teller, coordinator…</span>
+            </button>
+            <button type="button" className="roles-page__guide-card" onClick={() => setActiveTab("sidebar")}>
+              <strong>Sidebar access</strong>
+              <span className="muted">Susu, Loans, Agency Banking, Treasury menus</span>
+            </button>
+            <button type="button" className="roles-page__guide-card" onClick={() => setActiveTab("custom-roles")}>
+              <strong>Custom roles</strong>
+              <span className="muted">Product-scoped duty bundles</span>
+            </button>
           </div>
+        </section>
+      ) : null}
+
+      {activeTab === "job-titles" ? (
+        <section className="card roles-page__section roles-animate-in">
+          <RolesSectionHeader
+            title="System & company job titles"
+            subtitle="Customize platform titles or create your own. Changes apply after staff refresh or sign in again."
+            help={ROLES_SECTION_HELP.jobTitles}
+          />
+          <h3 className="roles-page__subsection-title">System job titles</h3>
+          <div className="roles-page__builtin-grid">
+            {TENANT_EDITABLE_BUILTIN_ROLES.map((builtinRole, index) => {
+              const view = builtinViews.find((v) => v.role === builtinRole);
+              const effective = view?.effectiveDuties ?? [];
+              const isEditing = editingBuiltin === builtinRole;
+              return (
+                <article
+                  key={builtinRole}
+                  className={`roles-page__builtin-card roles-animate-in${isEditing ? " is-editing" : ""}`}
+                  style={{ animationDelay: `${index * 40}ms` }}
+                >
+                  <div className="roles-page__builtin-card-head">
+                    <div>
+                      <h4>{BUILTIN_ROLE_LABELS[builtinRole]}</h4>
+                      <p className="muted">
+                        <code>{builtinRole}</code> · {effective.length} active
+                        {view?.isCustomized ? (
+                          <span className="roles-page__custom-badge"> Customized</span>
+                        ) : (
+                          <span> · defaults</span>
+                        )}
+                      </p>
+                    </div>
+                    {canManageRoles ? (
+                      <div className="roles-page__builtin-actions">
+                        {!isEditing ? (
+                          <button
+                            type="button"
+                            className="button secondary"
+                            onClick={() => openBuiltinEditor(builtinRole)}
+                          >
+                            Edit permissions
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="button-link"
+                            onClick={() => setEditingBuiltin(null)}
+                          >
+                            Close
+                          </button>
+                        )}
+                        {view?.isCustomized ? (
+                          <button
+                            type="button"
+                            className="button-link"
+                            disabled={builtinSaving}
+                            onClick={() => void handleResetBuiltin(builtinRole)}
+                          >
+                            Reset to defaults
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  {!isEditing ? (
+                    <ul className="roles-page__perm-list">
+                      {effective.map((p) => (
+                        <li key={p}>
+                          <code>{p}</code>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div className="roles-page__builtin-editor">
+                      {renderDutyCheckAllToolbar(
+                        builtinDraft,
+                        setBuiltinDraft,
+                        allCatalogPermissions,
+                        builtinSaving
+                      )}
+                      {renderPermissionGroups(
+                        builtinDraft,
+                        toggleBuiltinDuty,
+                        productSections,
+                        tenantCatalogByGroup,
+                        builtinSaving
+                      )}
+                      <button
+                        type="button"
+                        className="button"
+                        disabled={builtinSaving || !canManageRoles}
+                        onClick={() => void handleSaveBuiltin()}
+                      >
+                        {builtinSaving ? "Saving…" : "Save permissions"}
+                      </button>
+                    </div>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+
+          <RolesSectionHeader
+            title="Your company job titles"
+            subtitle="Create additional job titles with their own permissions. Assign them as a user's primary title when adding staff."
+            help="Custom job titles work like system titles (admin, teller, etc.) but are defined by your company. They appear in the user form under Your company job titles."
+          />
+
           {canManageRoles ? (
-            <div className="roles-page__nav-matrix-actions">
-              <button
-                type="button"
-                className="button secondary"
-                disabled={navSaving}
-                onClick={() => void handleResetNav()}
-              >
-                Reset to defaults
-              </button>
-              <button
-                type="button"
-                className="button"
-                disabled={navSaving}
-                onClick={() => void handleSaveNav()}
-              >
-                {navSaving ? "Saving…" : "Save sidebar access"}
+            <div className="roles-page__custom-form roles-page__job-title-create roles-animate-in roles-animate-in--2">
+              <RolesFormField label="Product scope" help={ROLES_FIELD_HELP.productScope}>
+                <select
+                  value={jobTitleScope}
+                  onChange={(e) => setJobTitleScope(e.target.value as CustomRoleProductScope)}
+                >
+                  {customRoleScopeOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </RolesFormField>
+
+              <RolesFormField label="Job title key (unique slug)" help={ROLES_FIELD_HELP.roleKey}>
+                <input
+                  value={jobTitleKey}
+                  onChange={(e) => setJobTitleKey(e.target.value)}
+                  placeholder="e.g. branch_supervisor"
+                />
+              </RolesFormField>
+
+              <RolesFormField label="Display name" help={ROLES_FIELD_HELP.displayName}>
+                <input
+                  value={jobTitleName}
+                  onChange={(e) => setJobTitleName(e.target.value)}
+                  placeholder="e.g. Branch supervisor"
+                />
+              </RolesFormField>
+
+              {renderDutyCheckAllToolbar(
+                jobTitleDuties,
+                setJobTitleDuties,
+                allJobTitlePermissions,
+                tenantJobTitleSaving
+              )}
+              {renderPermissionGroups(
+                jobTitleDuties,
+                toggleJobTitleDuty,
+                jobTitleSections,
+                jobTitleCatalogByGroup,
+                tenantJobTitleSaving
+              )}
+
+              <button type="button" className="button" onClick={() => void handleCreateJobTitle()}>
+                Create company job title
               </button>
             </div>
           ) : null}
-        </div>
 
-        <div className="roles-page__nav-matrix-list">
-          {navItems.map((item) => {
-            const expanded = expandedNavPath === item.navPath;
-            return (
-              <article
-                key={item.navPath}
-                className={`roles-page__nav-row${item.isCustomized ? " is-customized" : ""}`}
-              >
-                <header className="roles-page__nav-row-head">
-                  <div>
-                    <strong>{item.label}</strong>
-                    {item.isCustomized ? (
-                      <span className="roles-page__custom-badge"> Customized</span>
-                    ) : null}
-                    <p className="muted">{item.description}</p>
-                  </div>
-                  {canManageRoles ? (
-                    <button
-                      type="button"
-                      className="button-link"
-                      onClick={() => setExpandedNavPath(expanded ? null : item.navPath)}
-                    >
-                      {expanded ? "Hide permissions" : "Edit permissions"}
-                    </button>
-                  ) : null}
-                </header>
-
-                <div className="roles-page__nav-roles">
-                  <span className="roles-page__nav-roles-label">Job titles</span>
-                  <div className="roles-page__nav-role-chips">
-                    {NAV_MATRIX_ASSIGNABLE_ROLES.map((jobRole) => (
-                      <label key={jobRole} className="roles-page__nav-chip">
-                        <input
-                          type="checkbox"
-                          checked={item.roles.includes(jobRole)}
-                          disabled={!canManageRoles}
-                          onChange={() => toggleNavRole(item.navPath, jobRole)}
-                        />
-                        <span>{BUILTIN_ROLE_LABELS[jobRole]}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-
-                {expanded && canManageRoles ? (
-                  <div className="roles-page__nav-perms">
-                    <span className="roles-page__nav-roles-label">
-                      Any of these permissions (user must hold at least one)
-                    </span>
-                    <div className="duty-grid roles-page__nav-perm-grid">
-                      {navPermissionOptions.map((perm) => (
-                        <label key={perm} className="duty-item" title={perm}>
-                          <input
-                            type="checkbox"
-                            checked={item.anyPermissions.includes(perm)}
-                            onChange={() => toggleNavPermission(item.navPath, perm)}
-                          />
-                          <small>{perm}</small>
-                        </label>
-                      ))}
+          <div className="roles-page__builtin-grid">
+            {tenantJobTitleRoles.length === 0 ? (
+              <p className="muted">No company job titles yet. Create one above to use alongside system titles.</p>
+            ) : (
+              tenantJobTitleRoles.map((jobTitle, index) => {
+                const effective = (jobTitle.duties ?? []) as Permission[];
+                const isEditing = editingTenantJobTitle === jobTitle.roleKey;
+                return (
+                  <article
+                    key={jobTitle.roleKey}
+                    className={`roles-page__builtin-card roles-animate-in${isEditing ? " is-editing" : ""}`}
+                    style={{ animationDelay: `${index * 40}ms` }}
+                  >
+                    <div className="roles-page__builtin-card-head">
+                      <div>
+                        <h4>{jobTitle.displayName}</h4>
+                        <p className="muted">
+                          <code>{jobTitle.roleKey}</code> · {effective.length} active ·{" "}
+                          {customRoleProductScopeLabel(jobTitle.productScope ?? "all")}
+                          <span className="roles-page__custom-badge"> Company title</span>
+                        </p>
+                      </div>
+                      {canManageRoles ? (
+                        <div className="roles-page__builtin-actions">
+                          {!isEditing ? (
+                            <button
+                              type="button"
+                              className="button secondary"
+                              onClick={() => openTenantJobTitleEditor(jobTitle.roleKey)}
+                            >
+                              Edit permissions
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              className="button-link"
+                              onClick={() => setEditingTenantJobTitle(null)}
+                            >
+                              Close
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className="button-link"
+                            disabled={tenantJobTitleSaving}
+                            onClick={() =>
+                              void handleDeleteTenantJobTitle(jobTitle.roleKey, jobTitle.displayName)
+                            }
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      ) : null}
                     </div>
-                  </div>
-                ) : (
-                  <div className="roles-page__nav-perm-summary">
-                    {item.anyPermissions.map((p) => (
-                      <code key={p} className="roles-page__tag">
-                        {p}
-                      </code>
+
+                    {!isEditing ? (
+                      <ul className="roles-page__perm-list">
+                        {effective.map((p) => (
+                          <li key={p}>
+                            <code>{p}</code>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <div className="roles-page__builtin-editor">
+                        {renderDutyCheckAllToolbar(
+                          tenantJobTitleDraft,
+                          setTenantJobTitleDraft,
+                          allJobTitlePermissions,
+                          tenantJobTitleSaving
+                        )}
+                        {renderPermissionGroups(
+                          tenantJobTitleDraft,
+                          toggleTenantJobTitleDuty,
+                          jobTitleSections,
+                          jobTitleCatalogByGroup,
+                          tenantJobTitleSaving
+                        )}
+                        <button
+                          type="button"
+                          className="button"
+                          disabled={tenantJobTitleSaving || !canManageRoles}
+                          onClick={() => void handleSaveTenantJobTitle()}
+                        >
+                          {tenantJobTitleSaving ? "Saving…" : "Save permissions"}
+                        </button>
+                      </div>
+                    )}
+                  </article>
+                );
+              })
+            )}
+          </div>
+        </section>
+      ) : null}
+
+      {activeTab === "sidebar" ? (
+        <SidebarAccessSection
+          subscribedModules={subscribedModules}
+          canManageRoles={canManageRoles}
+          navItems={navItems}
+          navPermissionOptions={navPermissionOptions}
+          navSaving={navSaving}
+          expandedNavPath={expandedNavPath}
+          onExpandedNavPathChange={setExpandedNavPath}
+          onToggleNavRole={toggleNavRole}
+          onToggleNavPermission={toggleNavPermission}
+          onSaveNav={() => void handleSaveNav()}
+          onResetNav={() => void handleResetNav()}
+        />
+      ) : null}
+
+      {activeTab === "custom-roles" ? (
+        <section className="card roles-page__section roles-animate-in">
+          <RolesSectionHeader
+            title="Custom tenant roles"
+            subtitle="Named duty bundles stored per company. Scope to one product so unrelated menus never appear."
+            help={ROLES_SECTION_HELP.customRoles}
+          />
+
+          <div className="roles-page__custom-grid">
+            <div className="roles-page__custom-form roles-animate-in roles-animate-in--2">
+              <RolesFormField
+                label="Product scope"
+                help={ROLES_FIELD_HELP.productScope}
+                hint={
+                  customRoleScope === "all"
+                    ? "Duties may include any subscribed product plus core admin permissions."
+                    : `Only core permissions and ${customRoleProductScopeLabel(customRoleScope)} duties are listed below.`
+                }
+              >
+                <select
+                  value={customRoleScope}
+                  disabled={!canManageRoles}
+                  onChange={(e) => setCustomRoleScope(e.target.value as CustomRoleProductScope)}
+                >
+                  {customRoleScopeOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </RolesFormField>
+
+              <RolesFormField label="Role key (unique slug)" help={ROLES_FIELD_HELP.roleKey}>
+                <input
+                  value={roleKey}
+                  disabled={!canManageRoles}
+                  onChange={(e) => setRoleKey(e.target.value)}
+                  placeholder="e.g. susu_cash_supervisor"
+                />
+              </RolesFormField>
+
+              <RolesFormField label="Display name" help={ROLES_FIELD_HELP.displayName}>
+                <input
+                  value={displayName}
+                  disabled={!canManageRoles}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  placeholder="e.g. Susu cash supervisor"
+                />
+              </RolesFormField>
+
+              <p className="roles-page__field-intro muted">
+                <RolesInlineLabel label="Permissions for this role" help={ROLES_FIELD_HELP.dutySelection} />
+              </p>
+
+              {renderDutyCheckAllToolbar(duties, setDuties, allCustomRolePermissions, !canManageRoles)}
+              {renderPermissionGroups(
+                duties,
+                toggleDuty,
+                customRoleSections,
+                customRoleCatalogByGroup,
+                !canManageRoles
+              )}
+
+              <button
+                type="button"
+                className="button"
+                disabled={!canManageRoles}
+                onClick={() => void handleCreateRole()}
+              >
+                Create custom role
+              </button>
+            </div>
+
+            <aside className="roles-page__custom-aside roles-animate-in roles-animate-in--3">
+              <RolesSectionHeader
+                title="Assign custom role to user"
+                subtitle="Pick an existing staff member or create a new user with system job title plus custom roles."
+                help="Assign duty bundles to users who already have a system job title (admin, teller, etc.). To create a new login, use Add user."
+              />
+
+              <button
+                type="button"
+                className="button secondary roles-page__add-user-btn"
+                disabled={!canManageRoles}
+                onClick={() => setUserModalOpen(true)}
+              >
+                Add user
+              </button>
+
+              <RolesFormField label="Staff member" help={ROLES_FIELD_HELP.assignUserId}>
+                <select
+                  value={assignUserId}
+                  disabled={!canManageRoles || users.length === 0}
+                  onChange={(e) => setAssignUserId(e.target.value)}
+                >
+                  <option value="">Select user…</option>
+                  {users.map((staff) => (
+                    <option key={staff.userId} value={staff.userId}>
+                      {staff.fullName ? `${staff.fullName} — ` : ""}
+                      {staff.email} ({staff.role.replace(/_/g, " ")})
+                    </option>
+                  ))}
+                </select>
+              </RolesFormField>
+
+              <RolesFormField label="Custom role" help={ROLES_FIELD_HELP.assignRoleKey}>
+                <select
+                  value={assignRoleKey}
+                  disabled={!canManageRoles || extraDutyRoles.length === 0}
+                  onChange={(e) => setAssignRoleKey(e.target.value)}
+                >
+                  <option value="">Select custom role…</option>
+                  <optgroup label="Extra duty bundles">
+                    {extraDutyRoles.map((entry) => (
+                      <option key={entry.roleKey} value={entry.roleKey}>
+                        {entry.displayName} ({entry.roleKey})
+                      </option>
                     ))}
-                  </div>
+                  </optgroup>
+                </select>
+              </RolesFormField>
+              <button
+                type="button"
+                className="button secondary"
+                disabled={!canManageRoles}
+                onClick={() => void handleAssignRole()}
+              >
+                Assign custom role
+              </button>
+
+              <h4>Created roles</h4>
+              <div className="roles-page__role-list">
+                {extraDutyRoles.length === 0 ? (
+                  <p className="muted">No extra duty bundles yet.</p>
+                ) : (
+                  extraDutyRoles.map((entry) => (
+                    <div key={entry.roleKey} className="roles-page__role-list-item">
+                      <strong>{entry.displayName}</strong>
+                      <small className="muted">
+                        {entry.roleKey} · {customRoleProductScopeLabel(entry.productScope ?? "all")} ·{" "}
+                        {entry.duties.length} duties
+                      </small>
+                    </div>
+                  ))
                 )}
-              </article>
-            );
-          })}
-        </div>
-      </section>
+              </div>
 
-      <section className="card roles-page__custom">
-        <h3>Custom tenant roles</h3>
-        <p className="muted">Stored per company. Assign to users by user ID after creation.</p>
+              <h4>Recent assignments</h4>
+              <div className="roles-page__role-list">
+                {assignments.length === 0 ? (
+                  <p className="muted">No assignments yet.</p>
+                ) : (
+                  assignments.slice(0, 12).map((entry) => (
+                    <div key={`${entry.userId}-${entry.roleKey}`} className="roles-page__role-list-item">
+                      <strong>{userLabel(entry.userId)}</strong>
+                      <small className="muted">
+                        {customRoleLabel(entry.roleKey)} · <code>{entry.roleKey}</code>
+                      </small>
+                    </div>
+                  ))
+                )}
+              </div>
+            </aside>
+          </div>
+        </section>
+      ) : null}
 
-        <label className="field">
-          <span>Role key (unique slug)</span>
-          <input value={roleKey} disabled={!canManageRoles} onChange={(e) => setRoleKey(e.target.value)} />
-        </label>
-        <label className="field">
-          <span>Display name</span>
-          <input
-            value={displayName}
-            disabled={!canManageRoles}
-            onChange={(e) => setDisplayName(e.target.value)}
-          />
-        </label>
-
-        {renderDutyCheckAllToolbar(duties, setDuties, !canManageRoles)}
-        {renderPermissionGroups(duties, toggleDuty, !canManageRoles)}
-
-        <button
-          type="button"
-          className="button"
-          disabled={!canManageRoles}
-          onClick={() => void handleCreateRole()}
-        >
-          Create custom role
-        </button>
-
-        <label className="field">
-          <span>Assign to user ID</span>
-          <input
-            value={assignUserId}
-            disabled={!canManageRoles}
-            onChange={(e) => setAssignUserId(e.target.value)}
-          />
-        </label>
-        <label className="field">
-          <span>Custom role key</span>
-          <input
-            value={assignRoleKey}
-            disabled={!canManageRoles}
-            onChange={(e) => setAssignRoleKey(e.target.value)}
-          />
-        </label>
-        <button type="button" className="button secondary" disabled={!canManageRoles} onClick={() => void handleAssignRole()}>
-          Assign custom role
-        </button>
-
-        <div className="lines">
-          {roles.map((entry) => (
-            <div key={entry.roleKey} className="line">
-              <span>{entry.displayName}</span>
-              <small>
-                {entry.roleKey} · {entry.duties.length} duties
-              </small>
-            </div>
-          ))}
-        </div>
-        <h4>Assignments</h4>
-        <div className="lines">
-          {assignments.slice(0, 12).map((entry) => (
-            <div key={`${entry.userId}-${entry.roleKey}`} className="line">
-              <span>{entry.userId}</span>
-              <small>{entry.roleKey}</small>
-            </div>
-          ))}
-        </div>
-      </section>
+      <UserFormModal
+        open={userModalOpen}
+        mode="create"
+        user={null}
+        branches={branches}
+        createDefaults={{
+          customRoleKeys: assignRoleKey ? [assignRoleKey] : undefined
+        }}
+        onClose={() => setUserModalOpen(false)}
+        onSaved={() => void loadRoles()}
+      />
     </div>
   );
 }

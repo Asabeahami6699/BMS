@@ -1,5 +1,8 @@
 import { getSupabaseAdminClient } from "../config/supabaseClient.js";
+import { isSupabaseAuthNetworkError } from "../lib/networkError.js";
 import { findUserById, listUsersByTenant } from "./authStore.js";
+
+const USER_NAME_BATCH_SIZE = 100;
 
 export function userDisplayName(
   fullName: string | null | undefined,
@@ -24,28 +27,46 @@ export async function fetchUserNameMap(tenantId: string, userIds: string[]): Pro
     return map;
   }
 
+  for (const id of unique) {
+    map.set(id, id.slice(0, 8));
+  }
+
   const supabase = getSupabaseAdminClient();
-  if (supabase) {
-    const { data, error } = await supabase
-      .from("users")
-      .select("id, full_name, email")
-      .eq("tenant_id", tenantId)
-      .in("id", unique);
-    if (error) {
-      throw new Error(`Failed to resolve user names: ${error.message}`);
-    }
-    for (const row of data ?? []) {
-      map.set(String(row.id), userDisplayName(row.full_name, row.email, String(row.id)));
+  if (!supabase) {
+    for (const id of unique) {
+      const user = findUserById(id) ?? listUsersByTenant(tenantId).find((entry) => entry.id === id);
+      if (user) {
+        map.set(id, userDisplayName(user.fullName, user.email, id));
+      }
     }
     return map;
   }
 
-  for (const id of unique) {
-    const user = findUserById(id) ?? listUsersByTenant(tenantId).find((entry) => entry.id === id);
-    if (user) {
-      map.set(id, userDisplayName(user.fullName, user.email, id));
+  try {
+    for (let offset = 0; offset < unique.length; offset += USER_NAME_BATCH_SIZE) {
+      const batch = unique.slice(offset, offset + USER_NAME_BATCH_SIZE);
+      const { data, error } = await supabase
+        .from("users")
+        .select("id, full_name, email")
+        .eq("tenant_id", tenantId)
+        .in("id", batch);
+      if (error) {
+        console.warn(`[userNameResolver] User lookup batch failed: ${error.message}`);
+        continue;
+      }
+      for (const row of data ?? []) {
+        map.set(String(row.id), userDisplayName(row.full_name, row.email, String(row.id)));
+      }
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (isSupabaseAuthNetworkError(error)) {
+      console.warn("[userNameResolver] Network error resolving user names; using id fallbacks.");
+    } else {
+      console.warn(`[userNameResolver] Could not resolve user names: ${message}`);
     }
   }
+
   return map;
 }
 

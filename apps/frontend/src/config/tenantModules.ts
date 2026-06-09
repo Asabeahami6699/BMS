@@ -2,12 +2,14 @@ import type { Permission, SusuNavVisibilityRow, TenantAddon, TenantProductModule
 import {
   hasAnyPermission,
   hasTenantModule,
+  isBuiltinRole,
   LOANS_NAV_VISIBILITY,
   MODULE_LABELS,
-  SUSU_NAV_VISIBILITY
+  SUSU_NAV_VISIBILITY,
+  TREASURY_NAV_VISIBILITY,
+  BANKING_NAV_VISIBILITY
 } from "@bms/shared";
 import type { AppRole } from "../app/api";
-
 export type DashboardNavLink = {
   kind: "link";
   to: string;
@@ -26,24 +28,24 @@ export type DashboardNavItem = DashboardNavLink | DashboardNavGroup;
 type NavChildDef = {
   to: string;
   label: string;
-  roleCheck: (role: AppRole) => boolean;
+  roleCheck: (role: AppRole | string) => boolean;
   anyPermissions?: Permission[];
 };
 
 function filterChildren(
   children: NavChildDef[],
-  role: AppRole,
+  role: AppRole | string,
   permissions: Permission[] | undefined
 ): Array<{ to: string; label: string }> {
   return children
     .filter((child) => {
-      if (!child.roleCheck(role)) {
+      if (isBuiltinRole(role) && !child.roleCheck(role)) {
         return false;
       }
       if (child.anyPermissions?.length) {
         return hasAnyPermission(permissions, child.anyPermissions);
       }
-      return true;
+      return isBuiltinRole(role) ? child.roleCheck(role) : true;
     })
     .map(({ to, label }) => ({ to, label }));
 }
@@ -52,11 +54,13 @@ const SUSU_OVERVIEW_CHILD: NavChildDef = {
   to: "susu/overview",
   label: "Overview",
   roleCheck: (r) =>
+    !isBuiltinRole(r) ||
     r === "admin" ||
     r === "coordinator" ||
     r === "accountant" ||
     r === "auditor" ||
-    r === "teller"
+    r === "teller",
+  anyPermissions: ["customers.read", "reports.read"]
 };
 
 function buildSusuChildren(susuNav?: SusuNavVisibilityRow[]): NavChildDef[] {
@@ -64,7 +68,7 @@ function buildSusuChildren(susuNav?: SusuNavVisibilityRow[]): NavChildDef[] {
   return rows.map((row) => ({
     to: row.navPath,
     label: row.label,
-    roleCheck: (r) => row.roles.includes(r as AppRole),
+    roleCheck: (r) => !isBuiltinRole(r) || row.roles.includes(r as AppRole),
     anyPermissions: row.anyPermissions
   }));
 }
@@ -105,11 +109,22 @@ const SETTINGS_CHILDREN: NavChildDef[] = [
   }
 ];
 
-const BANKING_CHILDREN: NavChildDef[] = [
-  { to: "banking", label: "Department overview", roleCheck: (r) => r === "admin" || r === "accountant" }
-];
-
 const STAFF_NAV_ROLE_CHECK = () => true;
+
+function filterBankingNavChildren(
+  role: AppRole | string,
+  permissions: Permission[] | undefined
+): Array<{ to: string; label: string }> {
+  return BANKING_NAV_VISIBILITY.filter((row) => {
+    if (isBuiltinRole(role) && !row.roles.includes(role)) {
+      return false;
+    }
+    return hasAnyPermission(permissions, row.anyPermissions);
+  }).map(({ navPath, label }) => ({
+    to: navPath,
+    label
+  }));
+}
 
 const LOANS_NAV_CHILDREN: NavChildDef[] = LOANS_NAV_VISIBILITY.map((row) => ({
   to: row.navPath,
@@ -122,15 +137,18 @@ function buildLoansChildren(): NavChildDef[] {
   return LOANS_NAV_CHILDREN;
 }
 
-const TREASURY_CHILDREN: NavChildDef[] = [
-  { to: "treasury", label: "Department overview", roleCheck: (r) => r === "admin" || r === "accountant" }
-];
+const TREASURY_CHILDREN: NavChildDef[] = TREASURY_NAV_VISIBILITY.map((row) => ({
+  to: row.navPath,
+  label: row.label,
+  roleCheck: STAFF_NAV_ROLE_CHECK,
+  anyPermissions: [...row.anyPermissions]
+}));
 
 function buildGroup(
   id: string,
   label: string,
   children: NavChildDef[],
-  role: AppRole,
+  role: AppRole | string,
   permissions: Permission[] | undefined,
   modules: TenantProductModule[] | undefined,
   requiredModule?: TenantProductModule
@@ -150,7 +168,7 @@ function hasAnyProduct(modules: TenantProductModule[] | undefined): boolean {
 }
 
 export function buildTenantNav(
-  role: AppRole,
+  role: AppRole | string,
   subscribedModules: TenantProductModule[] | undefined,
   _subscribedAddons: TenantAddon[] | undefined,
   reportsAnalytics: boolean | undefined,
@@ -172,15 +190,21 @@ export function buildTenantNav(
     items.push(susu);
   }
 
-  const banking = buildGroup(
-    "banking",
-    MODULE_LABELS.banking,
-    BANKING_CHILDREN,
-    role,
-    permissions,
-    subscribedModules,
-    "banking"
-  );
+  const banking = (() => {
+    if (!hasTenantModule(subscribedModules, "banking")) {
+      return null;
+    }
+    const children = filterBankingNavChildren(role, permissions);
+    if (children.length === 0) {
+      return null;
+    }
+    return {
+      kind: "group" as const,
+      id: "banking",
+      label: MODULE_LABELS.banking,
+      children
+    };
+  })();
   if (banking) {
     items.push(banking);
   }

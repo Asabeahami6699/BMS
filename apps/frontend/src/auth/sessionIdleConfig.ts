@@ -1,7 +1,7 @@
-/** Idle time before the stay-signed-in prompt appears. */
-export const SESSION_IDLE_MS = 25 * 60 * 1000;
+/** Idle time before the stay-signed-in countdown appears (5 minutes). */
+export const SESSION_IDLE_MS = 5 * 60 * 1000;
 
-/** Time to respond before automatic sign-out. */
+/** Countdown duration before automatic sign-out (another 5 minutes — 10 minutes total). */
 export const SESSION_GRACE_MS = 5 * 60 * 1000;
 
 /** Minimum gap between activity events that reset the idle timer. */

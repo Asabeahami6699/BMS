@@ -1,6 +1,7 @@
-import type { Customer } from "@bms/shared";
+import type { Customer, TenantBankProduct } from "@bms/shared";
 import { isMissingSupabaseResource } from "../lib/supabaseSchema.js";
 import { listBranches, resolveBranchId } from "./branchService.js";
+import { listBankProducts } from "./bankProductService.js";
 import {
   listBranchCounterStatement,
   summarizeBranchCounterStatement,
@@ -19,6 +20,7 @@ type BranchRow = Awaited<ReturnType<typeof listBranches>>[number];
 export type BranchCounterBootstrap = {
   customers: Customer[];
   branches: BranchRow[];
+  bankProducts: TenantBankProduct[];
   statement: {
     lines: BranchCounterStatementLine[];
     summary: ReturnType<typeof summarizeBranchCounterStatement>;
@@ -37,9 +39,18 @@ export async function getBranchCounterBootstrap(
       ? options.date
       : new Date().toISOString().slice(0, 10);
 
-  const [customers, branchRows] = await Promise.all([
+  const [customers, branchRows, bankProducts] = await Promise.all([
     listCustomers(tenantId),
-    listBranches(tenantId).catch(() => [] as BranchRow[])
+    listBranches(tenantId).catch(() => [] as BranchRow[]),
+    (async () => {
+      const branchKey = options.branchId
+        ? await resolveBranchId(tenantId, options.branchId)
+        : undefined;
+      return listBankProducts(tenantId, {
+        activeOnly: true,
+        branchId: branchKey ?? undefined
+      }).catch(() => [] as TenantBankProduct[]);
+    })()
   ]);
 
   const branches = branchRows.filter((b) => b.status !== "inactive");
@@ -88,6 +99,7 @@ export async function getBranchCounterBootstrap(
   return {
     customers,
     branches,
+    bankProducts,
     statement,
     floatSession,
     floatSummary: floatSessionSummary(floatSession),

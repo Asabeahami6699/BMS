@@ -1,8 +1,12 @@
-import type { AiLoanReviewRequest, AiStatusResponse } from "@bms/shared";
+import type { AiLoanReviewRequest, AiPlatformSnapshot, AiStatusResponse } from "@bms/shared";
 import type { ResolvedUserContext } from "../userContextService.js";
 import { writeAuditLog } from "../auditService.js";
 import { getOllamaConfig } from "../../config/env.js";
 import { BMS_PRODUCT_KNOWLEDGE, LOAN_REVIEW_SYSTEM_PROMPT } from "./bmsKnowledge.js";
+import {
+  buildAiPlatformSnapshot,
+  looksLikeAnalyticsQuestion
+} from "./aiPlatformSnapshotService.js";
 import { isOllamaReachable, ollamaChat, OllamaUnavailableError, type ChatTurn } from "./ollamaProvider.js";
 
 const PLATFORM_AUDIT_TENANT = "platform";
@@ -18,6 +22,41 @@ function permissionsSummary(context: ResolvedUserContext): string {
 function subscribedModulesSummary(context: ResolvedUserContext): string {
   const modules = context.subscribedModules ?? [];
   return modules.length ? modules.join(", ") : "unknown modules";
+}
+
+function formatSnapshotForPrompt(snapshot: AiPlatformSnapshot): string {
+  return JSON.stringify(snapshot, null, 2);
+}
+
+const PLATFORM_ANALYSIS_INSTRUCTIONS = `When PLATFORM DATA SNAPSHOT is provided:
+- Treat snapshot numbers as authoritative for this tenant and scope.
+- Quote specific figures (GHS amounts, counts, queue sizes) when answering data questions.
+- Mention the snapshot period (periodDays / periodStart) and scope (branch or head office).
+- susuManagement = Susu collections, agents, customers, pending approvals.
+- agencyBanking = Agency Banking deposits/withdrawals and operational queues.
+- loansCredit = loan portfolio and recent application activity.
+- treasury = vault, teller drawer, and bank cash positions.
+- If a section is missing, the user lacks permission or the tenant is not subscribed to that module.
+- Do not invent metrics that are not in the snapshot.
+- Keep answers concise and actionable for cooperative/MFI staff.`;
+
+async function buildHelpSystemPrompt(
+  context: ResolvedUserContext,
+  snapshot?: AiPlatformSnapshot
+): Promise<string> {
+  const snapshotBlock = snapshot
+    ? `\nPLATFORM DATA SNAPSHOT (as of ${snapshot.generatedAt}):\n${formatSnapshotForPrompt(snapshot)}\n\n${PLATFORM_ANALYSIS_INSTRUCTIONS}\n`
+    : "";
+
+  return `${BMS_PRODUCT_KNOWLEDGE}
+${snapshotBlock}
+Signed-in user context (do not repeat verbatim unless helpful):
+- Role: ${context.role}
+- Scope: ${context.scopeType}${context.branchId ? ` (branch ${context.branchId})` : ""}
+- Subscribed modules: ${subscribedModulesSummary(context)}
+- Permissions: ${permissionsSummary(context)}
+
+Answer about BMS features and, when snapshot data is present, analyze the user's platform data. If they ask to perform an action they lack permission for, explain which permission or role is typically needed without being condescending.`;
 }
 
 async function logAiUse(input: {
@@ -56,17 +95,21 @@ export async function getAiStatus(): Promise<AiStatusResponse> {
 
 export async function generateWorkspaceHelp(
   context: ResolvedUserContext,
-  message: string
-): Promise<{ reply: string; model: string; provider: "ollama" }> {
-  const system = `${BMS_PRODUCT_KNOWLEDGE}
+  message: string,
+  options?: { includeData?: boolean }
+): Promise<{ reply: string; model: string; provider: "ollama"; snapshotIncluded: boolean }> {
+  const shouldIncludeData =
+    options?.includeData === true || looksLikeAnalyticsQuestion(message);
+  let snapshot: AiPlatformSnapshot | undefined;
+  if (shouldIncludeData) {
+    try {
+      snapshot = await buildAiPlatformSnapshot(context);
+    } catch {
+      snapshot = undefined;
+    }
+  }
 
-Signed-in user context (do not repeat verbatim unless helpful):
-- Role: ${context.role}
-- Scope: ${context.scopeType}${context.branchId ? ` (branch ${context.branchId})` : ""}
-- Subscribed modules: ${subscribedModulesSummary(context)}
-- Permissions: ${permissionsSummary(context)}
-
-Answer only about BMS features this user may have access to. If they ask to perform an action they lack permission for, explain which permission or role is typically needed without being condescending.`;
+  const system = await buildHelpSystemPrompt(context, snapshot);
 
   try {
     const result = await ollamaChat({ system, user: message });
@@ -77,13 +120,47 @@ Answer only about BMS features this user may have access to. If they ask to perf
       path: "/api/v1/ai/help",
       statusCode: 200
     });
-    return { reply: result.text, model: result.model, provider: "ollama" };
+    return {
+      reply: result.text,
+      model: result.model,
+      provider: "ollama",
+      snapshotIncluded: snapshot != null
+    };
   } catch (error) {
     await logAiUse({
       tenantId: context.tenantId,
       userId: context.userId,
       role: context.role,
       path: "/api/v1/ai/help",
+      statusCode: error instanceof OllamaUnavailableError ? 503 : 500
+    });
+    throw error;
+  }
+}
+
+export async function generatePlatformAnalysis(
+  context: ResolvedUserContext,
+  message: string
+): Promise<{ reply: string; model: string; provider: "ollama"; snapshot: AiPlatformSnapshot }> {
+  const snapshot = await buildAiPlatformSnapshot(context);
+  const system = await buildHelpSystemPrompt(context, snapshot);
+
+  try {
+    const result = await ollamaChat({ system, user: message });
+    await logAiUse({
+      tenantId: context.tenantId,
+      userId: context.userId,
+      role: context.role,
+      path: "/api/v1/ai/analyze",
+      statusCode: 200
+    });
+    return { reply: result.text, model: result.model, provider: "ollama", snapshot };
+  } catch (error) {
+    await logAiUse({
+      tenantId: context.tenantId,
+      userId: context.userId,
+      role: context.role,
+      path: "/api/v1/ai/analyze",
       statusCode: error instanceof OllamaUnavailableError ? 503 : 500
     });
     throw error;

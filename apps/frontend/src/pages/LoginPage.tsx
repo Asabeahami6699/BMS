@@ -9,6 +9,7 @@ import { useAuth } from "../auth/AuthContext";
 import { getHomePathForRole } from "../auth/roleRedirect";
 
 import { BmsBrandIcon } from "../components/BmsBrandIcon";
+import { ThemeToggle } from "../components/ThemeToggle";
 import { toUserFacingError } from "../lib/networkError";
 
 
@@ -72,6 +73,9 @@ export function LoginPage() {
   return (
 
     <main className="login-page">
+      <div className="login-theme-toggle">
+        <ThemeToggle showLabel />
+      </div>
 
       <p className="login-back">
 

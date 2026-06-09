@@ -18,9 +18,11 @@ import type {
   Role,
   SusuNavVisibilityRow,
   TenantAddon,
-  TenantProductModule
+  TenantProductModule,
+  TreasuryBootstrap,
+  CreateCashMovementInput
 } from "@bms/shared";
-import { isNetworkError, toUserFacingError } from "../lib/networkError";
+import { isNetworkError, toUserFacingError, withNetworkRetry } from "../lib/networkError";
 import { SESSION_UNAUTHORIZED_EVENT } from "../auth/sessionIdleConfig";
 
 export type { AccountType, TenantProductModule };
@@ -33,6 +35,7 @@ export type AppRole =
   | "auditor"
   | "accountant"
   | "teller"
+  | "back_officer"
   | "customer_service";
 
 export type TenantRecord = {
@@ -74,7 +77,7 @@ export type Payslip = {
   id: string;
   tenantId: string;
   userId: string;
-  role: AppRole;
+  role: string;
   periodId: string;
   lines: PayslipLine[];
   deductionLines: PayslipLine[];
@@ -88,7 +91,7 @@ export type StaffPayrollSetupRow = {
   userId: string;
   email?: string;
   fullName?: string;
-  role: AppRole;
+  role: string;
   status: "active" | "inactive";
   baseSalary: number;
   commissionPercentOverride: number | null;
@@ -110,7 +113,7 @@ export type StaffPayrollSetupRow = {
 
 export type RolePayrollDefault = {
   tenantId: string;
-  role: AppRole;
+  role: string;
   baseSalary: number;
   monthlyBonus: number;
   ssnitRatePercent: number | null;
@@ -155,7 +158,17 @@ export type TenantPayslipsResponse = {
 export type RoleDefinition = {
   roleKey: string;
   displayName: string;
+  roleKind?: "job_title" | "extra_duties";
+  productScope?: import("@bms/shared").CustomRoleProductScope;
   duties: string[];
+};
+
+export type TenantJobTitleView = {
+  roleKey: string;
+  displayName: string;
+  productScope: import("@bms/shared").CustomRoleProductScope;
+  effectiveDuties: Permission[];
+  updatedAt?: string;
 };
 
 export type RoleAssignment = {
@@ -166,7 +179,7 @@ export type UserRecord = {
   userId: string;
   email: string;
   fullName?: string;
-  role: AppRole;
+  role: string;
   scopeType: "head_office" | "branch";
   branchId?: string;
   tenantId: string;
@@ -239,7 +252,14 @@ export type BalanceDisclosure = {
   customerName?: string;
   fieldAgentName?: string;
   requestType: CustomerRequestType;
-  status: "pending" | "approved" | "rejected" | "expired";
+  status:
+    | "pending"
+    | "cs_approved"
+    | "bank_executed"
+    | "completed"
+    | "approved"
+    | "rejected"
+    | "expired";
   balanceAmount?: number;
   withdrawalAmount?: number;
   fulfillmentMode?: WithdrawalFulfillmentMode;
@@ -268,10 +288,12 @@ export type RequestCustomerApprovalInput =
     };
 
 export type ApproveCustomerRequestInput = {
+  workflowData?: Record<string, unknown>;
   payoutReference?: string;
   transactionProofImage?: string;
   generatedReceiptImage?: string;
   visibleHours?: number;
+  bankProductId?: string;
 };
 
 export type AgentNotification = {
@@ -290,7 +312,16 @@ export type AgentNotification = {
     | "float_requested"
     | "float_allocated"
     | "float_closed_pending_settlement"
-    | "workspace_activity";
+    | "workspace_activity"
+    | "collection_batch_pending"
+    | "collection_batch_posted"
+    | "deposit_pending_bank"
+    | "deposit_pending_accountant"
+    | "deposit_completed"
+    | "back_office_ecash_requested"
+    | "back_office_ecash_approved"
+    | "withdrawal_cs_approved"
+    | "withdrawal_ready_for_teller";
   title: string;
   body: string;
   customerId?: string;
@@ -482,16 +513,34 @@ export const API_BASE_URL = normalizeApiBaseUrl(
   import.meta.env.VITE_API_URL ?? "http://localhost:4000"
 );
 const AUTH_STORAGE_KEY = "bms.auth.session";
+const BRANCH_CONTEXT_STORAGE_KEY = "bms.branchContext";
+
+/** Query value sent to the API when viewing all branches (head office only). */
+export const ALL_BRANCHES_SCOPE = "all";
+
+function loadStoredBranchContext(): string {
+  try {
+    const stored = localStorage.getItem(BRANCH_CONTEXT_STORAGE_KEY);
+    if (stored) {
+      return stored;
+    }
+  } catch {
+    /* ignore */
+  }
+  return ALL_BRANCHES_SCOPE;
+}
 
 const runtimeContext = {
   tenantId: "tenant-demo",
-  branchId: "branch-a"
+  branchId: loadStoredBranchContext()
 };
+
+export const BRANCH_CONTEXT_CHANGED_EVENT = "bms:branch-context-changed";
 
 export type AuthMe = {
   userId: string;
   tenantId: string;
-  role: AppRole;
+  role: string;
   scopeType: "head_office" | "branch";
   branchId?: string;
   permissions: Permission[];
@@ -553,7 +602,14 @@ function persistSession(session: AuthSession | null): void {
   }
   localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
   runtimeContext.tenantId = session.user.tenantId;
-  runtimeContext.branchId = session.user.branchId ?? runtimeContext.branchId;
+  if (session.user.scopeType === "branch" && session.user.branchId) {
+    runtimeContext.branchId = session.user.branchId;
+    try {
+      localStorage.setItem(BRANCH_CONTEXT_STORAGE_KEY, session.user.branchId);
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
 export function authHeaders(): Record<string, string> {
@@ -613,34 +669,36 @@ function formatApiError(
 }
 
 export async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
-  try {
-    const response = await fetch(url, init);
-    if (!response.ok) {
-      const body = (await response.json().catch(() => ({}))) as {
-        error?: string;
-        details?: {
-          fieldErrors?: Record<string, string[]>;
-          formErrors?: string[];
+  return withNetworkRetry(async () => {
+    try {
+      const response = await fetch(withBranchScope(url), init);
+      if (!response.ok) {
+        const body = (await response.json().catch(() => ({}))) as {
+          error?: string;
+          details?: {
+            fieldErrors?: Record<string, string[]>;
+            formErrors?: string[];
+          };
         };
-      };
-      if (response.status === 401) {
-        handleUnauthorizedResponse();
+        if (response.status === 401) {
+          handleUnauthorizedResponse();
+        }
+        if (response.status === 413) {
+          throw new Error(body.error ?? "Photo or request data is too large. Try a smaller image.");
+        }
+        throw new Error(formatApiError(body, response.status));
       }
-      if (response.status === 413) {
-        throw new Error(body.error ?? "Photo or request data is too large. Try a smaller image.");
+      if (response.status === 204) {
+        return undefined as T;
       }
-      throw new Error(formatApiError(body, response.status));
+      return (await response.json()) as T;
+    } catch (error) {
+      if (error instanceof Error && !isNetworkError(error)) {
+        throw error;
+      }
+      throw new Error(toUserFacingError(error, "Request failed"));
     }
-    if (response.status === 204) {
-      return undefined as T;
-    }
-    return (await response.json()) as T;
-  } catch (error) {
-    if (error instanceof Error && !isNetworkError(error)) {
-      throw error;
-    }
-    throw new Error(toUserFacingError(error, "Request failed"));
-  }
+  });
 }
 
 export async function login(email: string, password: string): Promise<AuthSession> {
@@ -698,8 +756,55 @@ export function getRuntimeBranchId(): string {
   return runtimeContext.branchId;
 }
 
+/** Active branch filter for API calls (undefined = all branches). */
+export function getActiveBranchFilter(): string | undefined {
+  const value = getRuntimeBranchId();
+  if (!value || value === ALL_BRANCHES_SCOPE) {
+    return undefined;
+  }
+  return value;
+}
+
+export function isAllBranchesScope(branchId?: string | null): boolean {
+  return !branchId || branchId === ALL_BRANCHES_SCOPE;
+}
+
+function withBranchScope(url: string): string {
+  if (!url.startsWith(API_BASE_URL)) {
+    return url;
+  }
+  const path = url.slice(API_BASE_URL.length);
+  if (
+    path.startsWith("/api/v1/auth") ||
+    path.startsWith("/api/v1/platform") ||
+    path.startsWith("/api/v1/branches") ||
+    path.startsWith("/health")
+  ) {
+    return url;
+  }
+
+  const parsed = new URL(url);
+  if (parsed.searchParams.has("branchId")) {
+    return url;
+  }
+
+  const scope = getRuntimeBranchId();
+  if (scope) {
+    parsed.searchParams.set("branchId", scope === ALL_BRANCHES_SCOPE ? ALL_BRANCHES_SCOPE : scope);
+  }
+  return parsed.toString();
+}
+
 export function setRuntimeBranchId(branchId: string): void {
   runtimeContext.branchId = branchId;
+  try {
+    localStorage.setItem(BRANCH_CONTEXT_STORAGE_KEY, branchId);
+  } catch {
+    /* ignore */
+  }
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(BRANCH_CONTEXT_CHANGED_EVENT, { detail: branchId }));
+  }
 }
 
 export async function getAuthMe(): Promise<AuthMe> {
@@ -1225,11 +1330,58 @@ export async function getRoles(): Promise<RoleDefinition[]> {
   return response.json() as Promise<RoleDefinition[]>;
 }
 
+export async function getTenantJobTitles(): Promise<TenantJobTitleView[]> {
+  return fetchJson<TenantJobTitleView[]>(`${API_BASE_URL}/api/v1/admin/roles/job-titles`, {
+    headers: authHeaders()
+  });
+}
+
+export async function createTenantJobTitle(payload: {
+  roleKey: string;
+  displayName: string;
+  productScope?: import("@bms/shared").CustomRoleProductScope;
+  duties: Permission[];
+}): Promise<TenantJobTitleView> {
+  return fetchJson<TenantJobTitleView>(`${API_BASE_URL}/api/v1/admin/roles`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ ...payload, roleKind: "job_title" })
+  });
+}
+
+export async function updateTenantJobTitle(
+  roleKey: string,
+  payload: {
+    displayName?: string;
+    productScope?: import("@bms/shared").CustomRoleProductScope;
+    duties?: Permission[];
+  }
+): Promise<TenantJobTitleView> {
+  return fetchJson<TenantJobTitleView>(`${API_BASE_URL}/api/v1/admin/roles/job-title/${encodeURIComponent(roleKey)}`, {
+    method: "PUT",
+    headers: authHeaders(),
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function deleteTenantJobTitle(roleKey: string): Promise<void> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/admin/roles/job-title/${encodeURIComponent(roleKey)}`,
+    {
+      method: "DELETE",
+      headers: authHeaders()
+    }
+  );
+  if (!response.ok) {
+    throw new Error("Failed to delete job title.");
+  }
+}
+
 export async function createRole(payload: RoleDefinition): Promise<RoleDefinition> {
   return fetchJson<RoleDefinition>(`${API_BASE_URL}/api/v1/admin/roles`, {
     method: "POST",
     headers: authHeaders(),
-    body: JSON.stringify(payload)
+    body: JSON.stringify({ ...payload, roleKind: payload.roleKind ?? "extra_duties" })
   });
 }
 
@@ -1239,6 +1391,17 @@ export async function assignRole(payload: RoleAssignment): Promise<RoleAssignmen
     headers: authHeaders(),
     body: JSON.stringify(payload)
   });
+}
+
+export async function unassignRole(payload: RoleAssignment): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/admin/roles/assign`, {
+    method: "DELETE",
+    headers: authHeaders(),
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    throw new Error("Failed to remove custom role assignment.");
+  }
 }
 
 export async function getRoleAssignments(): Promise<RoleAssignment[]> {
@@ -1255,7 +1418,7 @@ export async function createUser(payload: {
   userId?: string;
   email: string;
   password: string;
-  role: AppRole;
+  role: string;
   scopeType: "head_office" | "branch";
   branchId?: string;
   fullName?: string;
@@ -1404,7 +1567,7 @@ export async function updateUser(
   payload: {
     email?: string;
     fullName?: string;
-    role?: AppRole;
+    role?: string;
     scopeType?: "head_office" | "branch";
     branchId?: string | null;
     status?: "active" | "inactive";
@@ -1705,6 +1868,7 @@ export type BranchFloatSummary = {
 export type BranchCounterBootstrapResponse = {
   customers: Customer[];
   branches: Branch[];
+  bankProducts: import("@bms/shared").TenantBankProduct[];
   statement: BranchCounterStatement | null;
   floatSession: BranchFloatSession | null;
   floatSummary: BranchFloatSummary;
@@ -1824,6 +1988,8 @@ export async function createTransaction(payload: {
   amount: number;
   transactionBranchId: string;
   notes?: string;
+  bankProductId?: string;
+  workflowData?: Record<string, unknown>;
 }): Promise<Transaction> {
   const idempotencyKey = crypto.randomUUID();
   return fetchJson<Transaction>(`${API_BASE_URL}/api/v1/transactions`, {
@@ -2338,4 +2504,340 @@ export async function removeLoanGroupMember(groupId: string, memberId: string): 
     method: "DELETE",
     headers: authHeaders()
   });
+}
+
+export type TreasuryAllBranchesBootstrap = {
+  scope: "all_branches";
+  branches: Array<{
+    branchId: string;
+    branchName: string;
+    bootstrap: TreasuryBootstrap;
+  }>;
+};
+
+export type TreasuryBootstrapResponse = TreasuryBootstrap | TreasuryAllBranchesBootstrap;
+
+export function isTreasuryAllBranchesBootstrap(
+  value: TreasuryBootstrapResponse
+): value is TreasuryAllBranchesBootstrap {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "scope" in value &&
+    (value as TreasuryAllBranchesBootstrap).scope === "all_branches"
+  );
+}
+
+export async function getTreasuryBootstrap(branchId?: string): Promise<TreasuryBootstrapResponse> {
+  const params = new URLSearchParams();
+  if (branchId?.trim()) {
+    params.set("branchId", branchId);
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return fetchJson<TreasuryBootstrapResponse>(`${API_BASE_URL}/api/v1/treasury/bootstrap${suffix}`, {
+    headers: authHeaders()
+  });
+}
+
+export async function postCashMovement(payload: CreateCashMovementInput): Promise<TreasuryBootstrap> {
+  return fetchJson<TreasuryBootstrap>(`${API_BASE_URL}/api/v1/treasury/movements`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function getAgencyBootstrap(branchId?: string): Promise<import("@bms/shared").AgencyBootstrap> {
+  const params = branchId ? `?branchId=${encodeURIComponent(branchId)}` : "";
+  return fetchJson(`${API_BASE_URL}/api/v1/agency/bootstrap${params}`, { headers: authHeaders() });
+}
+
+export async function getTellerAgencyDeposits(options?: {
+  branchId?: string;
+  date?: string;
+}): Promise<import("@bms/shared").TellerAgencyDeposits> {
+  const params = new URLSearchParams();
+  if (options?.branchId) params.set("branchId", options.branchId);
+  if (options?.date) params.set("date", options.date);
+  const qs = params.toString();
+  return fetchJson(`${API_BASE_URL}/api/v1/agency/teller/deposits${qs ? `?${qs}` : ""}`, {
+    headers: authHeaders()
+  });
+}
+
+export async function getBackOfficeBootstrap(options?: {
+  branchId?: string;
+  date?: string;
+}): Promise<import("@bms/shared").BackOfficeBootstrap> {
+  const params = new URLSearchParams();
+  if (options?.branchId) params.set("branchId", options.branchId);
+  if (options?.date) params.set("date", options.date);
+  const qs = params.toString();
+  return fetchJson(`${API_BASE_URL}/api/v1/agency/back-office/bootstrap${qs ? `?${qs}` : ""}`, {
+    headers: authHeaders()
+  });
+}
+
+export async function openBackOfficeDay(
+  payload: import("@bms/shared").OpenBackOfficeDayInput
+): Promise<import("@bms/shared").BackOfficeBootstrap> {
+  return fetchJson(`${API_BASE_URL}/api/v1/agency/back-office/open-day`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function executeBackOfficeDepositDone(
+  transactionId: string,
+  executionBankProductId: string
+): Promise<import("@bms/shared").BackOfficeBootstrap> {
+  return fetchJson(`${API_BASE_URL}/api/v1/agency/back-office/deposits/${transactionId}/done`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ executionBankProductId })
+  });
+}
+
+export async function approveBackOfficeAccountantDeposit(
+  transactionId: string
+): Promise<import("@bms/shared").BackOfficeBootstrap> {
+  return fetchJson(
+    `${API_BASE_URL}/api/v1/agency/back-office/deposits/${transactionId}/accountant-approve`,
+    { method: "POST", headers: authHeaders() }
+  );
+}
+
+export async function createBackOfficeEcashRequest(payload: {
+  branchId: string;
+  bankProductId?: string;
+  amount: number;
+  notes?: string;
+}): Promise<import("@bms/shared").BackOfficeBootstrap> {
+  return fetchJson(`${API_BASE_URL}/api/v1/agency/back-office/ecash-requests`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function approveBackOfficeEcashRequest(
+  requestId: string,
+  approve = true
+): Promise<import("@bms/shared").BackOfficeBootstrap> {
+  return fetchJson(`${API_BASE_URL}/api/v1/agency/back-office/ecash-requests/${requestId}/approve`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ approve })
+  });
+}
+
+export async function updateBackOfficeAccountEntries(payload: {
+  bankProductId: string;
+  manualTotalEntries: number;
+}): Promise<import("@bms/shared").BackOfficeBootstrap> {
+  return fetchJson(`${API_BASE_URL}/api/v1/agency/back-office/account-entries`, {
+    method: "PATCH",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function executeAgencyBankDeposit(transactionId: string): Promise<Transaction> {
+  return fetchJson(`${API_BASE_URL}/api/v1/agency/deposits/${transactionId}/execute-bank`, {
+    method: "POST",
+    headers: authHeaders()
+  });
+}
+
+export async function executeAgencyBankWithdrawal(
+  disclosureId: string,
+  bankProductId?: string
+): Promise<BalanceDisclosure> {
+  return fetchJson(`${API_BASE_URL}/api/v1/agency/withdrawals/${disclosureId}/execute-bank`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(bankProductId ? { bankProductId } : {})
+  });
+}
+
+export async function tellerPayAgencyWithdrawal(disclosureId: string): Promise<BalanceDisclosure> {
+  return fetchJson(`${API_BASE_URL}/api/v1/agency/withdrawals/${disclosureId}/pay-cash`, {
+    method: "POST",
+    headers: authHeaders()
+  });
+}
+
+export async function initiateAgencyWithdrawal(
+  payload: import("@bms/shared").InitiateAgencyWithdrawalInput
+): Promise<BalanceDisclosure> {
+  const body = await fetchJson<{ disclosure: BalanceDisclosure }>(
+    `${API_BASE_URL}/api/v1/agency/withdrawals/initiate`,
+    {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify(payload)
+    }
+  );
+  return body.disclosure;
+}
+
+export async function getAgencyWalkInCustomer(branchId: string): Promise<Customer> {
+  const params = new URLSearchParams({ branchId });
+  const body = await fetchJson<{ customer: Customer }>(
+    `${API_BASE_URL}/api/v1/agency/walk-in-customer?${params}`,
+    { headers: authHeaders() }
+  );
+  return body.customer;
+}
+
+export async function getTellerReconciliationBootstrap(options?: {
+  branchId?: string;
+  date?: string;
+  tellerUserId?: string;
+  transactionType?: string;
+  bankProductId?: string;
+}): Promise<import("@bms/shared").TellerReconciliationBootstrap> {
+  const params = new URLSearchParams();
+  if (options?.branchId) params.set("branchId", options.branchId);
+  if (options?.date) params.set("date", options.date);
+  if (options?.tellerUserId) params.set("tellerUserId", options.tellerUserId);
+  if (options?.transactionType) params.set("transactionType", options.transactionType);
+  if (options?.bankProductId) params.set("bankProductId", options.bankProductId);
+  const query = params.toString();
+  return fetchJson<import("@bms/shared").TellerReconciliationBootstrap>(
+    `${API_BASE_URL}/api/v1/agency/teller-reconciliation${query ? `?${query}` : ""}`,
+    { headers: authHeaders() }
+  );
+}
+
+export async function listTellerTillJournalEntries(options: {
+  branchId: string;
+  date?: string;
+  tellerUserId?: string;
+}): Promise<import("@bms/shared").TellerTillJournalEntry[]> {
+  const params = new URLSearchParams({ branchId: options.branchId });
+  if (options.date) params.set("date", options.date);
+  if (options.tellerUserId) params.set("tellerUserId", options.tellerUserId);
+  const body = await fetchJson<{ entries: import("@bms/shared").TellerTillJournalEntry[] }>(
+    `${API_BASE_URL}/api/v1/agency/till-journal?${params}`,
+    { headers: authHeaders() }
+  );
+  return body.entries;
+}
+
+export async function createTellerTillJournalEntry(payload: {
+  branchId: string;
+  businessDate: string;
+  entryType: import("@bms/shared").TellerTillEntryType;
+  amount: number;
+  notes?: string;
+}): Promise<import("@bms/shared").TellerTillJournalEntry> {
+  const body = await fetchJson<{ entry: import("@bms/shared").TellerTillJournalEntry }>(
+    `${API_BASE_URL}/api/v1/agency/till-journal`,
+    { method: "POST", headers: authHeaders(), body: JSON.stringify(payload) }
+  );
+  return body.entry;
+}
+
+export async function lookupPartnerBankAccount(
+  accountNumber: string
+): Promise<import("@bms/shared").PartnerBankAccount | null> {
+  const query = encodeURIComponent(accountNumber.trim());
+  const body = await fetchJson<{ account: import("@bms/shared").PartnerBankAccount | null }>(
+    `${API_BASE_URL}/api/v1/agency/partner-accounts/lookup?accountNumber=${query}`,
+    { headers: authHeaders() }
+  );
+  return body.account;
+}
+
+export async function listPartnerBankAccounts(options?: {
+  customerId?: string;
+}): Promise<import("@bms/shared").PartnerBankAccount[]> {
+  const params = new URLSearchParams();
+  if (options?.customerId) {
+    params.set("customerId", options.customerId);
+  }
+  const query = params.toString();
+  const body = await fetchJson<{ accounts: import("@bms/shared").PartnerBankAccount[] }>(
+    `${API_BASE_URL}/api/v1/agency/partner-accounts${query ? `?${query}` : ""}`,
+    { headers: authHeaders() }
+  );
+  return body.accounts;
+}
+
+export async function createPartnerBankAccount(payload: {
+  customerId: string;
+  bankProductId: string;
+  accountNumber: string;
+  accountName: string;
+  branchId?: string;
+  externalReference?: string;
+  workflowData?: Record<string, unknown>;
+}): Promise<import("@bms/shared").PartnerBankAccount> {
+  const body = await fetchJson<{ account: import("@bms/shared").PartnerBankAccount }>(
+    `${API_BASE_URL}/api/v1/agency/partner-accounts`,
+    { method: "POST", headers: authHeaders(), body: JSON.stringify(payload) }
+  );
+  return body.account;
+}
+
+export async function listBankProducts(options?: {
+  direction?: "deposit" | "withdrawal" | "account_opening";
+  activeOnly?: boolean;
+  branchId?: string;
+}): Promise<import("@bms/shared").TenantBankProduct[]> {
+  const params = new URLSearchParams();
+  if (options?.direction) {
+    params.set("direction", options.direction);
+  }
+  if (options?.activeOnly) {
+    params.set("activeOnly", "true");
+  }
+  if (options?.branchId) {
+    params.set("branchId", options.branchId);
+  }
+  const query = params.toString();
+  const payload = await fetchJson<{ products: import("@bms/shared").TenantBankProduct[] }>(
+    `${API_BASE_URL}/api/v1/banking/products${query ? `?${query}` : ""}`,
+    { headers: authHeaders() }
+  );
+  return payload.products;
+}
+
+export async function createBankProduct(payload: {
+  name: string;
+  code?: string;
+  direction: import("@bms/shared").BankProductCreateDirection;
+  bankLabel: string;
+  branchId?: string | null;
+  isActive?: boolean;
+  sortOrder?: number;
+  workflowFields?: import("@bms/shared").BankProductWorkflowField[];
+}): Promise<import("@bms/shared").TenantBankProduct[]> {
+  const body = await fetchJson<{ products: import("@bms/shared").TenantBankProduct[] }>(
+    `${API_BASE_URL}/api/v1/banking/products`,
+    { method: "POST", headers: authHeaders(), body: JSON.stringify(payload) }
+  );
+  return body.products;
+}
+
+export async function updateBankProduct(
+  productId: string,
+  payload: Partial<{
+    name: string;
+    code: string;
+    direction: "deposit" | "withdrawal" | "account_opening";
+    bankLabel: string;
+    branchId: string | null;
+    isActive: boolean;
+    sortOrder: number;
+    workflowFields: import("@bms/shared").BankProductWorkflowField[];
+  }>
+): Promise<import("@bms/shared").TenantBankProduct> {
+  const body = await fetchJson<{ product: import("@bms/shared").TenantBankProduct }>(
+    `${API_BASE_URL}/api/v1/banking/products/${productId}`,
+    { method: "PATCH", headers: authHeaders(), body: JSON.stringify(payload) }
+  );
+  return body.product;
 }

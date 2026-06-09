@@ -11,10 +11,10 @@ export type CustomerBootstrap = {
 
 export async function getCustomerBootstrap(
   tenantId: string,
-  options?: { agentId?: string }
+  options?: { agentId?: string; branchId?: string }
 ): Promise<CustomerBootstrap> {
   const [customers, branchRows] = await Promise.all([
-    listCustomers(tenantId, { agentId: options?.agentId }),
+    listCustomers(tenantId, { agentId: options?.agentId, branchId: options?.branchId }),
     listBranches(tenantId).catch(() => [] as BranchRow[])
   ]);
 

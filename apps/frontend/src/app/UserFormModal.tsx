@@ -1,25 +1,23 @@
-import { roleRequiresBranch } from "@bms/shared";
+import { BUILTIN_ROLE_LABELS, isBuiltinRole, roleRequiresBranch, TENANT_STAFF_ROLES } from "@bms/shared";
 import { FormEvent, useEffect, useState } from "react";
-import type { AppRole, Branch, UserRecord } from "./api";
-import { createUser, updateUser } from "./api";
+import type { AppRole, Branch, RoleDefinition, UserRecord } from "./api";
+import {
+  assignRole,
+  createUser,
+  getRoleAssignments,
+  getRoles,
+  unassignRole,
+  updateUser
+} from "./api";
 import { Modal } from "../components/Modal";
 import { useToast } from "../components/Toast";
-
-const TENANT_ROLES: AppRole[] = [
-  "admin",
-  "field_agent",
-  "coordinator",
-  "auditor",
-  "accountant",
-  "teller",
-  "customer_service"
-];
 
 type Mode = "create" | "edit";
 
 type CreateDefaults = {
-  role?: AppRole;
+  role?: string;
   scopeType?: "head_office" | "branch";
+  customRoleKeys?: string[];
 };
 
 type Props = {
@@ -32,19 +30,72 @@ type Props = {
   onSaved: () => void;
 };
 
+async function syncCustomRoleAssignments(
+  userId: string,
+  nextKeys: string[],
+  previousKeys: string[]
+): Promise<void> {
+  const nextSet = new Set(nextKeys);
+  const prevSet = new Set(previousKeys);
+  for (const roleKey of nextKeys) {
+    if (!prevSet.has(roleKey)) {
+      await assignRole({ userId, roleKey });
+    }
+  }
+  for (const roleKey of previousKeys) {
+    if (!nextSet.has(roleKey)) {
+      await unassignRole({ userId, roleKey });
+    }
+  }
+}
+
 export function UserFormModal({ open, mode, user, branches, createDefaults, onClose, onSaved }: Props) {
   const { showToast } = useToast();
   const [submitting, setSubmitting] = useState(false);
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("ChangeMe123!");
-  const [userRole, setUserRole] = useState<AppRole>("field_agent");
+  const [userRole, setUserRole] = useState<string>("field_agent");
   const [scopeType, setScopeType] = useState<"head_office" | "branch">("branch");
   const [branchId, setBranchId] = useState("");
   const [status, setStatus] = useState<"active" | "inactive">("active");
+  const [allTenantRoles, setAllTenantRoles] = useState<RoleDefinition[]>([]);
+  const [selectedCustomRoleKeys, setSelectedCustomRoleKeys] = useState<string[]>([]);
+  const [initialCustomRoleKeys, setInitialCustomRoleKeys] = useState<string[]>([]);
 
-  const requiresBranch = roleRequiresBranch(userRole);
+  const tenantJobTitles = allTenantRoles.filter((role) => role.roleKind === "job_title");
+  const extraDutyRoles = allTenantRoles.filter(
+    (role) => (role.roleKind ?? "extra_duties") === "extra_duties"
+  );
+
+  const requiresBranch = isBuiltinRole(userRole) && roleRequiresBranch(userRole);
   const activeBranches = branches.filter((b) => b.status !== "inactive");
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    void getRoles()
+      .then(setAllTenantRoles)
+      .catch(() => setAllTenantRoles([]));
+
+    if (mode === "edit" && user) {
+      void getRoleAssignments()
+        .then((rows) => {
+          const keys = rows.filter((row) => row.userId === user.userId).map((row) => row.roleKey);
+          setSelectedCustomRoleKeys(keys);
+          setInitialCustomRoleKeys(keys);
+        })
+        .catch(() => {
+          setSelectedCustomRoleKeys([]);
+          setInitialCustomRoleKeys([]);
+        });
+    } else {
+      const preset = createDefaults?.customRoleKeys ?? [];
+      setSelectedCustomRoleKeys(preset);
+      setInitialCustomRoleKeys([]);
+    }
+  }, [open, mode, user, createDefaults?.customRoleKeys]);
 
   useEffect(() => {
     if (!open) {
@@ -54,7 +105,8 @@ export function UserFormModal({ open, mode, user, branches, createDefaults, onCl
       setFullName(user.fullName ?? "");
       setEmail(user.email);
       setUserRole(user.role);
-      const scope = roleRequiresBranch(user.role) ? "branch" : user.scopeType;
+      const scope =
+        isBuiltinRole(user.role) && roleRequiresBranch(user.role) ? "branch" : user.scopeType;
       setScopeType(scope);
       const firstBranch = branches.find((b) => b.status !== "inactive");
       setBranchId(user.branchId ?? firstBranch?.id ?? "");
@@ -73,14 +125,20 @@ export function UserFormModal({ open, mode, user, branches, createDefaults, onCl
     }
   }, [open, mode, user, branches, createDefaults]);
 
-  function handleRoleChange(role: AppRole) {
+  function handleRoleChange(role: string) {
     setUserRole(role);
-    if (roleRequiresBranch(role)) {
+    if (isBuiltinRole(role) && roleRequiresBranch(role)) {
       setScopeType("branch");
       if (!branchId && activeBranches[0]) {
         setBranchId(activeBranches[0].id);
       }
     }
+  }
+
+  function toggleCustomRole(roleKey: string) {
+    setSelectedCustomRoleKeys((prev) =>
+      prev.includes(roleKey) ? prev.filter((key) => key !== roleKey) : [...prev, roleKey]
+    );
   }
 
   function resolveBranchIdForSubmit(): string | undefined | null {
@@ -111,15 +169,17 @@ export function UserFormModal({ open, mode, user, branches, createDefaults, onCl
     const effectiveBranch = resolveBranchIdForSubmit();
     try {
       if (mode === "create") {
-        await createUser({
+        const created = await createUser({
           email,
           password,
           fullName,
           role: userRole,
           scopeType: effectiveScope,
-          branchId:
-            effectiveScope === "branch" ? (effectiveBranch ?? undefined) : undefined
+          branchId: effectiveScope === "branch" ? (effectiveBranch ?? undefined) : undefined
         });
+        if (selectedCustomRoleKeys.length > 0) {
+          await syncCustomRoleAssignments(created.userId, selectedCustomRoleKeys, []);
+        }
         showToast("User created", "success");
       } else if (user) {
         await updateUser(user.userId, {
@@ -130,6 +190,7 @@ export function UserFormModal({ open, mode, user, branches, createDefaults, onCl
           branchId: effectiveScope === "branch" ? effectiveBranch ?? null : null,
           status
         });
+        await syncCustomRoleAssignments(user.userId, selectedCustomRoleKeys, initialCustomRoleKeys);
         showToast("User updated", "success");
       }
       onSaved();
@@ -147,8 +208,8 @@ export function UserFormModal({ open, mode, user, branches, createDefaults, onCl
       title={mode === "create" ? "Add user" : "Edit user"}
       subtitle={
         mode === "create"
-          ? "Create a staff login with email and password. Field agents must be assigned to a branch."
-          : "Update profile, role, scope, branch, or account status."
+          ? "Set a system job title plus optional custom roles. Field agents must be assigned to a branch."
+          : "Update profile, job title, custom roles, scope, branch, or account status."
       }
       onClose={onClose}
       footer={
@@ -189,15 +250,56 @@ export function UserFormModal({ open, mode, user, branches, createDefaults, onCl
           </label>
         ) : null}
         <label className="field">
-          <span>Role</span>
-          <select value={userRole} onChange={(e) => handleRoleChange(e.target.value as AppRole)}>
-            {TENANT_ROLES.map((r) => (
-              <option key={r} value={r}>
-                {r.replace(/_/g, " ")}
-              </option>
-            ))}
+          <span>Job title</span>
+          <select value={userRole} onChange={(e) => handleRoleChange(e.target.value)}>
+            <optgroup label="System job titles">
+              {TENANT_STAFF_ROLES.map((r) => (
+                <option key={r} value={r}>
+                  {BUILTIN_ROLE_LABELS[r]}
+                </option>
+              ))}
+            </optgroup>
+            {tenantJobTitles.length > 0 ? (
+              <optgroup label="Your company job titles">
+                {tenantJobTitles.map((jobTitle) => (
+                  <option key={jobTitle.roleKey} value={jobTitle.roleKey}>
+                    {jobTitle.displayName}
+                  </option>
+                ))}
+              </optgroup>
+            ) : null}
           </select>
+          <small className="muted">
+            Primary access level — system titles or custom titles you create under Roles &amp; permissions.
+          </small>
         </label>
+
+        <fieldset className="field roles-page__custom-role-picker">
+          <legend>Extra duty bundles (optional)</legend>
+          <small className="muted">
+            Add-on permissions on top of the job title above. Create these on the Custom roles tab.
+          </small>
+          {extraDutyRoles.length === 0 ? (
+            <p className="muted">No extra duty bundles yet — create them on the Custom roles tab first.</p>
+          ) : (
+            <div className="duty-grid">
+              {extraDutyRoles.map((customRole) => (
+                <label key={customRole.roleKey} className="duty-item">
+                  <input
+                    type="checkbox"
+                    checked={selectedCustomRoleKeys.includes(customRole.roleKey)}
+                    onChange={() => toggleCustomRole(customRole.roleKey)}
+                  />
+                  <span>
+                    <strong>{customRole.displayName}</strong>
+                    <small>{customRole.roleKey}</small>
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+        </fieldset>
+
         {requiresBranch ? (
           <label className="field">
             <span>Branch</span>

@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { TenantBankProduct } from "@bms/shared";
 import type {
   Branch,
   BranchCounterStatement,
@@ -9,6 +10,7 @@ import type {
   Transaction
 } from "../api";
 import {
+  ALL_BRANCHES_SCOPE,
   createTransaction,
   getBranchCounterBootstrap,
   getCustomerLedger,
@@ -34,11 +36,13 @@ type PostPayload = {
   amount: number;
   transactionBranchId: string;
   notes?: string;
+  bankProductId?: string;
 };
 
 type BranchCounterState = {
   customers: Customer[];
   branches: Branch[];
+  bankProducts: TenantBankProduct[];
   statement: BranchCounterStatement | null;
   floatSession: BranchFloatSession | null;
   floatSummary: BranchFloatSummary;
@@ -88,6 +92,17 @@ function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+function resolveStatementBranchId(current: string): string {
+  const runtimeScope = getRuntimeBranchId();
+  if (runtimeScope && runtimeScope !== ALL_BRANCHES_SCOPE) {
+    return runtimeScope;
+  }
+  if (current && current !== ALL_BRANCHES_SCOPE) {
+    return current;
+  }
+  return "";
+}
+
 function reconcileBranchScope(
   statementBranchId: string,
   branches: Branch[]
@@ -105,6 +120,7 @@ function reconcileBranchScope(
 export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
   customers: [],
   branches: [],
+  bankProducts: [],
   statement: null,
   floatSession: null,
   floatSummary: null,
@@ -167,15 +183,21 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
       error: null
     });
 
-    const { statementBranchId, statementDate, selectedCustomerId } = get();
+    const statementDate = get().statementDate;
+    const selectedCustomerId = get().selectedCustomerId;
+    const scopedBranchId = resolveStatementBranchId(get().statementBranchId);
+    if (scopedBranchId !== get().statementBranchId || scopedBranchId !== get().transactionBranchId) {
+      set({ statementBranchId: scopedBranchId, transactionBranchId: scopedBranchId });
+    }
 
     fetchInFlight = (async () => {
       try {
-        const data = await getBranchCounterBootstrap(statementBranchId, statementDate);
-        const branchPatch = reconcileBranchScope(statementBranchId, data.branches);
+        const data = await getBranchCounterBootstrap(scopedBranchId, statementDate);
+        const branchPatch = reconcileBranchScope(scopedBranchId, data.branches);
         set({
           customers: data.customers,
           branches: data.branches,
+          bankProducts: data.bankProducts ?? [],
           statement: data.statement,
           floatSession: data.floatSession,
           floatSummary: data.floatSummary,
@@ -218,16 +240,22 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
     if (fetchInFlight) {
       return fetchInFlight;
     }
-    const { statementBranchId, statementDate, selectedCustomerId } = get();
+    const statementDate = get().statementDate;
+    const selectedCustomerId = get().selectedCustomerId;
+    const scopedBranchId = resolveStatementBranchId(get().statementBranchId);
+    if (scopedBranchId !== get().statementBranchId || scopedBranchId !== get().transactionBranchId) {
+      set({ statementBranchId: scopedBranchId, transactionBranchId: scopedBranchId });
+    }
     set({ refreshing: true });
 
     fetchInFlight = (async () => {
       try {
-        const data = await getBranchCounterBootstrap(statementBranchId, statementDate);
-        const branchPatch = reconcileBranchScope(statementBranchId, data.branches);
+        const data = await getBranchCounterBootstrap(scopedBranchId, statementDate);
+        const branchPatch = reconcileBranchScope(scopedBranchId, data.branches);
         set({
           customers: data.customers,
           branches: data.branches,
+          bankProducts: data.bankProducts ?? [],
           statement: data.statement,
           floatSession: data.floatSession,
           floatSummary: data.floatSummary,

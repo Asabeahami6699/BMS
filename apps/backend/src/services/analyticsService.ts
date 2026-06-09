@@ -220,7 +220,7 @@ export async function getCustomerAccountMix(
   context: RoleContext
 ): Promise<CustomerAccountMix> {
   const { listCustomers } = await import("./customerService.js");
-  let customers = await listCustomers(tenantId);
+  let customers = await listCustomers(tenantId, { light: true });
   if (context.scopeType !== "head_office" && context.branchId) {
     customers = customers.filter((c) => c.homeBranchId === context.branchId);
   }

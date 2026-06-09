@@ -1,9 +1,9 @@
-import type { Permission, Role, ScopeType, TenantAddon, TenantProductModule } from "@bms/shared";
+import type { Permission, ScopeType, TenantAddon, TenantProductModule } from "@bms/shared";
 
 export interface UserContext {
   userId: string;
   tenantId: string;
-  role: Role;
+  role: string;
   scopeType: ScopeType;
   branchId?: string;
   permissions: Permission[];
@@ -19,6 +19,8 @@ declare global {
   namespace Express {
     interface Request {
       userContext?: UserContext;
+      /** Resolved after branch-scope middleware (query param or user branch). */
+      effectiveBranchId?: string;
     }
   }
 }

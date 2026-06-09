@@ -6,6 +6,7 @@ import { BmsBrandIcon } from "../components/BmsBrandIcon";
 import { AiHelpPanel } from "../components/AiHelpPanel";
 import { GlobalSearch } from "./components/GlobalSearch";
 import { DashboardNotifications } from "./components/DashboardNotifications";
+import { ThemeToggle } from "../components/ThemeToggle";
 
 export type { DashboardNavItem };
 
@@ -160,23 +161,25 @@ export function DashboardShell({
                     {getNavIcon(item.label)}
                   </span>
                   <span className="dash-nav-group-label">{item.label}</span>
-                  <span className="dash-nav-chevron" aria-hidden>
-                    {isOpen ? "▾" : "▸"}
+                  <span className={`dash-nav-chevron${isOpen ? " is-open" : ""}`} aria-hidden>
+                    ▸
                   </span>
                 </button>
-                <div className="dash-nav-children">
-                  {item.children.map((child) => (
-                    <NavLink
-                      key={child.to}
-                      to={child.to}
-                      className={({ isActive }) => `dash-nav-sublink${isActive ? " active" : ""}`}
-                    >
-                      <span className="dash-nav-sublink-icon" aria-hidden>
-                        {getNavIcon(child.label, child.to)}
-                      </span>
-                      {child.label}
-                    </NavLink>
-                  ))}
+                <div className="dash-nav-children" aria-hidden={!isOpen}>
+                  <div className="dash-nav-children-inner">
+                    {item.children.map((child) => (
+                      <NavLink
+                        key={child.to}
+                        to={child.to}
+                        className={({ isActive }) => `dash-nav-sublink${isActive ? " active" : ""}`}
+                      >
+                        <span className="dash-nav-sublink-icon" aria-hidden>
+                          {getNavIcon(child.label, child.to)}
+                        </span>
+                        {child.label}
+                      </NavLink>
+                    ))}
+                  </div>
                 </div>
               </div>
             );
@@ -191,12 +194,17 @@ export function DashboardShell({
 
       <div className="dash-main">
         <header className="dash-header">
-          <GlobalSearch canSearchCustomers={canSearchCustomers} canSearchUsers={canSearchUsers} />
+          <div className="dash-header-start">
+            <GlobalSearch canSearchCustomers={canSearchCustomers} canSearchUsers={canSearchUsers} />
+          </div>
 
-          <div className="dash-header-actions">
+          {topbarActions ? <div className="dash-header-center">{topbarActions}</div> : null}
+
+          <div className="dash-header-end">
+            <ThemeToggle />
             <DashboardNotifications enabled={notificationsEnabled} />
 
-            <div className="dash-profile-menu" ref={profileRef}>
+            <div className={`dash-profile-menu${profileOpen ? " is-open" : ""}`} ref={profileRef}>
               <button
                 type="button"
                 className="dash-profile-trigger"
@@ -212,11 +220,11 @@ export function DashboardShell({
                   <span className="dash-profile-role muted">{userRole}</span>
                 </span>
                 <span className="dash-profile-chevron" aria-hidden>
-                  ▾
+                  ▸
                 </span>
               </button>
               {profileOpen ? (
-                <div className="dash-profile-panel" role="menu">
+                <div className="dash-profile-panel dash-panel-enter" role="menu">
                   <Link
                     className="dash-profile-panel__item"
                     role="menuitem"
@@ -252,16 +260,22 @@ export function DashboardShell({
                   >
                     <span aria-hidden>⚙</span> Role &amp; permissions
                   </button>
+                  <ThemeToggle className="theme-toggle theme-toggle--menu" showLabel />
+                  <div className="dash-profile-panel__divider" role="separator" />
+                  <button
+                    type="button"
+                    className="dash-profile-panel__item dash-profile-panel__item--logout"
+                    role="menuitem"
+                    onClick={() => {
+                      setProfileOpen(false);
+                      onLogout();
+                    }}
+                  >
+                    <span aria-hidden>⎋</span> Sign out
+                  </button>
                 </div>
               ) : null}
             </div>
-
-            {topbarActions}
-
-            <button type="button" className="dash-logout-btn" onClick={onLogout}>
-              <span aria-hidden>⎋</span>
-              Sign out
-            </button>
           </div>
         </header>
 
