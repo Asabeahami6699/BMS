@@ -482,9 +482,11 @@ export async function resolveBankProductForWithdrawalApproval(
   return product.id;
 }
 
+type BankProductEnrichment = { bankProductName?: string; bankLabel?: string };
+
 export async function enrichTransactionsWithBankProducts<
-  T extends { bankProductId?: string; bankProductName?: string; bankLabel?: string }
->(tenantId: string, rows: T[]): Promise<T[]> {
+  T extends { bankProductId?: string }
+>(tenantId: string, rows: T[]): Promise<(T & BankProductEnrichment)[]> {
   const productIds = [...new Set(rows.map((r) => r.bankProductId).filter(Boolean))] as string[];
   if (productIds.length === 0) {
     return rows;
