@@ -9,39 +9,87 @@ import { RevealOnScroll } from "../components/RevealOnScroll";
 import { ThemeToggle } from "../components/ThemeToggle";
 
 const heroBadges = [
-  "Daily Susu collections",
-  "Cross-branch ledger",
-  "Credit & group loans",
-  "Live dashboard sync"
+  "Agency banking desks",
+  "Universal staff hub",
+  "Susu & member ledger",
+  "Accountant & auditor control"
 ];
 
 const pillars = [
   {
     tag: "Savings",
     title: "Susu & member accounts",
-    text: "Daily collections, deposits, withdrawals, and a single balance per member across every branch.",
-    points: ["Field agent posting", "Idempotent transactions", "Customer CIF & photos"]
+    text: "Daily collections, deposits, withdrawals, and one balance per member across every branch.",
+    points: ["Field agent posting", "Callover & till float", "Customer profiles & CIF"]
   },
   {
-    tag: "Lending",
-    title: "Credit department",
-    text: "Individual and group solidarity loans with products, approval workflows, disbursement, and repayments.",
-    points: ["Credit assessment forms", "Solidarity groups", "Printable applications"],
+    tag: "Banking",
+    title: "Agency banking operations",
+    text: "Teller, customer service, and back office workflows with partner bank products and branch reconciliation.",
+    points: ["Deposits & withdrawals", "Account opening", "Back-office execution"],
     highlight: true
   },
   {
-    tag: "Operations",
-    title: "Back office & control",
-    text: "Commissions, payroll, audit trails, role-based permissions, and exports for supervision.",
-    points: ["Custom roles & duties", "Commission policies", "CSV reports"]
+    tag: "Finance",
+    title: "Accountant & auditor desks",
+    text: "Grouped dashboards for cash positions, trial balance, approvals, exception review, and branch summaries.",
+    points: ["Trial balance & vault control", "High-value transaction review", "Audit logs & compliance"]
+  },
+  {
+    tag: "People",
+    title: "HR & Universal Operations",
+    text: "Every staff member gets attendance, leave, loans, announcements, documents, and incident reporting in one hub.",
+    points: ["Employee profiles & payroll", "Leave & training records", "Incident workflow"]
   }
+];
+
+const bankingDesks = [
+  {
+    icon: "₵",
+    title: "Teller desk",
+    text: "Record deposits, pay withdrawals, reconcile the till, and run the daybook from one workspace."
+  },
+  {
+    icon: "☎",
+    title: "Customer service",
+    text: "Approve withdrawals, open accounts, and serve members at the counter with clear queues."
+  },
+  {
+    icon: "🏦",
+    title: "Back office",
+    text: "Execute at the bank, balance company accounts across branches, and manage ecash requests."
+  },
+  {
+    icon: "📊",
+    title: "Accountant",
+    text: "Deposits, withdrawals, vault and bank cash, loan portfolios, trial balance, and branch financial summaries."
+  },
+  {
+    icon: "🔍",
+    title: "Auditor",
+    text: "Review queues, cash differences, reversed transactions, activity logs, and compliance exceptions."
+  },
+  {
+    icon: "👥",
+    title: "Human resources",
+    text: "Profiles, branch assignments, attendance, leave, appointments, payroll, roles, and training."
+  }
+];
+
+const universalOps = [
+  { icon: "⏰", title: "Attendance", text: "Clock in and out, breaks, history, and monthly reports." },
+  { icon: "🌴", title: "Leave management", text: "Annual, sick, maternity, and other leave types with approvals." },
+  { icon: "💰", title: "Staff loans", text: "Apply, track repayments, and view schedules from your portal." },
+  { icon: "📢", title: "Announcements", text: "Company news, policies, holidays, and training notices." },
+  { icon: "📄", title: "Documents center", text: "Handbooks, SOPs, AML guidelines, and circulars in one library." },
+  { icon: "🚨", title: "Incident reporting", text: "Cash variances, fraud signals, complaints, and operational errors." }
 ];
 
 const features = [
   {
     icon: "🏢",
-    title: "Multi-tenant SaaS",
-    text: "One platform hosts many cooperatives and MFIs. Each tenant gets an isolated workspace with branches, users, and subscribed products.",
+    title: "Multi-tenant workspaces",
+    text: "Each cooperative runs in its own secure workspace with branches, subscribed products, and isolated data.",
     tag: null
   },
   {
@@ -53,61 +101,61 @@ const features = [
   {
     icon: "⇄",
     title: "Daily Susu & transactions",
-    text: "Record daily Susu, deposits, and withdrawals with idempotent posting, audit trails, and real-time balance updates.",
+    text: "Record collections and movements with idempotent posting, audit trails, and live balance updates.",
     tag: null
+  },
+  {
+    icon: "🏦",
+    title: "Agency banking module",
+    text: "Role-based desks for tellers, CS, back office, accountants, auditors, and HR—with collapsible sidebar navigation.",
+    tag: "New"
+  },
+  {
+    icon: "🌐",
+    title: "Universal Operations",
+    text: "Every employee sees attendance, leave, staff loans, announcements, documents, and incidents in one staff hub.",
+    tag: "New"
   },
   {
     icon: "💳",
     title: "Loans & credit products",
-    text: "Configure interest rates, terms, and weekly or monthly schedules. Track portfolio KPIs from application to full repayment.",
-    tag: "New"
+    text: "Individual and group solidarity loans with products, workflows, disbursement, and repayment tracking.",
+    tag: null
   },
   {
     icon: "👥",
     title: "Group solidarity lending",
-    text: "Register loan groups with chairs, treasurers, and members. Apply on behalf of a member using group solidarity products.",
-    tag: "New"
+    text: "Register loan groups with officers and members; apply on behalf of members with full assessment.",
+    tag: null
   },
   {
     icon: "📋",
-    title: "Credit assessment & documents",
-    text: "Capture income, occupation, loan purpose, guarantor details, passport and ID photos—with printable review forms.",
+    title: "Credit assessment",
+    text: "Income, occupation, guarantor details, and identity capture—with printable application forms.",
+    tag: null
+  },
+  {
+    icon: "◇",
+    title: "Treasury & trial balance",
+    text: "Cash positions and movements where subscribed; accountants can reconcile vault, teller, and bank without extra modules.",
     tag: "New"
   },
   {
     icon: "⌂",
     title: "Branches & head office",
-    text: "Run head-office control with branch-scoped field staff. Mobilizers and coordinators operate where members actually save.",
-    tag: null
-  },
-  {
-    icon: "%",
-    title: "Commission policies",
-    text: "Configure field-agent and coordinator commission rules per tenant—percentages, basis, and bonus thresholds.",
+    text: "Head-office scope or branch-scoped staff. Mobilizers and coordinators work where members actually save.",
     tag: null
   },
   {
     icon: "▤",
     title: "Reports & exports",
-    text: "Summary, agent, branch, and loans performance views with CSV export for reconciliation and supervision.",
-    tag: null
-  },
-  {
-    icon: "⚡",
-    title: "Live sync dashboards",
-    text: "Susu and loans modules hydrate fast and refresh quietly in the background so supervisors always see current figures.",
+    text: "Summary, agent, branch, and loans performance with CSV export for reconciliation and supervision.",
     tag: null
   },
   {
     icon: "🔐",
     title: "Permission-driven access",
-    text: "Admins assign granular duties—read loans, approve applications, disburse, collect repayments—without hard-coded roles.",
-    tag: null
-  },
-  {
-    icon: "₵",
-    title: "Payroll & payslips",
-    text: "Run payroll cycles and deliver payslips to every role; commission lines appear only where they apply.",
+    text: "Custom job titles and duty bundles—granular permissions without locking every user to a fixed role.",
     tag: null
   }
 ];
@@ -132,51 +180,59 @@ const loanSpotlight = [
 
 const roles = [
   {
-    title: "Platform super admin",
-    text: "Registers companies on BMS, enables product subscriptions, and manages tenant lifecycle."
+    title: "Company administrator",
+    text: "Configures branches, users, products, commission rules, and job titles—the control center for each cooperative."
   },
   {
-    title: "Company admin",
-    text: "Sets up branches, users, commission policy, loan products, and custom roles—the control center for each cooperative."
+    title: "Teller & customer service",
+    text: "Serves members at the counter: deposits, withdrawals, account opening, and payout approvals."
+  },
+  {
+    title: "Back office & finance",
+    text: "Executes bank transactions, balances company accounts, and supports accountant review queues."
+  },
+  {
+    title: "Accountant & auditor",
+    text: "Monitors cash positions, trial balance, exceptions, high-value items, and audit trails."
+  },
+  {
+    title: "HR & every staff member",
+    text: "HR manages people operations; all staff use Universal Operations for attendance, leave, and workplace tools."
   },
   {
     title: "Field agent & coordinator",
-    text: "Onboards customers, posts Susu collections, and—with the right permissions—submits loan applications in the field."
-  },
-  {
-    title: "Credit & finance staff",
-    text: "Reviews applications, approves or declines credit, disburses loans, records repayments, and exports portfolio reports."
+    text: "Onboards customers, posts Susu collections, and—with permissions—supports loan applications in the field."
   }
 ];
 
 const steps = [
   {
     n: "01",
-    title: "Register your cooperative",
-    text: "Your platform admin onboards your organization as a tenant with the products you need—Susu, loans, or both."
+    title: "Onboard your cooperative",
+    text: "Contact us to register your organization with the products you need—Susu, agency banking, loans, or treasury."
   },
   {
     n: "02",
-    title: "Configure branches & products",
-    text: "Company admins create branches, commission rules, loan products, solidarity groups, and staff accounts."
+    title: "Configure branches & desks",
+    text: "Set up branches, bank products, loan products, commission rules, and staff accounts with the right permissions."
   },
   {
     n: "03",
-    title: "Collect & lend in the field",
-    text: "Agents record Susu and transactions; authorized staff submit individual or group loan applications with full documentation."
+    title: "Operate in the field & branch",
+    text: "Agents record Susu; tellers and CS serve members; back office executes at partner banks."
   },
   {
     n: "04",
-    title: "Supervise, report & pay",
-    text: "Head office monitors live KPIs, manages the loan portfolio, exports reports, and runs payroll with payslips."
+    title: "Supervise, report & comply",
+    text: "Accountants and auditors review dashboards; HR runs payroll; staff use Universal Operations daily."
   }
 ];
 
 const highlights = [
-  { value: "Susu + Loans", label: "One platform, two revenue lines" },
-  { value: "Live sync", label: "Fresh data without manual refresh" },
-  { value: "RLS-ready", label: "Tenant isolation by design" },
-  { value: "Audit-friendly", label: "Every posting traceable" }
+  { value: "6+ desks", label: "Agency banking role workspaces" },
+  { value: "Universal Ops", label: "Staff hub for every employee" },
+  { value: "Live sync", label: "Dashboards refresh in the background" },
+  { value: "Audit-ready", label: "Traceable postings & review queues" }
 ];
 
 export function LandingPage() {
@@ -205,9 +261,10 @@ export function LandingPage() {
 
         <nav className="landing-nav-links" aria-label="Primary">
           <a href="#platform">Platform</a>
+          <a href="#banking">Banking</a>
+          <a href="#universal-ops">Staff hub</a>
           <a href="#loans">Loans</a>
           <a href="#features">Features</a>
-          <a href="#how-it-works">How it works</a>
           <a href="#contact">Contact</a>
         </nav>
 
@@ -233,16 +290,16 @@ export function LandingPage() {
       <section className="landing-hero">
         <div className="landing-hero-copy">
           <p className="landing-eyebrow landing-animate-in landing-animate-in--1">
-            Savings, credit & supervision for cooperatives
+            Savings, agency banking & staff operations for cooperatives
           </p>
           <h1 className="landing-animate-in landing-animate-in--2">
-            Grow members with Susu today and{" "}
-            <span className="landing-gradient-text">responsible lending tomorrow</span>
+            Run Susu, branch banking, and{" "}
+            <span className="landing-gradient-text">every desk from one system</span>
           </h1>
           <p className="landing-lead landing-animate-in landing-animate-in--3">
             BMS is a modern Banking Management System for multi-branch cooperatives and MFIs—daily Susu collections,
-            cross-branch deposits, a full credit department with group solidarity loans, commissions, payroll, and
-            live dashboards from field agent to head office.
+            agency banking with teller and back-office desks, accountant and auditor control centres, HR operations,
+            and Universal Operations so every employee can manage attendance, leave, and workplace requests.
           </p>
           <ul className="landing-hero-badges landing-animate-in landing-animate-in--4" aria-label="Highlights">
             {heroBadges.map((badge) => (
@@ -253,8 +310,8 @@ export function LandingPage() {
             <button type="button" className="button landing-cta-primary" onClick={handlePrimaryCta}>
               {session?.accessToken && user ? "Open your dashboard" : "Sign in to your workspace"}
             </button>
-            <a href="#platform" className="button secondary landing-cta-secondary">
-              See the platform
+            <a href="#banking" className="button secondary landing-cta-secondary">
+              Explore agency banking
             </a>
           </div>
           <p className="landing-hero-note muted landing-animate-in landing-animate-in--6">
@@ -264,8 +321,8 @@ export function LandingPage() {
 
         <div className="landing-hero-panel landing-animate-in--panel" aria-hidden>
           <div className="landing-mock-card landing-animate-in landing-animate-in--6">
-            <p className="landing-mock-label">Today&apos;s Susu collections</p>
-            <p className="landing-mock-value">GH₵ 128,450</p>
+            <p className="landing-mock-label">Accountant dashboard</p>
+            <p className="landing-mock-value">Cash &amp; liquidity</p>
             <div className="landing-mock-bars">
               <span className="landing-mock-bar" style={{ height: "45%" }} />
               <span className="landing-mock-bar" style={{ height: "72%" }} />
@@ -276,22 +333,22 @@ export function LandingPage() {
             </div>
           </div>
           <div className="landing-mock-card landing-mock-card--small landing-animate-in landing-animate-in--7">
-            <p className="landing-mock-label">Loan portfolio</p>
-            <p className="landing-mock-value">GH₵ 2.4M</p>
-            <p className="landing-mock-meta">38 active loans</p>
+            <p className="landing-mock-label">Universal Operations</p>
+            <p className="landing-mock-value">Staff hub</p>
+            <p className="landing-mock-meta">Attendance · Leave · Docs</p>
           </div>
           <div className="landing-mock-card landing-mock-card--small landing-mock-card--accent landing-animate-in landing-animate-in--8">
-            <p className="landing-mock-label">Pending approval</p>
-            <p className="landing-mock-value">7</p>
-            <p className="landing-mock-meta">3 group applications</p>
+            <p className="landing-mock-label">Auditor queue</p>
+            <p className="landing-mock-value">Review</p>
+            <p className="landing-mock-meta">Exceptions &amp; compliance</p>
           </div>
           <div className="landing-mock-card landing-mock-card--wide landing-animate-in landing-animate-in--8">
             <div className="landing-mock-row">
-              <span className="landing-mock-pill landing-mock-pill--success">Disbursed</span>
-              <span className="landing-mock-pill">Group solidarity</span>
-              <span className="landing-mock-pill landing-mock-pill--warn">Due this week</span>
+              <span className="landing-mock-pill landing-mock-pill--success">Teller desk</span>
+              <span className="landing-mock-pill">Back office</span>
+              <span className="landing-mock-pill landing-mock-pill--warn">Trial balance</span>
             </div>
-            <p className="landing-mock-caption">Loans department · live portfolio sync</p>
+            <p className="landing-mock-caption">Agency banking · role-based workspaces</p>
           </div>
         </div>
       </section>
@@ -307,14 +364,14 @@ export function LandingPage() {
 
       <section className="landing-section landing-section--alt" id="platform">
         <RevealOnScroll className="landing-section-head landing-section-head--center">
-          <p className="landing-eyebrow">Three pillars, one workspace</p>
-          <h2>Savings operations and lending on the same member ledger</h2>
+          <p className="landing-eyebrow">Four pillars, one workspace</p>
+          <h2>Susu, agency banking, finance control, and staff operations together</h2>
           <p className="muted landing-section-sub">
-            Most cooperatives start with Susu. When you are ready to lend, BMS adds a credit department without
-            replacing your existing workflows or splitting customer data.
+            Start with daily collections. Add partner-bank agency workflows, accountant and auditor dashboards, and
+            a Universal Operations hub so every employee has the tools they need.
           </p>
         </RevealOnScroll>
-        <div className="landing-pillar-grid">
+        <div className="landing-pillar-grid landing-pillar-grid--four">
           {pillars.map((pillar, index) => (
             <RevealOnScroll
               key={pillar.title}
@@ -330,6 +387,55 @@ export function LandingPage() {
                   <li key={point}>{point}</li>
                 ))}
               </ul>
+            </RevealOnScroll>
+          ))}
+        </div>
+      </section>
+
+      <section className="landing-section" id="banking">
+        <RevealOnScroll className="landing-section-head">
+          <p className="landing-eyebrow">Agency banking</p>
+          <h2>Role desks for tellers, back office, finance, and HR</h2>
+          <p className="muted landing-section-sub">
+            Collapsible sidebar groups keep each job title focused—deposits and withdrawals at the counter, bank
+            execution in back office, trial balance and approvals for accountants, and exception review for auditors.
+          </p>
+        </RevealOnScroll>
+        <div className="landing-feature-grid">
+          {bankingDesks.map((desk, index) => (
+            <RevealOnScroll key={desk.title} as="article" className="landing-feature-card" delay={index * 50}>
+              <div className="landing-feature-card__head">
+                <span className="landing-feature-icon" aria-hidden>
+                  {desk.icon}
+                </span>
+              </div>
+              <h3>{desk.title}</h3>
+              <p>{desk.text}</p>
+            </RevealOnScroll>
+          ))}
+        </div>
+      </section>
+
+      <section className="landing-section landing-section--alt" id="universal-ops">
+        <RevealOnScroll className="landing-section-head landing-section-head--center">
+          <p className="landing-eyebrow">Universal Operations</p>
+          <h2>Every staff member gets their own operations hub</h2>
+          <p className="muted landing-section-sub">
+            Not only managers—tellers, CS, coordinators, and back-office staff all see attendance, leave, internal
+            announcements, policy documents, and incident reporting from the same sidebar.
+          </p>
+        </RevealOnScroll>
+        <div className="landing-feature-grid">
+          {universalOps.map((item, index) => (
+            <RevealOnScroll key={item.title} as="article" className="landing-feature-card" delay={index * 50}>
+              <div className="landing-feature-card__head">
+                <span className="landing-feature-icon" aria-hidden>
+                  {item.icon}
+                </span>
+                <span className="landing-feature-tag">Staff</span>
+              </div>
+              <h3>{item.title}</h3>
+              <p>{item.text}</p>
             </RevealOnScroll>
           ))}
         </div>
@@ -362,7 +468,7 @@ export function LandingPage() {
                 document.getElementById("contact")?.scrollIntoView({ behavior: "smooth" });
               }}
             >
-              {session?.accessToken && user ? "Open loans workspace" : "Talk to us about loans"}
+              {session?.accessToken && user ? "Open your workspace" : "Talk to us about loans"}
             </button>
           </RevealOnScroll>
           <div className="landing-loans-flow">
@@ -384,8 +490,8 @@ export function LandingPage() {
           <p className="landing-eyebrow">Platform capabilities</p>
           <h2>Everything your cooperative needs in one place</h2>
           <p className="muted landing-section-sub">
-            From daily Susu in the field to loan approvals at head office—BMS is designed for many tenants, many
-            branches, one member ledger, and staff who work on mobile—not only at a desk.
+            From daily Susu in the field to accountant trial balance and staff incident reporting—BMS is designed for
+            many branches, one member ledger, and teams who work on mobile as well as at the desk.
           </p>
         </RevealOnScroll>
         <div className="landing-feature-grid">
@@ -407,7 +513,7 @@ export function LandingPage() {
       <section className="landing-section landing-section--alt" id="how-it-works">
         <RevealOnScroll className="landing-section-head">
           <p className="landing-eyebrow">How it works</p>
-          <h2>From platform onboarding to daily collections and lending</h2>
+          <h2>From onboarding to daily collections, banking, and staff ops</h2>
         </RevealOnScroll>
         <ol className="landing-steps">
           {steps.map((step, index) => (
@@ -426,6 +532,10 @@ export function LandingPage() {
         <RevealOnScroll className="landing-section-head">
           <p className="landing-eyebrow">Who uses BMS</p>
           <h2>Built for every layer of your organization</h2>
+          <p className="muted landing-section-sub">
+            Role-based desks and permissions put the right tools in front of each team—without exposing internal
+            platform administration to branch staff.
+          </p>
         </RevealOnScroll>
         <div className="landing-roles-grid">
           {roles.map((item, index) => (
@@ -442,8 +552,8 @@ export function LandingPage() {
           <p className="landing-eyebrow">Contact</p>
           <h2>Ready to modernize your cooperative?</h2>
           <p className="muted landing-section-sub">
-            Tell us about your branches, Susu volume, and lending plans. Use live chat (bottom right) or email—we will
-            help you evaluate BMS for your organization.
+            Tell us about your branches, Susu volume, agency banking partners, and lending plans. Use live chat
+            (bottom right) or email—we will help you evaluate BMS for your organization.
           </p>
         </RevealOnScroll>
         <RevealOnScroll className="landing-contact-card card" delay={120}>
@@ -452,15 +562,15 @@ export function LandingPage() {
             <a href={`mailto:${BMS_CONTACT_EMAIL}`}>{BMS_CONTACT_EMAIL}</a>
           </p>
           <p className="muted">
-            BMS — Banking Management System for cooperatives and MFIs. Susu collections, cross-branch savings, credit
-            products, group solidarity loans, commissions, and payroll in one secure workspace.
+            BMS — Banking Management System for cooperatives and MFIs. Susu collections, agency banking desks,
+            Universal Operations for staff, credit products, and finance control in one secure workspace.
           </p>
         </RevealOnScroll>
       </section>
 
       <RevealOnScroll as="section" className="landing-section landing-cta-band">
         <div>
-          <h2>Start with savings. Scale into lending.</h2>
+          <h2>Start with savings. Scale into banking and staff operations.</h2>
           <p className="muted">
             Sign in with credentials from your administrator, or contact us to register your cooperative on BMS.
           </p>
@@ -478,7 +588,7 @@ export function LandingPage() {
           Contact: <a href={`mailto:${BMS_CONTACT_EMAIL}`}>{BMS_CONTACT_EMAIL}</a>
         </p>
         <p className="muted">
-          Multi-tenant · Susu &amp; loans · Live sync · Audit-friendly · Permission-based access
+          Multi-tenant · Susu &amp; agency banking · Universal Operations · Live sync · Audit-friendly
         </p>
       </footer>
 
