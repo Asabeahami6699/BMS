@@ -21,3 +21,5 @@ export * from "./amountInWords.js";
 export * from "./bankProducts.js";
 export * from "./agencyAccounts.js";
 export * from "./backOffice.js";
+export * from "./financeDesks.js";
+export * from "./universalOps.js";

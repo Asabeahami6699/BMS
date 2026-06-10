@@ -108,6 +108,8 @@ function mapListUser(user: {
 
   branchId?: string;
 
+  tellerType?: 1 | 2 | 3 | 4;
+
   tenantId: string;
 
   status: "active" | "inactive";
@@ -186,6 +188,8 @@ usersRouter.post("/", requirePermission("users.create"), async (req, res) => {
 
       branchId: parsed.data.branchId,
 
+      tellerType: parsed.data.tellerType ?? null,
+
       fullName: parsed.data.fullName,
 
       tenantId: context.tenantId,
@@ -256,7 +260,7 @@ usersRouter.get("/", requirePermission("users.read"), async (req, res) => {
 
       .from("users")
 
-      .select("id, email, role, scope_type, branch_id, tenant_id, created_by, full_name, status, created_at")
+      .select("id, email, role, scope_type, branch_id, teller_type, tenant_id, created_by, full_name, status, created_at")
 
       .eq("tenant_id", tenantId)
 
@@ -289,6 +293,9 @@ usersRouter.get("/", requirePermission("users.read"), async (req, res) => {
           scopeType: user.scope_type,
 
           branchId: user.branch_id ?? undefined,
+
+          tellerType:
+            user.teller_type != null ? (Number(user.teller_type) as 1 | 2 | 3 | 4) : undefined,
 
           tenantId: user.tenant_id,
 
@@ -327,6 +334,8 @@ usersRouter.get("/", requirePermission("users.read"), async (req, res) => {
         scopeType: user.scopeType,
 
         branchId: user.branchId,
+
+        tellerType: user.tellerType,
 
         tenantId,
 

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
-import type { DashboardNavItem } from "../config/tenantModules";
+import type { DashboardNavChild, DashboardNavItem } from "../config/tenantModules";
 import { getNavIcon } from "./navIcons";
 import { BmsBrandIcon } from "../components/BmsBrandIcon";
 import { AiHelpPanel } from "../components/AiHelpPanel";
@@ -26,12 +26,24 @@ type Props = {
 };
 
 function pathMatchesRoute(currentPath: string, navTo: string): boolean {
-  const segment = navTo.split("/").filter(Boolean).pop() ?? navTo;
-  return currentPath.includes(navTo) || currentPath.endsWith(`/${segment}`);
+  const normalized = navTo.replace(/^\/+/, "").replace(/^app\//, "");
+  const target = `/app/${normalized}`;
+  return currentPath === target || currentPath.endsWith(target);
+}
+
+function childIsActive(currentPath: string, child: DashboardNavChild): boolean {
+  if (child.kind === "link") {
+    return pathMatchesRoute(currentPath, child.to);
+  }
+  return child.children.some((sub) => pathMatchesRoute(currentPath, sub.to));
 }
 
 function groupIsActive(currentPath: string, item: Extract<DashboardNavItem, { kind: "group" }>): boolean {
-  return item.children.some((child) => pathMatchesRoute(currentPath, child.to));
+  return item.children.some((child) => childIsActive(currentPath, child));
+}
+
+function subgroupIsActive(currentPath: string, child: Extract<DashboardNavChild, { kind: "subgroup" }>): boolean {
+  return child.children.some((sub) => pathMatchesRoute(currentPath, sub.to));
 }
 
 function initialsFromName(name: string): string {
@@ -60,21 +72,45 @@ export function DashboardShell({
   const navigate = useNavigate();
   const currentPath = location.pathname;
   const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set());
+  const [openSubgroups, setOpenSubgroups] = useState<Set<string>>(() => new Set());
   const [profileOpen, setProfileOpen] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const active = new Set<string>();
+    const activeGroups = new Set<string>();
+    const activeSubgroups = new Set<string>();
     for (const item of navItems) {
-      if (item.kind === "group" && groupIsActive(currentPath, item)) {
-        active.add(item.id);
+      if (item.kind !== "group") {
+        continue;
+      }
+      if (groupIsActive(currentPath, item)) {
+        activeGroups.add(item.id);
+      }
+      for (const child of item.children) {
+        if (child.kind === "subgroup" && subgroupIsActive(currentPath, child)) {
+          activeGroups.add(item.id);
+          activeSubgroups.add(child.id);
+        }
       }
     }
-    if (active.size > 0) {
+    if (activeGroups.size > 0) {
       setOpenGroups((prev) => {
         let changed = false;
         const next = new Set(prev);
-        for (const id of active) {
+        for (const id of activeGroups) {
+          if (!next.has(id)) {
+            next.add(id);
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
+    }
+    if (activeSubgroups.size > 0) {
+      setOpenSubgroups((prev) => {
+        let changed = false;
+        const next = new Set(prev);
+        for (const id of activeSubgroups) {
           if (!next.has(id)) {
             next.add(id);
             changed = true;
@@ -97,6 +133,18 @@ export function DashboardShell({
 
   function toggleGroup(id: string) {
     setOpenGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }
+
+  function toggleSubgroup(id: string) {
+    setOpenSubgroups((prev) => {
       const next = new Set(prev);
       if (next.has(id)) {
         next.delete(id);
@@ -149,7 +197,7 @@ export function DashboardShell({
             return (
               <div
                 key={item.id}
-                className={`dash-nav-group${isOpen ? " is-open" : ""}${isActiveGroup ? " has-active" : ""}`}
+                className={`dash-nav-group${item.flatChildren ? " dash-nav-group--flat" : ""}${isOpen ? " is-open" : ""}${isActiveGroup ? " has-active" : ""}`}
               >
                 <button
                   type="button"
@@ -167,18 +215,63 @@ export function DashboardShell({
                 </button>
                 <div className="dash-nav-children" aria-hidden={!isOpen}>
                   <div className="dash-nav-children-inner">
-                    {item.children.map((child) => (
-                      <NavLink
-                        key={child.to}
-                        to={child.to}
-                        className={({ isActive }) => `dash-nav-sublink${isActive ? " active" : ""}`}
-                      >
-                        <span className="dash-nav-sublink-icon" aria-hidden>
-                          {getNavIcon(child.label, child.to)}
-                        </span>
-                        {child.label}
-                      </NavLink>
-                    ))}
+                    {item.children.map((child) => {
+                      if (child.kind === "link") {
+                        return (
+                          <NavLink
+                            key={child.to}
+                            to={child.to}
+                            className={({ isActive }) => `dash-nav-sublink${isActive ? " active" : ""}`}
+                          >
+                            <span className="dash-nav-sublink-icon" aria-hidden>
+                              {getNavIcon(child.label, child.to)}
+                            </span>
+                            {child.label}
+                          </NavLink>
+                        );
+                      }
+                      const subOpen = openSubgroups.has(child.id);
+                      const subActive = subgroupIsActive(currentPath, child);
+                      return (
+                        <div
+                          key={child.id}
+                          className={`dash-nav-subgroup${subOpen ? " is-open" : ""}${subActive ? " has-active" : ""}`}
+                        >
+                          <button
+                            type="button"
+                            className="dash-nav-subgroup-trigger"
+                            aria-expanded={subOpen}
+                            onClick={() => toggleSubgroup(child.id)}
+                          >
+                            <span className="dash-nav-sublink-icon" aria-hidden>
+                              {getNavIcon(child.label)}
+                            </span>
+                            <span className="dash-nav-subgroup-label">{child.label}</span>
+                            <span className={`dash-nav-chevron dash-nav-chevron--nested${subOpen ? " is-open" : ""}`} aria-hidden>
+                              ▸
+                            </span>
+                          </button>
+                          <div className="dash-nav-subchildren" aria-hidden={!subOpen}>
+                            <div className="dash-nav-subchildren-inner">
+                              {child.children.map((sub) => (
+                                <NavLink
+                                  key={sub.to}
+                                  to={sub.to}
+                                  className={({ isActive }) =>
+                                    `dash-nav-sublink dash-nav-sublink--nested${isActive ? " active" : ""}`
+                                  }
+                                >
+                                  <span className="dash-nav-sublink-icon" aria-hidden>
+                                    {getNavIcon(sub.label, sub.to)}
+                                  </span>
+                                  {sub.label}
+                                </NavLink>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               </div>

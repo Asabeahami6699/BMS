@@ -594,6 +594,7 @@ export async function createAuthUser(input: {
   scopeType: z.infer<typeof scopeTypeSchema>;
   tenantId: string;
   branchId?: string;
+  tellerType?: 1 | 2 | 3 | 4 | null;
   fullName?: string;
   createdBy?: string;
   userId?: string;
@@ -604,6 +605,7 @@ export async function createAuthUser(input: {
     role: input.role,
     scopeType: input.scopeType,
     branchId: input.branchId,
+    tellerType: input.tellerType ?? undefined,
     fullName: input.fullName,
     tenantId: input.tenantId,
     createdBy: input.createdBy ?? "system"
@@ -644,12 +646,15 @@ export async function createAuthUser(input: {
       throw new Error(`Failed to create auth user: ${authError?.message ?? "unknown"}`);
     }
 
+    const tellerType =
+      parsed.data.role === "teller" ? (parsed.data.tellerType ?? null) : null;
     const { error: profileError } = await supabase.from("users").insert({
       id: userId,
       tenant_id: parsed.data.tenantId,
       role: parsed.data.role,
       scope_type: parsed.data.scopeType,
       branch_id: parsed.data.branchId ?? null,
+      teller_type: tellerType,
       email: parsed.data.email,
       full_name: parsed.data.fullName ?? null,
       auth_user_id: authData.user.id,
@@ -668,6 +673,7 @@ export async function createAuthUser(input: {
       tenantId: parsed.data.tenantId,
       scopeType: parsed.data.scopeType,
       branchId: parsed.data.branchId,
+      tellerType: parsed.data.role === "teller" ? (parsed.data.tellerType ?? undefined) : undefined,
       fullName: parsed.data.fullName,
       status: "active",
       createdBy: parsed.data.createdBy,
@@ -703,6 +709,7 @@ export type TenantUserRecord = {
   role: string;
   scopeType: z.infer<typeof scopeTypeSchema>;
   branchId?: string;
+  tellerType?: 1 | 2 | 3 | 4;
   tenantId: string;
   status: "active" | "inactive";
   createdBy: string;
@@ -757,6 +764,7 @@ function mapStoredUser(user: StoredAuthUser, tenantId: string): TenantUserRecord
     role: user.role,
     scopeType: user.scopeType,
     branchId: user.branchId,
+    tellerType: user.tellerType,
     tenantId,
     status: user.status ?? "active",
     createdBy: user.createdBy ?? "system",
@@ -769,13 +777,15 @@ export async function getTenantUser(tenantId: string, userId: string): Promise<T
   if (supabase) {
     const { data, error } = await supabase
       .from("users")
-      .select("id, email, role, scope_type, branch_id, tenant_id, created_by, full_name, status, created_at")
+      .select("id, email, role, scope_type, branch_id, teller_type, tenant_id, created_by, full_name, status, created_at")
       .eq("tenant_id", tenantId)
       .eq("id", userId)
       .maybeSingle();
     if (error || !data) {
       return undefined;
     }
+    const tellerType =
+      data.teller_type != null ? (Number(data.teller_type) as 1 | 2 | 3 | 4) : undefined;
     return {
       userId: data.id,
       email: data.email ?? "",
@@ -783,6 +793,7 @@ export async function getTenantUser(tenantId: string, userId: string): Promise<T
       role: data.role,
       scopeType: data.scope_type as z.infer<typeof scopeTypeSchema>,
       branchId: data.branch_id ?? undefined,
+      tellerType,
       tenantId: data.tenant_id,
       status: data.status === "inactive" ? "inactive" : "active",
       createdBy: data.created_by ?? "system",
@@ -821,9 +832,19 @@ export async function updateTenantUser(
   const nextScope = parsed.data.scopeType ?? existing.scopeType;
   const nextBranch =
     parsed.data.branchId !== undefined ? parsed.data.branchId : (existing.branchId ?? null);
+  const nextTellerType =
+    nextRole === "teller"
+      ? parsed.data.tellerType !== undefined
+        ? parsed.data.tellerType
+        : (existing.tellerType ?? null)
+      : null;
 
   if (parsed.data.role !== undefined) {
     await assertValidUserJobTitle(tenantId, parsed.data.role);
+  }
+
+  if (nextRole === "teller" && nextTellerType == null) {
+    throw new Error("Select teller type (Teller 1–4)");
   }
 
   await assertUserBranchAssignment(tenantId, nextRole, nextScope, nextBranch);
@@ -860,6 +881,9 @@ export async function updateTenantUser(
     if (parsed.data.status !== undefined) {
       payload.status = parsed.data.status;
     }
+    if (parsed.data.tellerType !== undefined || parsed.data.role !== undefined) {
+      payload.teller_type = nextTellerType;
+    }
 
     if (Object.keys(payload).length > 0) {
       const { error } = await supabase.from("users").update(payload).eq("tenant_id", tenantId).eq("id", userId);
@@ -881,6 +905,7 @@ export async function updateTenantUser(
       role: parsed.data.role,
       scopeType: parsed.data.scopeType,
       branchId: parsed.data.branchId ?? undefined,
+      tellerType: nextTellerType ?? undefined,
       fullName: parsed.data.fullName,
       status: parsed.data.status
     });

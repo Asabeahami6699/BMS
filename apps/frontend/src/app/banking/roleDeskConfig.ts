@@ -101,15 +101,9 @@ export const AGENCY_ROLE_DESKS: RoleDeskConfig[] = [
       "Produce management reports"
     ],
     quickLinks: [
-      { to: "/app/reports", label: "Reports", description: "Analytics dashboard" },
-      { to: "/app/treasury/trial-balance", label: "Trial balance", description: "Cash reconciliation" },
-      { to: "/app/banking", label: "Agency overview", description: "Transaction queues" }
-    ],
-    placeholderFeatures: [
-      "Period close checklist",
-      "Automated journal review",
-      "Variance alerts vs vault",
-      "Export to accounting package"
+      { to: "/app/banking/accountant/approvals", label: "Approvals queue", description: "Large deposits & ecash" },
+      { to: "/app/banking/accountant/reports", label: "Reports", description: "Analytics dashboard" },
+      { to: "/app/banking/accountant/trial-balance", label: "Trial balance", description: "Cash reconciliation" }
     ]
   },
   {
@@ -127,15 +121,9 @@ export const AGENCY_ROLE_DESKS: RoleDeskConfig[] = [
       "Review segregation of duties"
     ],
     quickLinks: [
-      { to: "/app/settings/audit-logs", label: "Audit logs", description: "Who did what, when" },
-      { to: "/app/reports", label: "Reports", description: "Operational analytics" },
-      { to: "/app/banking", label: "Agency overview", description: "Queue visibility" }
-    ],
-    placeholderFeatures: [
-      "Exception dashboards",
-      "Role permission diff reports",
-      "Sampling worksheets",
-      "Findings register"
+      { to: "/app/banking/auditor/logs", label: "Audit logs", description: "Who did what, when" },
+      { to: "/app/banking/auditor/exceptions", label: "Exceptions", description: "Failed actions & queues" },
+      { to: "/app/banking/auditor/reports", label: "Reports", description: "Operational analytics" }
     ]
   },
   {
@@ -143,7 +131,7 @@ export const AGENCY_ROLE_DESKS: RoleDeskConfig[] = [
     path: "banking/hrm",
     title: "Human resources",
     eyebrow: "People operations",
-    subtitle: "Staff lifecycle for agency banking branches — coming soon.",
+    subtitle: "Staff directory, payroll, and job titles for agency banking branches.",
     accent: "rose",
     roles: ["admin", "coordinator"],
     anyPermissions: ["users.read"],
@@ -153,15 +141,10 @@ export const AGENCY_ROLE_DESKS: RoleDeskConfig[] = [
       "Link performance to compensation"
     ],
     quickLinks: [
-      { to: "/app/settings/users", label: "Users", description: "Staff accounts" },
-      { to: "/app/settings/roles", label: "Roles", description: "Job titles & duties" },
-      { to: "/app/banking", label: "Agency overview", description: "Branch operations hub" }
-    ],
-    placeholderFeatures: [
-      "Leave requests & approvals",
-      "Staff directory by branch",
-      "Performance review cycles",
-      "Training compliance tracker"
+      { to: "/app/banking/hrm/profiles", label: "Employee profiles", description: "Staff accounts" },
+      { to: "/app/banking/hrm/attendance", label: "Attendance", description: "Daily register" },
+      { to: "/app/banking/hrm/leave", label: "Leave", description: "Requests & approvals" },
+      { to: "/app/banking/hrm/payroll", label: "Payroll", description: "Runs & payslips" }
     ]
   },
   {

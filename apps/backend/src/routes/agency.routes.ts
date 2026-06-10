@@ -24,8 +24,20 @@ import {
   listPartnerBankAccounts
 } from "../services/agencyPartnerAccountService.js";
 import { ensureAgencyWalkInCustomer } from "../services/agencyWalkInCustomerService.js";
+import { getAccountantDashboard } from "../services/accountantDashboardService.js";
+import { getAuditorDashboard } from "../services/auditorDashboardService.js";
+import {
+  createHrLeaveRequest,
+  createHrTraining,
+  listHrAttendance,
+  listHrLeaveRequests,
+  listHrTraining,
+  updateHrLeaveStatus,
+  upsertHrAttendance
+} from "../services/hrService.js";
+import { getTreasuryBootstrap } from "../services/treasuryService.js";
+import { listBranches, resolveBranchId } from "../services/branchService.js";
 import { getTellerReconciliationBootstrap } from "../services/tellerReconciliationService.js";
-import { resolveBranchId } from "../services/branchService.js";
 import {
   createTellerTillJournalEntry,
   listTellerTillJournalEntries
@@ -442,6 +454,147 @@ agencyRouter.post(
     }
   }
 );
+
+agencyRouter.get(
+  "/accountant/dashboard",
+  requirePermission("ledger.read"),
+  async (req, res, next) => {
+    try {
+      const context = req.userContext!;
+      const dashboard = await getAccountantDashboard(toTxContext(context), {
+        branchId: resolveRequestBranchFilter(req)
+      });
+      res.json(dashboard);
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+agencyRouter.get(
+  "/accountant/trial-balance",
+  requirePermission("ledger.read"),
+  async (req, res, next) => {
+    try {
+      const context = req.userContext!;
+      const branchFilter = resolveRequestBranchFilter(req);
+      const branches = await listBranches(context.tenantId);
+      if (!branchFilter || branchFilter.toLowerCase() === "all") {
+        const items = await Promise.all(
+          branches
+            .filter((b) => b.status === "active")
+            .map(async (branch) => {
+              try {
+                const bootstrap = await getTreasuryBootstrap(
+                  context,
+                  branch.id,
+                  branch.name
+                );
+                return { branchId: branch.id, branchName: branch.name, branchCode: branch.code, bootstrap };
+              } catch {
+                return null;
+              }
+            })
+        );
+        res.json({ branches: items.filter(Boolean) });
+        return;
+      }
+      const branchId = await resolveBranchId(context.tenantId, branchFilter);
+      if (!branchId) {
+        res.status(400).json({ error: "Branch not found" });
+        return;
+      }
+      const branch = branches.find((b) => b.id === branchId);
+      const bootstrap = await getTreasuryBootstrap(
+        context,
+        branchId,
+        branch?.name ?? "Branch"
+      );
+      res.json(bootstrap);
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+agencyRouter.get(
+  "/auditor/dashboard",
+  requirePermission("audit.read"),
+  async (req, res, next) => {
+    try {
+      const context = req.userContext!;
+      const dashboard = await getAuditorDashboard(toTxContext(context), {
+        branchId: resolveRequestBranchFilter(req)
+      });
+      res.json(dashboard);
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+agencyRouter.get("/hr/leave", requirePermission("users.read"), async (req, res, next) => {
+  try {
+    res.json(await listHrLeaveRequests(req.userContext!.tenantId));
+  } catch (error) {
+    next(error);
+  }
+});
+
+agencyRouter.post("/hr/leave", requirePermission("users.update"), async (req, res, next) => {
+  try {
+    const row = await createHrLeaveRequest(req.userContext!.tenantId, req.body);
+    res.status(201).json(row);
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : "Failed" });
+  }
+});
+
+agencyRouter.patch("/hr/leave/:id", requirePermission("users.update"), async (req, res, next) => {
+  try {
+    const status = req.body?.status === "approved" ? "approved" : "rejected";
+    const leaveId = String(req.params.id);
+    const row = await updateHrLeaveStatus(req.userContext!.tenantId, leaveId, status);
+    res.json(row);
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : "Failed" });
+  }
+});
+
+agencyRouter.get("/hr/attendance", requirePermission("users.read"), async (req, res, next) => {
+  try {
+    const businessDate = typeof req.query.date === "string" ? req.query.date : undefined;
+    res.json(await listHrAttendance(req.userContext!.tenantId, { businessDate }));
+  } catch (error) {
+    next(error);
+  }
+});
+
+agencyRouter.post("/hr/attendance", requirePermission("users.update"), async (req, res, next) => {
+  try {
+    const row = await upsertHrAttendance(req.userContext!.tenantId, req.body);
+    res.status(201).json(row);
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : "Failed" });
+  }
+});
+
+agencyRouter.get("/hr/training", requirePermission("users.read"), async (req, res, next) => {
+  try {
+    res.json(await listHrTraining(req.userContext!.tenantId));
+  } catch (error) {
+    next(error);
+  }
+});
+
+agencyRouter.post("/hr/training", requirePermission("users.update"), async (req, res, next) => {
+  try {
+    const row = await createHrTraining(req.userContext!.tenantId, req.body);
+    res.status(201).json(row);
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : "Failed" });
+  }
+});
 
 agencyRouter.post(
   "/withdrawals/:disclosureId/pay-cash",

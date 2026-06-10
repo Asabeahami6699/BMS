@@ -182,6 +182,7 @@ export type UserRecord = {
   role: string;
   scopeType: "head_office" | "branch";
   branchId?: string;
+  tellerType?: 1 | 2 | 3 | 4;
   tenantId: string;
   status: "active" | "inactive";
   createdBy: string;
@@ -1421,6 +1422,7 @@ export async function createUser(payload: {
   role: string;
   scopeType: "head_office" | "branch";
   branchId?: string;
+  tellerType?: 1 | 2 | 3 | 4 | null;
   fullName?: string;
 }): Promise<UserRecord> {
   const response = await fetch(`${API_BASE_URL}/api/v1/users`, {
@@ -1570,6 +1572,7 @@ export async function updateUser(
     role?: string;
     scopeType?: "head_office" | "branch";
     branchId?: string | null;
+    tellerType?: 1 | 2 | 3 | 4 | null;
     status?: "active" | "inactive";
   }
 ): Promise<UserRecord> {
@@ -2562,6 +2565,115 @@ export async function getTellerAgencyDeposits(options?: {
   const qs = params.toString();
   return fetchJson(`${API_BASE_URL}/api/v1/agency/teller/deposits${qs ? `?${qs}` : ""}`, {
     headers: authHeaders()
+  });
+}
+
+export async function getAccountantDashboard(options?: {
+  branchId?: string;
+}): Promise<import("@bms/shared").AccountantDashboard> {
+  const params = new URLSearchParams();
+  if (options?.branchId) params.set("branchId", options.branchId);
+  const qs = params.toString();
+  return fetchJson(`${API_BASE_URL}/api/v1/agency/accountant/dashboard${qs ? `?${qs}` : ""}`, {
+    headers: authHeaders()
+  });
+}
+
+export async function getAccountantTrialBalance(options?: {
+  branchId?: string;
+}): Promise<
+  import("@bms/shared").TreasuryBootstrap | { branches: Array<{ branchId: string; branchName: string; branchCode?: string; bootstrap: import("@bms/shared").TreasuryBootstrap }> }
+> {
+  const params = new URLSearchParams();
+  if (options?.branchId) params.set("branchId", options.branchId);
+  const qs = params.toString();
+  return fetchJson(`${API_BASE_URL}/api/v1/agency/accountant/trial-balance${qs ? `?${qs}` : ""}`, {
+    headers: authHeaders()
+  });
+}
+
+export async function getAuditorDashboard(options?: {
+  branchId?: string;
+}): Promise<import("@bms/shared").AuditorDashboard> {
+  const params = new URLSearchParams();
+  if (options?.branchId) params.set("branchId", options.branchId);
+  const qs = params.toString();
+  return fetchJson(`${API_BASE_URL}/api/v1/agency/auditor/dashboard${qs ? `?${qs}` : ""}`, {
+    headers: authHeaders()
+  });
+}
+
+export async function listHrLeaveRequests(): Promise<import("@bms/shared").HrLeaveRequest[]> {
+  return fetchJson(`${API_BASE_URL}/api/v1/agency/hr/leave`, { headers: authHeaders() });
+}
+
+export async function createHrLeaveRequest(payload: {
+  userId: string;
+  leaveType: string;
+  startDate: string;
+  endDate: string;
+  notes?: string;
+}): Promise<import("@bms/shared").HrLeaveRequest> {
+  return fetchJson(`${API_BASE_URL}/api/v1/agency/hr/leave`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function updateHrLeaveStatus(
+  requestId: string,
+  status: "approved" | "rejected"
+): Promise<import("@bms/shared").HrLeaveRequest> {
+  return fetchJson(`${API_BASE_URL}/api/v1/agency/hr/leave/${requestId}`, {
+    method: "PATCH",
+    headers: authHeaders(),
+    body: JSON.stringify({ status })
+  });
+}
+
+export async function listHrAttendance(options?: {
+  businessDate?: string;
+}): Promise<import("@bms/shared").HrAttendanceRecord[]> {
+  const params = new URLSearchParams();
+  if (options?.businessDate) params.set("date", options.businessDate);
+  const qs = params.toString();
+  return fetchJson(`${API_BASE_URL}/api/v1/agency/hr/attendance${qs ? `?${qs}` : ""}`, {
+    headers: authHeaders()
+  });
+}
+
+export async function upsertHrAttendance(payload: {
+  userId: string;
+  branchId?: string;
+  businessDate: string;
+  status: "present" | "absent" | "late" | "leave";
+  checkIn?: string;
+  notes?: string;
+}): Promise<import("@bms/shared").HrAttendanceRecord> {
+  return fetchJson(`${API_BASE_URL}/api/v1/agency/hr/attendance`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function listHrTraining(): Promise<import("@bms/shared").HrTrainingRecord[]> {
+  return fetchJson(`${API_BASE_URL}/api/v1/agency/hr/training`, { headers: authHeaders() });
+}
+
+export async function createHrTraining(payload: {
+  userId: string;
+  trainingTitle: string;
+  completedOn?: string;
+  expiresOn?: string;
+  status?: "due" | "completed" | "expired";
+  notes?: string;
+}): Promise<import("@bms/shared").HrTrainingRecord> {
+  return fetchJson(`${API_BASE_URL}/api/v1/agency/hr/training`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(payload)
   });
 }
 

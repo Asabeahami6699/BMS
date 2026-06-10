@@ -10,7 +10,6 @@ import {
 } from "../app/api";
 import { isOfflineOrNetworkError } from "../lib/useNetworkStatus";
 import { getHomePathForRole } from "./roleRedirect";
-import { SessionIdleGuard } from "./SessionIdleGuard";
 import { SESSION_UNAUTHORIZED_EVENT } from "./sessionIdleConfig";
 
 type AuthContextValue = {
@@ -116,12 +115,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [user, loading, login, logout, refreshMe]
   );
 
-  return (
-    <AuthContext.Provider value={value}>
-      <SessionIdleGuard />
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth(): AuthContextValue {

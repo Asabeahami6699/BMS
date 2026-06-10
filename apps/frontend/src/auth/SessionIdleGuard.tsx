@@ -71,6 +71,7 @@ export function SessionIdleGuard() {
       return;
     }
     clearIdleTimer();
+    clearGraceTimer();
     const endsAt = Date.now() + SESSION_GRACE_MS;
     graceEndsAtRef.current = endsAt;
     setMode("warning");
@@ -78,7 +79,6 @@ export function SessionIdleGuard() {
     setOpen(true);
     openRef.current = true;
 
-    clearGraceTimer();
     graceTimerRef.current = setInterval(() => {
       const remainingMs = (graceEndsAtRef.current ?? Date.now()) - Date.now();
       const remainingSec = Math.ceil(remainingMs / 1000);
@@ -158,8 +158,10 @@ export function SessionIdleGuard() {
       return;
     }
 
-    lastActivityRef.current = Date.now();
-    scheduleIdleWarning();
+    if (!openRef.current) {
+      lastActivityRef.current = Date.now();
+      scheduleIdleWarning();
+    }
 
     let lastThrottled = 0;
     function onActivity() {
@@ -199,7 +201,9 @@ export function SessionIdleGuard() {
       window.removeEventListener(SESSION_UNAUTHORIZED_EVENT, onUnauthorized);
       window.clearInterval(tokenCheck);
       clearIdleTimer();
-      clearGraceTimer();
+      if (!openRef.current) {
+        clearGraceTimer();
+      }
     };
   }, [
     user?.userId,

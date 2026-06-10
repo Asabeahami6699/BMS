@@ -80,7 +80,7 @@ type BankProductsState = {
     name: string;
     bankLabel: string;
     executionLimitAmount: number;
-    branchId: string;
+    branchId?: string | null;
   }) => Promise<TenantBankProduct[]>;
   createProduct: (payload: {
     name: string;
@@ -259,7 +259,7 @@ export const useBankProductsStore = create<BankProductsState>((set, get) => ({
         name: payload.name,
         bankLabel: payload.bankLabel,
         direction: "deposit",
-        branchId: payload.branchId,
+        branchId: payload.branchId ? payload.branchId : null,
         isCompanyBankAccount: true,
         executionLimitAmount: payload.executionLimitAmount,
         workflowFields: [...STANDARD_DEPOSIT_EXECUTION_FIELDS],

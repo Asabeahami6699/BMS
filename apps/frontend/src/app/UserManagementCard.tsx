@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { tellerTypeLabel } from "@bms/shared";
 import type { AppRole, Branch, UserRecord } from "./api";
 import { deleteUser, exportUsersCsv, getTenantId, listBranches, listUsers, updateUser } from "./api";
 import { AdminDataTable, filterRowsBySearch } from "../components/AdminDataTable";
@@ -174,6 +175,12 @@ export function UserManagementCard({ role }: Props) {
               key: "role",
               label: "Role",
               render: (row) => row.role.replace(/_/g, " ")
+            },
+            {
+              key: "tellerType",
+              label: "Teller type",
+              render: (row) =>
+                row.role === "teller" && row.tellerType ? tellerTypeLabel(row.tellerType) : "—"
             },
             {
               key: "scopeType",

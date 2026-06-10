@@ -68,6 +68,36 @@ export function roleRequiresBranch(role: Role): boolean {
   return BRANCH_REQUIRED_ROLES.includes(role);
 }
 
+/** Teller desk slot shown when primary job title is teller. */
+export const tellerTypeSchema = z.union([
+  z.literal(1),
+  z.literal(2),
+  z.literal(3),
+  z.literal(4)
+]);
+
+export type TellerType = z.infer<typeof tellerTypeSchema>;
+
+export const TELLER_TYPE_OPTIONS: TellerType[] = [1, 2, 3, 4];
+
+export function tellerTypeLabel(type: TellerType): string {
+  return `Teller ${type}`;
+}
+
+function assertTellerTypeAssignment(
+  data: { role: UserJobTitle; tellerType?: TellerType | null },
+  ctx: z.RefinementCtx
+): void {
+  const isTeller = data.role === "teller";
+  if (isTeller && data.tellerType == null) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["tellerType"],
+      message: "Select teller type (Teller 1–4)"
+    });
+  }
+}
+
 function assertBranchAssignment(
   data: { role: UserJobTitle; scopeType: ScopeType; branchId?: string | null },
   ctx: z.RefinementCtx
@@ -109,13 +139,18 @@ export const createTenantUserBaseSchema = z.object({
   role: userJobTitleSchema,
   scopeType: scopeTypeSchema,
   branchId: z.string().optional(),
-  fullName: z.string().min(1).optional()
+  fullName: z.string().min(1).optional(),
+  tellerType: tellerTypeSchema.nullable().optional()
 });
 
 export function withBranchAssignmentRefine<T extends z.ZodTypeAny>(schema: T) {
-  return schema.superRefine((data, ctx) =>
-    assertBranchAssignment(data as { role: Role; scopeType: ScopeType; branchId?: string | null }, ctx)
-  );
+  return schema.superRefine((data, ctx) => {
+    assertBranchAssignment(
+      data as { role: Role; scopeType: ScopeType; branchId?: string | null },
+      ctx
+    );
+    assertTellerTypeAssignment(data as { role: UserJobTitle; tellerType?: TellerType | null }, ctx);
+  });
 }
 
 export const createTenantUserSchema = withBranchAssignmentRefine(createTenantUserBaseSchema);
@@ -129,7 +164,8 @@ export const updateTenantUserBaseSchema = z.object({
   scopeType: scopeTypeSchema.optional(),
   branchId: z.string().nullable().optional(),
   fullName: z.string().min(1).optional(),
-  status: accountStatusSchema.optional()
+  status: accountStatusSchema.optional(),
+  tellerType: tellerTypeSchema.nullable().optional()
 });
 
 export const updateTenantUserSchema = updateTenantUserBaseSchema.superRefine((data, ctx) => {
@@ -142,6 +178,10 @@ export const updateTenantUserSchema = updateTenantUserBaseSchema.superRefine((da
         scopeType: data.scopeType ?? fallbackScope,
         branchId: data.branchId
       },
+      ctx
+    );
+    assertTellerTypeAssignment(
+      { role: data.role, tellerType: data.tellerType ?? null },
       ctx
     );
   } else if (data.scopeType === "branch" && !data.branchId?.trim()) {

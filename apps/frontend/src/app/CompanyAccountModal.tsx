@@ -7,6 +7,9 @@ import { toUserFacingError } from "../lib/networkError";
 import { useBankProductsStore } from "./stores/bankProductsStore";
 import { useBranchesStore } from "./stores/branchesStore";
 
+/** Empty value = company account available at every branch (null branch_id). */
+const ALL_BRANCHES = "";
+
 const BANK_TYPES = [
   "Ecobank",
   "GCB Bank",
@@ -63,7 +66,7 @@ export function CompanyAccountModal({ open, mode, product, onClose, onSaved }: P
       setAccountLimit(
         String(product.executionLimitAmount ?? COMPANY_ACCOUNT_DEFAULT_EXECUTION_LIMIT)
       );
-      setBranchId(product.branchId ?? "");
+      setBranchId(product.branchId ?? ALL_BRANCHES);
     } else {
       setAccountName("");
       setBankType(BANK_TYPES[0]);
@@ -72,10 +75,10 @@ export function CompanyAccountModal({ open, mode, product, onClose, onSaved }: P
       const preferred =
         branchFilter && activeBranches.some((b) => b.id === branchFilter)
           ? branchFilter
-          : activeBranches[0]?.id ?? "";
+          : ALL_BRANCHES;
       setBranchId(preferred);
     }
-  }, [open, mode, product, branchFilter, activeBranches]);
+  }, [open, mode, product?.id, branchFilter]);
 
   const resolvedBankLabel = bankType === "Other" ? customBankType.trim() : bankType;
 
@@ -87,10 +90,6 @@ export function CompanyAccountModal({ open, mode, product, onClose, onSaved }: P
     }
     if (!resolvedBankLabel) {
       showToast("Bank type is required", "error");
-      return;
-    }
-    if (!branchId) {
-      showToast("Select a branch for this company account", "error");
       return;
     }
     const limit = Number(accountLimit);
@@ -105,7 +104,7 @@ export function CompanyAccountModal({ open, mode, product, onClose, onSaved }: P
           name: accountName.trim(),
           bankLabel: resolvedBankLabel,
           executionLimitAmount: limit,
-          branchId
+          branchId: branchId || null
         });
         showToast("Company account created", "success");
       } else if (product) {
@@ -113,7 +112,7 @@ export function CompanyAccountModal({ open, mode, product, onClose, onSaved }: P
           name: accountName.trim(),
           bankLabel: resolvedBankLabel,
           executionLimitAmount: limit,
-          branchId,
+          branchId: branchId || null,
           isCompanyBankAccount: true
         });
         showToast("Company account updated", "success");
@@ -146,15 +145,18 @@ export function CompanyAccountModal({ open, mode, product, onClose, onSaved }: P
       <form id="company-account-form" className="stack-form company-account-form" onSubmit={handleSubmit}>
         <label className="field">
           <span>Branch</span>
-          <select value={branchId} onChange={(e) => setBranchId(e.target.value)} required>
-            <option value="">Select branch…</option>
+          <select value={branchId} onChange={(e) => setBranchId(e.target.value)}>
+            <option value={ALL_BRANCHES}>All branches</option>
             {activeBranches.map((branch) => (
               <option key={branch.id} value={branch.id}>
                 {branch.name} ({branch.code})
               </option>
             ))}
           </select>
-          <small className="muted">Deposits at this branch can be executed through this account.</small>
+          <small className="muted">
+            All branches — back officer can use this account at any branch. Or pick one branch to
+            limit scope.
+          </small>
         </label>
 
         <label className="field">

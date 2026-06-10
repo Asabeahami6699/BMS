@@ -797,6 +797,16 @@ export const AGENCY_NAV_VISIBILITY: Array<{
     anyPermissions: ["agency.deposits.record"]
   },
   {
+    navPath: "banking/reconciliation",
+    label: "Teller reconciliation",
+    anyPermissions: ["agency.deposits.record"]
+  },
+  {
+    navPath: "banking/till-daybook",
+    label: "Till daybook",
+    anyPermissions: ["agency.deposits.record"]
+  },
+  {
     navPath: "banking/customer-service",
     label: "Customer service",
     anyPermissions: ["agency.withdrawals.approve"]
@@ -827,14 +837,89 @@ export const AGENCY_NAV_VISIBILITY: Array<{
     anyPermissions: ["ledger.read", "reports.read"]
   },
   {
+    navPath: "banking/accountant/approvals",
+    label: "Accountant approvals",
+    anyPermissions: ["ledger.read", "treasury.read"]
+  },
+  {
+    navPath: "banking/accountant/reports",
+    label: "Accountant reports",
+    anyPermissions: ["reports.read"]
+  },
+  {
     navPath: "banking/auditor",
     label: "Auditor desk",
+    anyPermissions: ["audit.read", "transactions.read"]
+  },
+  {
+    navPath: "banking/auditor/logs",
+    label: "Audit logs",
+    anyPermissions: ["audit.read"]
+  },
+  {
+    navPath: "banking/auditor/reports",
+    label: "Auditor reports",
+    anyPermissions: ["reports.read", "transactions.read"]
+  },
+  {
+    navPath: "banking/auditor/exceptions",
+    label: "Exception review",
     anyPermissions: ["audit.read", "transactions.read"]
   },
   {
     navPath: "banking/hrm",
     label: "HR desk",
     anyPermissions: ["users.read"]
+  },
+  {
+    navPath: "banking/hrm/staff",
+    label: "Staff directory",
+    anyPermissions: ["users.read"]
+  },
+  {
+    navPath: "banking/hrm/payroll",
+    label: "Payroll",
+    anyPermissions: ["users.read"]
+  },
+  {
+    navPath: "banking/accountant/trial-balance",
+    label: "Accountant trial balance",
+    anyPermissions: ["ledger.read"]
+  },
+  {
+    navPath: "banking/hrm/profiles",
+    label: "Employee profiles",
+    anyPermissions: ["users.read"]
+  },
+  {
+    navPath: "banking/hrm/branches",
+    label: "Branch assignments",
+    anyPermissions: ["users.read"]
+  },
+  {
+    navPath: "banking/hrm/attendance",
+    label: "Attendance",
+    anyPermissions: ["users.read"]
+  },
+  {
+    navPath: "banking/hrm/leave",
+    label: "Leave management",
+    anyPermissions: ["users.read"]
+  },
+  {
+    navPath: "banking/hrm/appointments",
+    label: "Appointment letters",
+    anyPermissions: ["users.read"]
+  },
+  {
+    navPath: "banking/hrm/training",
+    label: "Training compliance",
+    anyPermissions: ["users.read"]
+  },
+  {
+    navPath: "banking/hrm/roles",
+    label: "Job titles",
+    anyPermissions: ["roles.read", "users.read"]
   },
   {
     navPath: "banking/operations",
@@ -857,82 +942,219 @@ export const BANKING_NAV_VISIBILITY: Array<{
     roles: ["admin", "accountant", "back_officer", "teller", "customer_service", "coordinator", "auditor"]
   },
   {
-    navPath: "banking/teller",
-    label: "Teller desk",
-    anyPermissions: ["agency.deposits.record", "agency.withdrawals.pay"],
-    roles: ["admin", "teller"]
-  },
-  {
-    navPath: "banking/deposits",
-    label: "Record deposits",
-    anyPermissions: ["agency.deposits.record"],
-    roles: ["admin", "teller"]
-  },
-  {
-    navPath: "banking/reconciliation",
-    label: "Teller reconciliation",
-    anyPermissions: ["agency.deposits.record"],
-    roles: ["admin", "teller", "coordinator"]
-  },
-  {
-    navPath: "banking/till-daybook",
-    label: "Till daybook",
-    anyPermissions: ["agency.deposits.record"],
-    roles: ["admin", "teller"]
-  },
-  {
-    navPath: "banking/customer-service",
-    label: "Customer service",
-    anyPermissions: ["agency.withdrawals.approve"],
-    roles: ["admin", "customer_service"]
-  },
-  {
-    navPath: "banking/withdrawals",
-    label: "Withdrawals",
-    anyPermissions: ["agency.withdrawals.approve"],
-    roles: ["admin", "customer_service"]
-  },
-  {
-    navPath: "banking/account-opening",
-    label: "Account opening",
-    anyPermissions: ["agency.accounts.create"],
-    roles: ["admin", "customer_service"]
-  },
-  {
-    navPath: "banking/back-office",
-    label: "Back office",
-    anyPermissions: ["agency.bank.execute"],
-    roles: ["admin", "back_officer"]
-  },
-  {
     navPath: "banking/products",
     label: "Bank products",
     anyPermissions: ["banking.products.read"],
     roles: ["admin"]
   },
   {
-    navPath: "banking/accountant",
-    label: "Accountant desk",
-    anyPermissions: ["ledger.read", "reports.read"],
-    roles: ["admin", "accountant"]
-  },
-  {
-    navPath: "banking/auditor",
-    label: "Auditor desk",
-    anyPermissions: ["audit.read", "transactions.read"],
-    roles: ["admin", "auditor"]
-  },
-  {
-    navPath: "banking/hrm",
-    label: "HR desk",
-    anyPermissions: ["users.read"],
-    roles: ["admin", "coordinator"]
-  },
-  {
     navPath: "banking/operations",
     label: "Branch operations",
     anyPermissions: ["reports.read", "treasury.read"],
     roles: ["admin", "coordinator"]
+  }
+];
+
+export type BankingNavSubgroupRow = {
+  navPath: string;
+  label: string;
+  anyPermissions: Permission[];
+  roles: Role[];
+};
+
+export type BankingNavSubgroup = {
+  id: string;
+  label: string;
+  children: BankingNavSubgroupRow[];
+};
+
+/** Collapsible desk sections under Agency Banking. */
+export const BANKING_NAV_SUBGROUPS: BankingNavSubgroup[] = [
+  {
+    id: "banking_teller",
+    label: "Teller",
+    children: [
+      {
+        navPath: "banking/teller",
+        label: "Desk home",
+        anyPermissions: ["agency.deposits.record", "agency.withdrawals.pay"],
+        roles: ["admin", "teller"]
+      },
+      {
+        navPath: "banking/deposits",
+        label: "Record deposits",
+        anyPermissions: ["agency.deposits.record"],
+        roles: ["admin", "teller"]
+      },
+      {
+        navPath: "banking/reconciliation",
+        label: "Reconciliation",
+        anyPermissions: ["agency.deposits.record"],
+        roles: ["admin", "teller", "coordinator"]
+      },
+      {
+        navPath: "banking/till-daybook",
+        label: "Till daybook",
+        anyPermissions: ["agency.deposits.record"],
+        roles: ["admin", "teller"]
+      }
+    ]
+  },
+  {
+    id: "banking_customer_service",
+    label: "Customer service",
+    children: [
+      {
+        navPath: "banking/customer-service",
+        label: "Desk home",
+        anyPermissions: ["agency.withdrawals.approve"],
+        roles: ["admin", "customer_service"]
+      },
+      {
+        navPath: "banking/withdrawals",
+        label: "Withdrawals",
+        anyPermissions: ["agency.withdrawals.approve"],
+        roles: ["admin", "customer_service"]
+      },
+      {
+        navPath: "banking/account-opening",
+        label: "Account opening",
+        anyPermissions: ["agency.accounts.create"],
+        roles: ["admin", "customer_service"]
+      }
+    ]
+  },
+  {
+    id: "banking_back_officer",
+    label: "Back office",
+    children: [
+      {
+        navPath: "banking/back-office",
+        label: "Desk home",
+        anyPermissions: ["agency.bank.execute"],
+        roles: ["admin", "back_officer"]
+      }
+    ]
+  },
+  {
+    id: "banking_accountant",
+    label: "Accountant",
+    children: [
+      {
+        navPath: "banking/accountant",
+        label: "Desk home",
+        anyPermissions: ["ledger.read", "reports.read"],
+        roles: ["admin", "accountant"]
+      },
+      {
+        navPath: "banking/accountant/approvals",
+        label: "Approvals queue",
+        anyPermissions: ["ledger.read", "treasury.read"],
+        roles: ["admin", "accountant"]
+      },
+      {
+        navPath: "banking/accountant/reports",
+        label: "Reports",
+        anyPermissions: ["reports.read"],
+        roles: ["admin", "accountant"]
+      },
+      {
+        navPath: "banking/accountant/trial-balance",
+        label: "Trial balance",
+        anyPermissions: ["ledger.read"],
+        roles: ["admin", "accountant"]
+      }
+    ]
+  },
+  {
+    id: "banking_auditor",
+    label: "Auditor",
+    children: [
+      {
+        navPath: "banking/auditor",
+        label: "Desk home",
+        anyPermissions: ["audit.read", "transactions.read"],
+        roles: ["admin", "auditor"]
+      },
+      {
+        navPath: "banking/auditor/logs",
+        label: "Audit logs",
+        anyPermissions: ["audit.read"],
+        roles: ["admin", "auditor"]
+      },
+      {
+        navPath: "banking/auditor/reports",
+        label: "Reports",
+        anyPermissions: ["reports.read", "transactions.read"],
+        roles: ["admin", "auditor"]
+      },
+      {
+        navPath: "banking/auditor/exceptions",
+        label: "Exceptions",
+        anyPermissions: ["audit.read", "transactions.read"],
+        roles: ["admin", "auditor"]
+      }
+    ]
+  },
+  {
+    id: "banking_hrm",
+    label: "Human resources",
+    children: [
+      {
+        navPath: "banking/hrm",
+        label: "Desk home",
+        anyPermissions: ["users.read"],
+        roles: ["admin", "coordinator"]
+      },
+      {
+        navPath: "banking/hrm/profiles",
+        label: "Employee profiles",
+        anyPermissions: ["users.read"],
+        roles: ["admin", "coordinator"]
+      },
+      {
+        navPath: "banking/hrm/branches",
+        label: "Branch assignments",
+        anyPermissions: ["users.read"],
+        roles: ["admin", "coordinator"]
+      },
+      {
+        navPath: "banking/hrm/attendance",
+        label: "Attendance",
+        anyPermissions: ["users.read"],
+        roles: ["admin", "coordinator"]
+      },
+      {
+        navPath: "banking/hrm/leave",
+        label: "Leave management",
+        anyPermissions: ["users.read"],
+        roles: ["admin", "coordinator"]
+      },
+      {
+        navPath: "banking/hrm/appointments",
+        label: "Appointment letters",
+        anyPermissions: ["users.read"],
+        roles: ["admin", "coordinator"]
+      },
+      {
+        navPath: "banking/hrm/payroll",
+        label: "Payroll",
+        anyPermissions: ["users.read"],
+        roles: ["admin", "coordinator"]
+      },
+      {
+        navPath: "banking/hrm/roles",
+        label: "Roles & permissions",
+        anyPermissions: ["roles.read", "users.read"],
+        roles: ["admin", "coordinator"]
+      },
+      {
+        navPath: "banking/hrm/training",
+        label: "Training & compliance",
+        anyPermissions: ["users.read"],
+        roles: ["admin", "coordinator"]
+      }
+    ]
   }
 ];
 
@@ -949,6 +1171,12 @@ export function resolveAgencyRoutePermissions(routePath: string): Permission[] {
   const row = AGENCY_NAV_VISIBILITY.find((r) => r.navPath === normalized);
   if (row) {
     return [...row.anyPermissions] as Permission[];
+  }
+  const subgroupRow = BANKING_NAV_SUBGROUPS.flatMap((group) => group.children).find(
+    (child) => child.navPath === normalized
+  );
+  if (subgroupRow) {
+    return [...subgroupRow.anyPermissions];
   }
   const bankingRow = BANKING_NAV_VISIBILITY.find((r) => r.navPath === normalized);
   if (bankingRow) {

@@ -1,4 +1,11 @@
-import { BUILTIN_ROLE_LABELS, isBuiltinRole, roleRequiresBranch, TENANT_STAFF_ROLES } from "@bms/shared";
+import {
+  BUILTIN_ROLE_LABELS,
+  isBuiltinRole,
+  roleRequiresBranch,
+  TELLER_TYPE_OPTIONS,
+  tellerTypeLabel,
+  TENANT_STAFF_ROLES
+} from "@bms/shared";
 import { FormEvent, useEffect, useState } from "react";
 import type { AppRole, Branch, RoleDefinition, UserRecord } from "./api";
 import {
@@ -62,6 +69,7 @@ export function UserFormModal({ open, mode, user, branches, createDefaults, onCl
   const [allTenantRoles, setAllTenantRoles] = useState<RoleDefinition[]>([]);
   const [selectedCustomRoleKeys, setSelectedCustomRoleKeys] = useState<string[]>([]);
   const [initialCustomRoleKeys, setInitialCustomRoleKeys] = useState<string[]>([]);
+  const [tellerType, setTellerType] = useState<"" | "1" | "2" | "3" | "4">("");
 
   const tenantJobTitles = allTenantRoles.filter((role) => role.roleKind === "job_title");
   const extraDutyRoles = allTenantRoles.filter(
@@ -111,6 +119,7 @@ export function UserFormModal({ open, mode, user, branches, createDefaults, onCl
       const firstBranch = branches.find((b) => b.status !== "inactive");
       setBranchId(user.branchId ?? firstBranch?.id ?? "");
       setStatus(user.status ?? "active");
+      setTellerType(user.role === "teller" && user.tellerType ? String(user.tellerType) as "1" | "2" | "3" | "4" : "");
     } else {
       const defaultRole = createDefaults?.role ?? "field_agent";
       const defaultScope = createDefaults?.scopeType ?? (defaultRole === "coordinator" ? "head_office" : "branch");
@@ -122,11 +131,17 @@ export function UserFormModal({ open, mode, user, branches, createDefaults, onCl
       const firstBranch = branches.find((b) => b.status !== "inactive");
       setBranchId(firstBranch?.id ?? "");
       setStatus("active");
+      setTellerType(defaultRole === "teller" ? "1" : "");
     }
   }, [open, mode, user, branches, createDefaults]);
 
   function handleRoleChange(role: string) {
     setUserRole(role);
+    if (role === "teller") {
+      setTellerType((prev) => prev || "1");
+    } else {
+      setTellerType("");
+    }
     if (isBuiltinRole(role) && roleRequiresBranch(role)) {
       setScopeType("branch");
       if (!branchId && activeBranches[0]) {
@@ -163,8 +178,14 @@ export function UserFormModal({ open, mode, user, branches, createDefaults, onCl
       showToast("Create a branch first before adding a field agent.", "error");
       return;
     }
+    if (userRole === "teller" && !tellerType) {
+      showToast("Select teller type (Teller 1–4)", "error");
+      return;
+    }
 
     setSubmitting(true);
+    const resolvedTellerType =
+      userRole === "teller" ? (Number(tellerType) as 1 | 2 | 3 | 4) : null;
     const effectiveScope = requiresBranch ? "branch" : scopeType;
     const effectiveBranch = resolveBranchIdForSubmit();
     try {
@@ -175,7 +196,8 @@ export function UserFormModal({ open, mode, user, branches, createDefaults, onCl
           fullName,
           role: userRole,
           scopeType: effectiveScope,
-          branchId: effectiveScope === "branch" ? (effectiveBranch ?? undefined) : undefined
+          branchId: effectiveScope === "branch" ? (effectiveBranch ?? undefined) : undefined,
+          tellerType: resolvedTellerType
         });
         if (selectedCustomRoleKeys.length > 0) {
           await syncCustomRoleAssignments(created.userId, selectedCustomRoleKeys, []);
@@ -188,6 +210,7 @@ export function UserFormModal({ open, mode, user, branches, createDefaults, onCl
           role: userRole,
           scopeType: effectiveScope,
           branchId: effectiveScope === "branch" ? effectiveBranch ?? null : null,
+          tellerType: resolvedTellerType,
           status
         });
         await syncCustomRoleAssignments(user.userId, selectedCustomRoleKeys, initialCustomRoleKeys);
@@ -273,6 +296,27 @@ export function UserFormModal({ open, mode, user, branches, createDefaults, onCl
             Primary access level — system titles or custom titles you create under Roles &amp; permissions.
           </small>
         </label>
+
+        {userRole === "teller" ? (
+          <label className="field">
+            <span>Teller type</span>
+            <select
+              value={tellerType}
+              onChange={(e) => setTellerType(e.target.value as "" | "1" | "2" | "3" | "4")}
+              required
+            >
+              <option value="">Select teller slot…</option>
+              {TELLER_TYPE_OPTIONS.map((slot) => (
+                <option key={slot} value={String(slot)}>
+                  {tellerTypeLabel(slot)}
+                </option>
+              ))}
+            </select>
+            <small className="muted">
+              Cash drawer slot at the branch — e.g. Teller 1 through Teller 4.
+            </small>
+          </label>
+        ) : null}
 
         <fieldset className="field roles-page__custom-role-picker">
           <legend>Extra duty bundles (optional)</legend>

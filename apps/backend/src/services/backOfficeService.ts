@@ -1,9 +1,11 @@
 import {
   backOfficeBootstrapSchema,
+  bankProductAppliesToBranch,
   createBackOfficeEcashRequestSchema,
   openBackOfficeDaySchema,
   resolveAgencyDepositCustomerName,
   updateBackOfficeAccountEntriesSchema,
+  type BackOfficeAccountBalanceRow,
   type BackOfficeBootstrap
 } from "@bms/shared";
 import { randomUUID } from "node:crypto";
@@ -93,6 +95,80 @@ function tellerUserIdFromReconKey(key: string): string {
 
 function isAllBranchesRequest(branchId?: string): boolean {
   return branchId?.trim().toLowerCase() === "all";
+}
+
+type CompanyAccountSummary = {
+  id: string;
+  name: string;
+  bankLabel: string;
+  branchId: string | null;
+  executionLimitAmount: number | null;
+};
+
+async function buildAccountBalancesForBranch(
+  tenantId: string,
+  branch: { id: string; name: string; code: string },
+  businessDate: string,
+  companyAccounts: CompanyAccountSummary[],
+  supabase: ReturnType<typeof getSupabaseAdminClient>
+): Promise<BackOfficeAccountBalanceRow[]> {
+  const branchAccounts = companyAccounts.filter((account) =>
+    bankProductAppliesToBranch({ branchId: account.branchId ?? undefined }, branch.id)
+  );
+  if (branchAccounts.length === 0) {
+    return [];
+  }
+
+  const session = await resolveSession(tenantId, branch.id, businessDate);
+  const sessionOpen = session?.status === "open";
+  const openings =
+    session && supabase
+      ? (
+          await supabase
+            .from("back_office_account_opening")
+            .select("*")
+            .eq("session_id", session.id)
+        ).data ?? []
+      : [];
+  const openingsByProduct = new Map(
+    openings.map((opening) => [String(opening.bank_product_id), opening])
+  );
+  const executedTotalsByAccount = await sumExecutedByAccountsBatch(
+    tenantId,
+    branch.id,
+    businessDate,
+    branchAccounts.map((account) => account.id)
+  );
+
+  return branchAccounts.map((account) => {
+    const opening = openingsByProduct.get(account.id);
+    const openingBalance = opening ? Number(opening.opening_balance ?? 0) : 0;
+    const extraCash = opening ? Number(opening.extra_cash ?? 0) : 0;
+    const computedTotalEntries = executedTotalsByAccount.get(account.id) ?? 0;
+    const manualTotalEntries =
+      opening?.manual_total_entries != null ? Number(opening.manual_total_entries) : null;
+    const totalEntries = computedTotalEntries;
+    const executionLimit = resolveCompanyAccountExecutionLimit(account.executionLimitAmount);
+    const headroom = Math.max(0, executionLimit - totalEntries);
+    return {
+      bankProductId: account.id,
+      accountName: account.name,
+      bankLabel: account.bankLabel,
+      branchId: branch.id,
+      branchName: branch.name,
+      branchCode: branch.code,
+      sessionOpen,
+      openingBalance,
+      extraCash,
+      computedTotalEntries,
+      manualTotalEntries,
+      totalEntries,
+      closingBalance: openingBalance + extraCash - totalEntries,
+      executionLimit,
+      headroom,
+      limitReached: totalEntries >= executionLimit
+    };
+  });
 }
 
 export async function getBackOfficeBootstrap(
@@ -307,7 +383,7 @@ export async function getBackOfficeBootstrap(
   const openingsByProduct = new Map(
     openings.map((opening) => [String(opening.bank_product_id), opening])
   );
-  const accountBalances = [];
+  let accountBalances: BackOfficeAccountBalanceRow[] = [];
   if (operationalBranchId) {
     for (const account of companyAccounts) {
       const opening = openingsByProduct.get(account.id);
@@ -323,6 +399,7 @@ export async function getBackOfficeBootstrap(
         bankProductId: account.id,
         accountName: account.name,
         bankLabel: account.bankLabel,
+        sessionOpen: session?.status === "open",
         openingBalance,
         extraCash,
         computedTotalEntries,
@@ -334,6 +411,20 @@ export async function getBackOfficeBootstrap(
         limitReached: totalEntries >= executionLimit
       });
     }
+  } else if (viewAllBranches) {
+    const activeBranches = branches.filter((branch) => branch.status === "active");
+    const balanceSets = await Promise.all(
+      activeBranches.map((branch) =>
+        buildAccountBalancesForBranch(
+          context.tenantId,
+          branch,
+          businessDate,
+          companyAccounts,
+          supabase
+        )
+      )
+    );
+    accountBalances = balanceSets.flat();
   }
 
   const tellerMap = new Map<string, { deposits: number; count: number; branchId: string }>();

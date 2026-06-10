@@ -56,10 +56,31 @@ import { AgencyWithdrawalsPage } from "./banking/AgencyWithdrawalsPage";
 import { BackOfficeDeskPage } from "./banking/BackOfficeDeskPage";
 import { CustomerServiceDeskPage } from "./banking/CustomerServiceDeskPage";
 import { RoleDeskRoute } from "./banking/RoleDeskRoute";
+import { AccountantApprovalsPage } from "./banking/AccountantApprovalsPage";
+import { AccountantDeskPage } from "./banking/AccountantDeskPage";
+import { AuditorDeskPage } from "./banking/AuditorDeskPage";
+import { AuditorExceptionsPage } from "./banking/AuditorExceptionsPage";
+import { HrDeskPage } from "./banking/HrDeskPage";
+import { HrPayrollPage } from "./banking/HrPayrollPage";
+import { HrRolesPage } from "./banking/HrRolesPage";
+import { HrStaffDirectoryPage } from "./banking/HrStaffDirectoryPage";
+import { AccountantTrialBalancePage } from "./banking/AccountantTrialBalancePage";
+import { HrAttendancePage } from "./banking/hr/HrAttendancePage";
+import { HrAppointmentPage } from "./banking/hr/HrAppointmentPage";
+import { HrBranchAssignmentsPage } from "./banking/hr/HrBranchAssignmentsPage";
+import { HrLeavePage } from "./banking/hr/HrLeavePage";
+import { HrTrainingPage } from "./banking/hr/HrTrainingPage";
 import { RolePlaceholderDeskPage } from "./banking/RolePlaceholderDeskPage";
 import { TellerDeskPage } from "./banking/TellerDeskPage";
 import { TellerReconciliationPage } from "./banking/TellerReconciliationPage";
 import { TellerTillDaybookPage } from "./banking/TellerTillDaybookPage";
+import { UniversalOpsAnnouncementsPage } from "./universal/UniversalOpsAnnouncementsPage";
+import { UniversalOpsAttendancePage } from "./universal/UniversalOpsAttendancePage";
+import { UniversalOpsDashboardPage } from "./universal/UniversalOpsDashboardPage";
+import { UniversalOpsDocumentsPage } from "./universal/UniversalOpsDocumentsPage";
+import { UniversalOpsIncidentsPage } from "./universal/UniversalOpsIncidentsPage";
+import { UniversalOpsLeavePage } from "./universal/UniversalOpsLeavePage";
+import { UniversalOpsStaffLoansPage } from "./universal/UniversalOpsStaffLoansPage";
 import { BankProductsPage } from "./BankProductsPage";
 import { BankingOverviewPage } from "./BankingOverviewPage";
 import { useBranchesLiveSync } from "./hooks/useBranchesLiveSync";
@@ -125,6 +146,7 @@ export function TenantApp() {
   const canReports =
     reportsAnalytics !== false && hasAnyPermission(permissions, ["reports.read"]);
   const canMoveTreasuryCash = hasAnyPermission(permissions, ["treasury.cash.move"]);
+  const canManageHr = hasAnyPermission(permissions, ["users.update"]);
 
   async function handleLogout() {
     await logout();
@@ -196,6 +218,18 @@ export function TenantApp() {
           }
         />
         <Route path="/overview" element={<Navigate to="/app/dashboard" replace />} />
+
+        {/* Universal Operations — all staff */}
+        <Route path="/operations" element={<UniversalOpsDashboardPage displayName={displayName} />} />
+        <Route path="/operations/attendance" element={<UniversalOpsAttendancePage displayName={displayName} />} />
+        <Route path="/operations/leave" element={<UniversalOpsLeavePage displayName={displayName} />} />
+        <Route path="/operations/staff-loans" element={<UniversalOpsStaffLoansPage displayName={displayName} />} />
+        <Route
+          path="/operations/announcements"
+          element={<UniversalOpsAnnouncementsPage displayName={displayName} />}
+        />
+        <Route path="/operations/documents" element={<UniversalOpsDocumentsPage displayName={displayName} />} />
+        <Route path="/operations/incidents" element={<UniversalOpsIncidentsPage displayName={displayName} />} />
         <Route
           path="/profile"
           element={<UserProfilePage me={user} branches={branches} role={role} />}
@@ -353,7 +387,37 @@ export function TenantApp() {
           element={
             <TenantAgencyRoute route="banking/accountant" modules={modules} permissions={permissions}>
               <RoleDeskRoute kind="accountant" role={role} permissions={permissions}>
-                <RolePlaceholderDeskPage kind="accountant" displayName={displayName} />
+                <AccountantDeskPage displayName={displayName} />
+              </RoleDeskRoute>
+            </TenantAgencyRoute>
+          }
+        />
+        <Route
+          path="/banking/accountant/approvals"
+          element={
+            <TenantAgencyRoute route="banking/accountant/approvals" modules={modules} permissions={permissions}>
+              <RoleDeskRoute kind="accountant" role={role} permissions={permissions}>
+                <AccountantApprovalsPage displayName={displayName} />
+              </RoleDeskRoute>
+            </TenantAgencyRoute>
+          }
+        />
+        <Route
+          path="/banking/accountant/reports"
+          element={
+            <TenantAgencyRoute route="banking/accountant/reports" modules={modules} permissions={permissions}>
+              <RoleDeskRoute kind="accountant" role={role} permissions={permissions}>
+                <ReportsAnalyticsPage role={role} me={user} />
+              </RoleDeskRoute>
+            </TenantAgencyRoute>
+          }
+        />
+        <Route
+          path="/banking/accountant/trial-balance"
+          element={
+            <TenantAgencyRoute route="banking/accountant/trial-balance" modules={modules} permissions={permissions}>
+              <RoleDeskRoute kind="accountant" role={role} permissions={permissions}>
+                <AccountantTrialBalancePage displayName={displayName} />
               </RoleDeskRoute>
             </TenantAgencyRoute>
           }
@@ -363,7 +427,37 @@ export function TenantApp() {
           element={
             <TenantAgencyRoute route="banking/auditor" modules={modules} permissions={permissions}>
               <RoleDeskRoute kind="auditor" role={role} permissions={permissions}>
-                <RolePlaceholderDeskPage kind="auditor" displayName={displayName} />
+                <AuditorDeskPage displayName={displayName} />
+              </RoleDeskRoute>
+            </TenantAgencyRoute>
+          }
+        />
+        <Route
+          path="/banking/auditor/logs"
+          element={
+            <TenantAgencyRoute route="banking/auditor/logs" modules={modules} permissions={permissions}>
+              <RoleDeskRoute kind="auditor" role={role} permissions={permissions}>
+                <AuditLogsPage />
+              </RoleDeskRoute>
+            </TenantAgencyRoute>
+          }
+        />
+        <Route
+          path="/banking/auditor/reports"
+          element={
+            <TenantAgencyRoute route="banking/auditor/reports" modules={modules} permissions={permissions}>
+              <RoleDeskRoute kind="auditor" role={role} permissions={permissions}>
+                <ReportsAnalyticsPage role={role} me={user} />
+              </RoleDeskRoute>
+            </TenantAgencyRoute>
+          }
+        />
+        <Route
+          path="/banking/auditor/exceptions"
+          element={
+            <TenantAgencyRoute route="banking/auditor/exceptions" modules={modules} permissions={permissions}>
+              <RoleDeskRoute kind="auditor" role={role} permissions={permissions}>
+                <AuditorExceptionsPage displayName={displayName} />
               </RoleDeskRoute>
             </TenantAgencyRoute>
           }
@@ -373,7 +467,88 @@ export function TenantApp() {
           element={
             <TenantAgencyRoute route="banking/hrm" modules={modules} permissions={permissions}>
               <RoleDeskRoute kind="hrm" role={role} permissions={permissions}>
-                <RolePlaceholderDeskPage kind="hrm" displayName={displayName} />
+                <HrDeskPage displayName={displayName} />
+              </RoleDeskRoute>
+            </TenantAgencyRoute>
+          }
+        />
+        <Route path="/banking/hrm/staff" element={<Navigate to="/app/banking/hrm/profiles" replace />} />
+        <Route
+          path="/banking/hrm/profiles"
+          element={
+            <TenantAgencyRoute route="banking/hrm/profiles" modules={modules} permissions={permissions}>
+              <RoleDeskRoute kind="hrm" role={role} permissions={permissions}>
+                <HrStaffDirectoryPage displayName={displayName} role={role} />
+              </RoleDeskRoute>
+            </TenantAgencyRoute>
+          }
+        />
+        <Route
+          path="/banking/hrm/branches"
+          element={
+            <TenantAgencyRoute route="banking/hrm/branches" modules={modules} permissions={permissions}>
+              <RoleDeskRoute kind="hrm" role={role} permissions={permissions}>
+                <HrBranchAssignmentsPage displayName={displayName} />
+              </RoleDeskRoute>
+            </TenantAgencyRoute>
+          }
+        />
+        <Route
+          path="/banking/hrm/attendance"
+          element={
+            <TenantAgencyRoute route="banking/hrm/attendance" modules={modules} permissions={permissions}>
+              <RoleDeskRoute kind="hrm" role={role} permissions={permissions}>
+                <HrAttendancePage displayName={displayName} canManage={canManageHr} />
+              </RoleDeskRoute>
+            </TenantAgencyRoute>
+          }
+        />
+        <Route
+          path="/banking/hrm/leave"
+          element={
+            <TenantAgencyRoute route="banking/hrm/leave" modules={modules} permissions={permissions}>
+              <RoleDeskRoute kind="hrm" role={role} permissions={permissions}>
+                <HrLeavePage displayName={displayName} canManage={canManageHr} />
+              </RoleDeskRoute>
+            </TenantAgencyRoute>
+          }
+        />
+        <Route
+          path="/banking/hrm/appointments"
+          element={
+            <TenantAgencyRoute route="banking/hrm/appointments" modules={modules} permissions={permissions}>
+              <RoleDeskRoute kind="hrm" role={role} permissions={permissions}>
+                <HrAppointmentPage displayName={displayName} />
+              </RoleDeskRoute>
+            </TenantAgencyRoute>
+          }
+        />
+        <Route
+          path="/banking/hrm/training"
+          element={
+            <TenantAgencyRoute route="banking/hrm/training" modules={modules} permissions={permissions}>
+              <RoleDeskRoute kind="hrm" role={role} permissions={permissions}>
+                <HrTrainingPage displayName={displayName} canManage={canManageHr} />
+              </RoleDeskRoute>
+            </TenantAgencyRoute>
+          }
+        />
+        <Route
+          path="/banking/hrm/payroll"
+          element={
+            <TenantAgencyRoute route="banking/hrm/payroll" modules={modules} permissions={permissions}>
+              <RoleDeskRoute kind="hrm" role={role} permissions={permissions}>
+                <HrPayrollPage displayName={displayName} />
+              </RoleDeskRoute>
+            </TenantAgencyRoute>
+          }
+        />
+        <Route
+          path="/banking/hrm/roles"
+          element={
+            <TenantAgencyRoute route="banking/hrm/roles" modules={modules} permissions={permissions}>
+              <RoleDeskRoute kind="hrm" role={role} permissions={permissions}>
+                <HrRolesPage displayName={displayName} role={role} />
               </RoleDeskRoute>
             </TenantAgencyRoute>
           }
@@ -451,11 +626,7 @@ export function TenantApp() {
         />
         <Route
           path="/treasury/trial-balance"
-          element={
-            <TenantTreasuryRoute route="treasury/trial-balance" modules={modules} permissions={permissions}>
-              <TreasuryPage canMoveCash={false} defaultBranchId={selectedBranch || user?.branchId} />
-            </TenantTreasuryRoute>
-          }
+          element={<Navigate to="/app/banking/accountant/trial-balance" replace />}
         />
 
         {/* Settings */}

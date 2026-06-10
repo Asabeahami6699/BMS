@@ -17,6 +17,9 @@ type Props<T> = {
   emptyMessage?: string;
   actions?: (row: T) => ReactNode;
   toolbar?: ReactNode;
+  variant?: "default" | "desk";
+  title?: string;
+  subtitle?: string;
 };
 
 export function filterRowsBySearch<T extends Record<string, unknown>>(
@@ -42,10 +45,14 @@ export function AdminDataTable<T>({
   searchPlaceholder = "Search…",
   emptyMessage = "No records found.",
   actions,
-  toolbar
+  toolbar,
+  variant = "default",
+  title,
+  subtitle
 }: Props<T>) {
-  return (
-    <div className="admin-table-wrap">
+  const isDesk = variant === "desk";
+  const table = (
+    <div className={`admin-table-wrap${isDesk ? " desk-data-table__body" : ""}`}>
       <div className="admin-table-toolbar">
         <label className="admin-table-search">
           <span className="sr-only">Search</span>
@@ -58,8 +65,8 @@ export function AdminDataTable<T>({
         </label>
         {toolbar}
       </div>
-      <div className="admin-table-scroll">
-        <table className="admin-table">
+      <div className={`admin-table-scroll${isDesk ? " desk-data-table__scroll" : ""}`}>
+        <table className={`admin-table${isDesk ? " desk-data-table__grid" : ""}`}>
           <thead>
             <tr>
               {columns.map((col) => (
@@ -93,5 +100,21 @@ export function AdminDataTable<T>({
         </table>
       </div>
     </div>
+  );
+
+  if (!isDesk) {
+    return table;
+  }
+
+  return (
+    <section className="desk-data-table card">
+      {title ? (
+        <header className="desk-data-table__head">
+          <h3>{title}</h3>
+          {subtitle ? <p className="muted">{subtitle}</p> : null}
+        </header>
+      ) : null}
+      {table}
+    </section>
   );
 }

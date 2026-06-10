@@ -108,6 +108,7 @@ export function BackOfficeDeskPage({ displayName }: Props) {
 
   const companyAccounts = data?.companyAccounts ?? [];
   const canRunDayOps = Boolean(branchId && branchId !== "all" && !viewingAllBranches);
+  const canViewBalances = canRunDayOps || viewingAllBranches;
   const depositQueue = data?.depositQueue ?? [];
   const accountBalances = data?.accountBalances ?? [];
   const ecashRequests = data?.ecashRequests ?? [];
@@ -199,6 +200,38 @@ export function BackOfficeDeskPage({ displayName }: Props) {
       onRefresh={() => void refresh()}
       refreshing={loading}
     >
+      {branches.length > 0 ? (
+        <section className="card role-workspace__panel back-office-workspace-filters">
+          <div className="back-office-balancing-head__filters">
+            <label className="field">
+              <span>Branch</span>
+              <select value={branchId} onChange={(e) => setBranchId(e.target.value)}>
+                <option value="">Select branch…</option>
+                {isHeadOffice ? <option value="all">All branches</option> : null}
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name} ({b.code})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Business date</span>
+              <input
+                type="date"
+                value={businessDate}
+                onChange={(e) => setBusinessDate(e.target.value)}
+              />
+            </label>
+          </div>
+          <p className="muted back-office-workspace-filters__hint">
+            {viewingAllBranches
+              ? "All branches — deposit queue, balances, and teller reconciliation across every branch. Pick one branch to enter opening balances or ecash."
+              : "Filters apply to the deposit queue, account balances, and teller reconciliation below."}
+          </p>
+        </section>
+      ) : null}
+
       {canAccountantApprove &&
       ((data?.pendingAccountantCount ?? 0) > 0 || (data?.pendingEcashCount ?? 0) > 0) ? (
         <section className="card role-workspace__panel role-workspace__panel--accent">
@@ -426,30 +459,6 @@ export function BackOfficeDeskPage({ displayName }: Props) {
                 {sessionOpen ? ` Day open for ${businessDate}.` : ""}
               </p>
             </div>
-            <div className="back-office-balancing-head__filters">
-              {branches.length > 0 ? (
-                <label className="field">
-                  <span>Branch</span>
-                  <select value={branchId} onChange={(e) => setBranchId(e.target.value)}>
-                    <option value="">Select branch…</option>
-                    {isHeadOffice ? <option value="all">All branches</option> : null}
-                    {branches.map((b) => (
-                      <option key={b.id} value={b.id}>
-                        {b.name} ({b.code})
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : null}
-              <label className="field">
-                <span>Business date</span>
-                <input
-                  type="date"
-                  value={businessDate}
-                  onChange={(e) => setBusinessDate(e.target.value)}
-                />
-              </label>
-            </div>
           </div>
           {canRunDayOps ? (
             <div className="back-office-balancing-actions">
@@ -479,9 +488,9 @@ export function BackOfficeDeskPage({ displayName }: Props) {
           ) : null}
         </header>
 
-        {!canRunDayOps ? (
+        {!canViewBalances ? (
           <p className="muted agency-deposit-table-card__empty">
-            Select a specific branch (not All branches) to view and manage account balances.
+            Select a branch to view account balances.
           </p>
         ) : loading && accountBalances.length === 0 ? (
           <p className="muted agency-deposit-table-card__empty">Loading account balances…</p>
@@ -495,6 +504,7 @@ export function BackOfficeDeskPage({ displayName }: Props) {
             <table className="agency-deposit-table back-office-balancing-table">
               <thead>
                 <tr>
+                  {viewingAllBranches ? <th>Branch</th> : null}
                   <th>Company account</th>
                   <th className="agency-deposit-table__num">Opening</th>
                   <th className="agency-deposit-table__num">+ Ecash</th>
@@ -505,17 +515,31 @@ export function BackOfficeDeskPage({ displayName }: Props) {
                 </tr>
               </thead>
               <tbody>
-                {accountBalances.map((row) => (
-                  <tr key={row.bankProductId} className="agency-deposit-table__row">
+                {accountBalances.map((row) => {
+                  const rowSessionOpen = viewingAllBranches
+                    ? Boolean(row.sessionOpen)
+                    : sessionOpen;
+                  return (
+                  <tr
+                    key={`${row.branchId ?? "branch"}-${row.bankProductId}`}
+                    className="agency-deposit-table__row"
+                  >
+                    {viewingAllBranches ? (
+                      <td>
+                        <span className="agency-deposit-table__branch">
+                          {branchLabel(row.branchName, row.branchCode)}
+                        </span>
+                      </td>
+                    ) : null}
                     <td>
                       <strong>{row.bankLabel}</strong>
                       <span className="muted agency-deposit-table__account">{row.accountName}</span>
                     </td>
                     <td className="agency-deposit-table__num">
-                      {sessionOpen ? formatWorkspaceMoney(row.openingBalance) : "—"}
+                      {rowSessionOpen ? formatWorkspaceMoney(row.openingBalance) : "—"}
                     </td>
                     <td className="agency-deposit-table__num">
-                      {sessionOpen ? formatWorkspaceMoney(row.extraCash) : "—"}
+                      {rowSessionOpen ? formatWorkspaceMoney(row.extraCash) : "—"}
                     </td>
                     <td className="agency-deposit-table__num agency-deposit-table__amount">
                       {formatWorkspaceMoney(row.totalEntries)}
@@ -525,30 +549,36 @@ export function BackOfficeDeskPage({ displayName }: Props) {
                     </td>
                     <td
                       className={`agency-deposit-table__num ${
-                        sessionOpen && row.limitReached
+                        rowSessionOpen && row.limitReached
                           ? "back-office-diff--warn"
-                          : sessionOpen && row.headroom != null && row.headroom > 0
+                          : rowSessionOpen && row.headroom != null && row.headroom > 0
                             ? "back-office-diff--ok"
                             : ""
                       }`}
                     >
-                      {sessionOpen && row.headroom != null
+                      {rowSessionOpen && row.headroom != null
                         ? formatWorkspaceMoney(row.headroom)
                         : "—"}
                     </td>
                     <td className="agency-deposit-table__num">
                       <strong>
-                        {sessionOpen ? formatWorkspaceMoney(row.closingBalance) : "—"}
+                        {rowSessionOpen ? formatWorkspaceMoney(row.closingBalance) : "—"}
                       </strong>
                     </td>
                   </tr>
-                ))}
+                );
+                })}
               </tbody>
             </table>
-            {!sessionOpen && accountBalances.length > 0 ? (
+            {!viewingAllBranches && !sessionOpen && accountBalances.length > 0 ? (
               <p className="muted agency-deposit-table-card__hint">
                 Click <strong>Opening balances</strong> to enter opening and ecash on hand. Total
                 entries already reflect deposits marked done today.
+              </p>
+            ) : viewingAllBranches ? (
+              <p className="muted agency-deposit-table-card__hint">
+                Select a single branch above to enter opening balances or request ecash. Total entries
+                update live across all branches.
               </p>
             ) : null}
           </div>
@@ -559,11 +589,23 @@ export function BackOfficeDeskPage({ displayName }: Props) {
         <header className="agency-deposit-table-card__head role-workspace__panel-head">
           <div>
             <h3>Back office vs teller</h3>
-            <p className="muted">Teller deposits recorded vs back office executed — should match per teller.</p>
+            <p className="muted">
+              Teller deposits recorded vs back office executed — should match per teller.
+              {viewingAllBranches
+                ? " Showing all branches for the selected date."
+                : branchId
+                  ? ` Filtered to ${branches.find((b) => b.id === branchId)?.name ?? "this branch"}.`
+                  : ""}
+            </p>
           </div>
         </header>
-        {tellerReconciliation.length === 0 ? (
-          <p className="muted agency-deposit-table-card__empty">No teller activity for this date.</p>
+        {!branchId ? (
+          <p className="muted agency-deposit-table-card__empty">Select a branch above to load teller reconciliation.</p>
+        ) : tellerReconciliation.length === 0 ? (
+          <p className="muted agency-deposit-table-card__empty">
+            No teller activity for this date
+            {viewingAllBranches ? " across any branch" : ""}.
+          </p>
         ) : (
           <div className="agency-deposit-table-wrap">
             <table className="agency-deposit-table">

@@ -1,5 +1,6 @@
 import type { Permission, SusuNavVisibilityRow, TenantAddon, TenantProductModule } from "@bms/shared";
 import {
+  BANKING_NAV_SUBGROUPS,
   hasAnyPermission,
   hasTenantModule,
   isBuiltinRole,
@@ -7,7 +8,9 @@ import {
   MODULE_LABELS,
   SUSU_NAV_VISIBILITY,
   TREASURY_NAV_VISIBILITY,
-  BANKING_NAV_VISIBILITY
+  BANKING_NAV_VISIBILITY,
+  UNIVERSAL_OPS_LABEL,
+  UNIVERSAL_OPS_NAV
 } from "@bms/shared";
 import type { AppRole } from "../app/api";
 export type DashboardNavLink = {
@@ -16,11 +19,28 @@ export type DashboardNavLink = {
   label: string;
 };
 
+export type DashboardNavChildLink = {
+  kind: "link";
+  to: string;
+  label: string;
+};
+
+export type DashboardNavSubgroup = {
+  kind: "subgroup";
+  id: string;
+  label: string;
+  children: Array<{ to: string; label: string }>;
+};
+
+export type DashboardNavChild = DashboardNavChildLink | DashboardNavSubgroup;
+
 export type DashboardNavGroup = {
   kind: "group";
   id: string;
   label: string;
-  children: Array<{ to: string; label: string }>;
+  children: DashboardNavChild[];
+  /** Child links align with the group trigger (no extra indent). */
+  flatChildren?: boolean;
 };
 
 export type DashboardNavItem = DashboardNavLink | DashboardNavGroup;
@@ -111,19 +131,45 @@ const SETTINGS_CHILDREN: NavChildDef[] = [
 
 const STAFF_NAV_ROLE_CHECK = () => true;
 
+function filterBankingNavChildLink(
+  row: { navPath: string; label: string; roles: AppRole[]; anyPermissions: Permission[] },
+  role: AppRole | string,
+  permissions: Permission[] | undefined
+): DashboardNavChildLink | null {
+  if (isBuiltinRole(role) && !row.roles.includes(role as AppRole)) {
+    return null;
+  }
+  if (!hasAnyPermission(permissions, row.anyPermissions)) {
+    return null;
+  }
+  return { kind: "link", to: row.navPath, label: row.label };
+}
+
 function filterBankingNavChildren(
   role: AppRole | string,
   permissions: Permission[] | undefined
-): Array<{ to: string; label: string }> {
-  return BANKING_NAV_VISIBILITY.filter((row) => {
-    if (isBuiltinRole(role) && !row.roles.includes(role)) {
-      return false;
+): DashboardNavChild[] {
+  const items: DashboardNavChild[] = [];
+  for (const row of BANKING_NAV_VISIBILITY) {
+    const link = filterBankingNavChildLink(row, role, permissions);
+    if (link) {
+      items.push(link);
     }
-    return hasAnyPermission(permissions, row.anyPermissions);
-  }).map(({ navPath, label }) => ({
-    to: navPath,
-    label
-  }));
+  }
+  for (const subgroup of BANKING_NAV_SUBGROUPS) {
+    const children = subgroup.children
+      .map((row) => filterBankingNavChildLink(row, role, permissions))
+      .filter((row): row is DashboardNavChildLink => row != null);
+    if (children.length > 0) {
+      items.push({
+        kind: "subgroup",
+        id: subgroup.id,
+        label: subgroup.label,
+        children: children.map(({ to, label }) => ({ to, label }))
+      });
+    }
+  }
+  return items;
 }
 
 const LOANS_NAV_CHILDREN: NavChildDef[] = LOANS_NAV_VISIBILITY.map((row) => ({
@@ -160,7 +206,12 @@ function buildGroup(
   if (filtered.length === 0) {
     return null;
   }
-  return { kind: "group", id, label, children: filtered };
+  return {
+    kind: "group",
+    id,
+    label,
+    children: filtered.map((child) => ({ kind: "link" as const, ...child }))
+  };
 }
 
 function hasAnyProduct(modules: TenantProductModule[] | undefined): boolean {
@@ -176,6 +227,20 @@ export function buildTenantNav(
   susuNavVisibility?: SusuNavVisibilityRow[]
 ): DashboardNavItem[] {
   const items: DashboardNavItem[] = [{ kind: "link", to: "dashboard", label: "Dashboard" }];
+
+  if (hasAnyProduct(subscribedModules)) {
+    items.push({
+      kind: "group",
+      id: "universal_operations",
+      label: UNIVERSAL_OPS_LABEL,
+      flatChildren: true,
+      children: UNIVERSAL_OPS_NAV.map((row) => ({
+        kind: "link" as const,
+        to: row.navPath,
+        label: row.label
+      }))
+    });
+  }
 
   const susu = buildGroup(
     "susu_management",
@@ -245,7 +310,12 @@ export function buildTenantNav(
   if (hasAnyProduct(subscribedModules)) {
     const settingsChildren = filterChildren(SETTINGS_CHILDREN, role, permissions);
     if (settingsChildren.length > 0) {
-      items.push({ kind: "group", id: "settings", label: "Settings", children: settingsChildren });
+      items.push({
+        kind: "group",
+        id: "settings",
+        label: "Settings",
+        children: settingsChildren.map((child) => ({ kind: "link" as const, ...child }))
+      });
     }
   }
 

@@ -9,6 +9,7 @@ export type StoredAuthUser = {
   tenantId: string | null;
   scopeType: ScopeType;
   branchId?: string;
+  tellerType?: 1 | 2 | 3 | 4;
   fullName?: string;
   status?: "active" | "inactive";
   createdAt?: string;
@@ -154,7 +155,12 @@ export function listUsersByTenant(tenantId: string): StoredAuthUser[] {
 
 export function updateStoredAuthUser(
   userId: string,
-  patch: Partial<Pick<StoredAuthUser, "email" | "role" | "scopeType" | "branchId" | "fullName" | "status" | "passwordHash">>
+  patch: Partial<
+    Pick<
+      StoredAuthUser,
+      "email" | "role" | "scopeType" | "branchId" | "tellerType" | "fullName" | "status" | "passwordHash"
+    >
+  >
 ): StoredAuthUser {
   const existing = usersById.get(userId);
   if (!existing) {
