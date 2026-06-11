@@ -827,6 +827,21 @@ export const AGENCY_NAV_VISIBILITY: Array<{
     anyPermissions: ["agency.bank.execute"]
   },
   {
+    navPath: "banking/back-office/deposits",
+    label: "Deposit queue",
+    anyPermissions: ["agency.bank.execute"]
+  },
+  {
+    navPath: "banking/back-office/balancing",
+    label: "Account balancing",
+    anyPermissions: ["agency.bank.execute"]
+  },
+  {
+    navPath: "banking/back-office/reconciliation",
+    label: "Teller/Back Officer reconciliation",
+    anyPermissions: ["agency.bank.execute"]
+  },
+  {
     navPath: "banking/products",
     label: "Bank products",
     anyPermissions: ["banking.products.read"]
@@ -904,6 +919,16 @@ export const AGENCY_NAV_VISIBILITY: Array<{
   {
     navPath: "banking/hrm/leave",
     label: "Leave management",
+    anyPermissions: ["users.read"]
+  },
+  {
+    navPath: "banking/hrm/staff-loans",
+    label: "Staff loans",
+    anyPermissions: ["users.read"]
+  },
+  {
+    navPath: "banking/hrm/policies",
+    label: "HR policies",
     anyPermissions: ["users.read"]
   },
   {
@@ -1033,6 +1058,24 @@ export const BANKING_NAV_SUBGROUPS: BankingNavSubgroup[] = [
         label: "Desk home",
         anyPermissions: ["agency.bank.execute"],
         roles: ["admin", "back_officer"]
+      },
+      {
+        navPath: "banking/back-office/deposits",
+        label: "Deposit queue",
+        anyPermissions: ["agency.bank.execute"],
+        roles: ["admin", "back_officer"]
+      },
+      {
+        navPath: "banking/back-office/balancing",
+        label: "Account balancing",
+        anyPermissions: ["agency.bank.execute"],
+        roles: ["admin", "back_officer"]
+      },
+      {
+        navPath: "banking/back-office/reconciliation",
+        label: "Teller/Back Officer reconciliation",
+        anyPermissions: ["agency.bank.execute"],
+        roles: ["admin", "back_officer"]
       }
     ]
   },
@@ -1127,6 +1170,18 @@ export const BANKING_NAV_SUBGROUPS: BankingNavSubgroup[] = [
       {
         navPath: "banking/hrm/leave",
         label: "Leave management",
+        anyPermissions: ["users.read"],
+        roles: ["admin", "coordinator"]
+      },
+      {
+        navPath: "banking/hrm/staff-loans",
+        label: "Staff loans",
+        anyPermissions: ["users.read"],
+        roles: ["admin", "coordinator"]
+      },
+      {
+        navPath: "banking/hrm/policies",
+        label: "HR policies",
         anyPermissions: ["users.read"],
         roles: ["admin", "coordinator"]
       },

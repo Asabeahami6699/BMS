@@ -70,6 +70,8 @@ import { HrAppointmentPage } from "./banking/hr/HrAppointmentPage";
 import { HrBranchAssignmentsPage } from "./banking/hr/HrBranchAssignmentsPage";
 import { HrLeavePage } from "./banking/hr/HrLeavePage";
 import { HrTrainingPage } from "./banking/hr/HrTrainingPage";
+import { HrStaffLoansPage } from "./banking/hr/HrStaffLoansPage";
+import { HrPoliciesPage } from "./banking/hr/HrPoliciesPage";
 import { RolePlaceholderDeskPage } from "./banking/RolePlaceholderDeskPage";
 import { TellerDeskPage } from "./banking/TellerDeskPage";
 import { TellerReconciliationPage } from "./banking/TellerReconciliationPage";
@@ -383,6 +385,18 @@ export function TenantApp() {
           }
         />
         <Route
+          path="/banking/back-office/deposits"
+          element={<Navigate to="/app/banking/back-office#deposits" replace />}
+        />
+        <Route
+          path="/banking/back-office/balancing"
+          element={<Navigate to="/app/banking/back-office#balancing" replace />}
+        />
+        <Route
+          path="/banking/back-office/reconciliation"
+          element={<Navigate to="/app/banking/back-office#reconciliation" replace />}
+        />
+        <Route
           path="/banking/accountant"
           element={
             <TenantAgencyRoute route="banking/accountant" modules={modules} permissions={permissions}>
@@ -539,6 +553,26 @@ export function TenantApp() {
             <TenantAgencyRoute route="banking/hrm/payroll" modules={modules} permissions={permissions}>
               <RoleDeskRoute kind="hrm" role={role} permissions={permissions}>
                 <HrPayrollPage displayName={displayName} />
+              </RoleDeskRoute>
+            </TenantAgencyRoute>
+          }
+        />
+        <Route
+          path="/banking/hrm/staff-loans"
+          element={
+            <TenantAgencyRoute route="banking/hrm/staff-loans" modules={modules} permissions={permissions}>
+              <RoleDeskRoute kind="hrm" role={role} permissions={permissions}>
+                <HrStaffLoansPage displayName={displayName} canManage={canManageHr} />
+              </RoleDeskRoute>
+            </TenantAgencyRoute>
+          }
+        />
+        <Route
+          path="/banking/hrm/policies"
+          element={
+            <TenantAgencyRoute route="banking/hrm/policies" modules={modules} permissions={permissions}>
+              <RoleDeskRoute kind="hrm" role={role} permissions={permissions}>
+                <HrPoliciesPage displayName={displayName} canManage={canManageHr} />
               </RoleDeskRoute>
             </TenantAgencyRoute>
           }

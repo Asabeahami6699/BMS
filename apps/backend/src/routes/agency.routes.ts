@@ -12,6 +12,7 @@ import {
 import {
   approveAccountantDeposit,
   approveBackOfficeEcashRequest,
+  createBackOfficeAgentTransfer,
   createBackOfficeEcashRequest,
   executeBackOfficeDeposit,
   getBackOfficeBootstrap,
@@ -308,9 +309,13 @@ agencyRouter.get(
       const context = req.userContext!;
       const businessDate =
         typeof req.query.date === "string" ? req.query.date : undefined;
+      const dateFrom = typeof req.query.dateFrom === "string" ? req.query.dateFrom : undefined;
+      const dateTo = typeof req.query.dateTo === "string" ? req.query.dateTo : undefined;
       const bootstrap = await getBackOfficeBootstrap(toTxContext(context), {
         branchId: resolveRequestBranchFilter(req),
-        businessDate
+        businessDate,
+        dateFrom,
+        dateTo
       });
       res.json(bootstrap);
     } catch (error) {
@@ -351,6 +356,24 @@ agencyRouter.patch(
       res.json(result);
     } catch (error) {
       res.status(400).json({ error: error instanceof Error ? error.message : "Update failed" });
+    }
+  }
+);
+
+agencyRouter.post(
+  "/back-office/agent-transfers",
+  requirePermission("agency.bank.execute"),
+  async (req, res) => {
+    const context = req.userContext;
+    if (!context) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    try {
+      const result = await createBackOfficeAgentTransfer(toTxContext(context), req.body);
+      res.json(result);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : "Transfer failed" });
     }
   }
 );
@@ -478,6 +501,9 @@ agencyRouter.get(
     try {
       const context = req.userContext!;
       const branchFilter = resolveRequestBranchFilter(req);
+      const dateFrom = typeof req.query.dateFrom === "string" ? req.query.dateFrom : undefined;
+      const dateTo = typeof req.query.dateTo === "string" ? req.query.dateTo : undefined;
+      const periodMeta = { dateFrom, dateTo };
       const branches = await listBranches(context.tenantId);
       if (!branchFilter || branchFilter.toLowerCase() === "all") {
         const items = await Promise.all(
@@ -496,7 +522,7 @@ agencyRouter.get(
               }
             })
         );
-        res.json({ branches: items.filter(Boolean) });
+        res.json({ ...periodMeta, branches: items.filter(Boolean) });
         return;
       }
       const branchId = await resolveBranchId(context.tenantId, branchFilter);
@@ -510,7 +536,7 @@ agencyRouter.get(
         branchId,
         branch?.name ?? "Branch"
       );
-      res.json(bootstrap);
+      res.json({ ...periodMeta, ...bootstrap });
     } catch (error) {
       next(error);
     }
@@ -554,7 +580,11 @@ agencyRouter.patch("/hr/leave/:id", requirePermission("users.update"), async (re
   try {
     const status = req.body?.status === "approved" ? "approved" : "rejected";
     const leaveId = String(req.params.id);
-    const row = await updateHrLeaveStatus(req.userContext!.tenantId, leaveId, status);
+    const ctx = req.userContext!;
+    const row = await updateHrLeaveStatus(ctx.tenantId, leaveId, status, {
+      reviewedBy: ctx.userId,
+      rejectedReason: typeof req.body?.rejectedReason === "string" ? req.body.rejectedReason : undefined
+    });
     res.json(row);
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : "Failed" });
@@ -564,7 +594,9 @@ agencyRouter.patch("/hr/leave/:id", requirePermission("users.update"), async (re
 agencyRouter.get("/hr/attendance", requirePermission("users.read"), async (req, res, next) => {
   try {
     const businessDate = typeof req.query.date === "string" ? req.query.date : undefined;
-    res.json(await listHrAttendance(req.userContext!.tenantId, { businessDate }));
+    const dateFrom = typeof req.query.dateFrom === "string" ? req.query.dateFrom : undefined;
+    const dateTo = typeof req.query.dateTo === "string" ? req.query.dateTo : undefined;
+    res.json(await listHrAttendance(req.userContext!.tenantId, { businessDate, dateFrom, dateTo }));
   } catch (error) {
     next(error);
   }
@@ -591,6 +623,57 @@ agencyRouter.post("/hr/training", requirePermission("users.update"), async (req,
   try {
     const row = await createHrTraining(req.userContext!.tenantId, req.body);
     res.status(201).json(row);
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : "Failed" });
+  }
+});
+
+agencyRouter.get("/hr/staff-loans", requirePermission("users.read"), async (req, res, next) => {
+  try {
+    const { listAllStaffLoans } = await import("../services/universalOpsService.js");
+    res.json(await listAllStaffLoans(req.userContext!.tenantId));
+  } catch (error) {
+    next(error);
+  }
+});
+
+agencyRouter.patch("/hr/staff-loans/:id", requirePermission("users.update"), async (req, res) => {
+  try {
+    const { updateStaffLoanStatus } = await import("../services/universalOpsService.js");
+    const status = req.body?.status === "approved" ? "approved" : "declined";
+    const ctx = req.userContext!;
+    const monthlyDeduction =
+      typeof req.body?.monthlyDeduction === "number" && req.body.monthlyDeduction > 0
+        ? req.body.monthlyDeduction
+        : undefined;
+    const row = await updateStaffLoanStatus(
+      ctx.tenantId,
+      String(req.params.id),
+      status,
+      ctx.userId,
+      monthlyDeduction
+    );
+    res.json(row);
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : "Failed" });
+  }
+});
+
+agencyRouter.get("/hr/policies", requirePermission("users.read"), async (req, res, next) => {
+  try {
+    const { getHrPolicies } = await import("../services/hrPolicyService.js");
+    res.json(await getHrPolicies(req.userContext!.tenantId));
+  } catch (error) {
+    next(error);
+  }
+});
+
+agencyRouter.put("/hr/policies", requirePermission("users.update"), async (req, res) => {
+  try {
+    const { updateHrPolicies } = await import("../services/hrPolicyService.js");
+    const ctx = req.userContext!;
+    const row = await updateHrPolicies(ctx.tenantId, ctx.userId, req.body);
+    res.json(row);
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : "Failed" });
   }

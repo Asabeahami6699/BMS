@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { tellerTypeLabel } from "@bms/shared";
+import { useShallow } from "zustand/react/shallow";
 import type { AppRole, Branch, UserRecord } from "./api";
-import { deleteUser, exportUsersCsv, getTenantId, listBranches, listUsers, updateUser } from "./api";
+import { deleteUser, exportUsersCsv, updateUser } from "./api";
 import { AdminDataTable, filterRowsBySearch } from "../components/AdminDataTable";
 import { RowActionsMenu } from "../components/RowActionsMenu";
 import { ResetPasswordModal } from "./ResetPasswordModal";
 import { UserFormModal } from "./UserFormModal";
 import { useToast } from "../components/Toast";
-import { subscribeToTenantRealtime } from "./realtime";
+import { useBranchesLiveSync } from "./hooks/useBranchesLiveSync";
+import { useBranchesStore } from "./stores/branchesStore";
+import { useHrDeskStore } from "./stores/hrDeskStore";
 
 type Props = {
   role: AppRole;
@@ -35,41 +38,45 @@ function branchLabel(branchId: string | undefined, branches: Branch[]): string {
 export function UserManagementCard({ role }: Props) {
   const canManage = role === "admin";
   const { showToast } = useToast();
-  const [users, setUsers] = useState<UserRecord[]>([]);
-  const [branches, setBranches] = useState<Branch[]>([]);
+  useBranchesLiveSync();
+  const branches = useBranchesStore((s) => s.branches);
+  const {
+    users,
+    loading,
+    rosterError,
+    hydrateRoster,
+    refreshRoster,
+    startLiveSync,
+    stopLiveSync
+  } = useHrDeskStore(
+    useShallow((s) => ({
+      users: s.users,
+      loading: s.rosterLoading,
+      rosterError: s.rosterError,
+      hydrateRoster: s.hydrateRoster,
+      refreshRoster: s.refreshRoster,
+      startLiveSync: s.startLiveSync,
+      stopLiveSync: s.stopLiveSync
+    }))
+  );
   const [search, setSearch] = useState("");
-  const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<"create" | "edit">("create");
   const [editingUser, setEditingUser] = useState<UserRecord | null>(null);
   const [resetOpen, setResetOpen] = useState(false);
   const [passwordResetUser, setPasswordResetUser] = useState<UserRecord | null>(null);
 
-  async function loadUsers() {
-    setLoading(true);
-    try {
-      const [userRows, branchRows] = await Promise.all([listUsers(), listBranches().catch(() => [])]);
-      setUsers(userRows);
-      setBranches(branchRows);
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : "Failed to load users", "error");
-    } finally {
-      setLoading(false);
-    }
-  }
+  useEffect(() => {
+    hydrateRoster();
+    startLiveSync();
+    return () => stopLiveSync();
+  }, [hydrateRoster, startLiveSync, stopLiveSync]);
 
   useEffect(() => {
-    void loadUsers();
-    const unsubscribe = subscribeToTenantRealtime({
-      tenantId: getTenantId(),
-      tables: ["users"],
-      onChange: () => {
-        void loadUsers();
-      }
-    });
-
-    return () => unsubscribe();
-  }, [role]);
+    if (rosterError) {
+      showToast(rosterError, "error");
+    }
+  }, [rosterError, showToast]);
 
   const filtered = useMemo(
     () =>
@@ -108,7 +115,7 @@ export function UserManagementCard({ role }: Props) {
     try {
       await updateUser(user.userId, { status: next });
       showToast(`User ${next === "active" ? "activated" : "deactivated"}`, "success");
-      await loadUsers();
+      await refreshRoster();
     } catch (error) {
       showToast(error instanceof Error ? error.message : "Failed to update status", "error");
     }
@@ -121,7 +128,7 @@ export function UserManagementCard({ role }: Props) {
     try {
       await deleteUser(user.userId);
       showToast("User deleted", "success");
-      await loadUsers();
+      await refreshRoster();
     } catch (error) {
       showToast(error instanceof Error ? error.message : "Failed to delete user", "error");
     }
@@ -244,7 +251,7 @@ export function UserManagementCard({ role }: Props) {
             user={editingUser}
             branches={branches}
             onClose={() => setModalOpen(false)}
-            onSaved={() => void loadUsers()}
+            onSaved={() => void refreshRoster()}
           />
           <ResetPasswordModal
             open={resetOpen}

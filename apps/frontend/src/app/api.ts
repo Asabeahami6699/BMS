@@ -2581,11 +2581,15 @@ export async function getAccountantDashboard(options?: {
 
 export async function getAccountantTrialBalance(options?: {
   branchId?: string;
+  dateFrom?: string;
+  dateTo?: string;
 }): Promise<
   import("@bms/shared").TreasuryBootstrap | { branches: Array<{ branchId: string; branchName: string; branchCode?: string; bootstrap: import("@bms/shared").TreasuryBootstrap }> }
 > {
   const params = new URLSearchParams();
   if (options?.branchId) params.set("branchId", options.branchId);
+  if (options?.dateFrom) params.set("dateFrom", options.dateFrom);
+  if (options?.dateTo) params.set("dateTo", options.dateTo);
   const qs = params.toString();
   return fetchJson(`${API_BASE_URL}/api/v1/agency/accountant/trial-balance${qs ? `?${qs}` : ""}`, {
     headers: authHeaders()
@@ -2623,20 +2627,25 @@ export async function createHrLeaveRequest(payload: {
 
 export async function updateHrLeaveStatus(
   requestId: string,
-  status: "approved" | "rejected"
+  status: "approved" | "rejected",
+  options?: { rejectedReason?: string }
 ): Promise<import("@bms/shared").HrLeaveRequest> {
   return fetchJson(`${API_BASE_URL}/api/v1/agency/hr/leave/${requestId}`, {
     method: "PATCH",
     headers: authHeaders(),
-    body: JSON.stringify({ status })
+    body: JSON.stringify({ status, rejectedReason: options?.rejectedReason })
   });
 }
 
 export async function listHrAttendance(options?: {
   businessDate?: string;
+  dateFrom?: string;
+  dateTo?: string;
 }): Promise<import("@bms/shared").HrAttendanceRecord[]> {
   const params = new URLSearchParams();
   if (options?.businessDate) params.set("date", options.businessDate);
+  if (options?.dateFrom) params.set("dateFrom", options.dateFrom);
+  if (options?.dateTo) params.set("dateTo", options.dateTo);
   const qs = params.toString();
   return fetchJson(`${API_BASE_URL}/api/v1/agency/hr/attendance${qs ? `?${qs}` : ""}`, {
     headers: authHeaders()
@@ -2649,6 +2658,9 @@ export async function upsertHrAttendance(payload: {
   businessDate: string;
   status: "present" | "absent" | "late" | "leave";
   checkIn?: string;
+  checkOut?: string;
+  checkInPhotoUrl?: string;
+  checkOutPhotoUrl?: string;
   notes?: string;
 }): Promise<import("@bms/shared").HrAttendanceRecord> {
   return fetchJson(`${API_BASE_URL}/api/v1/agency/hr/attendance`, {
@@ -2677,13 +2689,181 @@ export async function createHrTraining(payload: {
   });
 }
 
+export async function listHrStaffLoans(): Promise<import("@bms/shared").HrStaffLoan[]> {
+  return fetchJson(`${API_BASE_URL}/api/v1/agency/hr/staff-loans`, { headers: authHeaders() });
+}
+
+export async function updateHrStaffLoanStatus(
+  loanId: string,
+  status: "approved" | "declined",
+  options?: { monthlyDeduction?: number }
+): Promise<import("@bms/shared").HrStaffLoan> {
+  return fetchJson(`${API_BASE_URL}/api/v1/agency/hr/staff-loans/${loanId}`, {
+    method: "PATCH",
+    headers: authHeaders(),
+    body: JSON.stringify({ status, monthlyDeduction: options?.monthlyDeduction })
+  });
+}
+
+export async function getHrPolicies(): Promise<import("@bms/shared").HrPolicies> {
+  return fetchJson(`${API_BASE_URL}/api/v1/agency/hr/policies`, { headers: authHeaders() });
+}
+
+export async function updateHrPolicies(
+  payload: import("@bms/shared").HrPolicies
+): Promise<import("@bms/shared").HrPolicies> {
+  return fetchJson(`${API_BASE_URL}/api/v1/agency/hr/policies`, {
+    method: "PUT",
+    headers: authHeaders(),
+    body: JSON.stringify({
+      lateCheckInTime: payload.lateCheckInTime,
+      defaultAnnualLeaveDays: payload.defaultAnnualLeaveDays,
+      roleLeaveEntitlements: payload.roleLeaveEntitlements.map((row) => ({
+        roleKey: row.roleKey,
+        annualLeaveDays: row.annualLeaveDays
+      }))
+    })
+  });
+}
+
+export async function getOpsSummary(): Promise<import("@bms/shared").UniversalOpsSummary> {
+  return fetchJson(`${API_BASE_URL}/api/v1/operations/summary`, { headers: authHeaders() });
+}
+
+export async function getMyAttendanceToday(): Promise<import("@bms/shared").HrAttendanceRecord | null> {
+  return fetchJson(`${API_BASE_URL}/api/v1/operations/attendance/today`, { headers: authHeaders() });
+}
+
+export async function listMyAttendanceHistory(): Promise<import("@bms/shared").HrAttendanceRecord[]> {
+  return fetchJson(`${API_BASE_URL}/api/v1/operations/attendance/history`, { headers: authHeaders() });
+}
+
+export async function checkInAttendance(payload?: {
+  photoUrl?: string;
+  branchId?: string;
+}): Promise<import("@bms/shared").HrAttendanceRecord> {
+  return fetchJson(`${API_BASE_URL}/api/v1/operations/attendance/check-in`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(payload ?? {})
+  });
+}
+
+export async function checkOutAttendance(payload?: {
+  photoUrl?: string;
+}): Promise<import("@bms/shared").HrAttendanceRecord> {
+  return fetchJson(`${API_BASE_URL}/api/v1/operations/attendance/check-out`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(payload ?? {})
+  });
+}
+
+export async function listMyLeaveRequests(): Promise<import("@bms/shared").HrLeaveRequest[]> {
+  return fetchJson(`${API_BASE_URL}/api/v1/operations/leave`, { headers: authHeaders() });
+}
+
+export async function getMyLeaveSummary(): Promise<import("@bms/shared").HrLeaveSummary> {
+  return fetchJson(`${API_BASE_URL}/api/v1/operations/leave/summary`, { headers: authHeaders() });
+}
+
+export async function submitMyLeaveRequest(payload: {
+  leaveType: string;
+  startDate: string;
+  endDate: string;
+  notes?: string;
+}): Promise<import("@bms/shared").HrLeaveRequest> {
+  return fetchJson(`${API_BASE_URL}/api/v1/operations/leave`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function listMyStaffLoans(): Promise<import("@bms/shared").HrStaffLoan[]> {
+  return fetchJson(`${API_BASE_URL}/api/v1/operations/staff-loans`, { headers: authHeaders() });
+}
+
+export async function applyStaffLoan(payload: {
+  amount: number;
+  purpose: string;
+  termMonths: number;
+  notes?: string;
+}): Promise<import("@bms/shared").HrStaffLoan> {
+  return fetchJson(`${API_BASE_URL}/api/v1/operations/staff-loans`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function listOpsAnnouncements(): Promise<import("@bms/shared").CompanyAnnouncement[]> {
+  return fetchJson(`${API_BASE_URL}/api/v1/operations/announcements`, { headers: authHeaders() });
+}
+
+export async function acknowledgeOpsAnnouncement(announcementId: string): Promise<void> {
+  await fetchJson(`${API_BASE_URL}/api/v1/operations/announcements/${announcementId}/ack`, {
+    method: "POST",
+    headers: authHeaders()
+  });
+}
+
+export async function createOpsAnnouncement(payload: {
+  title: string;
+  body: string;
+  category: string;
+  pinned?: boolean;
+}): Promise<import("@bms/shared").CompanyAnnouncement> {
+  return fetchJson(`${API_BASE_URL}/api/v1/operations/announcements`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function listOpsDocuments(): Promise<import("@bms/shared").CompanyDocument[]> {
+  return fetchJson(`${API_BASE_URL}/api/v1/operations/documents`, { headers: authHeaders() });
+}
+
+export async function uploadOpsDocument(payload: {
+  title: string;
+  category: string;
+  fileUrl?: string;
+  version?: string;
+}): Promise<import("@bms/shared").CompanyDocument> {
+  return fetchJson(`${API_BASE_URL}/api/v1/operations/documents`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function listMyIncidents(): Promise<import("@bms/shared").IncidentReport[]> {
+  return fetchJson(`${API_BASE_URL}/api/v1/operations/incidents`, { headers: authHeaders() });
+}
+
+export async function reportIncident(payload: {
+  incidentType: string;
+  description: string;
+}): Promise<import("@bms/shared").IncidentReport> {
+  return fetchJson(`${API_BASE_URL}/api/v1/operations/incidents`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(payload)
+  });
+}
+
 export async function getBackOfficeBootstrap(options?: {
   branchId?: string;
   date?: string;
+  dateFrom?: string;
+  dateTo?: string;
 }): Promise<import("@bms/shared").BackOfficeBootstrap> {
   const params = new URLSearchParams();
   if (options?.branchId) params.set("branchId", options.branchId);
   if (options?.date) params.set("date", options.date);
+  if (options?.dateFrom) params.set("dateFrom", options.dateFrom);
+  if (options?.dateTo) params.set("dateTo", options.dateTo);
   const qs = params.toString();
   return fetchJson(`${API_BASE_URL}/api/v1/agency/back-office/bootstrap${qs ? `?${qs}` : ""}`, {
     headers: authHeaders()
@@ -2718,6 +2898,21 @@ export async function approveBackOfficeAccountantDeposit(
     `${API_BASE_URL}/api/v1/agency/back-office/deposits/${transactionId}/accountant-approve`,
     { method: "POST", headers: authHeaders() }
   );
+}
+
+export async function createBackOfficeAgentTransfer(payload: {
+  branchId: string;
+  businessDate: string;
+  fromBankProductId: string;
+  toBankProductId: string;
+  amount: number;
+  notes?: string;
+}): Promise<import("@bms/shared").BackOfficeBootstrap> {
+  return fetchJson(`${API_BASE_URL}/api/v1/agency/back-office/agent-transfers`, {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
 }
 
 export async function createBackOfficeEcashRequest(payload: {

@@ -93,6 +93,15 @@ export function resolveAgencyDepositCustomerName(input: {
   return input.fallback ?? "Walk-in customer";
 }
 
+/** Depositor name from workflow (person who brought the cash). */
+export function resolveAgencyDepositDepositorName(
+  workflow?: Record<string, unknown> | null
+): string | undefined {
+  const name =
+    typeof workflow?.depositor_name === "string" ? workflow.depositor_name.trim() : "";
+  return name || undefined;
+}
+
 export function isManualPartnerWithdrawal(disclosure: {
   workflowData?: Record<string, unknown>;
   customerName?: string;

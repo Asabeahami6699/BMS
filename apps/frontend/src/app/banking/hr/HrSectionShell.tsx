@@ -9,6 +9,7 @@ type Props = {
   children: ReactNode;
   loading?: boolean;
   error?: string | null;
+  updatedLabel?: string;
   onRefresh?: () => void;
   refreshing?: boolean;
 };
@@ -20,6 +21,7 @@ export function HrSectionShell({
   children,
   loading,
   error,
+  updatedLabel,
   onRefresh,
   refreshing
 }: Props) {
@@ -30,6 +32,7 @@ export function HrSectionShell({
       displayName={displayName}
       loading={loading}
       error={error}
+      updatedLabel={updatedLabel}
       onRefresh={onRefresh}
       refreshing={refreshing}
     >

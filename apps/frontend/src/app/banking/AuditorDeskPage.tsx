@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { Link } from "react-router-dom";
-import type { AuditorDashboard } from "@bms/shared";
-import { getAuditorDashboard } from "../api";
+import { useShallow } from "zustand/react/shallow";
 import { formatWorkspaceMoney } from "../stores/roleWorkspaceStore";
+import { useAuditorDeskStore } from "../stores/auditorDeskStore";
 import { DeskMetricGrid } from "./DeskMetricGrid";
 import { DeskSummaryTable } from "./DeskSummaryTable";
 import { getRoleDeskConfig } from "./roleDeskConfig";
@@ -12,25 +12,33 @@ type Props = { displayName?: string };
 
 export function AuditorDeskPage({ displayName }: Props) {
   const config = getRoleDeskConfig("auditor");
-  const [data, setData] = useState<AuditorDashboard | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      setData(await getAuditorDashboard({ branchId: "all" }));
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load auditor dashboard");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const {
+    data,
+    loading,
+    error,
+    lastFetchedAt,
+    hydrateDashboard,
+    refreshDashboard,
+    startLiveSync,
+    stopLiveSync
+  } = useAuditorDeskStore(
+    useShallow((s) => ({
+      data: s.dashboard,
+      loading: s.dashboardLoading,
+      error: s.error,
+      lastFetchedAt: s.lastDashboardAt,
+      hydrateDashboard: s.hydrateDashboard,
+      refreshDashboard: s.refreshDashboard,
+      startLiveSync: s.startLiveSync,
+      stopLiveSync: s.stopLiveSync
+    }))
+  );
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    hydrateDashboard({ force: true, branchId: "all" });
+    startLiveSync();
+    return () => stopLiveSync();
+  }, [hydrateDashboard, startLiveSync, stopLiveSync]);
 
   const sections = useMemo(() => {
     if (!data) {
@@ -108,13 +116,18 @@ export function AuditorDeskPage({ displayName }: Props) {
     ];
   }, [data]);
 
+  const updatedLabel = lastFetchedAt
+    ? `Updated ${new Date(lastFetchedAt).toLocaleTimeString()}`
+    : undefined;
+
   return (
     <RoleDeskShell
       config={config}
       displayName={displayName}
+      updatedLabel={updatedLabel}
       error={error}
       loading={loading && !data}
-      onRefresh={() => void load()}
+      onRefresh={() => void refreshDashboard()}
       refreshing={loading}
     >
       <section className="card role-workspace__panel desk-hero-panel desk-hero-panel--auditor">

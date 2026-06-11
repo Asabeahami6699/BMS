@@ -262,9 +262,7 @@ export function AgencyDepositsPage() {
     return activeCustomers.find((c) => c.id === selectedCustomerId) ?? null;
   }, [activeCustomers, selectedCustomerId, lookupCustomer]);
 
-  const showDepositForm = captureMode === "manual" || Boolean(selectedCustomer);
-
-
+  const canPostDeposit = captureMode === "manual" || Boolean(selectedCustomer);
 
   const selectedProduct = useMemo(
     () => bankProducts.find((p) => p.id === bankProductId),
@@ -487,31 +485,18 @@ export function AgencyDepositsPage() {
 
 
     try {
-
       await postDeposit({
-
         customerId: selectedCustomer?.id,
-
         amount: parsedAmount,
-
         transactionBranchId,
-
         notes: notes.trim() || undefined,
-
         bankProductId: bankProductId || undefined,
-
         workflowData
-
       });
-
       showToast(
-
         `Deposit GHS ${parsedAmount.toFixed(2)} recorded — pending back-office bank execution`,
-
         "success"
-
       );
-
       if (captureMode === "manual") {
         resetDepositForm();
       } else {
@@ -519,11 +504,8 @@ export function AgencyDepositsPage() {
         setNotes("");
         setWorkflowData({});
       }
-
     } catch (err) {
-
       showToast(toUserFacingError(err, "Failed to record deposit"), "error");
-
     }
 
   }
@@ -721,56 +703,62 @@ export function AgencyDepositsPage() {
         </section>
 
         <section className="branch-counter__main">
-          {showDepositForm ? (
-            <>
-              <div className="branch-counter__hero card">
-                <div className="branch-counter__hero-top">
-                  <div>
-                    <p className="branch-counter__hero-eyebrow">
-                      {captureMode === "manual" ? "Manual entry" : "Selected account"}
-                    </p>
-                    <h3 className="branch-counter__hero-name">
-                      {captureMode === "manual"
-                        ? "Non-BMS account holder"
-                        : selectedCustomer?.fullName ?? "Deposit"}
-                    </h3>
-                    <p className="muted">
-                      {captureMode === "manual" ? (
-                        "Enter all deposit slip details below"
-                      ) : (
-                        <>
-                          {partnerAccountMeta?.accountNumber ??
-                            selectedCustomer?.accountNumber ??
-                            "—"}{" "}
-                          · {selectedCustomer?.accountType?.replace(/_/g, " ") ?? "Account"}
-                          {hasSusu && selectedCustomer && isSusuCustomer(selectedCustomer) ? " · Susu" : ""}
-                        </>
-                      )}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    className="button secondary branch-counter__clear"
-                    onClick={() => (captureMode === "manual" ? enableBanksMode() : handleSelectCustomer(""))}
-                  >
-                    Clear
-                  </button>
-                </div>
-                {captureMode !== "manual" && selectedCustomer && hasSusu ? (
-                  <div className="branch-counter__hero-balances">
-                    <div className="branch-counter__hero-balance branch-counter__hero-balance--primary">
-                      <span>Account balance</span>
-                      <strong>GHS {balances.accountBalance.toFixed(2)}</strong>
-                    </div>
-                    <div className="branch-counter__hero-balance">
-                      <span>Withdrawable</span>
-                      <strong>GHS {balances.withdrawableBalance.toFixed(2)}</strong>
-                    </div>
-                  </div>
-                ) : null}
+          <div className="branch-counter__hero card">
+            <div className="branch-counter__hero-top">
+              <div>
+                <p className="branch-counter__hero-eyebrow">
+                  {captureMode === "manual"
+                    ? "Manual entry"
+                    : selectedCustomer
+                      ? "Selected account"
+                      : "Deposit details"}
+                </p>
+                <h3 className="branch-counter__hero-name">
+                  {captureMode === "manual"
+                    ? "Non-BMS account holder"
+                    : selectedCustomer?.fullName ?? "Select or look up an account"}
+                </h3>
+                <p className="muted">
+                  {captureMode === "manual" ? (
+                    "Enter all deposit slip details below"
+                  ) : selectedCustomer ? (
+                    <>
+                      {partnerAccountMeta?.accountNumber ??
+                        selectedCustomer?.accountNumber ??
+                        "—"}{" "}
+                      · {selectedCustomer?.accountType?.replace(/_/g, " ") ?? "Account"}
+                      {hasSusu && isSusuCustomer(selectedCustomer) ? " · Susu" : ""}
+                    </>
+                  ) : (
+                    "Account holder appears here after search or banks lookup"
+                  )}
+                </p>
               </div>
+              {selectedCustomer || captureMode === "manual" ? (
+                <button
+                  type="button"
+                  className="button secondary branch-counter__clear"
+                  onClick={() => (captureMode === "manual" ? enableBanksMode() : handleSelectCustomer(""))}
+                >
+                  Clear
+                </button>
+              ) : null}
+            </div>
+            {captureMode !== "manual" && selectedCustomer && hasSusu ? (
+              <div className="branch-counter__hero-balances">
+                <div className="branch-counter__hero-balance branch-counter__hero-balance--primary">
+                  <span>Account balance</span>
+                  <strong>GHS {balances.accountBalance.toFixed(2)}</strong>
+                </div>
+                <div className="branch-counter__hero-balance">
+                  <span>Withdrawable</span>
+                  <strong>GHS {balances.withdrawableBalance.toFixed(2)}</strong>
+                </div>
+              </div>
+            ) : null}
+          </div>
 
-              <div className="branch-counter__post card">
+          <div className="branch-counter__post card">
                 <div className="branch-counter__section-head">
                   <span className="branch-counter__step">2</span>
                   <h3>Record deposit</h3>
@@ -895,21 +883,17 @@ export function AgencyDepositsPage() {
                 <button
                   type="button"
                   className="button primary branch-counter__submit"
-                  disabled={posting}
+                  disabled={posting || !canPostDeposit}
                   onClick={() => void handlePost()}
                 >
                   {posting ? "Posting…" : "Record deposit"}
                 </button>
+                {!canPostDeposit && captureMode === "banks" ? (
+                  <p className="muted branch-counter__post-hint">
+                    Select an account on the left or use banks account lookup to enable posting.
+                  </p>
+                ) : null}
               </div>
-            </>
-          ) : (
-            <div className="branch-counter__hero branch-counter__hero--empty card">
-              <p className="branch-counter__hero-placeholder">
-                Select <strong>Non-BMS account holder</strong>, search a Susu or savings account, or use{" "}
-                <strong>Banks account lookup</strong> to record a deposit.
-              </p>
-            </div>
-          )}
         </section>
       </div>
 

@@ -125,6 +125,11 @@ export function SessionIdleGuard() {
 
   const handleStaySignedIn = useCallback(async () => {
     setBusy(true);
+    clearGraceTimer();
+    setOpen(false);
+    openRef.current = false;
+    lastActivityRef.current = Date.now();
+    scheduleIdleWarning();
     try {
       const refreshed = await withNetworkRetry(() => refreshAuthSession(), { maxMs: 10_000 });
       if (!refreshed) {
@@ -132,16 +137,14 @@ export function SessionIdleGuard() {
         return;
       }
       await withNetworkRetry(() => refreshMe(), { maxMs: 10_000 });
-      setOpen(false);
-      openRef.current = false;
-      clearGraceTimer();
-      resetIdleClock();
+      lastActivityRef.current = Date.now();
+      scheduleIdleWarning();
     } catch {
       showExpired();
     } finally {
       setBusy(false);
     }
-  }, [clearGraceTimer, refreshMe, resetIdleClock, showExpired]);
+  }, [clearGraceTimer, refreshMe, scheduleIdleWarning, showExpired]);
 
   useEffect(() => {
     openRef.current = open;

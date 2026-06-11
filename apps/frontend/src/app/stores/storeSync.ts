@@ -33,7 +33,9 @@ export type LiveSyncConfig = {
   getTenantId: () => string;
   tables: string[];
   onRefresh: () => void;
-  isStale: () => boolean;
+  isStale?: () => boolean;
+  pollMs?: number;
+  debounceMs?: number;
 };
 
 export function createLiveSyncManager() {
@@ -48,21 +50,23 @@ export function createLiveSyncManager() {
       if (consumers > 1) {
         return;
       }
+      const pollMs = config.pollMs ?? LIVE_POLL_MS;
+      const isStale = config.isStale ?? (() => true);
       scheduler.schedule(config.onRefresh);
       unsubscribe = subscribeToTenantRealtime({
         tenantId: config.getTenantId(),
         tables: config.tables,
-        onChange: () => scheduler.schedule(config.onRefresh)
+        onChange: () => config.onRefresh()
       });
       pollTimer = setInterval(() => {
         if (typeof document !== "undefined" && document.hidden) {
           return;
         }
-        if (!config.isStale()) {
+        if (!isStale()) {
           return;
         }
-        scheduler.schedule(config.onRefresh);
-      }, LIVE_POLL_MS);
+        config.onRefresh();
+      }, pollMs);
     },
     stop() {
       consumers = Math.max(0, consumers - 1);

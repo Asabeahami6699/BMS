@@ -3,6 +3,7 @@ import type { BackOfficeBootstrap, OpenBackOfficeDayInput } from "@bms/shared";
 import {
   approveBackOfficeAccountantDeposit,
   approveBackOfficeEcashRequest,
+  createBackOfficeAgentTransfer,
   createBackOfficeEcashRequest,
   executeBackOfficeDepositDone,
   getBackOfficeBootstrap,
@@ -20,14 +21,22 @@ import {
   runHydrate
 } from "./storeSync";
 
-const STALE_MS = 20_000;
+const STALE_MS = 5_000;
+const LIVE_POLL_MS = 5_000;
 const silentScheduler = createSilentRefreshScheduler();
 const liveSyncMgr = createLiveSyncManager();
+
+function daysAgoIso(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return d.toISOString().slice(0, 10);
+}
 
 type State = {
   data: BackOfficeBootstrap | null;
   branchId: string;
-  businessDate: string;
+  dateFrom: string;
+  dateTo: string;
   loading: boolean;
   busyId: string | null;
   error: string | null;
@@ -39,7 +48,7 @@ type State = {
   refresh: () => Promise<void>;
   refreshSilent: () => Promise<void>;
   setBranchId: (branchId: string) => void;
-  setBusinessDate: (date: string) => void;
+  setDateRange: (dateFrom: string, dateTo: string) => void;
   setExecutionAccount: (depositId: string, bankProductId: string) => void;
   openDay: (payload: OpenBackOfficeDayInput) => Promise<void>;
   markDepositDone: (transactionId: string, executionBankProductId?: string) => Promise<void>;
@@ -50,6 +59,14 @@ type State = {
     amount: number;
     notes?: string;
   }) => Promise<void>;
+  agentTransfer: (payload: {
+    branchId: string;
+    businessDate: string;
+    fromBankProductId: string;
+    toBankProductId: string;
+    amount: number;
+    notes?: string;
+  }) => Promise<void>;
   approveEcash: (requestId: string, approve?: boolean) => Promise<void>;
   saveManualEntries: (bankProductId: string, manualTotalEntries: number) => Promise<void>;
   startLiveSync: () => void;
@@ -57,6 +74,7 @@ type State = {
 };
 
 let fetchInFlight: Promise<void> | null = null;
+let pendingSilentRefresh = false;
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -65,7 +83,8 @@ function todayIso(): string {
 export const useBackOfficeStore = create<State>((set, get) => ({
   data: null,
   branchId: getRuntimeBranchId() || "",
-  businessDate: todayIso(),
+  dateFrom: daysAgoIso(7),
+  dateTo: todayIso(),
   loading: false,
   busyId: null,
   error: null,
@@ -94,7 +113,7 @@ export const useBackOfficeStore = create<State>((set, get) => ({
 
   refresh: async () => {
     if (fetchInFlight) return fetchInFlight;
-    const { branchId, businessDate } = get();
+    const { branchId, dateFrom, dateTo } = get();
     if (!branchId) {
       set({ error: "Select a branch" });
       return;
@@ -102,7 +121,12 @@ export const useBackOfficeStore = create<State>((set, get) => ({
     set({ loading: true, error: null });
     fetchInFlight = (async () => {
       try {
-        const data = await getBackOfficeBootstrap({ branchId, date: businessDate });
+        const data = await getBackOfficeBootstrap({
+          branchId,
+          date: dateTo,
+          dateFrom,
+          dateTo
+        });
         set({ data, lastFetchedAt: Date.now(), error: null });
       } catch (error) {
         set({ error: toUserFacingError(error, "Could not load back office") });
@@ -115,17 +139,29 @@ export const useBackOfficeStore = create<State>((set, get) => ({
   },
 
   refreshSilent: async () => {
-    if (fetchInFlight) return fetchInFlight;
-    const { branchId, businessDate } = get();
+    if (fetchInFlight) {
+      pendingSilentRefresh = true;
+      return fetchInFlight;
+    }
+    const { branchId, dateFrom, dateTo } = get();
     if (!branchId) return;
     fetchInFlight = (async () => {
       try {
-        const data = await getBackOfficeBootstrap({ branchId, date: businessDate });
+        const data = await getBackOfficeBootstrap({
+          branchId,
+          date: dateTo,
+          dateFrom,
+          dateTo
+        });
         set({ data, lastFetchedAt: Date.now(), error: null });
       } catch {
         /* keep cache */
       } finally {
         fetchInFlight = null;
+        if (pendingSilentRefresh) {
+          pendingSilentRefresh = false;
+          void get().refreshSilent();
+        }
       }
     })();
     return fetchInFlight;
@@ -139,8 +175,11 @@ export const useBackOfficeStore = create<State>((set, get) => ({
     void get().refresh();
   },
 
-  setBusinessDate: (date) => {
-    set({ businessDate: date });
+  setDateRange: (dateFrom, dateTo) => {
+    if (get().dateFrom === dateFrom && get().dateTo === dateTo) {
+      return;
+    }
+    set({ dateFrom, dateTo });
     void get().refresh();
   },
 
@@ -207,6 +246,19 @@ export const useBackOfficeStore = create<State>((set, get) => ({
     }
   },
 
+  agentTransfer: async (payload) => {
+    set({ busyId: "agent-transfer", error: null });
+    try {
+      const data = await createBackOfficeAgentTransfer(payload);
+      set({ data, lastFetchedAt: Date.now() });
+    } catch (error) {
+      set({ error: toUserFacingError(error, "Agent transfer failed") });
+      throw error;
+    } finally {
+      set({ busyId: null });
+    }
+  },
+
   approveEcash: async (requestId, approve = true) => {
     set({ busyId: requestId, error: null });
     try {
@@ -242,9 +294,11 @@ export const useBackOfficeStore = create<State>((set, get) => ({
         "customer_transactions",
         "back_office_day_sessions",
         "back_office_ecash_requests",
-        "back_office_account_opening"
+        "back_office_account_opening",
+        "back_office_agent_transfers"
       ],
       onRefresh: () => void get().refreshSilent(),
+      pollMs: LIVE_POLL_MS,
       isStale: () => !isFresh(get().lastFetchedAt, STALE_MS)
     });
   },

@@ -1,5 +1,5 @@
-/** Idle time before the stay-signed-in countdown appears (5 minutes). */
-export const SESSION_IDLE_MS = 5 * 60 * 1000;
+/** Idle time before the stay-signed-in countdown appears (15 minutes). */
+export const SESSION_IDLE_MS = 15 * 60 * 1000;
 
 /** Countdown duration before automatic sign-out (another 5 minutes — 10 minutes total). */
 export const SESSION_GRACE_MS = 5 * 60 * 1000;

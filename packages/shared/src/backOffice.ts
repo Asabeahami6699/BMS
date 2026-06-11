@@ -131,3 +131,14 @@ export const updateBackOfficeAccountEntriesSchema = z.object({
   bankProductId: z.string().uuid(),
   manualTotalEntries: z.number().nonnegative()
 });
+
+export const createBackOfficeAgentTransferSchema = z.object({
+  branchId: z.string().uuid(),
+  businessDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  fromBankProductId: z.string().uuid(),
+  toBankProductId: z.string().uuid(),
+  amount: z.number().positive(),
+  notes: z.string().max(300).optional()
+});
+
+export type CreateBackOfficeAgentTransferInput = z.infer<typeof createBackOfficeAgentTransferSchema>;

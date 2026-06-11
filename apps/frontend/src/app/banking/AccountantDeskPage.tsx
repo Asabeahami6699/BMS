@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import type { AccountantDashboard } from "@bms/shared";
-import { getAccountantDashboard } from "../api";
+import { useShallow } from "zustand/react/shallow";
+import { AccountantCompanyBalanceModal } from "./AccountantCompanyBalanceModal";
 import { formatWorkspaceMoney } from "../stores/roleWorkspaceStore";
+import { useAccountantDeskStore } from "../stores/accountantDeskStore";
 import { DeskMetricGrid, formatDeskMoney } from "./DeskMetricGrid";
 import { DeskSummaryTable } from "./DeskSummaryTable";
 import { getRoleDeskConfig } from "./roleDeskConfig";
@@ -12,25 +13,45 @@ type Props = { displayName?: string };
 
 export function AccountantDeskPage({ displayName }: Props) {
   const config = getRoleDeskConfig("accountant");
-  const [data, setData] = useState<AccountantDashboard | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      setData(await getAccountantDashboard({ branchId: "all" }));
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load accountant dashboard");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const [companyModalOpen, setCompanyModalOpen] = useState(false);
+  const {
+    data,
+    loading,
+    error,
+    lastFetchedAt,
+    trialBranches,
+    trialSingle,
+    trialDateFrom,
+    trialDateTo,
+    hydrateDashboard,
+    hydrateTrialBalance,
+    refreshDashboard,
+    startLiveSync,
+    stopLiveSync
+  } = useAccountantDeskStore(
+    useShallow((s) => ({
+      data: s.dashboard,
+      loading: s.dashboardLoading,
+      error: s.error,
+      lastFetchedAt: s.lastDashboardAt,
+      trialBranches: s.trialBranches,
+      trialSingle: s.trialSingle,
+      trialDateFrom: s.trialDateFrom,
+      trialDateTo: s.trialDateTo,
+      hydrateDashboard: s.hydrateDashboard,
+      hydrateTrialBalance: s.hydrateTrialBalance,
+      refreshDashboard: s.refreshDashboard,
+      startLiveSync: s.startLiveSync,
+      stopLiveSync: s.stopLiveSync
+    }))
+  );
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    hydrateDashboard({ force: true, branchId: "all" });
+    hydrateTrialBalance({ force: true, branchId: "all" });
+    startLiveSync();
+    return () => stopLiveSync();
+  }, [hydrateDashboard, hydrateTrialBalance, startLiveSync, stopLiveSync]);
 
   const sections = useMemo(() => {
     if (!data) {
@@ -81,13 +102,18 @@ export function AccountantDeskPage({ displayName }: Props) {
     ];
   }, [data]);
 
+  const updatedLabel = lastFetchedAt
+    ? `Updated ${new Date(lastFetchedAt).toLocaleTimeString()}`
+    : undefined;
+
   return (
     <RoleDeskShell
       config={config}
       displayName={displayName}
+      updatedLabel={updatedLabel}
       error={error}
       loading={loading && !data}
-      onRefresh={() => void load()}
+      onRefresh={() => void refreshDashboard()}
       refreshing={loading}
     >
       <section className="card role-workspace__panel desk-hero-panel">
@@ -108,6 +134,14 @@ export function AccountantDeskPage({ displayName }: Props) {
               <strong>Trial balance</strong>
               <span>Vault · bank · teller</span>
             </Link>
+            <button
+              type="button"
+              className="role-workspace__quick-card role-workspace__quick-card--button"
+              onClick={() => setCompanyModalOpen(true)}
+            >
+              <strong>Company balances</strong>
+              <span>All branches overview</span>
+            </button>
             <Link className="role-workspace__quick-card" to="/app/banking/accountant/reports">
               <strong>Reports</strong>
               <span>Analytics export</span>
@@ -165,6 +199,15 @@ export function AccountantDeskPage({ displayName }: Props) {
           rows={data.branchSummary}
         />
       ) : null}
+
+      <AccountantCompanyBalanceModal
+        open={companyModalOpen}
+        onClose={() => setCompanyModalOpen(false)}
+        branches={trialBranches}
+        single={trialSingle}
+        dateFrom={trialDateFrom}
+        dateTo={trialDateTo}
+      />
     </RoleDeskShell>
   );
 }

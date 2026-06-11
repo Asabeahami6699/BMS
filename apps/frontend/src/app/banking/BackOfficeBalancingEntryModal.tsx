@@ -1,11 +1,14 @@
-import { FormEvent, useEffect, useState } from "react";
-import type { OpenBackOfficeDayInput } from "@bms/shared";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { bankProductAppliesToBranch, type OpenBackOfficeDayInput } from "@bms/shared";
 import { Modal } from "../../components/Modal";
+
+type BranchOption = { id: string; name: string; code?: string };
 
 type CompanyAccount = {
   id: string;
   name: string;
   bankLabel: string;
+  branchId?: string | null;
   branchName?: string;
 };
 
@@ -15,12 +18,14 @@ type Props = {
   open: boolean;
   mode: BalancingEntryMode;
   busy?: boolean;
-  branchId: string;
   businessDate: string;
+  branches: BranchOption[];
   companyAccounts: CompanyAccount[];
+  defaultBranchId?: string;
   onClose: () => void;
   onOpenDay: (payload: OpenBackOfficeDayInput) => Promise<void>;
   onRequestEcash: (payload: {
+    branchId: string;
     amount: number;
     notes?: string;
     bankProductId?: string;
@@ -31,13 +36,15 @@ export function BackOfficeBalancingEntryModal({
   open,
   mode,
   busy,
-  branchId,
   businessDate,
+  branches,
   companyAccounts,
+  defaultBranchId,
   onClose,
   onOpenDay,
   onRequestEcash
 }: Props) {
+  const [branchId, setBranchId] = useState("");
   const [openingDraft, setOpeningDraft] = useState<Record<string, { opening: string; ecash: string }>>(
     {}
   );
@@ -45,26 +52,48 @@ export function BackOfficeBalancingEntryModal({
   const [ecashNotes, setEcashNotes] = useState("");
   const [ecashAccountId, setEcashAccountId] = useState("");
 
+  const branchAccounts = useMemo(
+    () =>
+      companyAccounts.filter((account) =>
+        branchId ? bankProductAppliesToBranch({ branchId: account.branchId ?? undefined }, branchId) : false
+      ),
+    [branchId, companyAccounts]
+  );
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const preferred =
+      defaultBranchId && defaultBranchId !== "all" && branches.some((b) => b.id === defaultBranchId)
+        ? defaultBranchId
+        : branches[0]?.id ?? "";
+    setBranchId(preferred);
+    setEcashAmount("");
+    setEcashNotes("");
+  }, [open, branches, defaultBranchId]);
+
   useEffect(() => {
     if (!open) {
       return;
     }
     const next: Record<string, { opening: string; ecash: string }> = {};
-    for (const account of companyAccounts) {
+    for (const account of branchAccounts) {
       next[account.id] = { opening: "", ecash: "0" };
     }
     setOpeningDraft(next);
-    setEcashAmount("");
-    setEcashNotes("");
-    setEcashAccountId(companyAccounts[0]?.id ?? "");
-  }, [open, companyAccounts]);
+    setEcashAccountId(branchAccounts[0]?.id ?? "");
+  }, [open, branchAccounts]);
 
   async function handleOpenDay(event: FormEvent) {
     event.preventDefault();
+    if (!branchId) {
+      return;
+    }
     await onOpenDay({
       branchId,
       businessDate,
-      openings: companyAccounts.map((account) => ({
+      openings: branchAccounts.map((account) => ({
         bankProductId: account.id,
         openingBalance: Number(openingDraft[account.id]?.opening ?? 0),
         extraCash: Number(openingDraft[account.id]?.ecash ?? 0)
@@ -75,11 +104,15 @@ export function BackOfficeBalancingEntryModal({
 
   async function handleEcash(event: FormEvent) {
     event.preventDefault();
+    if (!branchId) {
+      return;
+    }
     const parsed = Number(ecashAmount);
     if (!Number.isFinite(parsed) || parsed <= 0) {
       return;
     }
     await onRequestEcash({
+      branchId,
       amount: parsed,
       notes: ecashNotes.trim() || undefined,
       bankProductId: ecashAccountId || undefined
@@ -95,8 +128,8 @@ export function BackOfficeBalancingEntryModal({
       title={isOpening ? "Opening balances" : "Ecash request"}
       subtitle={
         isOpening
-          ? `Record each company account balance for ${businessDate}. Total entries fill in automatically as deposits are marked done.`
-          : "Ask the accountant for extra cash to top up a company account."
+          ? `Pick the branch and record each company account balance for ${businessDate}.`
+          : "Pick the branch and ask the accountant for extra cash."
       }
       onClose={onClose}
       panelClassName="modal-panel--back-office"
@@ -110,7 +143,7 @@ export function BackOfficeBalancingEntryModal({
               type="submit"
               form="back-office-opening-form"
               className="button primary"
-              disabled={busy || companyAccounts.length === 0}
+              disabled={busy || !branchId || branchAccounts.length === 0}
             >
               {busy ? "Saving…" : "Save & open day"}
             </button>
@@ -119,7 +152,7 @@ export function BackOfficeBalancingEntryModal({
               type="submit"
               form="back-office-ecash-form"
               className="button primary"
-              disabled={busy}
+              disabled={busy || !branchId}
             >
               {busy ? "Sending…" : "Send request"}
             </button>
@@ -127,10 +160,25 @@ export function BackOfficeBalancingEntryModal({
         </>
       }
     >
+      <label className="field">
+        <span>Branch</span>
+        <select value={branchId} onChange={(e) => setBranchId(e.target.value)} required>
+          <option value="">Select branch…</option>
+          {branches.map((branch) => (
+            <option key={branch.id} value={branch.id}>
+              {branch.name}
+              {branch.code ? ` (${branch.code})` : ""}
+            </option>
+          ))}
+        </select>
+      </label>
+
       {isOpening ? (
-        companyAccounts.length === 0 ? (
+        branchAccounts.length === 0 ? (
           <p className="muted">
-            No company accounts for this branch. Add one under Bank Products → Company accounts.
+            {branchId
+              ? "No company accounts for this branch. Add one under Bank Products → Company accounts."
+              : "Select a branch to load company accounts."}
           </p>
         ) : (
           <form id="back-office-opening-form" onSubmit={(e) => void handleOpenDay(e)}>
@@ -144,7 +192,7 @@ export function BackOfficeBalancingEntryModal({
                   </tr>
                 </thead>
                 <tbody>
-                  {companyAccounts.map((account) => (
+                  {branchAccounts.map((account) => (
                     <tr key={account.id} className="agency-deposit-table__row">
                       <td>
                         <strong>{account.bankLabel}</strong>
@@ -200,12 +248,12 @@ export function BackOfficeBalancingEntryModal({
         )
       ) : (
         <form id="back-office-ecash-form" className="stack-form" onSubmit={(e) => void handleEcash(e)}>
-          {companyAccounts.length > 0 ? (
+          {branchAccounts.length > 0 ? (
             <label className="field">
               <span>Company account</span>
               <select value={ecashAccountId} onChange={(e) => setEcashAccountId(e.target.value)}>
                 <option value="">Any / general request</option>
-                {companyAccounts.map((account) => (
+                {branchAccounts.map((account) => (
                   <option key={account.id} value={account.id}>
                     {account.bankLabel} — {account.name}
                   </option>

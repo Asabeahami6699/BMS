@@ -1,44 +1,63 @@
-import { FormEvent, useCallback, useEffect, useState } from "react";
-import type { HrLeaveRequest } from "@bms/shared";
-import { createHrLeaveRequest, listHrLeaveRequests, listUsers, updateHrLeaveStatus } from "../../api";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { AdminDataTable, filterRowsBySearch } from "../../../components/AdminDataTable";
 import { useToast } from "../../../components/Toast";
+import { useHrDeskStore } from "../../stores/hrDeskStore";
 import { HrSectionShell } from "./HrSectionShell";
 
 type Props = { displayName?: string; canManage: boolean };
 
 export function HrLeavePage({ displayName, canManage }: Props) {
   const { showToast } = useToast();
-  const [rows, setRows] = useState<HrLeaveRequest[]>([]);
-  const [users, setUsers] = useState<Array<{ userId: string; label: string }>>([]);
-  const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState("");
   const [leaveType, setLeaveType] = useState("Annual");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+  const [notes, setNotes] = useState("");
   const [search, setSearch] = useState("");
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [leaveRows, staff] = await Promise.all([listHrLeaveRequests(), listUsers()]);
-      setRows(leaveRows);
-      setUsers(
-        staff.map((u) => ({
-          userId: u.userId,
-          label: u.fullName ? `${u.fullName} (${u.email})` : u.email
-        }))
-      );
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Failed to load leave", "error");
-    } finally {
-      setLoading(false);
-    }
-  }, [showToast]);
+  const {
+    rows,
+    users,
+    loading,
+    error,
+    lastFetchedAt,
+    hydrateLeave,
+    refreshLeave,
+    submitLeave,
+    setLeaveStatus,
+    startLiveSync,
+    stopLiveSync
+  } = useHrDeskStore(
+    useShallow((s) => ({
+      rows: s.leaveRequests,
+      users: s.users,
+      loading: s.leaveLoading,
+      error: s.leaveError,
+      lastFetchedAt: s.lastLeaveAt,
+      hydrateLeave: s.hydrateLeave,
+      refreshLeave: s.refreshLeave,
+      submitLeave: s.submitLeave,
+      setLeaveStatus: s.setLeaveStatus,
+      startLiveSync: s.startLiveSync,
+      stopLiveSync: s.stopLiveSync
+    }))
+  );
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    hydrateLeave({ force: true });
+    startLiveSync();
+    return () => stopLiveSync();
+  }, [hydrateLeave, startLiveSync, stopLiveSync]);
+
+  const staffOptions = useMemo(
+    () =>
+      users.map((u) => ({
+        userId: u.userId,
+        label: u.fullName ? `${u.fullName} (${u.email})` : u.email
+      })),
+    [users]
+  );
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -46,21 +65,27 @@ export function HrLeavePage({ displayName, canManage }: Props) {
       return;
     }
     try {
-      await createHrLeaveRequest({ userId, leaveType, startDate, endDate });
+      await submitLeave({ userId, leaveType, startDate, endDate, notes: notes || undefined });
+      setNotes("");
       showToast("Leave request submitted", "success");
-      await load();
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed", "error");
     }
   }
+
+  const updatedLabel = lastFetchedAt
+    ? `Updated ${new Date(lastFetchedAt).toLocaleTimeString()}`
+    : undefined;
 
   return (
     <HrSectionShell
       title="Leave management"
       subtitle="Submit, approve, and track staff leave across branches."
       displayName={displayName}
-      loading={loading}
-      onRefresh={() => void load()}
+      loading={loading && rows.length === 0}
+      error={error}
+      updatedLabel={updatedLabel}
+      onRefresh={() => void refreshLeave()}
       refreshing={loading}
     >
       {canManage ? (
@@ -70,7 +95,7 @@ export function HrLeavePage({ displayName, canManage }: Props) {
             <span>Employee</span>
             <select value={userId} onChange={(e) => setUserId(e.target.value)} required>
               <option value="">Select employee…</option>
-              {users.map((u) => (
+              {staffOptions.map((u) => (
                 <option key={u.userId} value={u.userId}>
                   {u.label}
                 </option>
@@ -96,6 +121,10 @@ export function HrLeavePage({ displayName, canManage }: Props) {
               <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} required />
             </label>
           </div>
+          <label className="field">
+            <span>Notes</span>
+            <textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Optional reason or handover notes" />
+          </label>
           <button type="submit" className="button primary">
             Submit request
           </button>
@@ -114,7 +143,28 @@ export function HrLeavePage({ displayName, canManage }: Props) {
           { key: "leaveType", label: "Type" },
           { key: "startDate", label: "Start" },
           { key: "endDate", label: "End" },
-          { key: "status", label: "Status" }
+          {
+            key: "status",
+            label: "Status",
+            render: (row) => (
+              <span
+                className={`trial-balance-status${
+                  row.raw.status === "approved"
+                    ? " trial-balance-status--ok"
+                    : row.raw.status === "rejected"
+                      ? " trial-balance-status--warn"
+                      : ""
+                }`}
+              >
+                {row.raw.status === "approved"
+                  ? "Approved"
+                  : row.raw.status === "rejected"
+                    ? "Rejected"
+                    : "Pending"}
+              </span>
+            )
+          },
+          { key: "notes", label: "Notes" }
         ]}
         rows={filterRowsBySearch(
           rows.map((r) => ({
@@ -124,38 +174,67 @@ export function HrLeavePage({ displayName, canManage }: Props) {
             startDate: r.startDate,
             endDate: r.endDate,
             status: r.status,
+            notes: r.notes ?? r.rejectedReason ?? "—",
             raw: r
           })),
           search,
-          ["userName", "leaveType", "status", "startDate", "endDate"]
+          ["userName", "leaveType", "status", "startDate", "endDate", "notes"]
         )}
         rowKey={(r) => r.id}
         emptyMessage={loading ? "Loading…" : "No leave requests yet."}
         actions={
           canManage
-            ? (row) =>
-                row.raw.status === "pending" ? (
-                  <div className="role-workspace__queue-actions">
-                    <button
-                      type="button"
-                      className="btn primary"
-                      onClick={() =>
-                        void updateHrLeaveStatus(row.id, "approved").then(() => load())
-                      }
-                    >
-                      Approve
-                    </button>
-                    <button
-                      type="button"
-                      className="button secondary"
-                      onClick={() =>
-                        void updateHrLeaveStatus(row.id, "rejected").then(() => load())
-                      }
-                    >
-                      Reject
-                    </button>
-                  </div>
-                ) : null
+            ? (row) => {
+                if (row.raw.status === "pending") {
+                  return (
+                    <div className="role-workspace__queue-actions">
+                      <button
+                        type="button"
+                        className="btn primary"
+                        onClick={() =>
+                          void setLeaveStatus(row.id, "approved")
+                            .then(() => showToast("Leave approved", "success"))
+                            .catch((err) =>
+                              showToast(err instanceof Error ? err.message : "Failed", "error")
+                            )
+                        }
+                      >
+                        Approve
+                      </button>
+                      <button
+                        type="button"
+                        className="button secondary"
+                        onClick={() => {
+                          const reason = window.prompt("Rejection reason (optional):");
+                          if (reason === null) {
+                            return;
+                          }
+                          void setLeaveStatus(row.id, "rejected", {
+                            rejectedReason: reason || undefined
+                          })
+                            .then(() => showToast("Leave rejected", "success"))
+                            .catch((err) =>
+                              showToast(err instanceof Error ? err.message : "Failed", "error")
+                            );
+                        }}
+                      >
+                        Reject
+                      </button>
+                    </div>
+                  );
+                }
+                if (row.raw.status === "approved") {
+                  return (
+                    <span className="trial-balance-status trial-balance-status--ok">Approved</span>
+                  );
+                }
+                if (row.raw.status === "rejected") {
+                  return (
+                    <span className="trial-balance-status trial-balance-status--warn">Rejected</span>
+                  );
+                }
+                return null;
+              }
             : undefined
         }
       />

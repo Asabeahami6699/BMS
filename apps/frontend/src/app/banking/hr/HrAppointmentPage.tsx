@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { listBranches, listUsers, type Branch, type UserRecord } from "../../api";
+import { useShallow } from "zustand/react/shallow";
+import type { UserRecord } from "../../api";
 import { AdminDataTable, filterRowsBySearch } from "../../../components/AdminDataTable";
+import { useBranchesLiveSync } from "../../hooks/useBranchesLiveSync";
+import { useBranchesStore } from "../../stores/branchesStore";
+import { useHrDeskStore } from "../../stores/hrDeskStore";
 import { HrSectionShell } from "./HrSectionShell";
 
 type Props = { displayName?: string };
@@ -13,19 +17,37 @@ function employmentDate(user: UserRecord): string {
 }
 
 export function HrAppointmentPage({ displayName }: Props) {
-  const [users, setUsers] = useState<UserRecord[]>([]);
-  const [branches, setBranches] = useState<Branch[]>([]);
   const [search, setSearch] = useState("");
-  const [loading, setLoading] = useState(true);
+  useBranchesLiveSync();
+  const branches = useBranchesStore((s) => s.branches);
+
+  const {
+    users,
+    loading,
+    error,
+    lastFetchedAt,
+    hydrateRoster,
+    refreshRoster,
+    startLiveSync,
+    stopLiveSync
+  } = useHrDeskStore(
+    useShallow((s) => ({
+      users: s.users,
+      loading: s.rosterLoading,
+      error: s.rosterError,
+      lastFetchedAt: s.lastRosterAt,
+      hydrateRoster: s.hydrateRoster,
+      refreshRoster: s.refreshRoster,
+      startLiveSync: s.startLiveSync,
+      stopLiveSync: s.stopLiveSync
+    }))
+  );
 
   useEffect(() => {
-    void Promise.all([listUsers(), listBranches().catch(() => [])])
-      .then(([userRows, branchRows]) => {
-        setUsers(userRows);
-        setBranches(branchRows);
-      })
-      .finally(() => setLoading(false));
-  }, []);
+    hydrateRoster();
+    startLiveSync();
+    return () => stopLiveSync();
+  }, [hydrateRoster, startLiveSync, stopLiveSync]);
 
   const branchById = useMemo(() => new Map(branches.map((b) => [b.id, b])), [branches]);
 
@@ -40,12 +62,20 @@ export function HrAppointmentPage({ displayName }: Props) {
     ["fullName", "email", "role", "branchLabel"] as (keyof UserRecord)[]
   );
 
+  const updatedLabel = lastFetchedAt
+    ? `Updated ${new Date(lastFetchedAt).toLocaleTimeString()}`
+    : undefined;
+
   return (
     <HrSectionShell
       title="Appointment letters"
       subtitle="Employment start dates and role assignments for official records."
       displayName={displayName}
-      loading={loading}
+      loading={loading && users.length === 0}
+      error={error}
+      updatedLabel={updatedLabel}
+      onRefresh={() => void refreshRoster()}
+      refreshing={loading}
     >
       <AdminDataTable
         variant="desk"

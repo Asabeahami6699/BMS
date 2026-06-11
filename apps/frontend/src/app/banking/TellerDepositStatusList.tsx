@@ -62,7 +62,8 @@ export function TellerDepositStatusList({ deposits, loading, businessDate }: Pro
               <tr>
                 <th>Time</th>
                 <th>Branch</th>
-                <th>Customer</th>
+                <th>Account holder</th>
+                <th>Depositor&apos;s name</th>
                 <th>Account</th>
                 <th>Bank product</th>
                 <th className="agency-deposit-table__num">Amount</th>
@@ -89,6 +90,7 @@ export function TellerDepositStatusList({ deposits, loading, businessDate }: Pro
                     <td>
                       <strong className="agency-deposit-table__customer">{row.customerName}</strong>
                     </td>
+                    <td className="muted">{row.depositorName ?? "—"}</td>
                     <td className="muted agency-deposit-table__account">
                       {row.partnerAccountNumber ?? "—"}
                     </td>

@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import type { AuditLogRecord } from "../api";
-import { getBackOfficeBootstrap, listAuditLogs } from "../api";
+import { useEffect, useMemo, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { AdminDataTable, filterRowsBySearch } from "../../components/AdminDataTable";
-import { useToast } from "../../components/Toast";
+import { useAuditorDeskStore } from "../stores/auditorDeskStore";
 import { getRoleDeskConfig } from "./roleDeskConfig";
 import { RoleDeskShell } from "./RoleDeskShell";
 
@@ -10,35 +9,38 @@ type Props = { displayName?: string };
 
 export function AuditorExceptionsPage({ displayName }: Props) {
   const config = getRoleDeskConfig("auditor");
-  const { showToast } = useToast();
-  const [auditRows, setAuditRows] = useState<AuditLogRecord[]>([]);
-  const [pendingAccountant, setPendingAccountant] = useState(0);
-  const [pendingBank, setPendingBank] = useState(0);
   const [search, setSearch] = useState("");
-  const [loading, setLoading] = useState(true);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [logs, bootstrap] = await Promise.all([
-        listAuditLogs({ limit: 200 }),
-        getBackOfficeBootstrap({ branchId: "all" })
-      ]);
-      setAuditRows(logs);
-      setPendingAccountant(bootstrap.pendingAccountantCount ?? 0);
-      setPendingBank(
-        bootstrap.depositQueue?.filter((d) => d.executionStatus === "pending_bank").length ?? 0
-      );
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Failed to load exceptions", "error");
-    } finally {
-      setLoading(false);
-    }
-  }, [showToast]);
+  const {
+    auditRows,
+    pendingAccountant,
+    pendingBank,
+    loading,
+    error,
+    lastFetchedAt,
+    hydrateExceptions,
+    refreshExceptions,
+    startLiveSync,
+    stopLiveSync
+  } = useAuditorDeskStore(
+    useShallow((s) => ({
+      auditRows: s.auditLogs,
+      pendingAccountant: s.pendingAccountant,
+      pendingBank: s.pendingBank,
+      loading: s.exceptionsLoading,
+      error: s.exceptionsError,
+      lastFetchedAt: s.lastExceptionsAt,
+      hydrateExceptions: s.hydrateExceptions,
+      refreshExceptions: s.refreshExceptions,
+      startLiveSync: s.startLiveSync,
+      stopLiveSync: s.stopLiveSync
+    }))
+  );
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    hydrateExceptions({ force: true });
+    startLiveSync();
+    return () => stopLiveSync();
+  }, [hydrateExceptions, startLiveSync, stopLiveSync]);
 
   const exceptions = useMemo(
     () => auditRows.filter((row) => row.statusCode >= 400 || row.action.toLowerCase().includes("denied")),
@@ -51,14 +53,20 @@ export function AuditorExceptionsPage({ displayName }: Props) {
     "actorUserId",
     "path",
     "method"
-  ] as (keyof AuditLogRecord)[]);
+  ]);
+
+  const updatedLabel = lastFetchedAt
+    ? `Updated ${new Date(lastFetchedAt).toLocaleTimeString()}`
+    : undefined;
 
   return (
     <RoleDeskShell
       config={{ ...config, title: "Exception review", subtitle: "Failed API actions and open agency queues." }}
       displayName={displayName}
-      loading={loading}
-      onRefresh={() => void load()}
+      updatedLabel={updatedLabel}
+      error={error}
+      loading={loading && auditRows.length === 0}
+      onRefresh={() => void refreshExceptions()}
       refreshing={loading}
       kpis={[
         { label: "Failed / denied events", value: exceptions.length, tone: "warning" },

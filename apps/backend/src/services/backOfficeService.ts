@@ -1,6 +1,7 @@
 import {
   backOfficeBootstrapSchema,
   bankProductAppliesToBranch,
+  createBackOfficeAgentTransferSchema,
   createBackOfficeEcashRequestSchema,
   openBackOfficeDaySchema,
   resolveAgencyDepositCustomerName,
@@ -173,9 +174,11 @@ async function buildAccountBalancesForBranch(
 
 export async function getBackOfficeBootstrap(
   context: TransactionRequestContext,
-  options?: { branchId?: string; businessDate?: string }
+  options?: { branchId?: string; businessDate?: string; dateFrom?: string; dateTo?: string }
 ): Promise<BackOfficeBootstrap> {
-  const businessDate = options?.businessDate?.trim() || todayDate();
+  const businessDate = options?.businessDate?.trim() || options?.dateTo?.trim() || todayDate();
+  const rangeFrom = options?.dateFrom?.trim() || businessDate;
+  const rangeTo = options?.dateTo?.trim() || businessDate;
   const rawBranchId = options?.branchId?.trim();
   const viewAllBranches =
     context.scopeType === "head_office" && (!rawBranchId || isAllBranchesRequest(rawBranchId));
@@ -222,8 +225,8 @@ export async function getBackOfficeBootstrap(
     }));
 
   const supabase = getSupabaseAdminClient();
-  const dayStart = `${businessDate}T00:00:00.000Z`;
-  const dayEnd = `${businessDate}T23:59:59.999Z`;
+  const dayStart = `${rangeFrom}T00:00:00.000Z`;
+  const dayEnd = `${rangeTo}T23:59:59.999Z`;
 
   const sessionPromise = operationalBranchId
     ? resolveSession(context.tenantId, operationalBranchId, businessDate)
@@ -239,6 +242,8 @@ export async function getBackOfficeBootstrap(
       .eq("tenant_id", context.tenantId)
       .eq("type", "deposit")
       .in("execution_status", ["pending_bank", "pending_accountant"])
+      .gte("created_at", dayStart)
+      .lte("created_at", dayEnd)
       .order("created_at", { ascending: false })
       .limit(200);
     if (operationalBranchId) {
@@ -717,6 +722,113 @@ export async function approveBackOfficeEcashRequest(
   }
 
   return getBackOfficeBootstrap(context, { branchId: String(row.branch_id) });
+}
+
+export async function createBackOfficeAgentTransfer(
+  context: TransactionRequestContext,
+  input: unknown
+): Promise<BackOfficeBootstrap> {
+  const payload = createBackOfficeAgentTransferSchema.parse(input ?? {});
+  const branchId = await resolveBranchId(context.tenantId, payload.branchId);
+  if (!branchId) {
+    throw new Error("Branch not found");
+  }
+  assertBranchAccess(context, branchId);
+
+  if (payload.fromBankProductId === payload.toBankProductId) {
+    throw new Error("Select two different company accounts");
+  }
+
+  const [fromProduct, toProduct] = await Promise.all([
+    getBankProductById(context.tenantId, payload.fromBankProductId),
+    getBankProductById(context.tenantId, payload.toBankProductId)
+  ]);
+  if (!fromProduct?.isCompanyBankAccount || !toProduct?.isCompanyBankAccount) {
+    throw new Error("Both accounts must be company bank accounts");
+  }
+  if (
+    !bankProductAppliesToBranch(fromProduct, branchId) ||
+    !bankProductAppliesToBranch(toProduct, branchId)
+  ) {
+    throw new Error("Both accounts must apply to the selected branch");
+  }
+
+  const supabase = getSupabaseAdminClient();
+  if (!supabase) {
+    throw new Error("Database required");
+  }
+
+  const session = await resolveSession(context.tenantId, branchId, payload.businessDate);
+  if (!session || session.status !== "open") {
+    throw new Error("Open the back office day before transferring between agent accounts");
+  }
+
+  const { data: openings } = await supabase
+    .from("back_office_account_opening")
+    .select("bank_product_id, extra_cash, opening_balance")
+    .eq("session_id", session.id)
+    .in("bank_product_id", [payload.fromBankProductId, payload.toBankProductId]);
+
+  const fromOpening = openings?.find((row) => row.bank_product_id === payload.fromBankProductId);
+  const toOpening = openings?.find((row) => row.bank_product_id === payload.toBankProductId);
+  if (!fromOpening || !toOpening) {
+    throw new Error("Enter opening balances for both accounts before transferring");
+  }
+
+  const fromExtra = Number(fromOpening.extra_cash ?? 0);
+  if (fromExtra < payload.amount) {
+    throw new Error(
+      `Insufficient ecash on ${fromProduct.bankLabel} — available GHS ${fromExtra.toFixed(2)}`
+    );
+  }
+
+  const toExtra = Number(toOpening.extra_cash ?? 0);
+  const transferId = randomUUID();
+
+  const { error: fromError } = await supabase
+    .from("back_office_account_opening")
+    .update({ extra_cash: fromExtra - payload.amount })
+    .eq("session_id", session.id)
+    .eq("bank_product_id", payload.fromBankProductId);
+  if (fromError) {
+    throw new Error(`Failed to debit source account: ${fromError.message}`);
+  }
+
+  const { error: toError } = await supabase
+    .from("back_office_account_opening")
+    .update({ extra_cash: toExtra + payload.amount })
+    .eq("session_id", session.id)
+    .eq("bank_product_id", payload.toBankProductId);
+  if (toError) {
+    await supabase
+      .from("back_office_account_opening")
+      .update({ extra_cash: fromExtra })
+      .eq("session_id", session.id)
+      .eq("bank_product_id", payload.fromBankProductId);
+    throw new Error(`Failed to credit destination account: ${toError.message}`);
+  }
+
+  const { error: logError } = await supabase.from("back_office_agent_transfers").insert({
+    id: transferId,
+    tenant_id: context.tenantId,
+    branch_id: branchId,
+    session_id: session.id,
+    from_bank_product_id: payload.fromBankProductId,
+    to_bank_product_id: payload.toBankProductId,
+    amount: payload.amount,
+    notes: payload.notes ?? null,
+    created_by_user_id: context.userId
+  });
+  if (logError) {
+    throw new Error(`Transfer logged failed: ${logError.message}`);
+  }
+
+  return getBackOfficeBootstrap(context, {
+    branchId,
+    businessDate: payload.businessDate,
+    dateFrom: payload.businessDate,
+    dateTo: payload.businessDate
+  });
 }
 
 export async function approveAccountantDeposit(

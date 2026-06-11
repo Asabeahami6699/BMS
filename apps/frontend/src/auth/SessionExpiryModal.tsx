@@ -28,7 +28,7 @@ export function SessionExpiryModal({
   const title = isExpired ? "Session expired" : "Still there?";
   const subtitle = isExpired
     ? "Your session is no longer active. Sign in again to continue."
-    : "You have been inactive for 5 minutes. Stay signed in or you will be signed out when the countdown ends.";
+    : "You have been inactive for 15 minutes. Stay signed in or you will be signed out when the countdown ends.";
   const progress = totalSeconds > 0 ? Math.max(0, Math.min(1, secondsLeft / totalSeconds)) : 0;
   const urgent = !isExpired && secondsLeft <= 60;
 

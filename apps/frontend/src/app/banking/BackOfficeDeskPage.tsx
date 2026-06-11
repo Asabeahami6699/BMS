@@ -4,10 +4,14 @@ import { bankProductAppliesToBranch, hasAnyPermission, type OpenBackOfficeDayInp
 import { useAuth } from "../../auth/AuthContext";
 import { useToast } from "../../components/Toast";
 import { toUserFacingError } from "../../lib/networkError";
+import { useBankProductsLiveSync } from "../hooks/useBankProductsLiveSync";
 import { useBranchesLiveSync } from "../hooks/useBranchesLiveSync";
+import { CopyableText } from "../../components/CopyableText";
 import { useBackOfficeStore } from "../stores/backOfficeStore";
+import { useBankProductsStore } from "../stores/bankProductsStore";
 import { useBranchesStore } from "../stores/branchesStore";
 import { formatWorkspaceMoney } from "../stores/roleWorkspaceStore";
+import { BackOfficeAgentTransferModal } from "./BackOfficeAgentTransferModal";
 import {
   BackOfficeBalancingEntryModal,
   type BalancingEntryMode
@@ -33,13 +37,16 @@ export function BackOfficeDeskPage({ displayName }: Props) {
   const { user } = useAuth();
   const { showToast } = useToast();
   useBranchesLiveSync();
+  useBankProductsLiveSync();
 
   const branches = useBranchesStore((s) => s.branches);
+  const bankProducts = useBankProductsStore((s) => s.products);
 
   const {
     data,
     branchId,
-    businessDate,
+    dateFrom,
+    dateTo,
     loading,
     busyId,
     error,
@@ -48,20 +55,22 @@ export function BackOfficeDeskPage({ displayName }: Props) {
     hydrate,
     refresh,
     setBranchId,
-    setBusinessDate,
+    setDateRange,
     setExecutionAccount,
     openDay,
     markDepositDone,
     approveAccountantDeposit,
     approveEcash,
     requestEcash,
+    agentTransfer,
     startLiveSync,
     stopLiveSync
   } = useBackOfficeStore(
     useShallow((s) => ({
       data: s.data,
       branchId: s.branchId,
-      businessDate: s.businessDate,
+      dateFrom: s.dateFrom,
+      dateTo: s.dateTo,
       loading: s.loading,
       busyId: s.busyId,
       error: s.error,
@@ -70,19 +79,21 @@ export function BackOfficeDeskPage({ displayName }: Props) {
       hydrate: s.hydrate,
       refresh: s.refresh,
       setBranchId: s.setBranchId,
-      setBusinessDate: s.setBusinessDate,
+      setDateRange: s.setDateRange,
       setExecutionAccount: s.setExecutionAccount,
       openDay: s.openDay,
       markDepositDone: s.markDepositDone,
       approveAccountantDeposit: s.approveAccountantDeposit,
       approveEcash: s.approveEcash,
       requestEcash: s.requestEcash,
+      agentTransfer: s.agentTransfer,
       startLiveSync: s.startLiveSync,
       stopLiveSync: s.stopLiveSync
     }))
   );
 
   const [balancingEntryMode, setBalancingEntryMode] = useState<BalancingEntryMode | null>(null);
+  const [agentTransferOpen, setAgentTransferOpen] = useState(false);
 
   useEffect(() => {
     hydrate({
@@ -92,6 +103,17 @@ export function BackOfficeDeskPage({ displayName }: Props) {
     startLiveSync();
     return () => stopLiveSync();
   }, [hydrate, startLiveSync, stopLiveSync, user?.branchId, user?.scopeType]);
+
+  useEffect(() => {
+    const hash = window.location.hash.replace("#", "");
+    if (!hash) {
+      return;
+    }
+    const el = document.getElementById(hash);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, []);
 
   const isHeadOffice = user?.scopeType === "head_office";
   const viewingAllBranches = branchId === "all" || Boolean(data?.viewAllBranches);
@@ -106,9 +128,26 @@ export function BackOfficeDeskPage({ displayName }: Props) {
     setBranchId(preferred);
   }, [branchId, branches, isHeadOffice, user?.branchId, setBranchId]);
 
-  const companyAccounts = data?.companyAccounts ?? [];
-  const canRunDayOps = Boolean(branchId && branchId !== "all" && !viewingAllBranches);
-  const canViewBalances = canRunDayOps || viewingAllBranches;
+  const allCompanyAccounts = useMemo(
+    () =>
+      bankProducts
+        .filter((p) => p.isCompanyBankAccount && p.isActive)
+        .map((p) => ({
+          id: p.id,
+          name: p.name,
+          bankLabel: p.bankLabel,
+          branchId: p.branchId ?? null,
+          branchName: p.branchName
+        })),
+    [bankProducts]
+  );
+
+  const operationalBranches = useMemo(
+    () => branches.filter((b) => b.status === "active"),
+    [branches]
+  );
+
+  const companyAccounts = data?.companyAccounts ?? allCompanyAccounts;
   const depositQueue = data?.depositQueue ?? [];
   const accountBalances = data?.accountBalances ?? [];
   const ecashRequests = data?.ecashRequests ?? [];
@@ -151,7 +190,7 @@ export function BackOfficeDeskPage({ displayName }: Props) {
   }
 
   function companyAccountsForBranch(transactionBranchId: string) {
-    return companyAccounts.filter((account) =>
+    return allCompanyAccounts.filter((account) =>
       bankProductAppliesToBranch({ branchId: account.branchId ?? undefined }, transactionBranchId)
     );
   }
@@ -173,13 +212,13 @@ export function BackOfficeDeskPage({ displayName }: Props) {
   }
 
   async function handleEcashRequest(payload: {
+    branchId: string;
     amount: number;
     notes?: string;
     bankProductId?: string;
   }) {
-    if (!branchId || branchId === "all") return;
     try {
-      await requestEcash({ branchId, ...payload });
+      await requestEcash(payload);
       showToast("Ecash request sent to accountant", "success");
     } catch (err) {
       showToast(toUserFacingError(err, "Ecash request failed"), "error");
@@ -196,7 +235,7 @@ export function BackOfficeDeskPage({ displayName }: Props) {
       updatedLabel={updatedLabel}
       error={error}
       loading={false}
-      kpis={data || loading ? kpis : undefined}
+      kpis={kpis}
       onRefresh={() => void refresh()}
       refreshing={loading}
     >
@@ -216,25 +255,35 @@ export function BackOfficeDeskPage({ displayName }: Props) {
               </select>
             </label>
             <label className="field">
-              <span>Business date</span>
+              <span>From</span>
               <input
                 type="date"
-                value={businessDate}
-                onChange={(e) => setBusinessDate(e.target.value)}
+                value={dateFrom}
+                max={dateTo}
+                onChange={(e) => setDateRange(e.target.value, dateTo)}
+              />
+            </label>
+            <label className="field">
+              <span>To</span>
+              <input
+                type="date"
+                value={dateTo}
+                min={dateFrom}
+                onChange={(e) => setDateRange(dateFrom, e.target.value)}
               />
             </label>
           </div>
           <p className="muted back-office-workspace-filters__hint">
             {viewingAllBranches
-              ? "All branches — deposit queue, balances, and teller reconciliation across every branch. Pick one branch to enter opening balances or ecash."
-              : "Filters apply to the deposit queue, account balances, and teller reconciliation below."}
+              ? `All branches · ${dateFrom} to ${dateTo}. Opening balances use the end date (${dateTo}).`
+              : `Filters apply to the deposit queue, account balances, and teller reconciliation · ${dateFrom} to ${dateTo}.`}
           </p>
         </section>
       ) : null}
 
       {canAccountantApprove &&
       ((data?.pendingAccountantCount ?? 0) > 0 || (data?.pendingEcashCount ?? 0) > 0) ? (
-        <section className="card role-workspace__panel role-workspace__panel--accent">
+        <section className="card role-workspace__panel role-workspace__panel--accent" id="approvals">
           <h3>Accountant approvals</h3>
           <p className="muted">Large deposits and ecash requests need your action.</p>
           <div className="role-workspace__queue">
@@ -306,7 +355,10 @@ export function BackOfficeDeskPage({ displayName }: Props) {
         </section>
       ) : null}
 
-      <section className="card role-workspace__panel agency-deposit-table-card">
+      <section
+        className="card role-workspace__panel agency-deposit-table-card"
+        id="deposits"
+      >
         <header className="agency-deposit-table-card__head role-workspace__panel-head">
           <div>
             <p className="agency-deposit-table-card__eyebrow">Execution queue</p>
@@ -314,7 +366,6 @@ export function BackOfficeDeskPage({ displayName }: Props) {
             <p className="muted">
               Pick the company account used at the bank, then click Done — teller status updates
               immediately.
-              {viewingAllBranches ? " Set branch above to filter this queue." : ""}
             </p>
           </div>
           <span className="agency-deposit-table-card__stat agency-deposit-table-card__stat--pending">
@@ -334,7 +385,7 @@ export function BackOfficeDeskPage({ displayName }: Props) {
                 <tr>
                   <th>Recorded</th>
                   <th>Branch</th>
-                  <th>Customer</th>
+                  <th>Account holder</th>
                   <th>Account</th>
                   <th>Teller</th>
                   <th>Bank product</th>
@@ -378,8 +429,12 @@ export function BackOfficeDeskPage({ displayName }: Props) {
                           {row.customerName ?? "Customer"}
                         </strong>
                       </td>
-                      <td className="muted agency-deposit-table__account">
-                        {row.partnerAccountNumber ?? "—"}
+                      <td className="agency-deposit-table__account">
+                        {row.partnerAccountNumber ? (
+                          <CopyableText value={row.partnerAccountNumber} label="Account number" />
+                        ) : (
+                          <span className="muted">—</span>
+                        )}
                       </td>
                       <td className="muted">{row.recordedByName ?? row.recordedByUserId}</td>
                       <td className="muted">
@@ -404,7 +459,7 @@ export function BackOfficeDeskPage({ displayName }: Props) {
                           <select
                             className="agency-deposit-table__select"
                             value={selectedAccount}
-                            disabled={busyId === row.id || rowCompanyAccounts.length === 0}
+                            disabled={busyId === row.id}
                             onChange={(e) => setExecutionAccount(row.id, e.target.value)}
                             aria-label={`Company account for ${row.customerName ?? "deposit"}`}
                           >
@@ -428,11 +483,7 @@ export function BackOfficeDeskPage({ displayName }: Props) {
                           <button
                             type="button"
                             className="btn primary agency-deposit-table__done-btn"
-                            disabled={
-                              busyId === row.id ||
-                              rowCompanyAccounts.length === 0 ||
-                              !selectedAccount
-                            }
+                            disabled={busyId === row.id || !selectedAccount}
                             onClick={() => void handleDone(row.id, selectedAccount)}
                           >
                             {busyId === row.id ? "…" : "Done"}
@@ -448,7 +499,10 @@ export function BackOfficeDeskPage({ displayName }: Props) {
         )}
       </section>
 
-      <section className="card role-workspace__panel agency-deposit-table-card">
+      <section
+        className="card role-workspace__panel agency-deposit-table-card"
+        id="balancing"
+      >
         <header className="agency-deposit-table-card__head role-workspace__panel-head">
           <div className="back-office-balancing-head">
             <div>
@@ -456,48 +510,47 @@ export function BackOfficeDeskPage({ displayName }: Props) {
               <p className="muted">
                 Opening + ecash − total entries = closing. Total entries update live as deposits are
                 marked done.
-                {sessionOpen ? ` Day open for ${businessDate}.` : ""}
+                {sessionOpen ? ` Day open for ${dateTo}.` : ""}
               </p>
             </div>
           </div>
-          {canRunDayOps ? (
-            <div className="back-office-balancing-actions">
-              <button
-                type="button"
-                className="back-office-balancing-actions__btn back-office-balancing-actions__btn--opening"
-                disabled={companyAccounts.length === 0 || busyId === "open-day"}
-                onClick={() => setBalancingEntryMode("opening")}
-              >
-                <strong>{sessionOpen ? "Update balances" : "Opening balances"}</strong>
-                <small>
-                  {sessionOpen
-                    ? "Edit opening & ecash on hand"
-                    : "Enter values & start the day"}
-                </small>
-              </button>
-              <button
-                type="button"
-                className="back-office-balancing-actions__btn back-office-balancing-actions__btn--ecash"
-                disabled={busyId === "ecash"}
-                onClick={() => setBalancingEntryMode("ecash")}
-              >
-                <strong>Ecash request</strong>
-                <small>Ask accountant for extra cash</small>
-              </button>
-            </div>
-          ) : null}
+          <div className="back-office-balancing-actions">
+            <button
+              type="button"
+              className="back-office-balancing-actions__btn back-office-balancing-actions__btn--opening"
+              disabled={busyId === "open-day"}
+              onClick={() => setBalancingEntryMode("opening")}
+            >
+              <strong>{sessionOpen ? "Update balances" : "Opening balances"}</strong>
+              <small>
+                {sessionOpen ? "Edit opening & ecash on hand" : "Enter values & start the day"}
+              </small>
+            </button>
+            <button
+              type="button"
+              className="back-office-balancing-actions__btn back-office-balancing-actions__btn--ecash"
+              disabled={busyId === "ecash"}
+              onClick={() => setBalancingEntryMode("ecash")}
+            >
+              <strong>Ecash request</strong>
+              <small>Ask accountant for extra cash</small>
+            </button>
+            <button
+              type="button"
+              className="back-office-balancing-actions__btn back-office-balancing-actions__btn--opening"
+              disabled={busyId === "agent-transfer"}
+              onClick={() => setAgentTransferOpen(true)}
+            >
+              <strong>Agent to agent</strong>
+              <small>Move ecash between company accounts</small>
+            </button>
+          </div>
         </header>
 
-        {!canViewBalances ? (
+        {accountBalances.length === 0 ? (
           <p className="muted agency-deposit-table-card__empty">
-            Select a branch to view account balances.
-          </p>
-        ) : loading && accountBalances.length === 0 ? (
-          <p className="muted agency-deposit-table-card__empty">Loading account balances…</p>
-        ) : accountBalances.length === 0 ? (
-          <p className="muted agency-deposit-table-card__empty">
-            No company accounts for this branch — add one under Bank Products → Company accounts,
-            then click <strong>Opening balances</strong>.
+            No company accounts yet — add one under Bank Products → Company accounts, then click{" "}
+            <strong>Opening balances</strong>.
           </p>
         ) : (
           <div className="agency-deposit-table-wrap">
@@ -520,90 +573,84 @@ export function BackOfficeDeskPage({ displayName }: Props) {
                     ? Boolean(row.sessionOpen)
                     : sessionOpen;
                   return (
-                  <tr
-                    key={`${row.branchId ?? "branch"}-${row.bankProductId}`}
-                    className="agency-deposit-table__row"
-                  >
-                    {viewingAllBranches ? (
-                      <td>
-                        <span className="agency-deposit-table__branch">
-                          {branchLabel(row.branchName, row.branchCode)}
-                        </span>
-                      </td>
-                    ) : null}
-                    <td>
-                      <strong>{row.bankLabel}</strong>
-                      <span className="muted agency-deposit-table__account">{row.accountName}</span>
-                    </td>
-                    <td className="agency-deposit-table__num">
-                      {rowSessionOpen ? formatWorkspaceMoney(row.openingBalance) : "—"}
-                    </td>
-                    <td className="agency-deposit-table__num">
-                      {rowSessionOpen ? formatWorkspaceMoney(row.extraCash) : "—"}
-                    </td>
-                    <td className="agency-deposit-table__num agency-deposit-table__amount">
-                      {formatWorkspaceMoney(row.totalEntries)}
-                    </td>
-                    <td className="agency-deposit-table__num muted">
-                      {row.executionLimit != null ? formatWorkspaceMoney(row.executionLimit) : "—"}
-                    </td>
-                    <td
-                      className={`agency-deposit-table__num ${
-                        rowSessionOpen && row.limitReached
-                          ? "back-office-diff--warn"
-                          : rowSessionOpen && row.headroom != null && row.headroom > 0
-                            ? "back-office-diff--ok"
-                            : ""
-                      }`}
+                    <tr
+                      key={`${row.branchId ?? "branch"}-${row.bankProductId}`}
+                      className="agency-deposit-table__row"
                     >
-                      {rowSessionOpen && row.headroom != null
-                        ? formatWorkspaceMoney(row.headroom)
-                        : "—"}
-                    </td>
-                    <td className="agency-deposit-table__num">
-                      <strong>
-                        {rowSessionOpen ? formatWorkspaceMoney(row.closingBalance) : "—"}
-                      </strong>
-                    </td>
-                  </tr>
-                );
+                      {viewingAllBranches ? (
+                        <td>
+                          <span className="agency-deposit-table__branch">
+                            {branchLabel(row.branchName, row.branchCode)}
+                          </span>
+                        </td>
+                      ) : null}
+                      <td>
+                        <strong>{row.bankLabel}</strong>
+                        <span className="muted agency-deposit-table__account">{row.accountName}</span>
+                      </td>
+                      <td className="agency-deposit-table__num">
+                        {rowSessionOpen ? formatWorkspaceMoney(row.openingBalance) : "—"}
+                      </td>
+                      <td className="agency-deposit-table__num">
+                        {rowSessionOpen ? formatWorkspaceMoney(row.extraCash) : "—"}
+                      </td>
+                      <td className="agency-deposit-table__num agency-deposit-table__amount">
+                        {formatWorkspaceMoney(row.totalEntries)}
+                      </td>
+                      <td className="agency-deposit-table__num muted">
+                        {row.executionLimit != null ? formatWorkspaceMoney(row.executionLimit) : "—"}
+                      </td>
+                      <td
+                        className={`agency-deposit-table__num ${
+                          rowSessionOpen && row.limitReached
+                            ? "back-office-diff--warn"
+                            : rowSessionOpen && row.headroom != null && row.headroom > 0
+                              ? "back-office-diff--ok"
+                              : ""
+                        }`}
+                      >
+                        {rowSessionOpen && row.headroom != null
+                          ? formatWorkspaceMoney(row.headroom)
+                          : "—"}
+                      </td>
+                      <td className="agency-deposit-table__num">
+                        <strong>
+                          {rowSessionOpen ? formatWorkspaceMoney(row.closingBalance) : "—"}
+                        </strong>
+                      </td>
+                    </tr>
+                  );
                 })}
               </tbody>
             </table>
-            {!viewingAllBranches && !sessionOpen && accountBalances.length > 0 ? (
-              <p className="muted agency-deposit-table-card__hint">
-                Click <strong>Opening balances</strong> to enter opening and ecash on hand. Total
-                entries already reflect deposits marked done today.
-              </p>
-            ) : viewingAllBranches ? (
-              <p className="muted agency-deposit-table-card__hint">
-                Select a single branch above to enter opening balances or request ecash. Total entries
-                update live across all branches.
-              </p>
-            ) : null}
           </div>
         )}
       </section>
 
-      <section className="card role-workspace__panel agency-deposit-table-card">
+      <section
+        className="card role-workspace__panel agency-deposit-table-card"
+        id="reconciliation"
+      >
         <header className="agency-deposit-table-card__head role-workspace__panel-head">
           <div>
-            <h3>Back office vs teller</h3>
+            <h3>Teller/Back Officer reconciliation</h3>
             <p className="muted">
-              Teller deposits recorded vs back office executed — should match per teller.
+              Teller vs back office per drawer
               {viewingAllBranches
-                ? " Showing all branches for the selected date."
+                ? ` · all branches · ${dateFrom} to ${dateTo}`
                 : branchId
-                  ? ` Filtered to ${branches.find((b) => b.id === branchId)?.name ?? "this branch"}.`
+                  ? ` · ${branches.find((b) => b.id === branchId)?.name ?? "Branch"} · ${dateFrom} to ${dateTo}`
                   : ""}
             </p>
           </div>
         </header>
         {!branchId ? (
-          <p className="muted agency-deposit-table-card__empty">Select a branch above to load teller reconciliation.</p>
+          <p className="muted agency-deposit-table-card__empty">
+            Select a branch above to load teller reconciliation.
+          </p>
         ) : tellerReconciliation.length === 0 ? (
           <p className="muted agency-deposit-table-card__empty">
-            No teller activity for this date
+            No teller activity for this period
             {viewingAllBranches ? " across any branch" : ""}.
           </p>
         ) : (
@@ -657,17 +704,39 @@ export function BackOfficeDeskPage({ displayName }: Props) {
         )}
       </section>
 
-      {canRunDayOps && balancingEntryMode ? (
+      {balancingEntryMode ? (
         <BackOfficeBalancingEntryModal
           open
           mode={balancingEntryMode}
           busy={balancingEntryMode === "opening" ? busyId === "open-day" : busyId === "ecash"}
-          branchId={branchId}
-          businessDate={businessDate}
-          companyAccounts={companyAccounts}
+          businessDate={dateTo}
+          branches={operationalBranches}
+          companyAccounts={allCompanyAccounts}
+          defaultBranchId={branchId !== "all" ? branchId : user?.branchId}
           onClose={() => setBalancingEntryMode(null)}
           onOpenDay={handleOpenDay}
           onRequestEcash={handleEcashRequest}
+        />
+      ) : null}
+
+      {agentTransferOpen ? (
+        <BackOfficeAgentTransferModal
+          open
+          busy={busyId === "agent-transfer"}
+          businessDate={dateTo}
+          branches={operationalBranches}
+          companyAccounts={allCompanyAccounts}
+          defaultBranchId={branchId !== "all" ? branchId : user?.branchId}
+          onClose={() => setAgentTransferOpen(false)}
+          onTransfer={async (payload) => {
+            try {
+              await agentTransfer(payload);
+              showToast("Ecash transferred between agent accounts", "success");
+            } catch (err) {
+              showToast(toUserFacingError(err, "Transfer failed"), "error");
+              throw err;
+            }
+          }}
         />
       ) : null}
     </RoleDeskShell>

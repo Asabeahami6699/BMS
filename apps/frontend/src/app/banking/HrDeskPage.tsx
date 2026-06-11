@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { Link } from "react-router-dom";
+import { useShallow } from "zustand/react/shallow";
 import { BUILTIN_ROLE_LABELS, tellerTypeLabel } from "@bms/shared";
-import type { UserRecord } from "../api";
-import { listBranches, listUsers } from "../api";
+import { useBranchesLiveSync } from "../hooks/useBranchesLiveSync";
+import { useBranchesStore } from "../stores/branchesStore";
+import { useHrDeskStore } from "../stores/hrDeskStore";
 import { getRoleDeskConfig } from "./roleDeskConfig";
 import { RoleDeskShell } from "./RoleDeskShell";
 
@@ -10,28 +12,35 @@ type Props = { displayName?: string };
 
 export function HrDeskPage({ displayName }: Props) {
   const config = getRoleDeskConfig("hrm");
-  const [users, setUsers] = useState<UserRecord[]>([]);
-  const [branchCount, setBranchCount] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [userRows, branches] = await Promise.all([listUsers(), listBranches().catch(() => [])]);
-      setUsers(userRows);
-      setBranchCount(branches.length);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load HR desk");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  useBranchesLiveSync();
+  const branchCount = useBranchesStore((s) => s.branches.length);
+  const {
+    users,
+    loading,
+    error,
+    lastFetchedAt,
+    hydrateRoster,
+    refreshRoster,
+    startLiveSync,
+    stopLiveSync
+  } = useHrDeskStore(
+    useShallow((s) => ({
+      users: s.users,
+      loading: s.rosterLoading,
+      error: s.rosterError,
+      lastFetchedAt: s.lastRosterAt,
+      hydrateRoster: s.hydrateRoster,
+      refreshRoster: s.refreshRoster,
+      startLiveSync: s.startLiveSync,
+      stopLiveSync: s.stopLiveSync
+    }))
+  );
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    hydrateRoster({ force: true });
+    startLiveSync();
+    return () => stopLiveSync();
+  }, [hydrateRoster, startLiveSync, stopLiveSync]);
 
   const activeStaff = users.filter((u) => u.status === "active");
   const tellers = activeStaff.filter((u) => u.role === "teller");
@@ -50,14 +59,19 @@ export function HrDeskPage({ displayName }: Props) {
     [activeStaff.length, branchCount, tellers.length, users.length]
   );
 
+  const updatedLabel = lastFetchedAt
+    ? `Updated ${new Date(lastFetchedAt).toLocaleTimeString()}`
+    : undefined;
+
   return (
     <RoleDeskShell
       config={config}
       displayName={displayName}
+      updatedLabel={updatedLabel}
       error={error}
-      loading={loading}
-      kpis={loading ? undefined : kpis}
-      onRefresh={() => void load()}
+      loading={loading && users.length === 0}
+      kpis={loading && users.length === 0 ? undefined : kpis}
+      onRefresh={() => void refreshRoster()}
       refreshing={loading}
     >
       <section className="card role-workspace__panel desk-hero-panel desk-hero-panel--hr">
@@ -94,6 +108,14 @@ export function HrDeskPage({ displayName }: Props) {
           <Link className="desk-link-card" to="/app/banking/hrm/payroll">
             <strong>Payroll</strong>
             <span>Runs &amp; payslips</span>
+          </Link>
+          <Link className="desk-link-card" to="/app/banking/hrm/staff-loans">
+            <strong>Staff loans</strong>
+            <span>Applications &amp; approvals</span>
+          </Link>
+          <Link className="desk-link-card" to="/app/banking/hrm/policies">
+            <strong>HR policies</strong>
+            <span>Late time &amp; leave days</span>
           </Link>
           <Link className="desk-link-card" to="/app/banking/hrm/roles">
             <strong>Roles &amp; permissions</strong>

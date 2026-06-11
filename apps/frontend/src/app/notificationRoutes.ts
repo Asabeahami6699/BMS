@@ -8,7 +8,7 @@ export function notificationTargetPath(notification: AgentNotification): string 
     case "deposit_completed":
     case "back_office_ecash_requested":
     case "back_office_ecash_approved":
-      return "/app/banking/back-office";
+      return "/app/banking/back-office#deposits";
     case "withdrawal_ready_for_teller":
     case "withdrawal_cs_approved":
     case "float_allocated":
@@ -47,7 +47,7 @@ export function notificationTargetPath(notification: AgentNotification): string 
     return "/app/banking/teller";
   }
   if (haystack.includes("back office") || haystack.includes("bank execution") || haystack.includes("deposit")) {
-    return "/app/banking/back-office";
+    return "/app/banking/back-office#deposits";
   }
   if (haystack.includes("withdrawal") || haystack.includes("customer service")) {
     return "/app/banking/withdrawals";

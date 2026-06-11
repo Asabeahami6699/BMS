@@ -38,6 +38,7 @@ type AgencyTellerState = {
   error: string | null;
   lastFetchedAt: number | null;
   liveSyncActive: boolean;
+  walkInCustomerIdByBranch: Record<string, string>;
 
   hydrate: (options?: { force?: boolean }) => void;
   refresh: () => Promise<void>;
@@ -89,6 +90,7 @@ export const useAgencyTellerStore = create<AgencyTellerState>((set, get) => ({
   error: null,
   lastFetchedAt: null,
   liveSyncActive: false,
+  walkInCustomerIdByBranch: {},
 
   hydrate: (options) => {
     const { loading, lastFetchedAt } = get();
@@ -219,8 +221,19 @@ export const useAgencyTellerStore = create<AgencyTellerState>((set, get) => ({
     try {
       let customerId = payload.customerId;
       if (!customerId) {
-        const walkIn = await getAgencyWalkInCustomer(payload.transactionBranchId);
-        customerId = walkIn.id;
+        const cached = get().walkInCustomerIdByBranch[payload.transactionBranchId];
+        if (cached) {
+          customerId = cached;
+        } else {
+          const walkIn = await getAgencyWalkInCustomer(payload.transactionBranchId);
+          customerId = walkIn.id;
+          set({
+            walkInCustomerIdByBranch: {
+              ...get().walkInCustomerIdByBranch,
+              [payload.transactionBranchId]: customerId
+            }
+          });
+        }
       }
       await createTransaction({
         customerId,
@@ -231,20 +244,21 @@ export const useAgencyTellerStore = create<AgencyTellerState>((set, get) => ({
         bankProductId: payload.bankProductId,
         workflowData: payload.workflowData
       });
-      await get().refreshSilent();
-      await get().loadLedger(customerId, { force: true });
+      void get().refreshSilent();
+      void get().loadLedger(customerId, { force: true });
       const branchId = get().transactionBranchId || getRuntimeBranchId();
       if (branchId) {
-        const depositsData = await getTellerAgencyDeposits({
+        void getTellerAgencyDeposits({
           branchId,
           date: todayIso()
-        }).catch(() => null);
-        if (depositsData) {
-          set({
-            recentDeposits: depositsData.deposits,
-            depositsBusinessDate: depositsData.businessDate
-          });
-        }
+        })
+          .then((depositsData) => {
+            set({
+              recentDeposits: depositsData.deposits,
+              depositsBusinessDate: depositsData.businessDate
+            });
+          })
+          .catch(() => undefined);
       }
     } catch (error) {
       set({ error: toUserFacingError(error, "Deposit failed") });
