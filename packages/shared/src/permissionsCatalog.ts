@@ -575,6 +575,13 @@ export const SUSU_NAV_VISIBILITY: SusuNavVisibilityRow[] = [
     description: "Register new customers into pending approval.",
     anyPermissions: ["customers.create"],
     roles: ["admin", "field_agent", "coordinator"]
+  },
+  {
+    navPath: "susu/closing-balances",
+    label: "Closing balances",
+    description: "Daily susu cash closing calculation for susu-only tenants.",
+    anyPermissions: ["transactions.read"],
+    roles: ["admin", "coordinator", "accountant"]
   }
 ];
 

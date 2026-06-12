@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { bankProductAppliesToBranch, hasAnyPermission, type OpenBackOfficeDayInput } from "@bms/shared";
+import {
+  bankLabelsMatch,
+  bankProductAppliesToBranch,
+  hasAnyPermission,
+  type OpenBackOfficeDayInput
+} from "@bms/shared";
 import { useAuth } from "../../auth/AuthContext";
 import { useToast } from "../../components/Toast";
 import { toUserFacingError } from "../../lib/networkError";
@@ -47,13 +52,10 @@ export function BackOfficeDeskPage({ displayName }: Props) {
     branchId,
     dateFrom,
     dateTo,
-    loading,
     busyId,
     error,
-    lastFetchedAt,
     executionAccountByDeposit,
     hydrate,
-    refresh,
     setBranchId,
     setDateRange,
     setExecutionAccount,
@@ -71,13 +73,10 @@ export function BackOfficeDeskPage({ displayName }: Props) {
       branchId: s.branchId,
       dateFrom: s.dateFrom,
       dateTo: s.dateTo,
-      loading: s.loading,
       busyId: s.busyId,
       error: s.error,
-      lastFetchedAt: s.lastFetchedAt,
       executionAccountByDeposit: s.executionAccountByDeposit,
       hydrate: s.hydrate,
-      refresh: s.refresh,
       setBranchId: s.setBranchId,
       setDateRange: s.setDateRange,
       setExecutionAccount: s.setExecutionAccount,
@@ -142,12 +141,27 @@ export function BackOfficeDeskPage({ displayName }: Props) {
     [bankProducts]
   );
 
+  const mergedCompanyAccounts = useMemo(() => {
+    const byId = new Map(allCompanyAccounts.map((account) => [account.id, account]));
+    for (const account of data?.companyAccounts ?? []) {
+      if (!byId.has(account.id)) {
+        byId.set(account.id, {
+          id: account.id,
+          name: account.name,
+          bankLabel: account.bankLabel,
+          branchId: account.branchId ?? null,
+          branchName: account.branchName
+        });
+      }
+    }
+    return [...byId.values()];
+  }, [allCompanyAccounts, data?.companyAccounts]);
+
   const operationalBranches = useMemo(
     () => branches.filter((b) => b.status === "active"),
     [branches]
   );
 
-  const companyAccounts = data?.companyAccounts ?? allCompanyAccounts;
   const depositQueue = data?.depositQueue ?? [];
   const accountBalances = data?.accountBalances ?? [];
   const ecashRequests = data?.ecashRequests ?? [];
@@ -167,10 +181,6 @@ export function BackOfficeDeskPage({ displayName }: Props) {
     [data, depositQueue.length]
   );
 
-  const updatedLabel = lastFetchedAt
-    ? `Updated ${new Date(lastFetchedAt).toLocaleTimeString()}`
-    : undefined;
-
   function depositBranchLabel(row: (typeof depositQueue)[0]): string {
     if (row.branchName) {
       return row.branchCode ? `${row.branchName} (${row.branchCode})` : row.branchName;
@@ -189,16 +199,35 @@ export function BackOfficeDeskPage({ displayName }: Props) {
     }
   }
 
-  function companyAccountsForBranch(transactionBranchId: string) {
-    return allCompanyAccounts.filter((account) =>
-      bankProductAppliesToBranch({ branchId: account.branchId ?? undefined }, transactionBranchId)
-    );
+  function companyAccountsForDeposit(row: (typeof depositQueue)[0]) {
+    if (row.eligibleCompanyAccounts != null) {
+      return row.eligibleCompanyAccounts;
+    }
+    return mergedCompanyAccounts.filter((account) => {
+      if (
+        !bankProductAppliesToBranch(
+          { branchId: account.branchId ?? undefined },
+          row.transactionBranchId
+        )
+      ) {
+        return false;
+      }
+      if (row.bankLabel?.trim()) {
+        return bankLabelsMatch(account.bankLabel, row.bankLabel);
+      }
+      return true;
+    });
   }
 
-  async function handleDone(transactionId: string, accountId: string) {
+  async function handleDone(
+    transactionId: string,
+    accountId: string,
+    row: (typeof depositQueue)[0]
+  ) {
     if (!accountId?.trim()) {
+      const bankHint = row.bankLabel ? `${row.bankLabel} ` : "";
       showToast(
-        "No company account for this branch — add one under Bank Products → Company accounts",
+        `No ${bankHint}company account for ${depositBranchLabel(row)} — add one under Bank Products → Company accounts`,
         "error"
       );
       return;
@@ -232,12 +261,9 @@ export function BackOfficeDeskPage({ displayName }: Props) {
     <RoleDeskShell
       config={config}
       displayName={displayName}
-      updatedLabel={updatedLabel}
       error={error}
       loading={false}
       kpis={kpis}
-      onRefresh={() => void refresh()}
-      refreshing={loading}
     >
       {branches.length > 0 ? (
         <section className="card role-workspace__panel back-office-workspace-filters">
@@ -398,7 +424,7 @@ export function BackOfficeDeskPage({ displayName }: Props) {
               <tbody>
                 {depositQueue.map((row) => {
                   const canExecute = row.executionStatus === "pending_bank";
-                  const rowCompanyAccounts = companyAccountsForBranch(row.transactionBranchId);
+                  const rowCompanyAccounts = companyAccountsForDeposit(row);
                   const rowDefaultAccount = rowCompanyAccounts[0]?.id ?? "";
                   const selectedAccount =
                     executionAccountByDeposit[row.id] ?? rowDefaultAccount;
@@ -464,7 +490,10 @@ export function BackOfficeDeskPage({ displayName }: Props) {
                             aria-label={`Company account for ${row.customerName ?? "deposit"}`}
                           >
                             {rowCompanyAccounts.length === 0 ? (
-                              <option value="">No account for {depositBranchLabel(row)}</option>
+                              <option value="">
+                                No {row.bankLabel ? `${row.bankLabel} ` : ""}account for{" "}
+                                {depositBranchLabel(row)}
+                              </option>
                             ) : (
                               rowCompanyAccounts.map((account) => (
                                 <option key={account.id} value={account.id}>
@@ -484,7 +513,7 @@ export function BackOfficeDeskPage({ displayName }: Props) {
                             type="button"
                             className="btn primary agency-deposit-table__done-btn"
                             disabled={busyId === row.id || !selectedAccount}
-                            onClick={() => void handleDone(row.id, selectedAccount)}
+                            onClick={() => void handleDone(row.id, selectedAccount, row)}
                           >
                             {busyId === row.id ? "…" : "Done"}
                           </button>
@@ -711,7 +740,7 @@ export function BackOfficeDeskPage({ displayName }: Props) {
           busy={balancingEntryMode === "opening" ? busyId === "open-day" : busyId === "ecash"}
           businessDate={dateTo}
           branches={operationalBranches}
-          companyAccounts={allCompanyAccounts}
+          companyAccounts={mergedCompanyAccounts}
           defaultBranchId={branchId !== "all" ? branchId : user?.branchId}
           onClose={() => setBalancingEntryMode(null)}
           onOpenDay={handleOpenDay}
@@ -725,7 +754,7 @@ export function BackOfficeDeskPage({ displayName }: Props) {
           busy={busyId === "agent-transfer"}
           businessDate={dateTo}
           branches={operationalBranches}
-          companyAccounts={allCompanyAccounts}
+          companyAccounts={mergedCompanyAccounts}
           defaultBranchId={branchId !== "all" ? branchId : user?.branchId}
           onClose={() => setAgentTransferOpen(false)}
           onTransfer={async (payload) => {

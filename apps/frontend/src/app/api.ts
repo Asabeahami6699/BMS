@@ -488,6 +488,9 @@ export type AgentReport = {
   dailySusuCount: number;
   depositCount: number;
   withdrawalCount: number;
+  dailySusuAmount: number;
+  depositAmount: number;
+  withdrawalAmount: number;
 };
 
 export type BranchReport = {
@@ -1455,6 +1458,9 @@ export type FieldAgentRosterRow = FieldAgentOption & {
   dailySusuCount: number;
   depositCount: number;
   withdrawalCount: number;
+  dailySusuAmount: number;
+  depositAmount: number;
+  withdrawalAmount: number;
 };
 
 export async function listFieldAgents(): Promise<FieldAgentOption[]> {
@@ -2046,6 +2052,95 @@ export async function getBranchReport(branchId?: string): Promise<BranchReport[]
     throw new Error("Failed to load branch report");
   }
   return response.json() as Promise<BranchReport[]>;
+}
+
+export type FieldWithdrawalFulfillmentLine = {
+  customerId: string;
+  customerName?: string;
+  disclosureId?: string;
+  transactionId?: string;
+  amount: number;
+  fulfilledAt: string;
+  status: string;
+};
+
+export type FieldWithdrawalFulfillmentRow = {
+  fieldAgentId: string;
+  fieldAgentName: string;
+  branchId?: string;
+  businessDate: string;
+  totalRequested: number;
+  totalApproved: number;
+  totalFulfilled: number;
+  customerCount: number;
+  lines: FieldWithdrawalFulfillmentLine[];
+};
+
+export type SusuClosingBalanceSnapshot = {
+  branchId: string;
+  businessDate: string;
+  initialCash: number;
+  fieldAgentDeposits: number;
+  walkInDeposits: number;
+  fieldAgentWithdrawals: number;
+  walkInWithdrawals: number;
+  susuExpenses: number;
+  totalInflows: number;
+  totalOutflows: number;
+  cashRemaining: number;
+  notes?: string;
+  recordedBy?: string;
+  updatedAt?: string;
+};
+
+export async function listFieldWithdrawalFulfillment(options?: {
+  date?: string;
+  fieldAgentId?: string;
+  branchId?: string;
+}): Promise<FieldWithdrawalFulfillmentRow[]> {
+  const params = new URLSearchParams();
+  if (options?.date) {
+    params.set("date", options.date);
+  }
+  if (options?.fieldAgentId) {
+    params.set("fieldAgentId", options.fieldAgentId);
+  }
+  if (options?.branchId) {
+    params.set("branchId", options.branchId);
+  }
+  const query = params.toString() ? `?${params.toString()}` : "";
+  return fetchJson<FieldWithdrawalFulfillmentRow[]>(
+    `${API_BASE_URL}/api/v1/reports/field-withdrawal-fulfillment${query}`,
+    { headers: authHeaders() }
+  );
+}
+
+export async function getSusuClosingBalance(
+  branchId: string,
+  date: string
+): Promise<SusuClosingBalanceSnapshot> {
+  const params = new URLSearchParams({ branchId, date });
+  return fetchJson<SusuClosingBalanceSnapshot>(
+    `${API_BASE_URL}/api/v1/reports/susu-closing-balance?${params.toString()}`,
+    { headers: authHeaders() }
+  );
+}
+
+export async function saveSusuClosingBalance(input: {
+  branchId: string;
+  businessDate: string;
+  initialCash: number;
+  susuExpenses: number;
+  notes?: string;
+}): Promise<SusuClosingBalanceSnapshot> {
+  return fetchJson<SusuClosingBalanceSnapshot>(
+    `${API_BASE_URL}/api/v1/reports/susu-closing-balance`,
+    {
+      method: "PUT",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify(input)
+    }
+  );
 }
 
 export async function exportReportsCsv(branchId?: string): Promise<string> {

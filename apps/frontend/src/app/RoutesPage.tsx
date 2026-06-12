@@ -5,7 +5,9 @@ import { deleteFieldRoute, updateFieldRoute } from "./api";
 import { AdminDataTable, filterRowsBySearch } from "../components/AdminDataTable";
 import { Modal } from "../components/Modal";
 import { RowActionsMenu } from "../components/RowActionsMenu";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useToast } from "../components/Toast";
+import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { useRoutesLiveSync } from "./hooks/useRoutesLiveSync";
 import { useRoutesStore } from "./stores/routesStore";
 import { RouteAssignAgentModal } from "./RouteAssignAgentModal";
@@ -121,6 +123,7 @@ function RouteDetailModal({
 export function RoutesPage({ role }: Props) {
   useRoutesLiveSync();
   const { showToast } = useToast();
+  const { confirm, dialogProps } = useConfirmDialog();
   const canManage = role === "admin" || role === "coordinator";
 
   const routes = useRoutesStore((s) => s.routes);
@@ -188,11 +191,13 @@ export function RoutesPage({ role }: Props) {
 
   async function handleUnassignAgent(route: FieldRoute) {
     const agentLabel = route.assignedFieldAgentName ?? "the assigned agent";
-    if (
-      !window.confirm(
-        `Unassign ${agentLabel} from route "${route.name}"? The route will have no field agent.`
-      )
-    ) {
+    const ok = await confirm({
+      title: "Unassign agent",
+      message: `Unassign ${agentLabel} from route "${route.name}"? The route will have no field agent.`,
+      confirmLabel: "Unassign",
+      danger: true
+    });
+    if (!ok) {
       return;
     }
     try {
@@ -226,7 +231,13 @@ export function RoutesPage({ role }: Props) {
   }
 
   async function handleDelete(route: FieldRoute) {
-    if (!window.confirm(`Delete route "${route.name}"? Members will be unlinked.`)) {
+    const ok = await confirm({
+      title: "Delete route",
+      message: `Delete route "${route.name}"? Members will be unlinked.`,
+      confirmLabel: "Delete",
+      danger: true
+    });
+    if (!ok) {
       return;
     }
     try {
@@ -434,6 +445,8 @@ export function RoutesPage({ role }: Props) {
         onClose={() => setMembersRoute(null)}
         onUpdated={() => void refreshSilent()}
       />
+
+      <ConfirmDialog {...dialogProps} />
     </div>
   );
 }

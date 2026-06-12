@@ -12,16 +12,26 @@ const ALL_BRANCHES = "";
 
 const BANK_TYPES = [
   "Ecobank",
-  "GCB Bank",
-  "Fidelity Bank",
-  "Absa Bank",
-  "Stanbic Bank",
-  "Zenith Bank",
+  "GCB",
+  "Fidelity",
+  "Absa",
+  "Stanbic",
+  "Zenith",
   "CalBank",
   "UBA",
-  "Access Bank",
+  "Access",
+  "MTN",
   "Other"
 ] as const;
+
+const LEGACY_BANK_LABELS: Record<string, (typeof BANK_TYPES)[number] | "Other"> = {
+  "GCB Bank": "GCB",
+  "Fidelity Bank": "Fidelity",
+  "Absa Bank": "Absa",
+  "Stanbic Bank": "Stanbic",
+  "Zenith Bank": "Zenith",
+  "Access Bank": "Access"
+};
 
 type Mode = "create" | "edit";
 
@@ -55,9 +65,13 @@ export function CompanyAccountModal({ open, mode, product, onClose, onSaved }: P
     }
     if (mode === "edit" && product) {
       setAccountName(product.name);
+      const legacy = LEGACY_BANK_LABELS[product.bankLabel];
       const known = BANK_TYPES.includes(product.bankLabel as (typeof BANK_TYPES)[number]);
       if (known) {
         setBankType(product.bankLabel);
+        setCustomBankType("");
+      } else if (legacy) {
+        setBankType(legacy);
         setCustomBankType("");
       } else {
         setBankType("Other");

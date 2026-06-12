@@ -20,7 +20,18 @@ export const backOfficeDepositQueueItemSchema = z.object({
   bankLabel: z.string().optional(),
   partnerAccountNumber: z.string().optional(),
   executionStatus: agencyExecutionStatusSchema,
-  workflowData: z.record(z.string(), z.unknown()).optional()
+  workflowData: z.record(z.string(), z.unknown()).optional(),
+  eligibleCompanyAccounts: z
+    .array(
+      z.object({
+        id: z.string(),
+        name: z.string(),
+        bankLabel: z.string(),
+        branchId: z.string().nullable().optional(),
+        branchName: z.string().optional()
+      })
+    )
+    .optional()
 });
 
 export type BackOfficeDepositQueueItem = z.infer<typeof backOfficeDepositQueueItemSchema>;

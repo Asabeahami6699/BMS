@@ -2086,6 +2086,139 @@ body {
   box-shadow: 0 0 0 3px var(--primary-soft);
 }
 
+/* Theme-aware native selects — keeps dropdown list readable in light/dark mode */
+select {
+  color-scheme: inherit;
+  background-color: var(--bg-input);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+select option,
+select optgroup {
+  background-color: var(--bg-surface);
+  color: var(--text);
+}
+
+select:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.field select,
+.dash-topbar-field select,
+.dash-header-branch__select,
+.role-workspace__select,
+.agency-deposit-table__select,
+.agent-customers-modal__transfer-field select,
+.agent-form .field select {
+  appearance: none;
+  background-image: var(--select-chevron);
+  background-repeat: no-repeat;
+  background-position: right 0.55rem center;
+  padding-right: 1.75rem;
+}
+
+.confirm-dialog__message {
+  margin: 0;
+  line-height: 1.55;
+  color: var(--text);
+}
+
+.button--danger {
+  background: var(--danger);
+}
+
+.button--danger:hover:not(:disabled) {
+  background: #e53935;
+  filter: brightness(1.05);
+}
+
+.onboarding-workflow-card h3 {
+  margin: 0 0 0.75rem;
+}
+
+.onboarding-workflow-steps {
+  margin: 0 0 0.75rem;
+  padding-left: 1.25rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.onboarding-workflow-note {
+  margin: 0;
+}
+
+.susu-closing-formula h3,
+.susu-closing-editor h3 {
+  margin: 0 0 0.75rem;
+}
+
+.susu-closing-formula__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.85rem;
+}
+
+.susu-closing-formula__grid > div {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface-elevated);
+}
+
+.susu-closing-formula__equation {
+  margin: 1rem 0 0;
+}
+
+.susu-closing-editor__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.susu-closing-editor__notes {
+  grid-column: 1 / -1;
+}
+
+.withdrawal-fulfillment-card__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.withdrawal-fulfillment-card__head h3 {
+  margin: 0;
+}
+
+.withdrawal-fulfillment-table-wrap {
+  overflow-x: auto;
+}
+
+.withdrawal-fulfillment-details {
+  margin-top: 1rem;
+}
+
+.withdrawal-fulfillment-details summary {
+  cursor: pointer;
+  color: var(--primary);
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+}
+
+.agents-detail__metric small.muted {
+  display: block;
+  margin-top: 0.2rem;
+  font-weight: 400;
+}
+
 .button {
   margin-top: 0.8rem;
   border: none;

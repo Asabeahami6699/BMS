@@ -5,7 +5,9 @@ import { useAgentsStore } from "./stores/agentsStore";
 import { useCustomersStore } from "./stores/customersStore";
 import { filterRowsBySearch } from "../components/AdminDataTable";
 import { Modal } from "../components/Modal";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useToast } from "../components/Toast";
+import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { toUserFacingError } from "../lib/networkError";
 
 const STATUS_LABEL: Record<Customer["status"], string> = {
@@ -33,6 +35,7 @@ type Props = {
 
 export function AgentCustomersModal({ agent, open, onClose, onUpdated }: Props) {
   const { showToast } = useToast();
+  const { confirm, dialogProps } = useConfirmDialog();
   const allCustomers = useCustomersStore((s) => s.customers);
   const customersLoading = useCustomersStore((s) => s.loading);
   const agentsRoster = useAgentsStore((s) => s.roster);
@@ -118,11 +121,13 @@ export function AgentCustomersModal({ agent, open, onClose, onUpdated }: Props) 
   }
 
   async function handleUnassign(customer: Customer) {
-    if (
-      !window.confirm(
-        `Unassign ${customer.fullName} from ${agent?.displayName}? They will not appear on any agent's list until reassigned.`
-      )
-    ) {
+    const ok = await confirm({
+      title: "Unassign customer",
+      message: `Unassign ${customer.fullName} from ${agent?.displayName}? They will not appear on any agent's list until reassigned.`,
+      confirmLabel: "Unassign",
+      danger: true
+    });
+    if (!ok) {
       return;
     }
     setBusyId(customer.id);
@@ -240,6 +245,8 @@ export function AgentCustomersModal({ agent, open, onClose, onUpdated }: Props) 
           </ul>
         )}
       </div>
+
+      <ConfirmDialog {...dialogProps} />
     </Modal>
   );
 }

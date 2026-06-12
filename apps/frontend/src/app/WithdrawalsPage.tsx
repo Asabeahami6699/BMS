@@ -1,7 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import type { AppRole, BalanceDisclosure } from "./api";
-import { approveBalanceDisclosure, BRANCH_CONTEXT_CHANGED_EVENT, listBankProducts, rejectBalanceDisclosure } from "./api";
+import type { AppRole, BalanceDisclosure, FieldWithdrawalFulfillmentRow } from "./api";
+import {
+  approveBalanceDisclosure,
+  BRANCH_CONTEXT_CHANGED_EVENT,
+  listBankProducts,
+  listFieldWithdrawalFulfillment,
+  rejectBalanceDisclosure
+} from "./api";
 import {
   bankProductDisplayLabel,
   hasAnyPermission,
@@ -101,6 +107,9 @@ export function WithdrawalsPage({ role, permissions, variant = "susu" }: Props) 
     Record<string, Record<string, unknown>>
   >({});
   const [expandedRequestId, setExpandedRequestId] = useState<string | null>(null);
+  const [fulfillmentDate, setFulfillmentDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [fulfillmentRows, setFulfillmentRows] = useState<FieldWithdrawalFulfillmentRow[]>([]);
+  const [fulfillmentLoading, setFulfillmentLoading] = useState(false);
 
   useEffect(() => {
     function loadProducts() {
@@ -112,6 +121,20 @@ export function WithdrawalsPage({ role, permissions, variant = "susu" }: Props) 
     window.addEventListener(BRANCH_CONTEXT_CHANGED_EVENT, loadProducts);
     return () => window.removeEventListener(BRANCH_CONTEXT_CHANGED_EVENT, loadProducts);
   }, []);
+
+  useEffect(() => {
+    if (isAgency) {
+      return;
+    }
+    setFulfillmentLoading(true);
+    void listFieldWithdrawalFulfillment({
+      date: fulfillmentDate,
+      branchId: branchFilter || undefined
+    })
+      .then(setFulfillmentRows)
+      .catch(() => setFulfillmentRows([]))
+      .finally(() => setFulfillmentLoading(false));
+  }, [isAgency, fulfillmentDate, branchFilter, lastFetchedAt]);
 
   const initialLoad = loading && lastFetchedAt == null;
   const kpis = useMemo(() => selectWithdrawalKpis(withdrawals), [withdrawals]);
@@ -427,6 +450,95 @@ export function WithdrawalsPage({ role, permissions, variant = "susu" }: Props) 
         onClose={() => setDeclineTarget(null)}
         onConfirm={handleDeclineConfirm}
       />
+
+      {!isAgency ? (
+        <section className="card agents-page__table-card withdrawal-fulfillment-card">
+          <header className="withdrawal-fulfillment-card__head">
+            <div>
+              <h3>Field agent daily withdrawal fulfillment</h3>
+              <p className="muted">
+                Tracks coordinator-approved field withdrawals and what was actually debited from
+                customer accounts through each field agent.
+              </p>
+            </div>
+            <label className="field agents-page__branch-filter">
+              <span>Date</span>
+              <input
+                type="date"
+                value={fulfillmentDate}
+                onChange={(e) => setFulfillmentDate(e.target.value)}
+              />
+            </label>
+          </header>
+
+          {fulfillmentLoading ? (
+            <p className="muted">Loading fulfillment…</p>
+          ) : fulfillmentRows.length === 0 ? (
+            <p className="muted">No field agent withdrawal activity for this date.</p>
+          ) : (
+            <div className="withdrawal-fulfillment-table-wrap">
+              <table className="admin-table withdrawal-fulfillment-table">
+                <thead>
+                  <tr>
+                    <th>Field agent</th>
+                    <th>Date</th>
+                    <th>Requested</th>
+                    <th>Approved</th>
+                    <th>Fulfilled (debited)</th>
+                    <th>Customers</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {fulfillmentRows.map((row) => (
+                    <tr key={`${row.fieldAgentId}-${row.businessDate}`}>
+                      <td>
+                        <strong>{row.fieldAgentName}</strong>
+                      </td>
+                      <td>{row.businessDate}</td>
+                      <td>GHS {row.totalRequested.toFixed(2)}</td>
+                      <td>GHS {row.totalApproved.toFixed(2)}</td>
+                      <td>
+                        <strong>GHS {row.totalFulfilled.toFixed(2)}</strong>
+                      </td>
+                      <td>{row.customerCount}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              {fulfillmentRows.some((row) => row.lines.length > 0) ? (
+                <details className="withdrawal-fulfillment-details">
+                  <summary>Customer-level fulfillment lines</summary>
+                  <table className="admin-table withdrawal-fulfillment-lines">
+                    <thead>
+                      <tr>
+                        <th>Agent</th>
+                        <th>Customer</th>
+                        <th>Amount</th>
+                        <th>Status</th>
+                        <th>Fulfilled at</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {fulfillmentRows.flatMap((row) =>
+                        row.lines.map((line) => (
+                          <tr key={`${row.fieldAgentId}-${line.disclosureId ?? line.transactionId}`}>
+                            <td>{row.fieldAgentName}</td>
+                            <td>{line.customerName ?? line.customerId}</td>
+                            <td>GHS {line.amount.toFixed(2)}</td>
+                            <td>{line.status.replace(/_/g, " ")}</td>
+                            <td>{formatDate(line.fulfilledAt)}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </details>
+              ) : null}
+            </div>
+          )}
+        </section>
+      ) : null}
     </div>
   );
 }

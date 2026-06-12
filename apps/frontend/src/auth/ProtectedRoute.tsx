@@ -18,7 +18,7 @@ export function ProtectedRoute({ children, allowedRoles, forbiddenRoles }: Props
   if (loading) {
     return (
       <main className="login-page">
-        <p>Loading session...</p>
+        <p>Loading dashboard...</p>
       </main>
     );
   }

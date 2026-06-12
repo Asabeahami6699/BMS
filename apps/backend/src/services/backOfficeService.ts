@@ -1,5 +1,6 @@
 import {
   backOfficeBootstrapSchema,
+  bankLabelsMatch,
   bankProductAppliesToBranch,
   createBackOfficeAgentTransferSchema,
   createBackOfficeEcashRequestSchema,
@@ -103,8 +104,37 @@ type CompanyAccountSummary = {
   name: string;
   bankLabel: string;
   branchId: string | null;
+  branchName?: string;
   executionLimitAmount: number | null;
 };
+
+function eligibleCompanyAccountsForDeposit(
+  companyAccounts: CompanyAccountSummary[],
+  deposit: { transactionBranchId: string; bankLabel?: string }
+) {
+  return companyAccounts
+    .filter((account) => {
+      if (
+        !bankProductAppliesToBranch(
+          { branchId: account.branchId ?? undefined },
+          deposit.transactionBranchId
+        )
+      ) {
+        return false;
+      }
+      if (deposit.bankLabel?.trim()) {
+        return bankLabelsMatch(account.bankLabel, deposit.bankLabel);
+      }
+      return true;
+    })
+    .map((account) => ({
+      id: account.id,
+      name: account.name,
+      bankLabel: account.bankLabel,
+      branchId: account.branchId ?? null,
+      branchName: account.branchName
+    }));
+}
 
 async function buildAccountBalancesForBranch(
   tenantId: string,
@@ -495,6 +525,11 @@ export async function getBackOfficeBootstrap(
     (d) => d.executionStatus === "pending_accountant"
   ).length;
 
+  const depositQueueWithAccounts = depositQueue.map((deposit) => ({
+    ...deposit,
+    eligibleCompanyAccounts: eligibleCompanyAccountsForDeposit(companyAccounts, deposit)
+  }));
+
   return backOfficeBootstrapSchema.parse({
     businessDate,
     branchId: operationalBranchId ?? "all",
@@ -502,7 +537,7 @@ export async function getBackOfficeBootstrap(
     sessionId: session?.id ?? null,
     sessionOpen: session?.status === "open",
     companyAccounts,
-    depositQueue,
+    depositQueue: depositQueueWithAccounts,
     accountBalances,
     tellerReconciliation,
     ecashRequests,

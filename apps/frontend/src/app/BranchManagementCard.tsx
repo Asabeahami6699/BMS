@@ -4,7 +4,9 @@ import { deleteBranch, listBranches, updateBranch } from "./api";
 import { AdminDataTable, filterRowsBySearch } from "../components/AdminDataTable";
 import { RowActionsMenu } from "../components/RowActionsMenu";
 import { BranchFormModal } from "./BranchFormModal";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useToast } from "../components/Toast";
+import { useConfirmDialog } from "../hooks/useConfirmDialog";
 
 type Props = { role: AppRole };
 
@@ -22,6 +24,7 @@ function formatDate(value?: string): string {
 export function BranchManagementCard({ role }: Props) {
   const canManage = role === "admin";
   const { showToast } = useToast();
+  const { confirm, dialogProps } = useConfirmDialog();
   const [branches, setBranches] = useState<Branch[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
@@ -74,7 +77,13 @@ export function BranchManagementCard({ role }: Props) {
   }
 
   async function handleDelete(branch: Branch) {
-    if (!window.confirm(`Delete branch "${branch.name}"? This cannot be undone.`)) {
+    const ok = await confirm({
+      title: "Delete branch",
+      message: `Delete branch "${branch.name}"? This cannot be undone.`,
+      confirmLabel: "Delete",
+      danger: true
+    });
+    if (!ok) {
       return;
     }
     try {
@@ -158,6 +167,8 @@ export function BranchManagementCard({ role }: Props) {
           onSaved={() => void loadBranches()}
         />
       ) : null}
+
+      <ConfirmDialog {...dialogProps} />
     </>
   );
 }

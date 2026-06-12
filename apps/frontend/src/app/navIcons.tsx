@@ -63,6 +63,7 @@ const iconByPath: Record<string, string> = {
   "susu/group-savings": "⊕",
   "susu/performance": "▲",
   "susu/onboarding": "✚",
+  "susu/closing-balances": "≡",
   banking: "🏦",
   loans: "◈",
   treasury: "◇",

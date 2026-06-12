@@ -809,4 +809,30 @@ export function bankProductAppliesToBranch(
 
 }
 
+/** Normalize bank names for matching teller products (e.g. "GCB") to company accounts (e.g. "GCB Bank"). */
+export function normalizeBankLabelForMatch(label: string): string {
+  return label
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/\s*(bank|ltd|limited|ghana)\s*$/gi, "")
+    .replace(/\s+/g, "")
+    .trim();
+}
+
+export function bankLabelsMatch(a?: string | null, b?: string | null): boolean {
+  if (!a?.trim() || !b?.trim()) {
+    return false;
+  }
+  const left = normalizeBankLabelForMatch(a);
+  const right = normalizeBankLabelForMatch(b);
+  if (!left || !right) {
+    return false;
+  }
+  if (left === right) {
+    return true;
+  }
+  return left.startsWith(right) || right.startsWith(left);
+}
+
 

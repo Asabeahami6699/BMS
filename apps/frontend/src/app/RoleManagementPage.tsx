@@ -44,7 +44,9 @@ import {
 } from "./api";
 import { UserFormModal } from "./UserFormModal";
 import { subscribeToTenantRealtime } from "./realtime";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useToast } from "../components/Toast";
+import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { toUserFacingError } from "../lib/networkError";
 import { useAuth } from "../auth/AuthContext";
 import { RolesSectionHeader } from "./roles/RolesSectionHeader";
@@ -80,6 +82,7 @@ function toastValidation(
 
 export function RoleManagementPage({ role }: Props) {
   const { showToast } = useToast();
+  const { confirm, dialogProps } = useConfirmDialog();
   const { user } = useAuth();
   const subscribedModules = user?.subscribedModules;
   const canManageRoles = role === "admin";
@@ -356,7 +359,13 @@ export function RoleManagementPage({ role }: Props) {
   }
 
   async function handleResetBuiltin(builtinRole: Role) {
-    if (!window.confirm(`Reset ${BUILTIN_ROLE_LABELS[builtinRole]} to platform defaults?`)) {
+    const ok = await confirm({
+      title: "Reset role",
+      message: `Reset ${BUILTIN_ROLE_LABELS[builtinRole]} to platform defaults?`,
+      confirmLabel: "Reset",
+      danger: true
+    });
+    if (!ok) {
       return;
     }
     setBuiltinSaving(true);
@@ -436,7 +445,13 @@ export function RoleManagementPage({ role }: Props) {
   }
 
   async function handleDeleteTenantJobTitle(roleKey: string, displayName: string) {
-    if (!window.confirm(`Delete job title "${displayName}"? Users must be reassigned first.`)) {
+    const ok = await confirm({
+      title: "Delete job title",
+      message: `Delete job title "${displayName}"? Users must be reassigned first.`,
+      confirmLabel: "Delete",
+      danger: true
+    });
+    if (!ok) {
       return;
     }
     try {
@@ -594,7 +609,13 @@ export function RoleManagementPage({ role }: Props) {
   }
 
   async function handleResetNav() {
-    if (!window.confirm("Reset all Susu sidebar rules to platform defaults?")) {
+    const ok = await confirm({
+      title: "Reset sidebar",
+      message: "Reset all Susu sidebar rules to platform defaults?",
+      confirmLabel: "Reset",
+      danger: true
+    });
+    if (!ok) {
       return;
     }
     setNavSaving(true);
@@ -1148,6 +1169,8 @@ export function RoleManagementPage({ role }: Props) {
         onClose={() => setUserModalOpen(false)}
         onSaved={() => void loadRoles()}
       />
+
+      <ConfirmDialog {...dialogProps} />
     </div>
   );
 }

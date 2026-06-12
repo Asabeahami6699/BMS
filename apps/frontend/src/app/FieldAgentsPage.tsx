@@ -107,15 +107,18 @@ function AgentDetailModal({
           </div>
           <div className="agents-detail__metric">
             <span>Daily Susu</span>
-            <strong>{agent.dailySusuCount}</strong>
+            <strong>{formatMoney(agent.dailySusuAmount)}</strong>
+            <small className="muted">{agent.dailySusuCount} transactions</small>
           </div>
           <div className="agents-detail__metric">
             <span>Deposits</span>
-            <strong>{agent.depositCount}</strong>
+            <strong>{formatMoney(agent.depositAmount)}</strong>
+            <small className="muted">{agent.depositCount} transactions</small>
           </div>
           <div className="agents-detail__metric">
             <span>Withdrawals</span>
-            <strong>{agent.withdrawalCount}</strong>
+            <strong>{formatMoney(agent.withdrawalAmount)}</strong>
+            <small className="muted">{agent.withdrawalCount} transactions</small>
           </div>
         </div>
 

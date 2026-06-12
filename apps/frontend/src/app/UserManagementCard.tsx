@@ -7,7 +7,9 @@ import { AdminDataTable, filterRowsBySearch } from "../components/AdminDataTable
 import { RowActionsMenu } from "../components/RowActionsMenu";
 import { ResetPasswordModal } from "./ResetPasswordModal";
 import { UserFormModal } from "./UserFormModal";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useToast } from "../components/Toast";
+import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { useBranchesLiveSync } from "./hooks/useBranchesLiveSync";
 import { useBranchesStore } from "./stores/branchesStore";
 import { useHrDeskStore } from "./stores/hrDeskStore";
@@ -38,6 +40,7 @@ function branchLabel(branchId: string | undefined, branches: Branch[]): string {
 export function UserManagementCard({ role }: Props) {
   const canManage = role === "admin";
   const { showToast } = useToast();
+  const { confirm, dialogProps } = useConfirmDialog();
   useBranchesLiveSync();
   const branches = useBranchesStore((s) => s.branches);
   const {
@@ -122,7 +125,13 @@ export function UserManagementCard({ role }: Props) {
   }
 
   async function handleDelete(user: UserRecord) {
-    if (!window.confirm(`Delete user "${user.fullName ?? user.email}"? This cannot be undone.`)) {
+    const ok = await confirm({
+      title: "Delete user",
+      message: `Delete user "${user.fullName ?? user.email}"? This cannot be undone.`,
+      confirmLabel: "Delete",
+      danger: true
+    });
+    if (!ok) {
       return;
     }
     try {
@@ -260,6 +269,8 @@ export function UserManagementCard({ role }: Props) {
           />
         </>
       ) : null}
+
+      <ConfirmDialog {...dialogProps} />
     </>
   );
 }

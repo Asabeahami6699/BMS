@@ -96,24 +96,11 @@ export function SessionIdleGuard() {
       return;
     }
 
-    const tokenExp = parseAccessTokenExpiryMs(getAuthSession()?.accessToken);
-    const idleDeadline = lastActivityRef.current + SESSION_IDLE_MS;
-    let triggerAt = idleDeadline;
-
-    if (tokenExp != null) {
-      const tokenWarningAt = tokenExp - SESSION_GRACE_MS;
-      triggerAt = Math.min(idleDeadline, tokenWarningAt);
-    }
-
-    const delay = Math.max(0, triggerAt - Date.now());
+    const delay = Math.max(0, lastActivityRef.current + SESSION_IDLE_MS - Date.now());
     idleTimerRef.current = setTimeout(() => {
-      if (tokenExp != null && tokenExp <= Date.now()) {
-        showExpired();
-        return;
-      }
       showWarning();
     }, delay);
-  }, [clearIdleTimer, showExpired, showWarning, user?.userId]);
+  }, [clearIdleTimer, showWarning, user?.userId]);
 
   const resetIdleClock = useCallback(() => {
     if (!user || openRef.current) {
@@ -126,10 +113,6 @@ export function SessionIdleGuard() {
   const handleStaySignedIn = useCallback(async () => {
     setBusy(true);
     clearGraceTimer();
-    setOpen(false);
-    openRef.current = false;
-    lastActivityRef.current = Date.now();
-    scheduleIdleWarning();
     try {
       const refreshed = await withNetworkRetry(() => refreshAuthSession(), { maxMs: 10_000 });
       if (!refreshed) {
@@ -138,6 +121,8 @@ export function SessionIdleGuard() {
       }
       await withNetworkRetry(() => refreshMe(), { maxMs: 10_000 });
       lastActivityRef.current = Date.now();
+      setOpen(false);
+      openRef.current = false;
       scheduleIdleWarning();
     } catch {
       showExpired();
@@ -181,15 +166,25 @@ export function SessionIdleGuard() {
     }
 
     const tokenCheck = window.setInterval(() => {
-      if (openRef.current) {
-        return;
-      }
-      const tokenExp = parseAccessTokenExpiryMs(getAuthSession()?.accessToken);
-      if (tokenExp != null && tokenExp <= Date.now()) {
-        showExpired();
-        return;
-      }
-      scheduleIdleWarning();
+      void (async () => {
+        if (openRef.current) {
+          return;
+        }
+        const tokenExp = parseAccessTokenExpiryMs(getAuthSession()?.accessToken);
+        if (tokenExp != null && tokenExp <= Date.now() + 60_000) {
+          const refreshed = await refreshAuthSession();
+          if (refreshed) {
+            lastActivityRef.current = Date.now();
+            scheduleIdleWarning();
+            return;
+          }
+        }
+        if (tokenExp != null && tokenExp <= Date.now()) {
+          showExpired();
+          return;
+        }
+        scheduleIdleWarning();
+      })();
     }, SESSION_TOKEN_CHECK_MS);
 
     function onUnauthorized() {

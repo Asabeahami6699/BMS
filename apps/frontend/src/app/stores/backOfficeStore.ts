@@ -10,19 +10,15 @@ import {
   getRuntimeBranchId,
   getTenantId,
   openBackOfficeDay,
-  setRuntimeBranchId,
   updateBackOfficeAccountEntries
 } from "../api";
 import { toUserFacingError } from "../../lib/networkError";
 import {
   createLiveSyncManager,
   createSilentRefreshScheduler,
-  isFresh,
   runHydrate
 } from "./storeSync";
 
-const STALE_MS = 5_000;
-const LIVE_POLL_MS = 5_000;
 const silentScheduler = createSilentRefreshScheduler();
 const liveSyncMgr = createLiveSyncManager();
 
@@ -96,9 +92,6 @@ export const useBackOfficeStore = create<State>((set, get) => ({
     const branchId = options?.branchId ?? options?.fallbackBranchId ?? get().branchId;
     if (branchId) {
       set({ branchId });
-      if (branchId !== "all") {
-        setRuntimeBranchId(branchId);
-      }
     }
     const { loading, lastFetchedAt } = get();
     runHydrate({
@@ -169,9 +162,6 @@ export const useBackOfficeStore = create<State>((set, get) => ({
 
   setBranchId: (branchId) => {
     set({ branchId });
-    if (branchId && branchId !== "all") {
-      setRuntimeBranchId(branchId);
-    }
     void get().refresh();
   },
 
@@ -295,11 +285,12 @@ export const useBackOfficeStore = create<State>((set, get) => ({
         "back_office_day_sessions",
         "back_office_ecash_requests",
         "back_office_account_opening",
-        "back_office_agent_transfers"
+        "back_office_agent_transfers",
+        "tenant_bank_products"
       ],
       onRefresh: () => void get().refreshSilent(),
-      pollMs: LIVE_POLL_MS,
-      isStale: () => !isFresh(get().lastFetchedAt, STALE_MS)
+      pollMs: 0,
+      debounceMs: 300
     });
   },
 

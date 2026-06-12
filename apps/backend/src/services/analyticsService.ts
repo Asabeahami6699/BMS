@@ -52,29 +52,23 @@ export async function getBranchPerformanceSummary(
   return summary;
 }
 
+export type AgentPerformanceRow = {
+  fieldAgentId: string;
+  totalCollections: number;
+  dailySusuCount: number;
+  depositCount: number;
+  withdrawalCount: number;
+  dailySusuAmount: number;
+  depositAmount: number;
+  withdrawalAmount: number;
+};
+
 export async function getAgentPerformance(
   tenantId: string,
   context: RoleContext
-): Promise<
-  Array<{
-    fieldAgentId: string;
-    totalCollections: number;
-    dailySusuCount: number;
-    depositCount: number;
-    withdrawalCount: number;
-  }>
-> {
+): Promise<AgentPerformanceRow[]> {
   const transactions = scopedTransactions(await listTransactions(tenantId), context);
-  const map = new Map<
-    string,
-    {
-      fieldAgentId: string;
-      totalCollections: number;
-      dailySusuCount: number;
-      depositCount: number;
-      withdrawalCount: number;
-    }
-  >();
+  const map = new Map<string, AgentPerformanceRow>();
 
   for (const transaction of transactions) {
     const existing = map.get(transaction.fieldAgentId) ?? {
@@ -82,16 +76,23 @@ export async function getAgentPerformance(
       totalCollections: 0,
       dailySusuCount: 0,
       depositCount: 0,
-      withdrawalCount: 0
+      withdrawalCount: 0,
+      dailySusuAmount: 0,
+      depositAmount: 0,
+      withdrawalAmount: 0
     };
 
-    existing.totalCollections += transaction.amount;
     if (transaction.type === "daily_susu") {
       existing.dailySusuCount += 1;
+      existing.dailySusuAmount += transaction.amount;
+      existing.totalCollections += transaction.amount;
     } else if (transaction.type === "deposit") {
       existing.depositCount += 1;
+      existing.depositAmount += transaction.amount;
+      existing.totalCollections += transaction.amount;
     } else if (transaction.type === "withdrawal") {
       existing.withdrawalCount += 1;
+      existing.withdrawalAmount += transaction.amount;
     }
 
     map.set(transaction.fieldAgentId, existing);

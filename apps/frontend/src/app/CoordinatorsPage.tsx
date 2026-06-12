@@ -6,7 +6,9 @@ import { getTenantId, listBranches, updateUser, deleteUser } from "./api";
 import { AdminDataTable, filterRowsBySearch } from "../components/AdminDataTable";
 import { Modal } from "../components/Modal";
 import { RowActionsMenu } from "../components/RowActionsMenu";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useToast } from "../components/Toast";
+import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { useCoordinatorsLiveSync } from "./hooks/useCoordinatorsLiveSync";
 import { ResetPasswordModal } from "./ResetPasswordModal";
 import { UserFormModal } from "./UserFormModal";
@@ -212,8 +214,16 @@ export function CoordinatorsPage() {
     }
   }
 
+  const { confirm, dialogProps } = useConfirmDialog();
+
   async function handleDelete(row: CoordinatorRosterRow) {
-    if (!window.confirm(`Delete coordinator ${row.email}? This cannot be undone.`)) {
+    const ok = await confirm({
+      title: "Delete coordinator",
+      message: `Delete coordinator ${row.email}? This cannot be undone.`,
+      confirmLabel: "Delete",
+      danger: true
+    });
+    if (!ok) {
       return;
     }
     try {
@@ -458,6 +468,8 @@ export function CoordinatorsPage() {
         user={passwordResetUser}
         onClose={() => setResetOpen(false)}
       />
+
+      <ConfirmDialog {...dialogProps} />
     </div>
   );
 }

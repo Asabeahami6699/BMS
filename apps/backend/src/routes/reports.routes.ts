@@ -10,6 +10,11 @@ import { getGroupSavingsBootstrap } from "../services/groupSavingsBootstrapServi
 import { getPerformanceBootstrap } from "../services/performanceBootstrapService.js";
 import { getWithdrawalsBootstrap } from "../services/withdrawalsBootstrapService.js";
 import { getReportsAnalyticsBootstrap } from "../services/reportsAnalyticsBootstrapService.js";
+import { listFieldWithdrawalFulfillment } from "../services/fieldWithdrawalFulfillmentService.js";
+import {
+  getSusuClosingBalance,
+  saveSusuClosingRecord
+} from "../services/susuClosingBalanceService.js";
 
 import { resolveRequestBranchFilter } from "../middleware/branchScope.js";
 
@@ -301,5 +306,120 @@ reportsRouter.get("/export.csv", requirePermission("reports.read"), async (req, 
     res.status(200).send(csv);
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : "Failed to export reports CSV" });
+  }
+});
+
+reportsRouter.get(
+  "/field-withdrawal-fulfillment",
+  requirePermission("agency.withdrawals.approve"),
+  async (req, res) => {
+    const context = req.userContext;
+    if (!context) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+
+    const branchFilter = resolveRequestBranchFilter(req);
+    const businessDate =
+      typeof req.query.date === "string" ? req.query.date : undefined;
+    const fieldAgentId =
+      typeof req.query.fieldAgentId === "string" ? req.query.fieldAgentId : undefined;
+
+    try {
+      res.json(
+        await listFieldWithdrawalFulfillment(
+          context.tenantId,
+          {
+            role: context.role,
+            scopeType: context.scopeType as "head_office" | "branch",
+            branchId: context.branchId,
+            filterBranchId: branchFilter
+          },
+          { businessDate, fieldAgentId, branchId: branchFilter }
+        )
+      );
+    } catch (error) {
+      res.status(500).json({
+        error:
+          error instanceof Error ? error.message : "Failed to load field withdrawal fulfillment"
+      });
+    }
+  }
+);
+
+reportsRouter.get("/susu-closing-balance", requirePermission("transactions.read"), async (req, res) => {
+  const context = req.userContext;
+  if (!context) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  const branchId = typeof req.query.branchId === "string" ? req.query.branchId : "";
+  const businessDate =
+    typeof req.query.date === "string" ? req.query.date : new Date().toISOString().slice(0, 10);
+
+  try {
+    res.json(
+      await getSusuClosingBalance(
+        context.tenantId,
+        {
+          role: context.role,
+          scopeType: context.scopeType as "head_office" | "branch",
+          branchId: context.branchId
+        },
+        branchId,
+        businessDate
+      )
+    );
+  } catch (error) {
+    res.status(400).json({
+      error: error instanceof Error ? error.message : "Failed to load susu closing balance"
+    });
+  }
+});
+
+reportsRouter.put("/susu-closing-balance", requirePermission("transactions.read"), async (req, res) => {
+  const context = req.userContext;
+  if (!context) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  const body = req.body as {
+    branchId?: string;
+    businessDate?: string;
+    initialCash?: number;
+    susuExpenses?: number;
+    notes?: string;
+  };
+
+  if (!body.branchId || !body.businessDate) {
+    res.status(400).json({ error: "branchId and businessDate are required" });
+    return;
+  }
+
+  try {
+    res.json(
+      await saveSusuClosingRecord(
+        context.tenantId,
+        {
+          role: context.role,
+          scopeType: context.scopeType as "head_office" | "branch",
+          branchId: context.branchId,
+          userId: context.userId
+        },
+        {
+          branchId: body.branchId,
+          businessDate: body.businessDate,
+          initialCash: Number(body.initialCash ?? 0),
+          susuExpenses: Number(body.susuExpenses ?? 0),
+          notes: body.notes
+        }
+      )
+    );
+  } catch (error) {
+    res.status(400).json({
+      error: error instanceof Error ? error.message : "Failed to save susu closing record"
+    });
   }
 });

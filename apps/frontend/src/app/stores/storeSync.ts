@@ -52,21 +52,25 @@ export function createLiveSyncManager() {
       }
       const pollMs = config.pollMs ?? LIVE_POLL_MS;
       const isStale = config.isStale ?? (() => true);
+      const debounceMs = config.debounceMs ?? SILENT_DEBOUNCE_MS;
+      const debouncedRefresh = () => scheduler.schedule(config.onRefresh);
       scheduler.schedule(config.onRefresh);
       unsubscribe = subscribeToTenantRealtime({
         tenantId: config.getTenantId(),
         tables: config.tables,
-        onChange: () => config.onRefresh()
+        onChange: debouncedRefresh
       });
-      pollTimer = setInterval(() => {
-        if (typeof document !== "undefined" && document.hidden) {
-          return;
-        }
-        if (!isStale()) {
-          return;
-        }
-        config.onRefresh();
-      }, pollMs);
+      if (pollMs > 0) {
+        pollTimer = setInterval(() => {
+          if (typeof document !== "undefined" && document.hidden) {
+            return;
+          }
+          if (!isStale()) {
+            return;
+          }
+          debouncedRefresh();
+        }, pollMs);
+      }
     },
     stop() {
       consumers = Math.max(0, consumers - 1);

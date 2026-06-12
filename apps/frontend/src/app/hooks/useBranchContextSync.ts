@@ -17,7 +17,7 @@ import { useWithdrawalsStore } from "../stores/withdrawalsStore";
 function refreshBranchScopedStores(): void {
   void useCustomersStore.getState().refresh();
   void useBranchCounterStore.getState().refresh();
-  void useTreasuryStore.getState().refresh();
+  void useTreasuryStore.getState().refreshSilent();
   void useAgencyStore.getState().refresh();
   void useWithdrawalsStore.getState().refresh();
   void useGroupSavingsStore.getState().refresh();

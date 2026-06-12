@@ -94,11 +94,14 @@ import { OverviewPage } from "./OverviewPage";
 import { TenantDashboardPage } from "./TenantDashboardPage";
 import { PendingApprovalsCard } from "./PendingApprovalsCard";
 import { PendingBalanceApprovalsCard } from "./PendingBalanceApprovalsCard";
-const ONBOARDING_WORKFLOW = [
-  "Field Agent → Customer Registration",
-  "Pending Approval",
-  "Coordinator Review",
-  "Active Customer"
+import { CustomerOnboardingPage } from "./CustomerOnboardingPage";
+import { SusuClosingBalancesPage } from "./SusuClosingBalancesPage";
+
+const APPROVAL_WORKFLOW_STEPS = [
+  "Field agent registration or withdrawal request",
+  "Coordinator review",
+  "Customer account credited or debited",
+  "Callover batch posted to ledger"
 ];
 
 export function TenantApp() {
@@ -295,11 +298,15 @@ export function TenantApp() {
           path="/susu/onboarding"
           element={
             <TenantSusuRoute route="susu/onboarding" modules={modules} role={role} permissions={permissions} susuNavVisibility={user?.susuNavVisibility}>
-              <FeaturePlaceholderPage
-                title="Customer Onboarding"
-                description="Registration form: personal info, Ghana Card, address, account type, opening balance, assigned agent. Default status: Pending Approval."
-                workflow={ONBOARDING_WORKFLOW}
-              />
+              <CustomerOnboardingPage role={role} />
+            </TenantSusuRoute>
+          }
+        />
+        <Route
+          path="/susu/closing-balances"
+          element={
+            <TenantSusuRoute route="susu/closing-balances" modules={modules} role={role} permissions={permissions} susuNavVisibility={user?.susuNavVisibility}>
+              <SusuClosingBalancesPage role={role} />
             </TenantSusuRoute>
           }
         />
@@ -697,7 +704,7 @@ export function TenantApp() {
               <FeaturePlaceholderPage
                 title="Approval Workflows"
                 description="Configure customer and withdrawal approval chains."
-                workflow={ONBOARDING_WORKFLOW}
+                workflow={APPROVAL_WORKFLOW_STEPS}
               />
             </TenantSettingsRoute>
           }

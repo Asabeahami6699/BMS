@@ -82,7 +82,10 @@ function buildRoster(
       transactionCount,
       dailySusuCount: report?.dailySusuCount ?? 0,
       depositCount: report?.depositCount ?? 0,
-      withdrawalCount: report?.withdrawalCount ?? 0
+      withdrawalCount: report?.withdrawalCount ?? 0,
+      dailySusuAmount: report?.dailySusuAmount ?? 0,
+      depositAmount: report?.depositAmount ?? 0,
+      withdrawalAmount: report?.withdrawalAmount ?? 0
     };
   });
 
