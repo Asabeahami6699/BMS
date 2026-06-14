@@ -7,6 +7,7 @@ import {
 import { getSupabaseAdminClient } from "../config/supabaseClient.js";
 import { getTenantFromStore, upsertTenantInStore, type StoredTenant } from "./authStore.js";
 import { getTenantAddonsFromStore } from "./tenantAddonService.js";
+import { syncBuiltinRolePermissionsForModules } from "./builtinRolePermissionService.js";
 
 const modulesByTenant = new Map<string, TenantProductModule[]>();
 
@@ -57,10 +58,29 @@ export async function loadTenantModules(tenantId: string): Promise<TenantProduct
   return setTenantModulesInStore(tenantId, ["susu_management"]);
 }
 
+/** Always read subscribed modules from the database (refresh auth/me and sidebar). */
+export async function reloadTenantModulesFromDb(tenantId: string): Promise<TenantProductModule[]> {
+  const supabase = getSupabaseAdminClient();
+  if (supabase) {
+    const { data, error } = await supabase
+      .from("tenant_modules")
+      .select("module_key")
+      .eq("tenant_id", tenantId);
+    if (!error && data && data.length > 0) {
+      const modules = data
+        .map((row) => normalizeTenantModule(row.module_key) ?? row.module_key)
+        .filter((key): key is TenantProductModule => tenantProductModuleSchema.safeParse(key).success);
+      return setTenantModulesInStore(tenantId, modules);
+    }
+  }
+  return loadTenantModules(tenantId);
+}
+
 export async function saveTenantModules(
   tenantId: string,
   modules: TenantProductModule[]
 ): Promise<TenantProductModule[]> {
+  const previous = getTenantModulesFromStore(tenantId) ?? [];
   const unique = setTenantModulesInStore(tenantId, modules);
 
   const supabase = getSupabaseAdminClient();
@@ -72,6 +92,11 @@ export async function saveTenantModules(
     if (error) {
       throw new Error(`Failed to save tenant modules: ${error.message}`);
     }
+  }
+
+  const added = unique.filter((module) => !previous.includes(module));
+  if (added.length > 0 || unique.includes("investment_management")) {
+    await syncBuiltinRolePermissionsForModules(tenantId, unique);
   }
 
   return unique;

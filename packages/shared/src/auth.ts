@@ -256,7 +256,14 @@ export const permissionSchema = z.enum([
   "agency.deposits.record",
   "agency.accounts.create",
   "banking.products.read",
-  "banking.products.manage"
+  "banking.products.manage",
+  "investments.read",
+  "investments.products.manage",
+  "investments.applications.create",
+  "investments.applications.approve",
+  "investments.redeem",
+  "investments.forms.manage",
+  "investments.reports.read"
 ]);
 
 export type Permission = z.infer<typeof permissionSchema>;

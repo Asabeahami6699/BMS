@@ -12,7 +12,8 @@ export const API_PATH_MODULE: Array<{ prefix: string; module: TenantProductModul
   { prefix: "/api/v1/loans", module: "loans_credit" },
   { prefix: "/api/v1/banking", module: "banking" },
   { prefix: "/api/v1/agency", module: "banking" },
-  { prefix: "/api/v1/treasury", module: "treasury" }
+  { prefix: "/api/v1/treasury", module: "treasury" },
+  { prefix: "/api/v1/investments", module: "investment_management" }
 ];
 
 export function moduleForApiPath(path: string): TenantProductModule | undefined {

@@ -15,6 +15,7 @@ function ProductRoute() {
     susu: "susu_management",
     loans: "loans_credit",
     treasury: "treasury",
+    investments: "investment_management",
     reports: "reports_analytics"
   };
   const product = map[slug ?? ""] ?? "banking";

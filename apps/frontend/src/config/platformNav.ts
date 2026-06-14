@@ -12,6 +12,7 @@ export const PLATFORM_NAV: DashboardNavItem[] = [
       { kind: "link", to: "products/susu", label: "Susu Management" },
       { kind: "link", to: "products/loans", label: "Loans" },
       { kind: "link", to: "products/treasury", label: "Treasury" },
+      { kind: "link", to: "products/investments", label: "Investment Management" },
       { kind: "link", to: "products/reports", label: "Reports & Analytics" }
     ]
   },

@@ -16,6 +16,7 @@ export type PermissionGroupId =
   | "commission"
   | "audit"
   | "loans"
+  | "investments"
   | "agency_banking"
   | "workspace";
 
@@ -35,6 +36,7 @@ export const PERMISSION_GROUP_PRODUCT: Record<PermissionGroupId, PermissionProdu
   commission: "susu_management",
   audit: "core",
   loans: "loans_credit",
+  investments: "investment_management",
   agency_banking: "banking",
   workspace: "core"
 };
@@ -47,6 +49,7 @@ export const PERMISSION_GROUP_ORDER: PermissionGroupId[] = [
   "transactions",
   "ledger",
   "loans",
+  "investments",
   "agency_banking",
   "reports",
   "payroll",
@@ -64,6 +67,7 @@ export const PERMISSION_GROUP_LABELS: Record<PermissionGroupId, string> = {
   transactions: "Transactions & till",
   ledger: "Ledger",
   loans: "Loans & credit",
+  investments: "Investment management",
   agency_banking: "Agency operations",
   reports: "Reports",
   payroll: "Payroll",
@@ -76,6 +80,7 @@ export const PERMISSION_PRODUCT_SECTION_ORDER: PermissionProductScope[] = [
   "core",
   "susu_management",
   "loans_credit",
+  "investment_management",
   "banking",
   "treasury"
 ];
@@ -84,6 +89,7 @@ export const PERMISSION_PRODUCT_LABELS: Record<PermissionProductScope, string> =
   core: "Core & admin",
   susu_management: MODULE_LABELS.susu_management,
   loans_credit: MODULE_LABELS.loans_credit,
+  investment_management: MODULE_LABELS.investment_management,
   banking: MODULE_LABELS.banking,
   treasury: MODULE_LABELS.treasury
 };
@@ -333,6 +339,54 @@ export const PERMISSION_CATALOG: PermissionCatalogEntry[] = [
     requires: ["loans.read"]
   },
   {
+    id: "investments.read",
+    label: "View investments",
+    description: "See investment products, applications, portfolio, and customer records.",
+    group: "investments"
+  },
+  {
+    id: "investments.products.manage",
+    label: "Manage investment products",
+    description: "Create and edit fixed deposit, treasury bill, bond, and share products.",
+    group: "investments",
+    requires: ["investments.read"]
+  },
+  {
+    id: "investments.applications.create",
+    label: "Create investment applications",
+    description: "Submit customer investment applications at a branch.",
+    group: "investments",
+    requires: ["investments.read"]
+  },
+  {
+    id: "investments.applications.approve",
+    label: "Approve investments",
+    description: "Activate approved investment applications.",
+    group: "investments",
+    requires: ["investments.read"]
+  },
+  {
+    id: "investments.redeem",
+    label: "Redeem or close investments",
+    description: "Redeem matured investments or close/cancel active positions.",
+    group: "investments",
+    requires: ["investments.read"]
+  },
+  {
+    id: "investments.forms.manage",
+    label: "Manage application forms",
+    description: "Customize tenant investment application fields and sections.",
+    group: "investments",
+    requires: ["investments.read"]
+  },
+  {
+    id: "investments.reports.read",
+    label: "View investment reports",
+    description: "Portfolio, branch, and product performance reports.",
+    group: "investments",
+    requires: ["investments.read"]
+  },
+  {
     id: "treasury.read",
     label: "View treasury & cash positions",
     description: "Vault, teller drawer, and bank cash balances plus trial balance.",
@@ -463,6 +517,67 @@ export const LOANS_NAV_VISIBILITY: LoansNavVisibilityRow[] = [
     label: "Group application",
     description: "Solidarity group member loan application.",
     anyPermissions: ["loans.applications.create"]
+  }
+];
+
+export type InvestmentsNavKey =
+  | "overview"
+  | "applications"
+  | "apply"
+  | "products"
+  | "formBuilder"
+  | "reports";
+
+export type InvestmentsNavVisibilityRow = {
+  navPath: string;
+  navKey: InvestmentsNavKey;
+  label: string;
+  description: string;
+  anyPermissions: Permission[];
+};
+
+export const INVESTMENTS_NAV_VISIBILITY: InvestmentsNavVisibilityRow[] = [
+  {
+    navPath: "investments",
+    navKey: "overview",
+    label: "Overview",
+    description: "Investment portfolio KPIs and summary.",
+    anyPermissions: ["investments.read"]
+  },
+  {
+    navPath: "investments/applications",
+    navKey: "applications",
+    label: "Portfolio",
+    description: "Search and manage customer investments.",
+    anyPermissions: ["investments.read"]
+  },
+  {
+    navPath: "investments/apply",
+    navKey: "apply",
+    label: "New application",
+    description: "Standard customer investment application form.",
+    anyPermissions: ["investments.applications.create"]
+  },
+  {
+    navPath: "investments/products",
+    navKey: "products",
+    label: "Products & rates",
+    description: "Fixed deposits, treasury bills, bonds, and shares.",
+    anyPermissions: ["investments.read"]
+  },
+  {
+    navPath: "investments/form-builder",
+    navKey: "formBuilder",
+    label: "Form builder",
+    description: "Customize application fields per company.",
+    anyPermissions: ["investments.forms.manage"]
+  },
+  {
+    navPath: "investments/reports",
+    navKey: "reports",
+    label: "Reports",
+    description: "Active, matured, redeemed, and performance reports.",
+    anyPermissions: ["investments.reports.read"]
   }
 ];
 
@@ -617,6 +732,25 @@ export function resolveLoansRoutePermissions(routePath: string): Permission[] {
   }
   const prefix = LOANS_NAV_VISIBILITY.find((row) => normalized.startsWith(`${row.navPath}/`));
   return prefix?.anyPermissions ?? ["loans.read"];
+}
+
+export function filterInvestmentsNavByPermissions(
+  permissions: Permission[] | undefined
+): InvestmentsNavVisibilityRow[] {
+  return INVESTMENTS_NAV_VISIBILITY.filter((row) => hasAnyPermission(permissions, row.anyPermissions));
+}
+
+export function resolveInvestmentsRoutePermissions(routePath: string): Permission[] {
+  const normalized = routePath.replace(/^\/+/, "").replace(/^app\//, "").split("?")[0] ?? "";
+  if (/^investments\/applications\/[^/]+$/.test(normalized)) {
+    return ["investments.read"];
+  }
+  const exact = INVESTMENTS_NAV_VISIBILITY.find((row) => row.navPath === normalized);
+  if (exact) {
+    return exact.anyPermissions;
+  }
+  const prefix = INVESTMENTS_NAV_VISIBILITY.find((row) => normalized.startsWith(`${row.navPath}/`));
+  return prefix?.anyPermissions ?? ["investments.read"];
 }
 
 const SUSU_OVERVIEW_ACCESS: Pick<SusuNavVisibilityRow, "anyPermissions" | "roles"> = {

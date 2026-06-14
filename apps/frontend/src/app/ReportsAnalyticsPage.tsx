@@ -1,13 +1,21 @@
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
-import { hasTenantModule, MODULE_LABELS, type TenantProductModule } from "@bms/shared";
+import {
+  hasAnyPermission,
+  hasTenantModule,
+  listSubscribedProductModules,
+  MODULE_LABELS
+} from "@bms/shared";
 import type { AppRole, AuthMe, BranchReport } from "./api";
 import { exportReportsCsv } from "./api";
 import { useReportsAnalyticsLiveSync } from "./hooks/useReportsAnalyticsLiveSync";
+import { useInvestmentsLiveSync } from "./hooks/useInvestmentsLiveSync";
 import { selectAgentDisplayName, selectBranchDisplayName } from "./stores/performanceStore";
 import { useReportsAnalyticsStore } from "./stores/reportsAnalyticsStore";
+import { selectInvestmentKpis, useInvestmentStore } from "./stores/investmentStore";
 import { useToast } from "../components/Toast";
 import { toUserFacingError } from "../lib/networkError";
+import { formatInvestmentMoney } from "./investments/investmentUi";
 
 type Props = {
   role: AppRole;
@@ -36,9 +44,14 @@ function formatShortDate(iso: string): string {
 export function ReportsAnalyticsPage({ role, me }: Props) {
   const modules = me?.subscribedModules;
   const hasSusu = hasTenantModule(modules, "susu_management");
+  const hasInvestments = hasTenantModule(modules, "investment_management");
+  const canInvestmentsRead = hasAnyPermission(me?.permissions, ["investments.read"]);
   const canLoad = hasSusu && me?.reportsAnalytics !== false;
 
   useReportsAnalyticsLiveSync(canLoad);
+  useInvestmentsLiveSync(hasInvestments && canInvestmentsRead && me?.reportsAnalytics !== false);
+
+  const investmentKpis = useInvestmentStore((s) => selectInvestmentKpis(s));
 
   const { showToast } = useToast();
   const data = useReportsAnalyticsStore((s) => s.data);
@@ -130,19 +143,10 @@ export function ReportsAnalyticsPage({ role, me }: Props) {
   const canFilterBranch =
     role === "admin" || role === "accountant" || role === "auditor" || role === "coordinator";
 
-  const subscribed: TenantProductModule[] = [];
-  if (hasSusu) {
-    subscribed.push("susu_management");
-  }
-  if (hasTenantModule(modules, "banking")) {
-    subscribed.push("banking");
-  }
-  if (hasTenantModule(modules, "loans_credit")) {
-    subscribed.push("loans_credit");
-  }
-  if (hasTenantModule(modules, "treasury")) {
-    subscribed.push("treasury");
-  }
+  const subscribed = useMemo(
+    () => listSubscribedProductModules(modules),
+    [modules]
+  );
 
   async function handleExportCsv() {
     try {
@@ -225,6 +229,33 @@ export function ReportsAnalyticsPage({ role, me }: Props) {
       ) : null}
 
       {error ? <p className="overview-error">{error}</p> : null}
+
+      {hasInvestments && canInvestmentsRead ? (
+        <section className="overview-panel reports-product-panel" aria-label="Investment management summary">
+          <div className="reports-product-panel__head">
+            <h2 className="overview-panel__title">{MODULE_LABELS.investment_management}</h2>
+            <Link to="/app/investments/reports">Open investment reports →</Link>
+          </div>
+          <div className="kpi-grid overview-kpis">
+            <article className="kpi-card kpi-card--primary">
+              <p className="kpi-label">Active investments</p>
+              <p className="kpi-value">{investmentKpis.active}</p>
+            </article>
+            <article className="kpi-card kpi-card--purple">
+              <p className="kpi-label">Matured</p>
+              <p className="kpi-value">{investmentKpis.matured}</p>
+            </article>
+            <article className="kpi-card">
+              <p className="kpi-label">Portfolio principal</p>
+              <p className="kpi-value">{formatInvestmentMoney(investmentKpis.totalPrincipal)}</p>
+            </article>
+            <article className="kpi-card kpi-card--success">
+              <p className="kpi-label">Expected interest</p>
+              <p className="kpi-value">{formatInvestmentMoney(investmentKpis.totalExpectedInterest)}</p>
+            </article>
+          </div>
+        </section>
+      ) : null}
 
       {hasSusu && canLoad ? (
         <>
@@ -420,8 +451,13 @@ export function ReportsAnalyticsPage({ role, me }: Props) {
             field without a branch till float.
           </p>
         </>
+      ) : subscribed.length > 0 && !hasSusu ? (
+        <p className="muted">
+          Susu analytics charts require Susu Management. Other subscribed products appear above when data is
+          available.
+        </p>
       ) : (
-        <p className="muted">Subscribe to Susu Management to unlock analytics charts.</p>
+        <p className="muted">Subscribe to a product module to unlock analytics.</p>
       )}
     </div>
   );

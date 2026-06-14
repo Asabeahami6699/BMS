@@ -20,7 +20,12 @@ import type {
   TenantAddon,
   TenantProductModule,
   TreasuryBootstrap,
-  CreateCashMovementInput
+  CreateCashMovementInput,
+  InvestmentFormConfig,
+  InvestmentProduct,
+  InvestmentRecord,
+  InvestmentSummary,
+  InvestmentAuditEvent
 } from "@bms/shared";
 import { isNetworkError, toUserFacingError, withNetworkRetry } from "../lib/networkError";
 import { withTransactionStepUp } from "../lib/transactionPinBridge";
@@ -3342,4 +3347,136 @@ export async function updateBankProduct(
     { method: "PATCH", headers: authHeaders(), body: JSON.stringify(payload) }
   );
   return body.product;
+}
+
+export type InvestmentsBootstrap = {
+  products: InvestmentProduct[];
+  investments: InvestmentRecord[];
+  formConfig: InvestmentFormConfig;
+  summary: InvestmentSummary;
+};
+
+export async function getInvestmentsBootstrap(): Promise<InvestmentsBootstrap> {
+  return fetchJson<InvestmentsBootstrap>(`${API_BASE_URL}/api/v1/investments/bootstrap`, {
+    headers: authHeaders()
+  });
+}
+
+export async function getInvestmentFormConfig(): Promise<InvestmentFormConfig> {
+  const body = await fetchJson<{ formConfig: InvestmentFormConfig }>(
+    `${API_BASE_URL}/api/v1/investments/form-config`,
+    { headers: authHeaders() }
+  );
+  return body.formConfig;
+}
+
+export async function updateInvestmentFormConfig(payload: {
+  sections: InvestmentFormConfig["sections"];
+  fields: InvestmentFormConfig["fields"];
+}): Promise<InvestmentFormConfig> {
+  const body = await fetchJson<{ formConfig: InvestmentFormConfig }>(
+    `${API_BASE_URL}/api/v1/investments/form-config`,
+    { method: "PUT", headers: authHeaders(), body: JSON.stringify(payload) }
+  );
+  return body.formConfig;
+}
+
+export async function createInvestmentProduct(
+  payload: Omit<InvestmentProduct, "id" | "tenantId" | "createdAt">
+): Promise<InvestmentProduct> {
+  const body = await fetchJson<{ product: InvestmentProduct }>(
+    `${API_BASE_URL}/api/v1/investments/products`,
+    { method: "POST", headers: authHeaders(), body: JSON.stringify(payload) }
+  );
+  return body.product;
+}
+
+export async function updateInvestmentProductApi(
+  productId: string,
+  payload: Partial<InvestmentProduct>
+): Promise<InvestmentProduct> {
+  const body = await fetchJson<{ product: InvestmentProduct }>(
+    `${API_BASE_URL}/api/v1/investments/products/${productId}`,
+    { method: "PATCH", headers: authHeaders(), body: JSON.stringify(payload) }
+  );
+  return body.product;
+}
+
+export async function createInvestmentApplication(
+  payload: Record<string, unknown>
+): Promise<InvestmentRecord> {
+  const body = await fetchJson<{ investment: InvestmentRecord }>(
+    `${API_BASE_URL}/api/v1/investments/applications`,
+    { method: "POST", headers: authHeaders(), body: JSON.stringify(payload) }
+  );
+  return body.investment;
+}
+
+export async function updateInvestmentApplicationApi(
+  investmentId: string,
+  payload: Record<string, unknown>
+): Promise<InvestmentRecord> {
+  const body = await fetchJson<{ investment: InvestmentRecord }>(
+    `${API_BASE_URL}/api/v1/investments/applications/${investmentId}`,
+    { method: "PATCH", headers: authHeaders(), body: JSON.stringify(payload) }
+  );
+  return body.investment;
+}
+
+export async function getInvestmentDetail(investmentId: string): Promise<InvestmentRecord> {
+  const body = await fetchJson<{ investment: InvestmentRecord }>(
+    `${API_BASE_URL}/api/v1/investments/applications/${investmentId}`,
+    { headers: authHeaders() }
+  );
+  return body.investment;
+}
+
+export async function redeemInvestment(investmentId: string): Promise<InvestmentRecord> {
+  const body = await fetchJson<{ investment: InvestmentRecord }>(
+    `${API_BASE_URL}/api/v1/investments/applications/${investmentId}/redeem`,
+    { method: "POST", headers: authHeaders() }
+  );
+  return body.investment;
+}
+
+export async function closeInvestment(investmentId: string): Promise<InvestmentRecord> {
+  const body = await fetchJson<{ investment: InvestmentRecord }>(
+    `${API_BASE_URL}/api/v1/investments/applications/${investmentId}/close`,
+    { method: "POST", headers: authHeaders() }
+  );
+  return body.investment;
+}
+
+export async function cancelInvestment(investmentId: string): Promise<InvestmentRecord> {
+  const body = await fetchJson<{ investment: InvestmentRecord }>(
+    `${API_BASE_URL}/api/v1/investments/applications/${investmentId}/cancel`,
+    { method: "POST", headers: authHeaders() }
+  );
+  return body.investment;
+}
+
+export async function listInvestmentAudit(investmentId: string): Promise<InvestmentAuditEvent[]> {
+  const body = await fetchJson<{ events: InvestmentAuditEvent[] }>(
+    `${API_BASE_URL}/api/v1/investments/applications/${investmentId}/audit`,
+    { headers: authHeaders() }
+  );
+  return body.events;
+}
+
+export async function getInvestmentReports(): Promise<{
+  summary: InvestmentSummary;
+  active: InvestmentRecord[];
+  matured: InvestmentRecord[];
+  redeemed: InvestmentRecord[];
+  autoRenewed: InvestmentRecord[];
+}> {
+  return fetchJson(`${API_BASE_URL}/api/v1/investments/reports`, { headers: authHeaders() });
+}
+
+export async function processInvestmentMaturities(): Promise<InvestmentRecord[]> {
+  const body = await fetchJson<{ renewed: InvestmentRecord[] }>(
+    `${API_BASE_URL}/api/v1/investments/process-maturities`,
+    { method: "POST", headers: authHeaders() }
+  );
+  return body.renewed;
 }

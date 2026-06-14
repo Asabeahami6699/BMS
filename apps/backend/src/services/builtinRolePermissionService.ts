@@ -2,12 +2,15 @@ import {
   getPermissionsForRole,
   isBuiltinRole,
   isTenantEditableBuiltinRole,
+  PERMISSION_CATALOG,
+  PERMISSION_GROUP_PRODUCT,
   permissionSchema,
   resolveRolePermissions,
   type Permission,
   type Role,
   TENANT_EDITABLE_BUILTIN_ROLES,
-  type TenantEditableBuiltinRole
+  type TenantEditableBuiltinRole,
+  type TenantProductModule
 } from "@bms/shared";
 import { z } from "zod";
 import { getSupabaseAdminClient } from "../config/supabaseClient.js";
@@ -130,6 +133,48 @@ export async function resolvePermissionsForTenantUser(
     return base;
   }
   return [...new Set([...base, ...custom])];
+}
+
+function permissionsForProductModule(module: TenantProductModule): Permission[] {
+  return PERMISSION_CATALOG.filter((entry) => PERMISSION_GROUP_PRODUCT[entry.group] === module).map(
+    (entry) => entry.id
+  );
+}
+
+/** When a product is subscribed, merge its default duties into customized builtin roles. */
+export async function syncBuiltinRolePermissionsForModules(
+  tenantId: string,
+  modules: TenantProductModule[]
+): Promise<void> {
+  const modulePermissions = new Set<Permission>();
+  for (const module of modules) {
+    for (const permission of permissionsForProductModule(module)) {
+      modulePermissions.add(permission);
+    }
+  }
+  if (modulePermissions.size === 0) {
+    return;
+  }
+
+  for (const role of TENANT_EDITABLE_BUILTIN_ROLES) {
+    const row = await loadOverrideRow(tenantId, role);
+    if (!row) {
+      continue;
+    }
+    const defaults = getPermissionsForRole(role);
+    const toAdd = [...modulePermissions].filter(
+      (permission) => defaults.includes(permission) && !row.duties.includes(permission)
+    );
+    if (toAdd.length === 0) {
+      continue;
+    }
+    await saveBuiltinRolePermissions(
+      tenantId,
+      role,
+      { duties: [...row.duties, ...toAdd] },
+      "system-module-sync"
+    );
+  }
 }
 
 export async function listBuiltinRolePermissions(

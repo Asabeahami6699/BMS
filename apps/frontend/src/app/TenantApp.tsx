@@ -37,12 +37,20 @@ import { LoanGroupApplyWizard } from "./loans/LoanGroupApplyWizard";
 import { LoanBlankFormPage } from "./loans/LoanBlankFormPage";
 import { LoanGroupsPage } from "./LoanGroupsPage";
 import { LoanDetailPage } from "./LoanDetailPage";
+import { InvestmentsOverviewPage } from "./investments/InvestmentsOverviewPage";
+import { InvestmentApplicationsPage } from "./investments/InvestmentApplicationsPage";
+import { InvestmentApplyPage } from "./investments/InvestmentApplyPage";
+import { InvestmentProductsPage } from "./investments/InvestmentProductsPage";
+import { InvestmentFormBuilderPage } from "./investments/InvestmentFormBuilderPage";
+import { InvestmentReportsPage } from "./investments/InvestmentReportsPage";
+import { InvestmentDetailPage } from "./investments/InvestmentDetailPage";
 import { TransactionLedgerCard } from "./TransactionLedgerCard";
 import { UserManagementCard } from "./UserManagementCard";
 import {
   AccessDenied,
   TenantAgencyRoute,
   TenantBankingRoute,
+  TenantInvestmentsRoute,
   TenantLoansRoute,
   TenantSettingsRoute,
   TenantSusuRoute,
@@ -105,13 +113,17 @@ const APPROVAL_WORKFLOW_STEPS = [
 ];
 
 export function TenantApp() {
-  const { user, logout } = useAuth();
+  const { user, logout, refreshMe } = useAuth();
   const navigate = useNavigate();
   const role = (user?.role ?? "admin") as AppRole;
   const [selectedBranch, setSelectedBranch] = useState(getRuntimeBranchId());
   const branches = useBranchesStore(useShallow((s) => s.branches));
 
   useBranchesLiveSync();
+
+  useEffect(() => {
+    void refreshMe();
+  }, [refreshMe]);
 
   const showBranchSelector = Boolean(user?.scopeType === "head_office");
   useBranchContextSync(showBranchSelector);
@@ -647,6 +659,62 @@ export function TenantApp() {
             <TenantLoansRoute route="loans/form" modules={modules} permissions={permissions}>
               <LoanBlankFormPage role={role} companyName={user?.tenantName} />
             </TenantLoansRoute>
+          }
+        />
+        <Route
+          path="/investments"
+          element={
+            <TenantInvestmentsRoute route="investments" modules={modules} permissions={permissions}>
+              <InvestmentsOverviewPage role={role} />
+            </TenantInvestmentsRoute>
+          }
+        />
+        <Route
+          path="/investments/applications"
+          element={
+            <TenantInvestmentsRoute route="investments/applications" modules={modules} permissions={permissions}>
+              <InvestmentApplicationsPage role={role} />
+            </TenantInvestmentsRoute>
+          }
+        />
+        <Route
+          path="/investments/applications/:investmentId"
+          element={
+            <TenantInvestmentsRoute route="investments/applications/detail" modules={modules} permissions={permissions}>
+              <InvestmentDetailPage role={role} />
+            </TenantInvestmentsRoute>
+          }
+        />
+        <Route
+          path="/investments/apply"
+          element={
+            <TenantInvestmentsRoute route="investments/apply" modules={modules} permissions={permissions}>
+              <InvestmentApplyPage role={role} />
+            </TenantInvestmentsRoute>
+          }
+        />
+        <Route
+          path="/investments/products"
+          element={
+            <TenantInvestmentsRoute route="investments/products" modules={modules} permissions={permissions}>
+              <InvestmentProductsPage role={role} />
+            </TenantInvestmentsRoute>
+          }
+        />
+        <Route
+          path="/investments/form-builder"
+          element={
+            <TenantInvestmentsRoute route="investments/form-builder" modules={modules} permissions={permissions}>
+              <InvestmentFormBuilderPage role={role} />
+            </TenantInvestmentsRoute>
+          }
+        />
+        <Route
+          path="/investments/reports"
+          element={
+            <TenantInvestmentsRoute route="investments/reports" modules={modules} permissions={permissions}>
+              <InvestmentReportsPage role={role} />
+            </TenantInvestmentsRoute>
           }
         />
         <Route

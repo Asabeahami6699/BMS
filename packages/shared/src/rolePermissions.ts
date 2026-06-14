@@ -51,6 +51,13 @@ export const permissionsByRole: Record<Role, Permission[]> = {
     "agency.accounts.create",
     "banking.products.read",
     "banking.products.manage",
+    "investments.read",
+    "investments.products.manage",
+    "investments.applications.create",
+    "investments.applications.approve",
+    "investments.redeem",
+    "investments.forms.manage",
+    "investments.reports.read",
     "workspace.notifications"
   ],
   coordinator: [

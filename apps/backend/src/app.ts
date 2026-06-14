@@ -35,6 +35,7 @@ import { treasuryRouter } from "./routes/treasury.routes.js";
 import { agencyRouter } from "./routes/agency.routes.js";
 import { bankProductsRouter } from "./routes/bankProducts.routes.js";
 import { operationsRouter } from "./routes/operations.routes.js";
+import { investmentsRouter } from "./routes/investments.routes.js";
 
 export function createApp() {
   const app = express();
@@ -75,6 +76,7 @@ export function createApp() {
   app.use("/api/v1/agency", moneyMutationRateLimit, agencyRouter);
   app.use("/api/v1/banking/products", adminMutationRateLimit, bankProductsRouter);
   app.use("/api/v1/operations", operationsRouter);
+  app.use("/api/v1/investments", moneyMutationRateLimit, investmentsRouter);
 
   return app;
 }

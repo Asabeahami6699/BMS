@@ -4,6 +4,7 @@ import {
   hasAnyPermission,
   hasTenantModule,
   isBuiltinRole,
+  INVESTMENTS_NAV_VISIBILITY,
   LOANS_NAV_VISIBILITY,
   MODULE_LABELS,
   SUSU_NAV_VISIBILITY,
@@ -183,6 +184,17 @@ function buildLoansChildren(): NavChildDef[] {
   return LOANS_NAV_CHILDREN;
 }
 
+const INVESTMENTS_CHILDREN: NavChildDef[] = INVESTMENTS_NAV_VISIBILITY.map((row) => ({
+  to: row.navPath,
+  label: row.label,
+  roleCheck: STAFF_NAV_ROLE_CHECK,
+  anyPermissions: [...row.anyPermissions]
+}));
+
+function buildInvestmentsChildren(): NavChildDef[] {
+  return INVESTMENTS_CHILDREN;
+}
+
 const TREASURY_CHILDREN: NavChildDef[] = TREASURY_NAV_VISIBILITY.map((row) => ({
   to: row.navPath,
   label: row.label,
@@ -287,6 +299,19 @@ export function buildTenantNav(
     items.push(loans);
   }
 
+  const investments = buildGroup(
+    "investment_management",
+    MODULE_LABELS.investment_management,
+    buildInvestmentsChildren(),
+    role,
+    permissions,
+    subscribedModules,
+    "investment_management"
+  );
+  if (investments) {
+    items.push(investments);
+  }
+
   const treasury = buildGroup(
     "treasury",
     MODULE_LABELS.treasury,
@@ -334,6 +359,9 @@ export function routeRequiresModule(path: string): TenantProductModule | undefin
   }
   if (path.includes("/treasury")) {
     return "treasury";
+  }
+  if (path.includes("/investments")) {
+    return "investment_management";
   }
   return undefined;
 }

@@ -18,7 +18,7 @@ import {
 import { z } from "zod";
 import { getSupabaseJwtSecret } from "../config/env.js";
 import { getPermissionsForRole } from "../config/permissions.js";
-import { resolvePermissionsForTenantUser } from "./builtinRolePermissionService.js";
+import { resolvePermissionsForTenantUser, syncBuiltinRolePermissionsForModules } from "./builtinRolePermissionService.js";
 import { assertValidUserJobTitle, parseProfileJobTitle, tenantJobTitleExists } from "./tenantJobTitleService.js";
 import { isSupabaseAuthNetworkError } from "../lib/networkError.js";
 import {
@@ -47,7 +47,7 @@ import {
 } from "./authStore.js";
 import { hashPassword, verifyPassword } from "./password.js";
 import { seedTransactionPinResetForNewUser } from "./transactionPinService.js";
-import { loadTenantModules, saveTenantModules, toTenantRecord } from "./tenantModuleService.js";
+import { loadTenantModules, reloadTenantModulesFromDb, saveTenantModules, toTenantRecord } from "./tenantModuleService.js";
 import { loadTenantAddons, saveTenantAddons } from "./tenantAddonService.js";
 import type { TenantProductModule } from "@bms/shared";
 import type { TenantAddon } from "@bms/shared";
@@ -74,12 +74,13 @@ async function enrichTenantContext(
     };
   }
 
+  const modules = await reloadTenantModulesFromDb(context.tenantId);
+  await syncBuiltinRolePermissionsForModules(context.tenantId, modules);
   const permissions = await resolvePermissionsForTenantUser(
     context.tenantId,
     context.role,
     context.userId
   );
-  const modules = await loadTenantModules(context.tenantId);
   const addons = await loadTenantAddons(context.tenantId);
   const tenant = getTenantFromStore(context.tenantId);
   if (!tenant && getSupabaseAdminClient()) {

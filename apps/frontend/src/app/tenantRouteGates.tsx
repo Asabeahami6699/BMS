@@ -9,6 +9,7 @@ import {
 } from "@bms/shared";
 import type { AppRole } from "./api";
 import { LoansPermissionGate } from "./loans/LoansPermissionGate";
+import { InvestmentsPermissionGate } from "./investments/InvestmentsPermissionGate";
 import { PermissionGate } from "./PermissionGate";
 import { SettingsPermissionGate } from "./SettingsPermissionGate";
 import { SusuPermissionGate } from "./SusuPermissionGate";
@@ -143,6 +144,23 @@ export function TenantAgencyRoute({ route, modules, permissions, children }: Age
       >
         {children}
       </PermissionGate>
+    </TenantModuleGate>
+  );
+}
+
+type InvestmentsRouteProps = {
+  route: string;
+  modules?: TenantProductModule[];
+  permissions?: Permission[];
+  children: ReactNode;
+};
+
+export function TenantInvestmentsRoute({ route, modules, permissions, children }: InvestmentsRouteProps) {
+  return (
+    <TenantModuleGate module="investment_management" modules={modules}>
+      <InvestmentsPermissionGate permissions={permissions} route={route} denied={<AccessDenied />}>
+        {children}
+      </InvestmentsPermissionGate>
     </TenantModuleGate>
   );
 }

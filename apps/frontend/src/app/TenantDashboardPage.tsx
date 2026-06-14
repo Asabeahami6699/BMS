@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import {
   hasAnyPermission,
   hasTenantModule,
+  listSubscribedProductModules,
   MODULE_DESCRIPTIONS,
   MODULE_LABELS,
   type Permission,
@@ -14,6 +15,9 @@ import { getLoansBootstrap } from "./api";
 import { useOverviewLiveSync } from "./hooks/useOverviewLiveSync";
 import { selectCoordinatorKpis, useCoordinatorStore } from "./stores/coordinatorStore";
 import { selectWithdrawalKpis, useWithdrawalsStore } from "./stores/withdrawalsStore";
+import { useInvestmentsLiveSync } from "./hooks/useInvestmentsLiveSync";
+import { selectInvestmentKpis, useInvestmentStore } from "./stores/investmentStore";
+import { formatInvestmentMoney } from "./investments/investmentUi";
 
 type Props = {
   role: AppRole;
@@ -41,7 +45,9 @@ export function TenantDashboardPage({ role, modules, permissions, me, branches, 
   const hasLoans = hasTenantModule(modules, "loans_credit");
   const hasBanking = hasTenantModule(modules, "banking");
   const hasTreasury = hasTenantModule(modules, "treasury");
+  const hasInvestments = hasTenantModule(modules, "investment_management");
   const canLoansRead = hasAnyPermission(permissions, ["loans.read"]);
+  const canInvestmentsRead = hasAnyPermission(permissions, ["investments.read"]);
 
   const loadCoordinator = hasSusu && (role === "admin" || role === "coordinator" || role === "accountant" || role === "auditor" || role === "teller");
   const loadWithdrawals = hasSusu && (role === "admin" || role === "coordinator");
@@ -54,6 +60,10 @@ export function TenantDashboardPage({ role, modules, permissions, me, branches, 
     loadGroupSavings: false,
     loadPerformance: false
   });
+
+  useInvestmentsLiveSync(hasInvestments && canInvestmentsRead);
+
+  const investmentKpis = useInvestmentStore(useShallow(selectInvestmentKpis));
 
   const susuKpis = useCoordinatorStore(useShallow(selectCoordinatorKpis));
   const withdrawals = useWithdrawalsStore((s) => s.withdrawals);
@@ -134,17 +144,42 @@ export function TenantDashboardPage({ role, modules, permissions, me, branches, 
       });
     }
 
+    if (hasInvestments && canInvestmentsRead) {
+      cards.push({
+        id: "investment_management",
+        title: MODULE_LABELS.investment_management,
+        description: MODULE_DESCRIPTIONS.investment_management,
+        to: "/app/investments",
+        metrics: [
+          { label: "Active investments", value: String(investmentKpis.active) },
+          { label: "Portfolio principal", value: formatInvestmentMoney(investmentKpis.totalPrincipal) },
+          { label: "Matured", value: String(investmentKpis.matured) }
+        ]
+      });
+    } else if (hasInvestments) {
+      cards.push({
+        id: "investment_management",
+        title: MODULE_LABELS.investment_management,
+        description: MODULE_DESCRIPTIONS.investment_management,
+        to: "/app/investments",
+        metrics: [{ label: "Access", value: "Limited" }]
+      });
+    }
+
     return cards;
   }, [
     hasSusu,
     hasLoans,
     hasBanking,
     hasTreasury,
+    hasInvestments,
     canLoansRead,
+    canInvestmentsRead,
     loadCoordinator,
     susuKpis,
     withdrawalKpis.pending,
-    loansData
+    loansData,
+    investmentKpis
   ]);
 
   const subscribedCount = modules?.length ?? 0;
