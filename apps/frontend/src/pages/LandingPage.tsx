@@ -10,9 +10,10 @@ import { ThemeToggle } from "../components/ThemeToggle";
 
 const heroBadges = [
   "Agency banking desks",
-  "Universal staff hub",
+  "Loans & solidarity groups",
+  "Investment management",
   "Susu & member ledger",
-  "Accountant & auditor control"
+  "Universal staff hub"
 ];
 
 const pillars = [
@@ -40,6 +41,18 @@ const pillars = [
     title: "HR & Universal Operations",
     text: "Every staff member gets attendance, leave, loans, announcements, documents, and incident reporting in one hub.",
     points: ["Employee profiles & payroll", "Leave & training records", "Incident workflow"]
+  },
+  {
+    tag: "Credit",
+    title: "Loans department",
+    text: "Individual and group solidarity lending with products, credit assessment, approval workflows, disbursement, and repayment tracking.",
+    points: ["Solidarity groups & members", "Guarantor & income capture", "Portfolio & overdue visibility"]
+  },
+  {
+    tag: "Investments",
+    title: "Investment management",
+    text: "Fixed deposits, treasury bills, bonds, and shares—with configurable application forms, portfolio tracking, and maturity reports.",
+    points: ["Multi-tier product rates", "Customer CIF & PDF export", "Auto-renewal & redemption"]
   }
 ];
 
@@ -120,7 +133,13 @@ const features = [
     icon: "💳",
     title: "Loans & credit products",
     text: "Individual and group solidarity loans with products, workflows, disbursement, and repayment tracking.",
-    tag: null
+    tag: "Credit"
+  },
+  {
+    icon: "◆",
+    title: "Investment management",
+    text: "Fixed deposits, treasury bills, bonds, and shares with portfolio tracking, maturity processing, and PDF customer records.",
+    tag: "New"
   },
   {
     icon: "👥",
@@ -157,6 +176,24 @@ const features = [
     title: "Permission-driven access",
     text: "Custom job titles and duty bundles—granular permissions without locking every user to a fixed role.",
     tag: null
+  }
+];
+
+const investmentSpotlight = [
+  {
+    step: "1",
+    title: "Configure investment products",
+    text: "Set up fixed deposits, T-bills, bonds, or shares with tenure tiers, rates, and branch availability."
+  },
+  {
+    step: "2",
+    title: "Capture applications in the field",
+    text: "Staff complete wizard-style forms with customer photos, KYC, beneficiaries, and investment terms."
+  },
+  {
+    step: "3",
+    title: "Track portfolio & maturities",
+    text: "Monitor active positions, process redemptions, run maturity reports, and export customer records as PDF."
   }
 ];
 
@@ -209,7 +246,7 @@ const steps = [
   {
     n: "01",
     title: "Onboard your cooperative",
-    text: "Contact us to register your organization with the products you need—Susu, agency banking, loans, or treasury."
+    text: "Contact us to register your organization with the products you need—Susu, agency banking, loans, investments, or treasury."
   },
   {
     n: "02",
@@ -230,9 +267,9 @@ const steps = [
 
 const highlights = [
   { value: "6+ desks", label: "Agency banking role workspaces" },
-  { value: "Universal Ops", label: "Staff hub for every employee" },
-  { value: "Live sync", label: "Dashboards refresh in the background" },
-  { value: "Audit-ready", label: "Traceable postings & review queues" }
+  { value: "Loans", label: "Solidarity lending & credit workflows" },
+  { value: "Investments", label: "Portfolio, maturities & PDF exports" },
+  { value: "Live sync", label: "Dashboards refresh in the background" }
 ];
 
 export function LandingPage() {
@@ -264,6 +301,7 @@ export function LandingPage() {
           <a href="#banking">Banking</a>
           <a href="#universal-ops">Staff hub</a>
           <a href="#loans">Loans</a>
+          <a href="#investments">Investments</a>
           <a href="#features">Features</a>
           <a href="#contact">Contact</a>
         </nav>
@@ -298,8 +336,9 @@ export function LandingPage() {
           </h1>
           <p className="landing-lead landing-animate-in landing-animate-in--3">
             BMS is a modern Banking Management System for multi-branch cooperatives and MFIs—daily Susu collections,
-            agency banking with teller and back-office desks, accountant and auditor control centres, HR operations,
-            and Universal Operations so every employee can manage attendance, leave, and workplace requests.
+            agency banking with teller and back-office desks, loans and investment management, accountant and auditor
+            control centres, HR operations, and Universal Operations so every employee can manage attendance, leave,
+            and workplace requests.
           </p>
           <ul className="landing-hero-badges landing-animate-in landing-animate-in--4" aria-label="Highlights">
             {heroBadges.map((badge) => (
@@ -337,10 +376,15 @@ export function LandingPage() {
             <p className="landing-mock-value">Staff hub</p>
             <p className="landing-mock-meta">Attendance · Leave · Docs</p>
           </div>
+          <div className="landing-mock-card landing-mock-card--small landing-animate-in landing-animate-in--8">
+            <p className="landing-mock-label">Loans portfolio</p>
+            <p className="landing-mock-value">GHS 2.4M</p>
+            <p className="landing-mock-meta">Disbursed · 18 pending approval</p>
+          </div>
           <div className="landing-mock-card landing-mock-card--small landing-mock-card--accent landing-animate-in landing-animate-in--8">
-            <p className="landing-mock-label">Auditor queue</p>
-            <p className="landing-mock-value">Review</p>
-            <p className="landing-mock-meta">Exceptions &amp; compliance</p>
+            <p className="landing-mock-label">Investment desk</p>
+            <p className="landing-mock-value">42 active</p>
+            <p className="landing-mock-meta">Fixed deposits · T-bills · maturities</p>
           </div>
           <div className="landing-mock-card landing-mock-card--wide landing-animate-in landing-animate-in--8">
             <div className="landing-mock-row">
@@ -364,14 +408,14 @@ export function LandingPage() {
 
       <section className="landing-section landing-section--alt" id="platform">
         <RevealOnScroll className="landing-section-head landing-section-head--center">
-          <p className="landing-eyebrow">Four pillars, one workspace</p>
-          <h2>Susu, agency banking, finance control, and staff operations together</h2>
+          <p className="landing-eyebrow">Products, one workspace</p>
+          <h2>Susu, banking, loans, investments, finance control, and staff operations together</h2>
           <p className="muted landing-section-sub">
-            Start with daily collections. Add partner-bank agency workflows, accountant and auditor dashboards, and
-            a Universal Operations hub so every employee has the tools they need.
+            Start with daily collections. Add partner-bank agency workflows, credit and investment products,
+            accountant and auditor dashboards, and a Universal Operations hub so every employee has the tools they need.
           </p>
         </RevealOnScroll>
-        <div className="landing-pillar-grid landing-pillar-grid--four">
+        <div className="landing-pillar-grid landing-pillar-grid--six">
           {pillars.map((pillar, index) => (
             <RevealOnScroll
               key={pillar.title}
@@ -485,6 +529,50 @@ export function LandingPage() {
         </div>
       </section>
 
+      <section className="landing-section landing-investments-spotlight" id="investments">
+        <div className="landing-loans-spotlight__inner landing-investments-spotlight__inner">
+          <RevealOnScroll className="landing-loans-spotlight__copy">
+            <p className="landing-eyebrow">Investment management</p>
+            <h2>Fixed deposits, treasury bills, bonds, and shares in one portfolio</h2>
+            <p className="muted">
+              Configure investment products with multi-tier rates, onboard customers through customizable application
+              forms with photos and KYC, and supervise the full lifecycle—from approval through maturity, redemption,
+              and auto-renewal—with printable customer records.
+            </p>
+            <ul className="landing-loans-checklist">
+              <li>Product catalog with tenure and rate tiers</li>
+              <li>Wizard-style applications with customer CIF layout</li>
+              <li>Portfolio filters, audit trail, and maturity reports</li>
+              <li>Direct PDF export with portrait and ID photos</li>
+            </ul>
+            <button
+              type="button"
+              className="button landing-cta-primary"
+              onClick={() => {
+                if (session?.accessToken && user) {
+                  handlePrimaryCta();
+                  return;
+                }
+                document.getElementById("contact")?.scrollIntoView({ behavior: "smooth" });
+              }}
+            >
+              {session?.accessToken && user ? "Open your workspace" : "Talk to us about investments"}
+            </button>
+          </RevealOnScroll>
+          <div className="landing-loans-flow">
+            {investmentSpotlight.map((item, index) => (
+              <RevealOnScroll key={item.title} as="article" className="landing-loans-flow__step" delay={index * 90}>
+                <span className="landing-loans-flow__num">{item.step}</span>
+                <div>
+                  <h3>{item.title}</h3>
+                  <p>{item.text}</p>
+                </div>
+              </RevealOnScroll>
+            ))}
+          </div>
+        </div>
+      </section>
+
       <section className="landing-section" id="features">
         <RevealOnScroll className="landing-section-head">
           <p className="landing-eyebrow">Platform capabilities</p>
@@ -563,7 +651,7 @@ export function LandingPage() {
           </p>
           <p className="muted">
             BMS — Banking Management System for cooperatives and MFIs. Susu collections, agency banking desks,
-            Universal Operations for staff, credit products, and finance control in one secure workspace.
+            loans, investment management, Universal Operations for staff, and finance control in one secure workspace.
           </p>
         </RevealOnScroll>
       </section>
@@ -588,7 +676,7 @@ export function LandingPage() {
           Contact: <a href={`mailto:${BMS_CONTACT_EMAIL}`}>{BMS_CONTACT_EMAIL}</a>
         </p>
         <p className="muted">
-          Multi-tenant · Susu &amp; agency banking · Universal Operations · Live sync · Audit-friendly
+          Multi-tenant · Susu &amp; agency banking · Loans &amp; investments · Universal Operations · Live sync
         </p>
       </footer>
 
