@@ -1,5 +1,6 @@
 import { Router, type Request } from "express";
 import { requirePermission } from "../middleware/requirePermission.js";
+import { requireTransactionStepUp } from "../middleware/requireTransactionStepUp.js";
 import { resolveRequestBranchFilter } from "../middleware/branchScope.js";
 import {
   executeBankDeposit,
@@ -7,6 +8,8 @@ import {
   getAgencyBootstrap,
   initiateAgencyWithdrawal,
   listTellerAgencyDeposits,
+  cancelTellerAgencyDeposit,
+  updateTellerAgencyDeposit,
   tellerPayWithdrawal
 } from "../services/agencyBankingService.js";
 import {
@@ -301,6 +304,46 @@ agencyRouter.get(
   }
 );
 
+agencyRouter.patch(
+  "/teller/deposits/:transactionId",
+  requirePermission("agency.deposits.record"),
+  async (req, res) => {
+    const context = req.userContext;
+    if (!context) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    try {
+      const deposit = await updateTellerAgencyDeposit(
+        toTxContext(context),
+        String(req.params.transactionId),
+        req.body
+      );
+      res.json({ deposit });
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : "Deposit update failed" });
+    }
+  }
+);
+
+agencyRouter.post(
+  "/teller/deposits/:transactionId/cancel",
+  requirePermission("agency.deposits.record"),
+  async (req, res) => {
+    const context = req.userContext;
+    if (!context) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    try {
+      await cancelTellerAgencyDeposit(toTxContext(context), String(req.params.transactionId), req.body);
+      res.json({ ok: true });
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : "Deposit cancellation failed" });
+    }
+  }
+);
+
 agencyRouter.get(
   "/back-office/bootstrap",
   requirePermission("agency.bank.execute"),
@@ -448,6 +491,7 @@ agencyRouter.post(
 agencyRouter.post(
   "/back-office/deposits/:transactionId/done",
   requirePermission("agency.bank.execute"),
+  requireTransactionStepUp,
   async (req, res) => {
     const context = req.userContext;
     if (!context) {
@@ -682,6 +726,7 @@ agencyRouter.put("/hr/policies", requirePermission("users.update"), async (req, 
 agencyRouter.post(
   "/withdrawals/:disclosureId/pay-cash",
   requirePermission("agency.withdrawals.pay"),
+  requireTransactionStepUp,
   async (req, res) => {
     const context = req.userContext;
     if (!context) {

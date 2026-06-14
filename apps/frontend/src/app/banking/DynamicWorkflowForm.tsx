@@ -1,5 +1,5 @@
 import type { BankProductWorkflowField } from "@bms/shared";
-import { applyWorkflowAutoFields } from "@bms/shared";
+import { applyWorkflowAutoFields, formatGhanaCardInput } from "@bms/shared";
 
 type Props = {
   fields: BankProductWorkflowField[];
@@ -44,8 +44,12 @@ export function DynamicWorkflowForm({ fields, values, disabled, onChange }: Prop
         const isReadOnly = field.readOnly === true || Boolean(field.autoFrom);
 
         if (field.type === "checkbox") {
+          const isSelfCheckbox = field.key === "deposit_self";
           return (
-            <label key={field.key} className="field workflow-form__checkbox">
+            <label
+              key={field.key}
+              className={`field workflow-form__checkbox${isSelfCheckbox ? " workflow-form__checkbox--self" : ""}`}
+            >
               <input
                 id={id}
                 type="checkbox"
@@ -119,7 +123,9 @@ export function DynamicWorkflowForm({ fields, values, disabled, onChange }: Prop
                   ? "date"
                   : "text";
 
-        const isDepositorNumber = field.key === "depositor_number";
+        const isPhoneField = field.type === "phone";
+        const isCommissionField = field.key === "commission";
+        const isGhanaCardField = field.key === "ghana_card_number";
 
         return (
           <label key={field.key} className="field">
@@ -129,18 +135,24 @@ export function DynamicWorkflowForm({ fields, values, disabled, onChange }: Prop
             </span>
             <input
               id={id}
-              type={isDepositorNumber ? "tel" : inputType}
-              inputMode={isDepositorNumber ? "numeric" : undefined}
-              maxLength={isDepositorNumber ? 10 : undefined}
-              pattern={isDepositorNumber ? "[0-9]{10}" : undefined}
+              className={isCommissionField || field.type === "number" ? "input-no-spin" : undefined}
+              type={isPhoneField ? "tel" : inputType}
+              inputMode={isPhoneField ? "numeric" : isGhanaCardField ? "numeric" : isCommissionField ? "decimal" : undefined}
+              min={isCommissionField ? 0 : undefined}
+              step={isCommissionField ? 0.01 : undefined}
+              maxLength={isPhoneField ? 10 : isGhanaCardField ? 14 : undefined}
+              pattern={isPhoneField ? "[0-9]{10}" : undefined}
+              placeholder={isGhanaCardField ? "GHA-123456789-0" : field.placeholder}
               value={value != null ? String(value) : ""}
-              placeholder={field.placeholder}
               disabled={disabled || isReadOnly}
               readOnly={isReadOnly}
               onChange={(e) => {
-                const next = isDepositorNumber
-                  ? e.target.value.replace(/\D/g, "").slice(0, 10)
-                  : e.target.value;
+                let next = e.target.value;
+                if (isPhoneField) {
+                  next = e.target.value.replace(/\D/g, "").slice(0, 10);
+                } else if (isGhanaCardField) {
+                  next = formatGhanaCardInput(e.target.value);
+                }
                 handleChange(field.key, next);
               }}
             />

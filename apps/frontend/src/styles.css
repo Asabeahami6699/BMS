@@ -6,6 +6,7 @@
   --bg-surface: #161b22;
   --bg-surface-elevated: #1c2330;
   --bg-input: #121820;
+  --bg-card: #161b22;
   --border: #252d3a;
   --border-soft: #1e2633;
   --text: #f4f7fb;
@@ -52,6 +53,7 @@
   --bg-surface: #ffffff;
   --bg-surface-elevated: #f8fafc;
   --bg-input: #f1f5f9;
+  --bg-card: #ffffff;
   --border: #d8e0ea;
   --border-soft: #e8edf3;
   --text: #0f172a;
@@ -3855,6 +3857,85 @@ select:disabled {
   max-width: min(92vw, 26rem);
 }
 
+.transaction-pin-modal .modal-body {
+  padding-top: 0.25rem;
+}
+
+.transaction-pin-modal__body {
+  display: grid;
+  gap: 0.85rem;
+  justify-items: center;
+}
+
+.transaction-pin-modal__input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.transaction-pin-modal__hint {
+  margin: 0;
+  font-size: 0.8rem;
+  text-align: center;
+}
+
+.transaction-pin-modal__dots {
+  display: flex;
+  gap: 0.65rem;
+}
+
+.transaction-pin-modal__dot {
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 999px;
+  border: 2px solid var(--border);
+  background: transparent;
+}
+
+.transaction-pin-modal__dot.is-filled {
+  border-color: var(--primary);
+  background: var(--primary);
+}
+
+.transaction-pin-modal__pad {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(3.25rem, 1fr));
+  gap: 0.5rem;
+  width: min(100%, 14rem);
+}
+
+.transaction-pin-modal__key {
+  min-height: 2.75rem;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 1.1rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.transaction-pin-modal__key:hover:not(:disabled) {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.transaction-pin-modal__key--muted {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.transaction-pin-modal__busy {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
 .company-account-form .field small {
   display: block;
   margin-top: 0.35rem;
@@ -4812,7 +4893,7 @@ select:disabled {
 .row-actions-trigger[aria-expanded="true"] {
   color: var(--text);
   border-color: var(--primary);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface-hover);
 }
 
 .row-actions-menu {
@@ -4824,10 +4905,10 @@ select:disabled {
   margin: 0;
   padding: 0.35rem 0;
   list-style: none;
-  background: var(--bg-card, #1a1f2e);
+  background: var(--bg-card);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-sm);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--shadow-card);
 }
 
 .row-actions-item {
@@ -4843,7 +4924,7 @@ select:disabled {
 }
 
 .row-actions-item:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-hover);
 }
 
 .row-actions-item--danger {
@@ -7239,7 +7320,7 @@ select:disabled {
 }
 
 .cif-ledger__row:nth-child(even) {
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--surface-hover);
 }
 
 .cif-ledger__type--credit {
@@ -7378,6 +7459,32 @@ select:disabled {
   font-size: 0.82rem;
 }
 
+[data-theme="light"] .cif-account-card {
+  border-color: rgba(61, 90, 254, 0.22);
+  background: linear-gradient(135deg, #eef2ff 0%, var(--bg-surface-elevated) 52%, #f8fafc 100%);
+}
+
+[data-theme="light"] .cif-account-card::after {
+  background: radial-gradient(ellipse 80% 60% at 100% 0%, rgba(124, 77, 255, 0.1), transparent 55%);
+}
+
+[data-theme="light"] .cif-account-card__chip {
+  background: linear-gradient(135deg, rgba(61, 90, 254, 0.25), rgba(61, 90, 254, 0.08));
+  border-color: rgba(61, 90, 254, 0.2);
+}
+
+[data-theme="light"] .cif-account-card__eyebrow {
+  color: var(--text-dim);
+}
+
+[data-theme="light"] .cif-account-card__number {
+  color: var(--text);
+}
+
+[data-theme="light"] .cif-lightbox {
+  background: rgba(15, 23, 42, 0.55);
+}
+
 .customer-profile__reject,
 .cif-reject {
   margin-top: 1rem;
@@ -7455,6 +7562,15 @@ select:disabled {
   align-items: center;
   gap: 0.55rem;
   margin-bottom: 1rem;
+}
+
+.branch-counter__section-head--split {
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.branch-counter__clear-form {
+  flex-shrink: 0;
 }
 
 .branch-counter__section-head h3 {
@@ -10580,6 +10696,9 @@ select:disabled {
 }
 
 .role-workspace__hero {
+  position: relative;
+  z-index: 1;
+  overflow: visible;
   background: linear-gradient(
     135deg,
     rgba(59, 130, 246, 0.1) 0%,
@@ -10617,11 +10736,124 @@ select:disabled {
   color: var(--accent, #60a5fa);
 }
 
+.role-workspace__hero-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.35rem;
+}
+
+.role-workspace__hero-tools {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-shrink: 0;
+}
+
 .role-workspace__hero-row {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
+}
+
+.role-workspace__workflow-tip {
+  position: relative;
+  display: inline-flex;
+}
+
+.role-workspace__workflow-tip-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  height: auto;
+  min-height: 1.75rem;
+  padding: 0.3rem 0.55rem 0.3rem 0.65rem;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--bg-input);
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  font-style: normal;
+  font-family: inherit;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.role-workspace__workflow-tip-label {
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  font-size: 0.68rem;
+}
+
+.role-workspace__workflow-tip-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.15rem;
+  height: 1.15rem;
+  border-radius: 999px;
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--text);
+  font-size: 0.62rem;
+  font-weight: 700;
+  font-style: italic;
+  font-family: Georgia, "Times New Roman", serif;
+  flex-shrink: 0;
+}
+
+.role-workspace__workflow-tip-btn:hover,
+.role-workspace__workflow-tip-btn:focus-visible,
+.role-workspace__workflow-tip.is-open .role-workspace__workflow-tip-btn,
+.role-workspace__workflow-tip.is-hovered .role-workspace__workflow-tip-btn {
+  border-color: rgba(96, 165, 250, 0.55);
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--text);
+  outline: none;
+}
+
+.role-workspace__workflow-tip-popover {
+  width: min(20rem, 78vw);
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-card);
+}
+
+.role-workspace__workflow-tip-popover--floating {
+  position: fixed;
+  z-index: 1200;
+  max-height: min(18rem, 55vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  animation: role-workspace-workflow-in 0.18s ease both;
+}
+
+@keyframes role-workspace-workflow-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.role-workspace__workflow-tip-title {
+  margin: 0 0 0.6rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
 }
 
 .role-workspace__hero h2 {
@@ -10640,6 +10872,9 @@ select:disabled {
 
 .role-workspace__refresh {
   flex-shrink: 0;
+  min-width: 2.25rem;
+  padding-left: 0.55rem;
+  padding-right: 0.55rem;
 }
 
 .role-workspace__kpis .role-workspace__kpi {
@@ -10648,10 +10883,6 @@ select:disabled {
 
 .role-workspace__kpis .role-workspace__kpi:hover {
   transform: translateY(-2px);
-}
-
-.role-workspace__workflow h3 {
-  margin: 0 0 0.75rem;
 }
 
 .role-workspace__steps {
@@ -12223,6 +12454,64 @@ select:disabled {
   font-weight: 700;
 }
 
+.agency-deposit-table__actions .row-actions {
+  justify-content: flex-end;
+}
+
+.agency-deposit-table__actions {
+  width: 3rem;
+  text-align: right;
+}
+
+.teller-deposit-confirm__body {
+  display: grid;
+  gap: 1rem;
+}
+
+.teller-deposit-confirm__list {
+  margin: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.teller-deposit-confirm__list > div {
+  display: grid;
+  grid-template-columns: minmax(7rem, 9rem) 1fr;
+  gap: 0.5rem 1rem;
+  align-items: baseline;
+}
+
+.teller-deposit-confirm__list dt {
+  margin: 0;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.teller-deposit-confirm__list dd {
+  margin: 0;
+}
+
+.teller-deposit-confirm__type {
+  font-size: 0.88em;
+}
+
+.teller-deposit-confirm__amount-words {
+  display: block;
+  font-size: 0.88em;
+  margin-top: 0.2rem;
+}
+
+.teller-deposit-confirm__hint {
+  margin: 0;
+}
+
+.teller-deposit-confirm__actions {
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
 .agency-deposit-table__time {
   white-space: nowrap;
   font-size: 0.82rem;
@@ -12522,6 +12811,33 @@ select:disabled {
   flex-direction: row !important;
   align-items: flex-start;
   gap: 0.5rem;
+}
+
+.workflow-form__checkbox--self {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.35rem 0;
+}
+
+.workflow-form__checkbox--self input[type="checkbox"] {
+  width: 1.35rem;
+  height: 1.35rem;
+  margin: 0;
+  flex-shrink: 0;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.workflow-form__checkbox--self > span {
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.35rem;
+}
+
+.workflow-form__checkbox--self small {
+  flex-basis: 100%;
+  margin-left: calc(1.35rem + 0.65rem);
 }
 
 .workflow-fields-editor {

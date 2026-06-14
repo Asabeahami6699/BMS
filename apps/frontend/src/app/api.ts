@@ -23,6 +23,7 @@ import type {
   CreateCashMovementInput
 } from "@bms/shared";
 import { isNetworkError, toUserFacingError, withNetworkRetry } from "../lib/networkError";
+import { withTransactionStepUp } from "../lib/transactionPinBridge";
 import { SESSION_UNAUTHORIZED_EVENT } from "../auth/sessionIdleConfig";
 
 export type { AccountType, TenantProductModule };
@@ -555,6 +556,12 @@ export type AuthMe = {
   subscribedAddons?: TenantAddon[];
   reportsAnalytics?: boolean;
   susuNavVisibility?: SusuNavVisibilityRow[];
+  transactionPin?: {
+    required: boolean;
+    configured: boolean;
+    resetRequired: boolean;
+    lockedUntil?: string | null;
+  };
 };
 
 /** Stable compare key so auth state updates skip when /auth/me payload is unchanged. */
@@ -575,7 +582,8 @@ export function authMeSignature(me: AuthMe | null | undefined): string {
     fullName: me.fullName ?? "",
     email: me.email ?? "",
     tenantName: me.tenantName ?? "",
-    susuNavVisibility: me.susuNavVisibility ?? null
+    susuNavVisibility: me.susuNavVisibility ?? null,
+    transactionPin: me.transactionPin ?? null
   });
 }
 
@@ -616,12 +624,15 @@ function persistSession(session: AuthSession | null): void {
   }
 }
 
-export function authHeaders(): Record<string, string> {
+export function authHeaders(transactionAuthToken?: string): Record<string, string> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json"
   };
   if (authSession?.accessToken) {
     headers.Authorization = `Bearer ${authSession.accessToken}`;
+  }
+  if (transactionAuthToken) {
+    headers["X-Transaction-Authorization"] = transactionAuthToken;
   }
   return headers;
 }
@@ -672,7 +683,7 @@ function formatApiError(
   return body.error ?? `Request failed (${status})`;
 }
 
-export async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
+export async function fetchJson<T>(url: string, init?: RequestInit, retried = false): Promise<T> {
   return withNetworkRetry(async () => {
     try {
       const response = await fetch(withBranchScope(url), init);
@@ -685,6 +696,19 @@ export async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> 
           };
         };
         if (response.status === 401) {
+          if (!retried && authSession?.accessToken) {
+            const refreshed = await refreshAuthSession();
+            if (refreshed) {
+              const retryInit: RequestInit = {
+                ...init,
+                headers: {
+                  ...(init?.headers as Record<string, string> | undefined),
+                  ...authHeaders()
+                }
+              };
+              return fetchJson<T>(url, retryInit, true);
+            }
+          }
           handleUnauthorizedResponse();
         }
         if (response.status === 413) {
@@ -743,7 +767,6 @@ export async function refreshAuthSession(): Promise<boolean> {
       headers: authHeaders()
     });
     if (response.status === 401) {
-      handleUnauthorizedResponse();
       return false;
     }
     return response.ok;
@@ -843,6 +866,44 @@ export async function changeMyPassword(currentPassword: string, newPassword: str
     method: "POST",
     headers: authHeaders(),
     body: JSON.stringify({ currentPassword, newPassword })
+  });
+}
+
+export type TransactionPinStatus = {
+  required: boolean;
+  configured: boolean;
+  resetRequired: boolean;
+  lockedUntil?: string | null;
+};
+
+export async function getTransactionPinStatus(): Promise<TransactionPinStatus> {
+  return fetchJson<TransactionPinStatus>(`${API_BASE_URL}/api/v1/auth/transaction-pin/status`, {
+    headers: authHeaders()
+  });
+}
+
+export async function setTransactionPin(pin: string, confirmPin: string): Promise<void> {
+  await fetchJson(`${API_BASE_URL}/api/v1/auth/transaction-pin/setup`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ pin, confirmPin })
+  });
+}
+
+export async function verifyTransactionPin(
+  pin: string
+): Promise<{ token: string; expiresAt: string }> {
+  return fetchJson(`${API_BASE_URL}/api/v1/auth/transaction-pin/verify`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ pin })
+  });
+}
+
+export async function requireUserTransactionPinReset(userId: string): Promise<void> {
+  await fetchJson(`${API_BASE_URL}/api/v1/users/${userId}/transaction-pin/reset`, {
+    method: "POST",
+    headers: authHeaders()
   });
 }
 
@@ -1968,11 +2029,13 @@ export async function settleBranchFloat(sessionId: string): Promise<BranchFloatS
 
 export async function getBranchCounterBootstrap(
   branchId: string,
-  date: string
+  date: string,
+  options?: { minimal?: boolean }
 ): Promise<BranchCounterBootstrapResponse> {
   const params = new URLSearchParams();
   if (branchId) params.set("branchId", branchId);
   if (date) params.set("date", date);
+  if (options?.minimal) params.set("minimal", "true");
   const query = params.toString();
   return fetchJson<BranchCounterBootstrapResponse>(
     `${API_BASE_URL}/api/v1/transactions/branch-counter-bootstrap${query ? `?${query}` : ""}`,
@@ -1999,16 +2062,19 @@ export async function createTransaction(payload: {
   notes?: string;
   bankProductId?: string;
   workflowData?: Record<string, unknown>;
+  manualPartnerAccount?: boolean;
 }): Promise<Transaction> {
   const idempotencyKey = crypto.randomUUID();
-  return fetchJson<Transaction>(`${API_BASE_URL}/api/v1/transactions`, {
-    method: "POST",
-    headers: {
-      ...authHeaders(),
-      "Idempotency-Key": idempotencyKey
-    },
-    body: JSON.stringify(payload)
-  });
+  return withTransactionStepUp((transactionAuthToken) =>
+    fetchJson<Transaction>(`${API_BASE_URL}/api/v1/transactions`, {
+      method: "POST",
+      headers: {
+        ...authHeaders(transactionAuthToken || undefined),
+        "Idempotency-Key": idempotencyKey
+      },
+      body: JSON.stringify(payload)
+    })
+  );
 }
 
 export async function getCustomerLedger(customerId: string): Promise<LedgerEntry[]> {
@@ -2663,6 +2729,32 @@ export async function getTellerAgencyDeposits(options?: {
   });
 }
 
+export async function updateTellerAgencyDeposit(
+  transactionId: string,
+  payload: import("@bms/shared").UpdateTellerAgencyDepositInput
+): Promise<import("@bms/shared").TellerDepositStatus> {
+  const response = await fetchJson<{ deposit: import("@bms/shared").TellerDepositStatus }>(
+    `${API_BASE_URL}/api/v1/agency/teller/deposits/${encodeURIComponent(transactionId)}`,
+    {
+      method: "PATCH",
+      headers: authHeaders(),
+      body: JSON.stringify(payload)
+    }
+  );
+  return response.deposit;
+}
+
+export async function cancelTellerAgencyDeposit(
+  transactionId: string,
+  reason: string
+): Promise<void> {
+  await fetchJson(`${API_BASE_URL}/api/v1/agency/teller/deposits/${encodeURIComponent(transactionId)}/cancel`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ reason })
+  });
+}
+
 export async function getAccountantDashboard(options?: {
   branchId?: string;
 }): Promise<import("@bms/shared").AccountantDashboard> {
@@ -2979,11 +3071,13 @@ export async function executeBackOfficeDepositDone(
   transactionId: string,
   executionBankProductId: string
 ): Promise<import("@bms/shared").BackOfficeBootstrap> {
-  return fetchJson(`${API_BASE_URL}/api/v1/agency/back-office/deposits/${transactionId}/done`, {
-    method: "POST",
-    headers: { ...authHeaders(), "Content-Type": "application/json" },
-    body: JSON.stringify({ executionBankProductId })
-  });
+  return withTransactionStepUp((transactionAuthToken) =>
+    fetchJson(`${API_BASE_URL}/api/v1/agency/back-office/deposits/${transactionId}/done`, {
+      method: "POST",
+      headers: { ...authHeaders(transactionAuthToken || undefined), "Content-Type": "application/json" },
+      body: JSON.stringify({ executionBankProductId })
+    })
+  );
 }
 
 export async function approveBackOfficeAccountantDeposit(
@@ -3064,10 +3158,12 @@ export async function executeAgencyBankWithdrawal(
 }
 
 export async function tellerPayAgencyWithdrawal(disclosureId: string): Promise<BalanceDisclosure> {
-  return fetchJson(`${API_BASE_URL}/api/v1/agency/withdrawals/${disclosureId}/pay-cash`, {
-    method: "POST",
-    headers: authHeaders()
-  });
+  return withTransactionStepUp((transactionAuthToken) =>
+    fetchJson(`${API_BASE_URL}/api/v1/agency/withdrawals/${disclosureId}/pay-cash`, {
+      method: "POST",
+      headers: authHeaders(transactionAuthToken || undefined)
+    })
+  );
 }
 
 export async function initiateAgencyWithdrawal(

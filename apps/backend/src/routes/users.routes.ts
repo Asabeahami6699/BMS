@@ -29,6 +29,7 @@ import {
   updateTenantUser
 
 } from "../services/authService.js";
+import { requireTransactionPinResetForUser } from "../services/transactionPinService.js";
 
 import { getAgentsBootstrap } from "../services/agentsBootstrapService.js";
 import { getCoordinatorsBootstrap } from "../services/coordinatorsBootstrapService.js";
@@ -523,6 +524,30 @@ usersRouter.post("/:userId/reset-password", requirePermission("users.update"), a
 
   }
 
+});
+
+
+
+usersRouter.post("/:userId/transaction-pin/reset", requirePermission("users.update"), async (req, res) => {
+  const context = req.userContext;
+  if (!context?.tenantId || context.tenantId === "platform") {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const userId = Array.isArray(req.params.userId) ? req.params.userId[0] : req.params.userId;
+  try {
+    await requireTransactionPinResetForUser(
+      context.tenantId,
+      userId,
+      context.userId,
+      context.role
+    );
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(400).json({
+      error: error instanceof Error ? error.message : "Failed to require transaction PIN reset"
+    });
+  }
 });
 
 

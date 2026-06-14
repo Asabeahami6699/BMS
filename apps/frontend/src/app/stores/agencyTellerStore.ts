@@ -1,7 +1,8 @@
 import { create } from "zustand";
-import type { TenantBankProduct, TellerDepositStatus } from "@bms/shared";
+import type { TenantBankProduct, TellerDepositStatus, UpdateTellerAgencyDepositInput } from "@bms/shared";
 import type { Branch, Customer, LedgerEntry } from "../api";
 import {
+  cancelTellerAgencyDeposit,
   createTransaction,
   getAgencyWalkInCustomer,
   getBranchCounterBootstrap,
@@ -9,7 +10,8 @@ import {
   getRuntimeBranchId,
   getTenantId,
   getTellerAgencyDeposits,
-  setRuntimeBranchId
+  setRuntimeBranchId,
+  updateTellerAgencyDeposit
 } from "../api";
 import { toUserFacingError } from "../../lib/networkError";
 import {
@@ -34,6 +36,7 @@ type AgencyTellerState = {
   recentDeposits: TellerDepositStatus[];
   depositsBusinessDate: string;
   loading: boolean;
+  depositsLoading: boolean;
   posting: boolean;
   error: string | null;
   lastFetchedAt: number | null;
@@ -53,7 +56,14 @@ type AgencyTellerState = {
     notes?: string;
     bankProductId?: string;
     workflowData?: Record<string, unknown>;
+    manualPartnerAccount?: boolean;
   }) => Promise<void>;
+  refreshDeposits: () => Promise<void>;
+  updatePendingDeposit: (
+    transactionId: string,
+    payload: UpdateTellerAgencyDepositInput
+  ) => Promise<TellerDepositStatus>;
+  cancelPendingDeposit: (transactionId: string, reason: string) => Promise<void>;
   startLiveSync: () => void;
   stopLiveSync: () => void;
 };
@@ -75,6 +85,17 @@ function resolveBranchId(stored: string, branches: Branch[]): string {
   return branches[0]?.id ?? "";
 }
 
+function filterDepositProducts(products: TenantBankProduct[]): TenantBankProduct[] {
+  return products.filter((p) => p.direction === "deposit" && p.isActive && !p.isCompanyBankAccount);
+}
+
+async function loadDepositsForBranch(branchId: string, date: string) {
+  if (!branchId) {
+    return null;
+  }
+  return getTellerAgencyDeposits({ branchId, date }).catch(() => null);
+}
+
 export const useAgencyTellerStore = create<AgencyTellerState>((set, get) => ({
   customers: [],
   branches: [],
@@ -86,6 +107,7 @@ export const useAgencyTellerStore = create<AgencyTellerState>((set, get) => ({
   recentDeposits: [],
   depositsBusinessDate: todayIso(),
   loading: false,
+  depositsLoading: false,
   posting: false,
   error: null,
   lastFetchedAt: null,
@@ -114,34 +136,38 @@ export const useAgencyTellerStore = create<AgencyTellerState>((set, get) => ({
     fetchInFlight = (async () => {
       try {
         const date = todayIso();
-        const data = await getBranchCounterBootstrap(branchId, date);
+        const data = await getBranchCounterBootstrap(branchId, date, { minimal: true });
         const nextBranchId = resolveBranchId(get().transactionBranchId, data.branches);
-        const depositsData = nextBranchId
-          ? await getTellerAgencyDeposits({ branchId: nextBranchId, date }).catch(() => null)
-          : null;
         set({
           customers: data.customers,
           branches: data.branches,
-          bankProducts: (data.bankProducts ?? []).filter(
-            (p) => p.direction === "deposit" && p.isActive && !p.isCompanyBankAccount
-          ),
+          bankProducts: filterDepositProducts(data.bankProducts ?? []),
           transactionBranchId: nextBranchId,
-          recentDeposits: depositsData?.deposits ?? [],
-          depositsBusinessDate: depositsData?.businessDate ?? date,
           lastFetchedAt: Date.now(),
-          error: null
+          error: null,
+          loading: false
         });
         if (nextBranchId) {
           setRuntimeBranchId(nextBranchId);
         }
+        set({ depositsLoading: true });
+        void loadDepositsForBranch(nextBranchId, date)
+          .then((depositsData) => {
+            if (depositsData) {
+              set({
+                recentDeposits: depositsData.deposits,
+                depositsBusinessDate: depositsData.businessDate
+              });
+            }
+          })
+          .finally(() => set({ depositsLoading: false }));
         const selected = get().selectedCustomerId;
         if (selected) {
-          await get().loadLedger(selected, { force: true });
+          void get().loadLedger(selected, { force: true });
         }
       } catch (error) {
-        set({ error: toUserFacingError(error, "Could not load agency teller data") });
+        set({ error: toUserFacingError(error, "Could not load agency teller data"), loading: false });
       } finally {
-        set({ loading: false });
         fetchInFlight = null;
       }
     })();
@@ -160,18 +186,14 @@ export const useAgencyTellerStore = create<AgencyTellerState>((set, get) => ({
         const nextBranchId = resolveBranchId(get().transactionBranchId, get().branches);
         const effectiveBranch = branchId || nextBranchId;
         const [data, depositsData] = await Promise.all([
-          getBranchCounterBootstrap(effectiveBranch, date),
-          effectiveBranch
-            ? getTellerAgencyDeposits({ branchId: effectiveBranch, date }).catch(() => null)
-            : Promise.resolve(null)
+          getBranchCounterBootstrap(effectiveBranch, date, { minimal: true }),
+          loadDepositsForBranch(effectiveBranch, date)
         ]);
         const resolvedBranchId = resolveBranchId(get().transactionBranchId, data.branches);
         set({
           customers: data.customers,
           branches: data.branches,
-          bankProducts: (data.bankProducts ?? []).filter(
-            (p) => p.direction === "deposit" && p.isActive && !p.isCompanyBankAccount
-          ),
+          bankProducts: filterDepositProducts(data.bankProducts ?? []),
           transactionBranchId: resolvedBranchId,
           recentDeposits: depositsData?.deposits ?? get().recentDeposits,
           depositsBusinessDate: depositsData?.businessDate ?? date,
@@ -216,6 +238,38 @@ export const useAgencyTellerStore = create<AgencyTellerState>((set, get) => ({
     }
   },
 
+  refreshDeposits: async () => {
+    const branchId = get().transactionBranchId || getRuntimeBranchId() || "";
+    if (!branchId) {
+      return;
+    }
+    set({ depositsLoading: true });
+    try {
+      const depositsData = await getTellerAgencyDeposits({ branchId, date: todayIso() });
+      set({
+        recentDeposits: depositsData.deposits,
+        depositsBusinessDate: depositsData.businessDate
+      });
+    } catch {
+      /* keep cache */
+    } finally {
+      set({ depositsLoading: false });
+    }
+  },
+
+  updatePendingDeposit: async (transactionId, payload) => {
+    const deposit = await updateTellerAgencyDeposit(transactionId, payload);
+    set((state) => ({
+      recentDeposits: state.recentDeposits.map((row) => (row.id === deposit.id ? deposit : row))
+    }));
+    return deposit;
+  },
+
+  cancelPendingDeposit: async (transactionId, reason) => {
+    await cancelTellerAgencyDeposit(transactionId, reason);
+    await get().refreshDeposits();
+  },
+
   postDeposit: async (payload) => {
     set({ posting: true, error: null });
     try {
@@ -242,24 +296,12 @@ export const useAgencyTellerStore = create<AgencyTellerState>((set, get) => ({
         transactionBranchId: payload.transactionBranchId,
         notes: payload.notes,
         bankProductId: payload.bankProductId,
-        workflowData: payload.workflowData
+        workflowData: payload.workflowData,
+        manualPartnerAccount: payload.manualPartnerAccount
       });
       void get().refreshSilent();
       void get().loadLedger(customerId, { force: true });
-      const branchId = get().transactionBranchId || getRuntimeBranchId();
-      if (branchId) {
-        void getTellerAgencyDeposits({
-          branchId,
-          date: todayIso()
-        })
-          .then((depositsData) => {
-            set({
-              recentDeposits: depositsData.deposits,
-              depositsBusinessDate: depositsData.businessDate
-            });
-          })
-          .catch(() => undefined);
-      }
+      void get().refreshDeposits();
     } catch (error) {
       set({ error: toUserFacingError(error, "Deposit failed") });
       throw error;

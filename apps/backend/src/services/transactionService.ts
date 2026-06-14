@@ -379,14 +379,10 @@ export async function createTransaction(
   let workflowData: Record<string, unknown> | undefined = payload.workflowData;
   if (bankProductId && payload.type === "deposit" && usesAgencyDepositFlow(context)) {
     const { getBankProductById } = await import("./bankProductService.js");
-    const { validateWorkflowFieldValues, workflowFieldsForStage } = await import("@bms/shared");
+    const { validateDepositCaptureWorkflow } = await import("@bms/shared");
     const product = await getBankProductById(context.tenantId, bankProductId);
     if (product) {
-      const validation = validateWorkflowFieldValues(
-        workflowFieldsForStage(product, "capture"),
-        payload.workflowData ?? {},
-        "capture"
-      );
+      const validation = validateDepositCaptureWorkflow(product, payload.workflowData ?? {});
       if (!validation.ok) {
         throw new Error(validation.errors.join("; "));
       }
@@ -422,7 +418,11 @@ export async function createTransaction(
     }
   }
 
-  if (payload.type === "deposit" && usesAgencyDepositFlow(context)) {
+  if (
+    payload.type === "deposit" &&
+    usesAgencyDepositFlow(context) &&
+    payload.manualPartnerAccount
+  ) {
     return createAgencyPendingDeposit(context, transaction);
   }
 

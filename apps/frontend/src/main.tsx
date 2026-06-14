@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { App } from "./app/App";
 import { AuthProvider } from "./auth/AuthContext";
+import { TransactionPinProvider } from "./auth/TransactionPinProvider";
 import { SessionIdleGuard } from "./auth/SessionIdleGuard";
 import { ToastProvider } from "./components/Toast";
 import { ThemeProvider } from "./theme/ThemeProvider";
@@ -27,8 +28,10 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
       <ThemeProvider>
         <ToastProvider>
           <AuthProvider>
-            <SessionIdleGuard />
-            <App />
+            <TransactionPinProvider>
+              <SessionIdleGuard />
+              <App />
+            </TransactionPinProvider>
           </AuthProvider>
         </ToastProvider>
       </ThemeProvider>

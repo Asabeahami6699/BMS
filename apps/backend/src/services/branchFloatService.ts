@@ -603,6 +603,61 @@ export async function applyTransactionToFloat(
   });
 }
 
+export async function reverseTransactionFromFloat(
+  context: ActorContext,
+  transaction: Transaction
+): Promise<void> {
+  const session = await getFloatSessionForCashier(
+    context.tenantId,
+    context.userId,
+    transaction.createdAt.slice(0, 10),
+    transaction.transactionBranchId
+  );
+  if (!session || session.status !== "open") {
+    return;
+  }
+
+  if (transaction.type === "withdrawal") {
+    session.totalWithdrawals = Math.max(0, session.totalWithdrawals - transaction.amount);
+  } else if (transaction.type === "daily_susu") {
+    session.totalDailySusu = Math.max(0, session.totalDailySusu - transaction.amount);
+  } else if (transaction.type === "deposit") {
+    session.totalDeposits = Math.max(0, session.totalDeposits - transaction.amount);
+  }
+  session.transactionCount = Math.max(0, session.transactionCount - 1);
+  session.expectedClosing = expectedCash(session);
+  await persistSession(session);
+}
+
+export async function adjustDepositAmountOnFloat(
+  context: ActorContext,
+  transaction: Transaction,
+  previousAmount: number,
+  nextAmount: number
+): Promise<void> {
+  const session = await getFloatSessionForCashier(
+    context.tenantId,
+    context.userId,
+    transaction.createdAt.slice(0, 10),
+    transaction.transactionBranchId
+  );
+  if (!session || session.status !== "open") {
+    return;
+  }
+  const delta = nextAmount - previousAmount;
+  if (delta > 0) {
+    const availableFloat = remainingFloatBalance(session);
+    if (delta > availableFloat + 1e-9) {
+      throw new Error(
+        `Insufficient till float balance for the updated amount. Available float: GHS ${availableFloat.toFixed(2)}.`
+      );
+    }
+  }
+  session.totalDeposits = Math.max(0, session.totalDeposits + delta);
+  session.expectedClosing = expectedCash(session);
+  await persistSession(session);
+}
+
 export function floatSessionSummary(session: BranchFloatSession | null): {
   expectedCash: number;
   floatBalance: number;

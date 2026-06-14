@@ -1,7 +1,14 @@
 import { Router } from "express";
+import { setTransactionPinSchema, verifyTransactionPinSchema } from "@bms/shared";
+import { validateBody } from "../middleware/validateBody.js";
 import { changeOwnPassword, loginWithCredentials, logoutAccessToken } from "../services/authService.js";
 import { extendSession } from "../services/authStore.js";
 import { resolveEffectiveSusuNavVisibility } from "../services/susuNavVisibilityService.js";
+import {
+  getTransactionPinStatus,
+  setTransactionPin,
+  verifyTransactionPin
+} from "../services/transactionPinService.js";
 
 export const authRouter = Router();
 
@@ -40,7 +47,8 @@ authRouter.get("/me", async (req, res) => {
 
   res.json({
     ...context,
-    susuNavVisibility
+    susuNavVisibility,
+    transactionPin: await getTransactionPinStatus(context.userId, context.tenantId, context.role)
   });
 });
 
@@ -76,3 +84,64 @@ authRouter.post("/change-password", async (req, res) => {
     });
   }
 });
+
+authRouter.get("/transaction-pin/status", async (req, res) => {
+  const context = req.userContext;
+  if (!context?.tenantId || context.tenantId === "platform") {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  try {
+    const status = await getTransactionPinStatus(context.userId, context.tenantId, context.role);
+    res.json(status);
+  } catch (error) {
+    res.status(400).json({
+      error: error instanceof Error ? error.message : "Failed to load transaction PIN status"
+    });
+  }
+});
+
+authRouter.post(
+  "/transaction-pin/setup",
+  validateBody(setTransactionPinSchema),
+  async (req, res) => {
+    const context = req.userContext;
+    if (!context?.tenantId || context.tenantId === "platform") {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    try {
+      await setTransactionPin(context.userId, context.tenantId, context.role, req.body.pin);
+      res.json({ ok: true });
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Failed to set transaction PIN"
+      });
+    }
+  }
+);
+
+authRouter.post(
+  "/transaction-pin/verify",
+  validateBody(verifyTransactionPinSchema),
+  async (req, res) => {
+    const context = req.userContext;
+    if (!context?.tenantId || context.tenantId === "platform") {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    try {
+      const result = await verifyTransactionPin(
+        context.userId,
+        context.tenantId,
+        context.role,
+        req.body.pin
+      );
+      res.json(result);
+    } catch (error) {
+      res.status(401).json({
+        error: error instanceof Error ? error.message : "Transaction PIN verification failed"
+      });
+    }
+  }
+);

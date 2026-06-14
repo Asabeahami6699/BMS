@@ -51,17 +51,40 @@ export const tellerDepositStatusSchema = z.object({
   id: z.string().min(1),
   createdAt: z.string().min(1),
   amount: z.number(),
+  customerId: z.string().optional(),
   customerName: z.string(),
   depositorName: z.string().optional(),
   executionStatus: agencyExecutionStatusSchema,
   branchName: z.string().optional(),
   branchCode: z.string().optional(),
   bankLabel: z.string().optional(),
+  bankProductId: z.string().optional(),
   bankProductName: z.string().optional(),
-  partnerAccountNumber: z.string().optional()
+  partnerAccountNumber: z.string().optional(),
+  notes: z.string().optional(),
+  workflowData: z.record(z.string(), z.unknown()).optional()
 });
 
 export type TellerDepositStatus = z.infer<typeof tellerDepositStatusSchema>;
+
+export function isTellerDepositPending(status: string): boolean {
+  return status === "pending_bank" || status === "pending_accountant";
+}
+
+export const updateTellerAgencyDepositSchema = z.object({
+  amount: z.number().positive("Amount must be greater than zero").optional(),
+  notes: z.string().max(500).optional(),
+  bankProductId: z.string().uuid().optional(),
+  workflowData: z.record(z.string(), z.unknown()).optional()
+});
+
+export type UpdateTellerAgencyDepositInput = z.infer<typeof updateTellerAgencyDepositSchema>;
+
+export const cancelTellerAgencyDepositSchema = z.object({
+  reason: z.string().trim().min(3, "Enter a cancellation reason (at least 3 characters)")
+});
+
+export type CancelTellerAgencyDepositInput = z.infer<typeof cancelTellerAgencyDepositSchema>;
 
 export const tellerAgencyDepositsSchema = z.object({
   businessDate: z.string(),

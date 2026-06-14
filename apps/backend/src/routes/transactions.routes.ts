@@ -2,6 +2,7 @@ import { createTransactionInputSchema } from "@bms/shared";
 import { Router } from "express";
 import { requireIdempotencyKey } from "../middleware/idempotency.js";
 import { requirePermission } from "../middleware/requirePermission.js";
+import { requireTransactionStepUp } from "../middleware/requireTransactionStepUp.js";
 import { validateBody } from "../middleware/validateBody.js";
 import { resolveBranchId } from "../services/branchService.js";
 import { resolveRequestBranchFilter } from "../middleware/branchScope.js";
@@ -54,7 +55,8 @@ transactionsRouter.get("/branch-counter-bootstrap", requirePermission("transacti
       branchId: resolvedBranchId || undefined,
       date: dateParam,
       cashierUserId: context.userId,
-      includePending: context.role === "admin" || context.role === "coordinator"
+      includePending: context.role === "admin" || context.role === "coordinator",
+      minimal: req.query.minimal === "true" || req.query.minimal === "1"
     });
     res.json(data);
   } catch (error) {
@@ -68,6 +70,7 @@ transactionsRouter.post(
   "/",
   requirePermission("transactions.read"),
   requireIdempotencyKey,
+  requireTransactionStepUp,
   validateBody(createTransactionInputSchema),
   async (req, res) => {
   const context = req.userContext;

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Link, useSearchParams } from "react-router-dom";
 
@@ -6,11 +6,25 @@ import { useShallow } from "zustand/react/shallow";
 
 import {
 
+  adaptDepositCaptureFields,
+
   applyWorkflowAutoFields,
 
   bankProductDisplayLabel,
 
   hasTenantModule,
+
+  isDepositSelfWorkflow,
+
+  isMomoBankProduct,
+
+  depositProductsForCustomerTab,
+
+  formatGhanaCardInput,
+
+  STANDARD_DEPOSIT_CAPTURE_FIELDS,
+
+  validateDepositCaptureWorkflow,
 
   workflowFieldsForStage
 
@@ -46,10 +60,24 @@ import {
 } from "../stores/agencyTellerStore";
 
 import { TellerDepositStatusList } from "./TellerDepositStatusList";
+import { TellerDepositConfirmModal, type DepositPreview } from "./TellerDepositConfirmModal";
+import {
+  clearTellerDepositDraft,
+  loadTellerDepositDraft,
+  saveTellerDepositDraft
+} from "./tellerDepositDraft";
 
 
 
 const QUICK_AMOUNTS = [50, 100, 200, 500, 1000];
+
+const DEFAULT_DEPOSIT_PRODUCT = {
+  code: "deposit",
+  name: "Deposit",
+  bankLabel: "BMS",
+  direction: "deposit" as const,
+  workflowFields: [] as import("@bms/shared").BankProductWorkflowField[]
+};
 
 type DepositCaptureMode = "banks" | "manual";
 
@@ -91,6 +119,14 @@ export function AgencyDepositsPage() {
     accountNumber?: string;
     bankLabel?: string;
   } | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmPreview, setConfirmPreview] = useState<DepositPreview | null>(null);
+  const [pendingPost, setPendingPost] = useState<{
+    amount: number;
+    workflowData: Record<string, unknown>;
+    queuesForBackOffice: boolean;
+  } | null>(null);
+  const draftHydratedRef = useRef(false);
 
 
 
@@ -114,6 +150,8 @@ export function AgencyDepositsPage() {
 
     loading,
 
+    depositsLoading,
+
     posting,
 
     error,
@@ -131,6 +169,10 @@ export function AgencyDepositsPage() {
     selectCustomer,
 
     postDeposit,
+
+    updatePendingDeposit,
+
+    cancelPendingDeposit,
 
     recentDeposits,
 
@@ -154,6 +196,8 @@ export function AgencyDepositsPage() {
 
       loading: s.loading,
 
+      depositsLoading: s.depositsLoading,
+
       posting: s.posting,
 
       error: s.error,
@@ -174,7 +218,11 @@ export function AgencyDepositsPage() {
 
       selectCustomer: s.selectCustomer,
 
-      postDeposit: s.postDeposit
+      postDeposit: s.postDeposit,
+
+      updatePendingDeposit: s.updatePendingDeposit,
+
+      cancelPendingDeposit: s.cancelPendingDeposit
 
     }))
 
@@ -184,13 +232,46 @@ export function AgencyDepositsPage() {
 
   useEffect(() => {
 
-    hydrate({ force: true });
+    hydrate();
 
     startLiveSync();
 
     return () => stopLiveSync();
 
   }, [hydrate, startLiveSync, stopLiveSync]);
+
+  useEffect(() => {
+    if (draftHydratedRef.current) {
+      return;
+    }
+    draftHydratedRef.current = true;
+    const draft = loadTellerDepositDraft();
+    if (!draft) {
+      return;
+    }
+    setAmount(draft.amount);
+    setNotes(draft.notes);
+    setBankProductId(draft.bankProductId);
+    setWorkflowData(draft.workflowData);
+    setCaptureMode(draft.captureMode);
+    setCustomerSearchTab(draft.customerSearchTab);
+    setAccountNumberInput(draft.accountNumberInput);
+  }, []);
+
+  useEffect(() => {
+    if (!draftHydratedRef.current) {
+      return;
+    }
+    saveTellerDepositDraft({
+      amount,
+      notes,
+      bankProductId,
+      workflowData,
+      captureMode,
+      customerSearchTab,
+      accountNumberInput
+    });
+  }, [amount, notes, bankProductId, workflowData, captureMode, customerSearchTab, accountNumberInput]);
 
 
 
@@ -208,27 +289,12 @@ export function AgencyDepositsPage() {
 
 
 
-  useEffect(() => {
-
-    if (bankProducts.length === 0) {
-
-      setBankProductId("");
-
-      return;
-
-    }
-
-    if (!bankProducts.some((p) => p.id === bankProductId)) {
-
-      setBankProductId(bankProducts[0]?.id ?? "");
-
-    }
-
-  }, [bankProducts, bankProductId]);
-
-
-
   const activeCustomers = useMemo(() => selectActiveAgencyCustomers(customers), [customers]);
+
+  const depositProducts = useMemo(
+    () => depositProductsForCustomerTab(bankProducts, customerSearchTab),
+    [bankProducts, customerSearchTab]
+  );
 
   const customersForSearchTab = useMemo(() => {
     if (customerSearchTab === "susu") {
@@ -253,6 +319,25 @@ export function AgencyDepositsPage() {
 
   const showCatalogLoader = loading && activeCustomers.length === 0;
 
+  const branchSelectable =
+    captureMode === "banks" && Boolean(selectedCustomerId) && !partnerAccountMeta;
+
+  const tellerBranchId = useMemo(() => {
+    if (user?.branchId) {
+      return user.branchId;
+    }
+    if (transactionBranchId && branches.some((branch) => branch.id === transactionBranchId)) {
+      return transactionBranchId;
+    }
+    return branches[0]?.id ?? "";
+  }, [user?.branchId, transactionBranchId, branches]);
+
+  useEffect(() => {
+    if (!branchSelectable && tellerBranchId && transactionBranchId !== tellerBranchId) {
+      setTransactionBranchId(tellerBranchId);
+    }
+  }, [branchSelectable, tellerBranchId, transactionBranchId, setTransactionBranchId]);
+
 
 
   const selectedCustomer = useMemo(() => {
@@ -262,17 +347,56 @@ export function AgencyDepositsPage() {
     return activeCustomers.find((c) => c.id === selectedCustomerId) ?? null;
   }, [activeCustomers, selectedCustomerId, lookupCustomer]);
 
+  useEffect(() => {
+    if (
+      bankProductId &&
+      depositProducts.length > 0 &&
+      !depositProducts.some((product) => product.id === bankProductId)
+    ) {
+      setBankProductId("");
+    }
+  }, [depositProducts, bankProductId]);
+
   const canPostDeposit = captureMode === "manual" || Boolean(selectedCustomer);
 
   const selectedProduct = useMemo(
-    () => bankProducts.find((p) => p.id === bankProductId),
-    [bankProducts, bankProductId]
+    () => depositProducts.find((p) => p.id === bankProductId),
+    [depositProducts, bankProductId]
   );
 
-  const captureFields = useMemo(
-    () => (selectedProduct ? workflowFieldsForStage(selectedProduct, "capture") : []),
-    [selectedProduct]
-  );
+  const captureFields = useMemo(() => {
+    const product = selectedProduct ?? DEFAULT_DEPOSIT_PRODUCT;
+    const base = selectedProduct
+      ? workflowFieldsForStage(selectedProduct, "capture")
+      : STANDARD_DEPOSIT_CAPTURE_FIELDS;
+    return adaptDepositCaptureFields(product, base);
+  }, [selectedProduct]);
+
+  const depositSelf = isDepositSelfWorkflow(workflowData);
+
+  useEffect(() => {
+    if (!depositSelf) {
+      return;
+    }
+    setWorkflowData((prev) => {
+      if (prev.depositor_name == null && prev.depositor_number == null) {
+        return prev;
+      }
+      const next = { ...prev };
+      delete next.depositor_name;
+      delete next.depositor_number;
+      return next;
+    });
+  }, [depositSelf]);
+
+  const visibleCaptureFields = useMemo(() => {
+    if (!depositSelf) {
+      return captureFields;
+    }
+    return captureFields.filter(
+      (field) => field.key !== "depositor_name" && field.key !== "depositor_number"
+    );
+  }, [captureFields, depositSelf]);
 
   const usesWorkflowAmount = useMemo(
     () => captureFields.some((field) => field.key === "amount_figure"),
@@ -310,13 +434,20 @@ export function AgencyDepositsPage() {
       if (selectedCustomer) {
         apply("account_holder_name", selectedCustomer.fullName);
         if (selectedCustomer.idCardNumber) {
-          apply("ghana_card_number", selectedCustomer.idCardNumber);
+          apply("ghana_card_number", formatGhanaCardInput(selectedCustomer.idCardNumber));
         }
       }
       if (partnerAccountMeta?.accountNumber) {
         apply("account_number", partnerAccountMeta.accountNumber);
-      } else if (selectedCustomer?.accountNumber) {
-        apply("account_number", selectedCustomer.accountNumber);
+      } else if (selectedCustomer) {
+        if (selectedProduct && isMomoBankProduct(selectedProduct)) {
+          const phoneDigits = selectedCustomer.phone?.replace(/\D/g, "").slice(-10);
+          if (phoneDigits) {
+            apply("account_number", phoneDigits);
+          }
+        } else if (selectedCustomer.accountNumber) {
+          apply("account_number", selectedCustomer.accountNumber);
+        }
       }
 
       return changed ? next : prev;
@@ -326,6 +457,8 @@ export function AgencyDepositsPage() {
     selectedCustomer?.fullName,
     selectedCustomer?.accountNumber,
     selectedCustomer?.idCardNumber,
+    selectedCustomer?.phone,
+    selectedProduct?.id,
     selectedBranch?.id,
     selectedBranch?.name,
     partnerAccountMeta?.accountNumber,
@@ -356,6 +489,13 @@ export function AgencyDepositsPage() {
     setAmount("");
     setNotes("");
     setWorkflowData({});
+  }
+
+  function clearDepositForm() {
+    clearTellerDepositDraft();
+    resetDepositForm();
+    setBankProductId("");
+    setAccountNumberInput("");
   }
 
   function enableManualMode() {
@@ -474,7 +614,7 @@ export function AgencyDepositsPage() {
 
     }
 
-    if (bankProducts.length > 0 && !bankProductId) {
+    if (depositProducts.length > 0 && !bankProductId) {
 
       showToast("Select a deposit bank product", "error");
 
@@ -482,32 +622,109 @@ export function AgencyDepositsPage() {
 
     }
 
-
-
-    try {
-      await postDeposit({
-        customerId: selectedCustomer?.id,
-        amount: parsedAmount,
-        transactionBranchId,
-        notes: notes.trim() || undefined,
-        bankProductId: bankProductId || undefined,
-        workflowData
-      });
-      showToast(
-        `Deposit GHS ${parsedAmount.toFixed(2)} recorded — pending back-office bank execution`,
-        "success"
-      );
-      if (captureMode === "manual") {
-        resetDepositForm();
-      } else {
-        setAmount("");
-        setNotes("");
-        setWorkflowData({});
-      }
-    } catch (err) {
-      showToast(toUserFacingError(err, "Failed to record deposit"), "error");
+    const workflowProduct = selectedProduct ?? DEFAULT_DEPOSIT_PRODUCT;
+    const workflowValidation = validateDepositCaptureWorkflow(workflowProduct, workflowData);
+    if (!workflowValidation.ok) {
+      showToast(workflowValidation.errors[0] ?? "Check deposit form fields", "error");
+      return;
     }
 
+    const normalizedWorkflowData = workflowValidation.data;
+    const queuesForBackOffice =
+      captureMode === "manual" || Boolean(partnerAccountMeta);
+    const branch = branches.find((item) => item.id === transactionBranchId);
+    const commission = Number(normalizedWorkflowData.commission);
+
+    const accountHolderName =
+      typeof normalizedWorkflowData.account_holder_name === "string" &&
+      normalizedWorkflowData.account_holder_name.trim()
+        ? normalizedWorkflowData.account_holder_name.trim()
+        : selectedCustomer?.fullName?.trim() || "Account holder";
+
+    setPendingPost({
+      amount: parsedAmount,
+      workflowData: normalizedWorkflowData,
+      queuesForBackOffice
+    });
+    setConfirmPreview({
+      accountHolderName,
+      accountTypeLabel:
+        captureMode === "manual"
+          ? "Non-BMS account holder"
+          : selectedCustomer && hasSusu
+            ? isSusuCustomer(selectedCustomer)
+              ? "BMS Susu account"
+              : "BMS Savings account"
+            : selectedCustomer
+              ? "BMS account"
+              : undefined,
+      amount: parsedAmount,
+      amountInWords:
+        typeof normalizedWorkflowData.amount_in_words === "string"
+          ? normalizedWorkflowData.amount_in_words
+          : undefined,
+      branchName: branch ? `${branch.name} (${branch.code})` : "—",
+      productLabel: selectedProduct ? bankProductDisplayLabel(selectedProduct) : undefined,
+      accountNumber:
+        typeof normalizedWorkflowData.account_number === "string"
+          ? normalizedWorkflowData.account_number
+          : undefined,
+      depositorName:
+        typeof normalizedWorkflowData.depositor_name === "string"
+          ? normalizedWorkflowData.depositor_name
+          : undefined,
+      commission: Number.isFinite(commission) && commission > 0 ? commission : undefined,
+      notes: notes.trim() || undefined,
+      queuesForBackOffice
+    });
+    setConfirmOpen(true);
+
+  }
+
+  function confirmPost() {
+    if (!pendingPost) {
+      return;
+    }
+
+    const payload = {
+      customerId: selectedCustomer?.id,
+      amount: pendingPost.amount,
+      transactionBranchId,
+      notes: notes.trim() || undefined,
+      bankProductId: bankProductId || undefined,
+      workflowData: pendingPost.workflowData,
+      manualPartnerAccount: pendingPost.queuesForBackOffice
+    };
+    const currentCaptureMode = captureMode;
+    const queued = pendingPost.queuesForBackOffice;
+    const postedAmount = pendingPost.amount;
+
+    setConfirmOpen(false);
+    setConfirmPreview(null);
+    setPendingPost(null);
+
+    if (currentCaptureMode === "manual") {
+      resetDepositForm();
+      setBankProductId("");
+    } else {
+      resetDepositForm();
+    }
+    clearTellerDepositDraft();
+
+    showToast(`Recording deposit GHS ${postedAmount.toFixed(2)}…`, "info");
+
+    void postDeposit(payload)
+      .then(() => {
+        showToast(
+          queued
+            ? `Deposit GHS ${postedAmount.toFixed(2)} recorded — pending back-office bank execution`
+            : `Deposit GHS ${postedAmount.toFixed(2)} credited to customer account`,
+          "success"
+        );
+      })
+      .catch((err) => {
+        showToast(toUserFacingError(err, "Failed to record deposit"), "error");
+      });
   }
 
 
@@ -527,7 +744,8 @@ export function AgencyDepositsPage() {
           <p className="role-workspace__eyebrow">Agency banking · Teller</p>
           <h2>Record deposit</h2>
           <p className="muted branch-counter__subtitle">
-            Agency teller desk — cash deposits queued for back-office bank execution · {updatedLabel}
+            BMS Susu &amp; Savings credit immediately · non-BMS deposits queue for back-office bank
+            execution · {updatedLabel}
           </p>
           {error ? <p className="error-text">{error}</p> : null}
         </div>
@@ -759,15 +977,32 @@ export function AgencyDepositsPage() {
           </div>
 
           <div className="branch-counter__post card">
-                <div className="branch-counter__section-head">
-                  <span className="branch-counter__step">2</span>
-                  <h3>Record deposit</h3>
+                <div className="branch-counter__section-head branch-counter__section-head--split">
+                  <div>
+                    <span className="branch-counter__step">2</span>
+                    <h3>Record deposit</h3>
+                  </div>
+                  <button
+                    type="button"
+                    className="button secondary branch-counter__clear-form"
+                    disabled={posting}
+                    onClick={clearDepositForm}
+                  >
+                    Clear form
+                  </button>
                 </div>
 
 
 
                 <div className="branch-counter__post-grid">
-                  {bankProducts.length > 0 ? (
+                  {loading && bankProducts.length === 0 ? (
+                    <label className="field">
+                      <span>Deposit product</span>
+                      <select disabled value="">
+                        <option value="">Loading products…</option>
+                      </select>
+                    </label>
+                  ) : depositProducts.length > 0 ? (
                     <label className="field">
                       <span>Deposit product</span>
                       <select
@@ -775,22 +1010,25 @@ export function AgencyDepositsPage() {
                         disabled={posting}
                         onChange={(e) => setBankProductId(e.target.value)}
                       >
-                        {bankProducts.map((product) => (
+                        <option value="">Select product</option>
+                        {depositProducts.map((product) => (
                           <option key={product.id} value={product.id}>
                             {bankProductDisplayLabel(product)}
                           </option>
                         ))}
                       </select>
-                      <small className="muted">
-                        Teller deposit type (e.g. GCB cash deposit) — not the company settlement account.
-                      </small>
                     </label>
+                  ) : bankProducts.length > 0 ? (
+                    <p className="muted">
+                      No {customerSearchTab === "susu" ? "Susu" : "Savings"} deposit products configured.
+                      Switch to <strong>All accounts</strong> for partner bank products.
+                    </p>
                   ) : null}
                   <label className="field">
                     <span>Branch</span>
                     <select
                       value={transactionBranchId}
-                      disabled={posting || branches.length <= 1}
+                      disabled={posting || !branchSelectable}
                       onChange={(e) => setTransactionBranchId(e.target.value)}
                     >
                       <option value="">Select branch</option>
@@ -800,6 +1038,11 @@ export function AgencyDepositsPage() {
                         </option>
                       ))}
                     </select>
+                    {!branchSelectable ? (
+                      <small className="muted">
+                        Locked to your registered branch until a Susu or Savings account is selected.
+                      </small>
+                    ) : null}
                   </label>
                   <label className="field">
                     <span>Notes (optional)</span>
@@ -846,7 +1089,7 @@ export function AgencyDepositsPage() {
                 ) : null}
 
                 <DynamicWorkflowForm
-                  fields={captureFields}
+                  fields={visibleCaptureFields}
                   values={workflowData}
                   disabled={posting}
                   onChange={(key, value) => {
@@ -886,7 +1129,7 @@ export function AgencyDepositsPage() {
                   disabled={posting || !canPostDeposit}
                   onClick={() => void handlePost()}
                 >
-                  {posting ? "Posting…" : "Record deposit"}
+                  {posting ? "Posting…" : "Review & record deposit"}
                 </button>
                 {!canPostDeposit && captureMode === "banks" ? (
                   <p className="muted branch-counter__post-hint">
@@ -897,10 +1140,42 @@ export function AgencyDepositsPage() {
         </section>
       </div>
 
+      <TellerDepositConfirmModal
+        open={confirmOpen}
+        preview={confirmPreview}
+        onConfirm={confirmPost}
+        onCancel={() => {
+          setConfirmOpen(false);
+          setConfirmPreview(null);
+          setPendingPost(null);
+        }}
+      />
+
       <TellerDepositStatusList
         deposits={recentDeposits}
-        loading={loading && recentDeposits.length === 0}
+        loading={depositsLoading && recentDeposits.length === 0}
         businessDate={depositsBusinessDate}
+        onEdit={async (deposit) => {
+          try {
+            await updatePendingDeposit(deposit.id, {
+              amount: deposit.amount,
+              notes: deposit.notes
+            });
+            showToast("Deposit updated", "success");
+          } catch (err) {
+            showToast(toUserFacingError(err, "Could not update deposit"), "error");
+            throw err;
+          }
+        }}
+        onCancel={async (deposit, reason) => {
+          try {
+            await cancelPendingDeposit(deposit.id, reason);
+            showToast("Deposit removed", "success");
+          } catch (err) {
+            showToast(toUserFacingError(err, "Could not delete deposit"), "error");
+            throw err;
+          }
+        }}
       />
     </div>
   );

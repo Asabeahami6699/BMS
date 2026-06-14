@@ -182,7 +182,10 @@ export const createTransactionInputSchema = z.object({
 
   bankProductId: z.string().uuid().optional(),
 
-  workflowData: z.record(z.string(), z.unknown()).optional()
+  workflowData: z.record(z.string(), z.unknown()).optional(),
+
+  /** Non-BMS partner deposit — queues for back-office bank execution. BMS Susu/Savings credit immediately. */
+  manualPartnerAccount: z.boolean().optional()
 
 });
 

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import type { RoleDeskConfig } from "./roleDeskConfig";
+import { DeskWorkflowTip } from "./DeskWorkflowTip";
 
 type Kpi = {
   label: string;
@@ -34,30 +35,33 @@ export function RoleDeskShell({
   return (
     <div className={`role-workspace agency-banking-page role-workspace--${config.accent}`}>
       <header className="card role-workspace__hero workspace-animate-in">
-        <p className="role-workspace__eyebrow">Agency banking · {config.eyebrow}</p>
-        <div className="role-workspace__hero-row">
-          <div>
-            <h2>{config.title}</h2>
-            <p className="muted role-workspace__subtitle">{config.subtitle}</p>
-            {displayName ? (
-              <p className="muted role-workspace__greeting">
-                Welcome back, <strong>{displayName}</strong>
-                {updatedLabel ? ` · ${updatedLabel}` : ""}
-              </p>
+        <div className="role-workspace__hero-head">
+          <p className="role-workspace__eyebrow">Agency banking · {config.eyebrow}</p>
+          <div className="role-workspace__hero-tools">
+            <DeskWorkflowTip steps={config.workflow} />
+            {onRefresh ? (
+              <button
+                type="button"
+                className="button secondary role-workspace__refresh"
+                disabled={refreshing}
+                onClick={onRefresh}
+                aria-label="Refresh desk"
+              >
+                {refreshing ? "…" : "↻"}
+              </button>
             ) : null}
-            {error ? <p className="error-text role-workspace__error">{error}</p> : null}
           </div>
-          {onRefresh ? (
-            <button
-              type="button"
-              className="button secondary role-workspace__refresh"
-              disabled={refreshing}
-              onClick={onRefresh}
-              aria-label="Refresh desk"
-            >
-              {refreshing ? "…" : "↻"}
-            </button>
+        </div>
+        <div>
+          <h2>{config.title}</h2>
+          <p className="muted role-workspace__subtitle">{config.subtitle}</p>
+          {displayName ? (
+            <p className="muted role-workspace__greeting">
+              Welcome back, <strong>{displayName}</strong>
+              {updatedLabel ? ` · ${updatedLabel}` : ""}
+            </p>
           ) : null}
+          {error ? <p className="error-text role-workspace__error">{error}</p> : null}
         </div>
       </header>
 
@@ -77,19 +81,7 @@ export function RoleDeskShell({
         <p className="muted workspace-animate-in workspace-animate-in--2">Loading desk…</p>
       ) : null}
 
-      <section className="card role-workspace__workflow workspace-animate-in workspace-animate-in--2">
-        <h3>Workflow</h3>
-        <ol className="role-workspace__steps">
-          {config.workflow.map((step, index) => (
-            <li key={step} className="role-workspace__step">
-              <span className="role-workspace__step-num">{index + 1}</span>
-              <span>{step}</span>
-            </li>
-          ))}
-        </ol>
-      </section>
-
-      <section className="role-workspace__quick-grid workspace-animate-in workspace-animate-in--3">
+      <section className="role-workspace__quick-grid workspace-animate-in workspace-animate-in--2">
         {config.quickLinks.map((link) => (
           <Link key={link.to} to={link.to} className="card role-workspace__quick-card">
             <strong>{link.label}</strong>

@@ -7,7 +7,10 @@ import {
   resolveAgencyDepositCustomerName,
   resolveAgencyDepositDepositorName,
   transactionSchema,
+  cancelTellerAgencyDepositSchema,
   tellerAgencyDepositsSchema,
+  updateTellerAgencyDepositSchema,
+  validateDepositCaptureWorkflow,
   type AgencyBootstrap,
   type BalanceDisclosure,
   type TellerAgencyDeposits,
@@ -16,7 +19,7 @@ import {
 import { randomUUID } from "node:crypto";
 import { getSupabaseAdminClient } from "../config/supabaseClient.js";
 import { assertBranchAccess } from "../middleware/branchScope.js";
-import { applyTransactionToFloat } from "./branchFloatService.js";
+import { applyTransactionToFloat, adjustDepositAmountOnFloat, reverseTransactionFromFloat } from "./branchFloatService.js";
 import { getCustomerById, getCustomerWithdrawableBalance, listCustomers } from "./customerService.js";
 import { addLedgerEntry } from "./ledgerService.js";
 import { notifyTenantStaff } from "./notificationService.js";
@@ -208,13 +211,16 @@ export async function listTellerAgencyDeposits(
         id: String(row.id),
         createdAt: String(row.created_at),
         amount: Number(row.amount),
+        customerId: String(row.customer_id),
         customerName,
         depositorName: resolveAgencyDepositDepositorName(workflow),
         executionStatus: String(row.execution_status ?? "completed"),
         bankProductId: row.bank_product_id != null ? String(row.bank_product_id) : undefined,
         partnerAccountNumber,
         branchName: branch?.name,
-        branchCode: branch?.code
+        branchCode: branch?.code,
+        notes: row.notes != null ? String(row.notes) : undefined,
+        workflowData: workflow
       };
     })
   );
@@ -226,16 +232,160 @@ export async function listTellerAgencyDeposits(
       id: row.id,
       createdAt: row.createdAt,
       amount: row.amount,
+      customerId: row.customerId,
       customerName: row.customerName,
       depositorName: row.depositorName,
       executionStatus: row.executionStatus,
       bankLabel: row.bankLabel,
+      bankProductId: row.bankProductId,
       bankProductName: row.bankProductName,
       partnerAccountNumber: row.partnerAccountNumber,
       branchName: row.branchName,
-      branchCode: row.branchCode
+      branchCode: row.branchCode,
+      notes: row.notes,
+      workflowData: row.workflowData
     }))
   });
+}
+
+async function loadTellerOwnedDeposit(
+  context: TransactionRequestContext,
+  transactionId: string
+): Promise<{ row: Record<string, unknown>; transaction: Transaction }> {
+  const supabase = getSupabaseAdminClient();
+  if (!supabase) {
+    throw new Error("Deposit changes require database connectivity");
+  }
+
+  const { data, error } = await supabase
+    .from("customer_transactions")
+    .select("*")
+    .eq("tenant_id", context.tenantId)
+    .eq("id", transactionId)
+    .maybeSingle();
+  if (error) {
+    throw new Error(`Failed to load deposit: ${error.message}`);
+  }
+  if (!data) {
+    throw new Error("Deposit not found");
+  }
+
+  const row = data as Record<string, unknown>;
+  if (String(row.type) !== "deposit") {
+    throw new Error("Only deposits can be changed here");
+  }
+
+  const status = String(row.execution_status ?? "completed");
+  if (status !== "pending_bank" && status !== "pending_accountant") {
+    throw new Error("Only pending deposits can be changed or removed");
+  }
+
+  if (context.role === "teller" && String(row.recorded_by_user_id) !== context.userId) {
+    throw new Error("You can only change deposits you recorded");
+  }
+
+  assertBranchAccess(context, String(row.transaction_branch_id));
+
+  return { row, transaction: mapTransactionRow(row) };
+}
+
+export async function cancelTellerAgencyDeposit(
+  context: TransactionRequestContext,
+  transactionId: string,
+  input: { reason: string }
+): Promise<void> {
+  const parsed = cancelTellerAgencyDepositSchema.parse(input);
+  const { row, transaction } = await loadTellerOwnedDeposit(context, transactionId);
+
+  await reverseTransactionFromFloat(context, transaction);
+
+  const supabase = getSupabaseAdminClient();
+  if (!supabase) {
+    throw new Error("Deposit cancellation requires database connectivity");
+  }
+
+  const priorNotes = row.notes != null ? String(row.notes).trim() : "";
+  const cancellationNote = `Cancelled by teller: ${parsed.reason.trim()}`;
+  const combinedNotes = priorNotes ? `${priorNotes} · ${cancellationNote}` : cancellationNote;
+
+  const { error } = await supabase
+    .from("customer_transactions")
+    .update({
+      execution_status: "failed",
+      notes: combinedNotes
+    })
+    .eq("tenant_id", context.tenantId)
+    .eq("id", transactionId);
+  if (error) {
+    throw new Error(`Failed to cancel deposit: ${error.message}`);
+  }
+}
+
+export async function updateTellerAgencyDeposit(
+  context: TransactionRequestContext,
+  transactionId: string,
+  input: {
+    amount?: number;
+    notes?: string;
+    bankProductId?: string;
+    workflowData?: Record<string, unknown>;
+  }
+): Promise<TellerAgencyDeposits["deposits"][number]> {
+  const parsed = updateTellerAgencyDepositSchema.parse(input);
+  const { row, transaction } = await loadTellerOwnedDeposit(context, transactionId);
+
+  const nextAmount = parsed.amount ?? transaction.amount;
+  const nextBankProductId = parsed.bankProductId ?? transaction.bankProductId;
+  let nextWorkflow = {
+    ...(row.workflow_data && typeof row.workflow_data === "object"
+      ? (row.workflow_data as Record<string, unknown>)
+      : {}),
+    ...(parsed.workflowData ?? {})
+  };
+
+  if (nextBankProductId) {
+    const product = await getBankProductById(context.tenantId, nextBankProductId);
+    if (product) {
+      const validation = validateDepositCaptureWorkflow(product, nextWorkflow);
+      if (!validation.ok) {
+        throw new Error(validation.errors.join("; "));
+      }
+      nextWorkflow = validation.data;
+    }
+  }
+
+  if (nextAmount !== transaction.amount) {
+    await adjustDepositAmountOnFloat(context, transaction, transaction.amount, nextAmount);
+  }
+
+  const supabase = getSupabaseAdminClient();
+  if (!supabase) {
+    throw new Error("Deposit update requires database connectivity");
+  }
+
+  const { error } = await supabase
+    .from("customer_transactions")
+    .update({
+      amount: nextAmount,
+      notes: parsed.notes ?? (row.notes != null ? String(row.notes) : null),
+      bank_product_id: nextBankProductId ?? null,
+      workflow_data: nextWorkflow
+    })
+    .eq("tenant_id", context.tenantId)
+    .eq("id", transactionId);
+  if (error) {
+    throw new Error(`Failed to update deposit: ${error.message}`);
+  }
+
+  const deposits = await listTellerAgencyDeposits(context, {
+    branchId: String(row.transaction_branch_id),
+    businessDate: String(row.created_at).slice(0, 10)
+  });
+  const updated = deposits.deposits.find((deposit) => deposit.id === transactionId);
+  if (!updated) {
+    throw new Error("Deposit updated but could not be reloaded");
+  }
+  return updated;
 }
 
 async function loadPendingDeposits(tenantId: string, branchId?: string): Promise<Transaction[]> {

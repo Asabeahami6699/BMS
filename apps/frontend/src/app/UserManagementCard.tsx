@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { tellerTypeLabel } from "@bms/shared";
+import { roleRequiresTransactionPin, tellerTypeLabel } from "@bms/shared";
 import { useShallow } from "zustand/react/shallow";
 import type { AppRole, Branch, UserRecord } from "./api";
 import { deleteUser, exportUsersCsv, updateUser } from "./api";
 import { AdminDataTable, filterRowsBySearch } from "../components/AdminDataTable";
 import { RowActionsMenu } from "../components/RowActionsMenu";
 import { ResetPasswordModal } from "./ResetPasswordModal";
+import { ResetTransactionPinModal } from "./ResetTransactionPinModal";
 import { UserFormModal } from "./UserFormModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useToast } from "../components/Toast";
@@ -68,6 +69,8 @@ export function UserManagementCard({ role }: Props) {
   const [editingUser, setEditingUser] = useState<UserRecord | null>(null);
   const [resetOpen, setResetOpen] = useState(false);
   const [passwordResetUser, setPasswordResetUser] = useState<UserRecord | null>(null);
+  const [resetPinOpen, setResetPinOpen] = useState(false);
+  const [pinResetUser, setPinResetUser] = useState<UserRecord | null>(null);
 
   useEffect(() => {
     hydrateRoster();
@@ -111,6 +114,11 @@ export function UserManagementCard({ role }: Props) {
   function openReset(user: UserRecord) {
     setPasswordResetUser(user);
     setResetOpen(true);
+  }
+
+  function openResetPin(user: UserRecord) {
+    setPinResetUser(user);
+    setResetPinOpen(true);
   }
 
   async function toggleStatus(user: UserRecord) {
@@ -239,6 +247,9 @@ export function UserManagementCard({ role }: Props) {
                     items={[
                       { label: "Edit", onClick: () => openEdit(row) },
                       { label: "Reset password", onClick: () => openReset(row) },
+                      ...(roleRequiresTransactionPin(row.role)
+                        ? [{ label: "Reset transaction PIN", onClick: () => openResetPin(row) }]
+                        : []),
                       {
                         label: row.status === "active" ? "Deactivate" : "Activate",
                         onClick: () => void toggleStatus(row)
@@ -266,6 +277,11 @@ export function UserManagementCard({ role }: Props) {
             open={resetOpen}
             user={passwordResetUser}
             onClose={() => setResetOpen(false)}
+          />
+          <ResetTransactionPinModal
+            open={resetPinOpen}
+            user={pinResetUser}
+            onClose={() => setResetPinOpen(false)}
           />
         </>
       ) : null}

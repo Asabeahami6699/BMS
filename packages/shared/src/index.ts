@@ -23,3 +23,5 @@ export * from "./agencyAccounts.js";
 export * from "./backOffice.js";
 export * from "./financeDesks.js";
 export * from "./universalOps.js";
+export * from "./transactionPin.js";
+export * from "./ghanaCard.js";

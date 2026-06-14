@@ -32,7 +32,14 @@ export type BranchCounterBootstrap = {
 
 export async function getBranchCounterBootstrap(
   tenantId: string,
-  options: { branchId?: string; date?: string; cashierUserId?: string; includePending?: boolean }
+  options: {
+    branchId?: string;
+    date?: string;
+    cashierUserId?: string;
+    includePending?: boolean;
+    /** Skip statement, float session, and pending float requests (faster teller deposit desk). */
+    minimal?: boolean;
+  }
 ): Promise<BranchCounterBootstrap> {
   const date =
     options.date && options.date.length > 0
@@ -56,7 +63,7 @@ export async function getBranchCounterBootstrap(
   const branches = branchRows.filter((b) => b.status !== "inactive");
 
   let statement: BranchCounterBootstrap["statement"] = null;
-  if (options.branchId) {
+  if (!options.minimal && options.branchId) {
     const resolvedBranchId = await resolveBranchId(tenantId, options.branchId);
     if (resolvedBranchId) {
       try {
@@ -81,7 +88,7 @@ export async function getBranchCounterBootstrap(
   }
 
   let floatSession: BranchFloatSession | null = null;
-  if (options.cashierUserId) {
+  if (!options.minimal && options.cashierUserId) {
     const resolvedBranchId = options.branchId
       ? await resolveBranchId(tenantId, options.branchId)
       : undefined;
@@ -94,7 +101,7 @@ export async function getBranchCounterBootstrap(
   }
 
   const pendingFloatRequests =
-    options.includePending ? await listPendingFloatRequests(tenantId) : [];
+    !options.minimal && options.includePending ? await listPendingFloatRequests(tenantId) : [];
 
   const tellerBankProducts = bankProducts.filter(
     (p) => !p.isCompanyBankAccount

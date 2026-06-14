@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { amountFigureToWords } from "./amountInWords.js";
+import { normalizeGhanaCardNumber } from "./ghanaCard.js";
 
 
 
@@ -377,6 +378,8 @@ export const STANDARD_DEPOSIT_CAPTURE_FIELDS: BankProductWorkflowField[] = [
     type: "text",
     required: true,
     stages: ["capture"],
+    placeholder: "GHA-123456789-0",
+    helpText: "Format: GHA- plus 9 digits, dash, then check digit",
     sortOrder: 5
   },
   {
@@ -639,7 +642,7 @@ export function validateWorkflowFieldValues(
 
     }
 
-    if (field.key === "depositor_number" && typeof raw === "string") {
+    if ((field.type === "phone" || field.key === "depositor_number") && typeof raw === "string") {
 
       const digits = raw.replace(/\D/g, "");
 
@@ -650,6 +653,22 @@ export function validateWorkflowFieldValues(
       } else {
 
         normalized[field.key] = digits;
+
+      }
+
+    }
+
+    if (field.key === "ghana_card_number" && typeof raw === "string") {
+
+      const formatted = normalizeGhanaCardNumber(raw);
+
+      if (!formatted) {
+
+        errors.push(`${field.label} must be in format GHA-123456789-0`);
+
+      } else {
+
+        normalized[field.key] = formatted;
 
       }
 
@@ -833,6 +852,178 @@ export function bankLabelsMatch(a?: string | null, b?: string | null): boolean {
     return true;
   }
   return left.startsWith(right) || right.startsWith(left);
+}
+
+export function bankProductMatchText(
+  product: Pick<TenantBankProduct, "code" | "name" | "bankLabel">
+): string {
+  return `${product.code} ${product.name} ${product.bankLabel}`.toLowerCase();
+}
+
+export function isMomoBankProduct(
+  product: Pick<TenantBankProduct, "code" | "name" | "bankLabel">
+): boolean {
+  const text = bankProductMatchText(product);
+  return /\b(momo|mtn|vodafone|airtel|tigo|mobile\s*money|mobilemoney)\b/.test(text);
+}
+
+function isBmsInternalBankLabel(bankLabel: string): boolean {
+  const normalized = normalizeBankLabelForMatch(bankLabel);
+  return normalized === "bms" || normalized.startsWith("bms");
+}
+
+export function isSusuDepositBankProduct(
+  product: Pick<TenantBankProduct, "code" | "name" | "bankLabel" | "direction">
+): boolean {
+  if (product.direction !== "deposit") {
+    return false;
+  }
+  return /\bsusu\b/.test(bankProductMatchText(product));
+}
+
+export function isSavingsDepositBankProduct(
+  product: Pick<TenantBankProduct, "code" | "name" | "bankLabel" | "direction">
+): boolean {
+  if (product.direction !== "deposit") {
+    return false;
+  }
+  const text = bankProductMatchText(product);
+  if (/\bsusu\b/.test(text)) {
+    return false;
+  }
+  if (/\bsavings?\b/.test(text)) {
+    return true;
+  }
+  return isBmsInternalBankLabel(product.bankLabel) && !isMomoBankProduct(product);
+}
+
+export function depositProductsForCustomerTab(
+  products: TenantBankProduct[],
+  tab: "all" | "susu" | "savings"
+): TenantBankProduct[] {
+  const deposits = products.filter((product) => product.direction === "deposit");
+  if (tab === "susu") {
+    return deposits.filter(isSusuDepositBankProduct);
+  }
+  if (tab === "savings") {
+    return deposits.filter(isSavingsDepositBankProduct);
+  }
+  return deposits;
+}
+
+export const TELLER_DEPOSIT_SELF_FIELD: BankProductWorkflowField = {
+  key: "deposit_self",
+  label: "Self",
+  type: "checkbox",
+  required: false,
+  stages: ["capture"],
+  helpText: "Customer is depositing for their own account",
+  sortOrder: 50
+};
+
+export const TELLER_DEPOSIT_COMMISSION_FIELD: BankProductWorkflowField = {
+  key: "commission",
+  label: "Commission (GHS)",
+  type: "number",
+  required: false,
+  stages: ["capture"],
+  sortOrder: 95
+};
+
+export function isDepositSelfWorkflow(data: WorkflowData): boolean {
+  return data.deposit_self === true || data.deposit_self === "true";
+}
+
+export function adaptDepositCaptureFields(
+  product: Pick<TenantBankProduct, "code" | "name" | "bankLabel" | "direction" | "workflowFields">,
+  fields: BankProductWorkflowField[]
+): BankProductWorkflowField[] {
+  const adapted = fields.map((field) => {
+    if (field.key === "account_number" && isMomoBankProduct(product)) {
+      return {
+        ...field,
+        label: "Phone number",
+        type: "phone" as const,
+        placeholder: "10-digit mobile number",
+        helpText: "Digits only — exactly 10 numbers"
+      };
+    }
+    return field;
+  });
+
+  const depositorIndex = adapted.findIndex((field) => field.key === "depositor_name");
+  const withSelf: BankProductWorkflowField[] =
+    depositorIndex >= 0
+      ? [...adapted.slice(0, depositorIndex), TELLER_DEPOSIT_SELF_FIELD, ...adapted.slice(depositorIndex)]
+      : [...adapted, TELLER_DEPOSIT_SELF_FIELD];
+
+  if (withSelf.some((field) => field.key === "commission")) {
+    return withSelf;
+  }
+
+  const amountWordsIndex = withSelf.findIndex((field) => field.key === "amount_in_words");
+  if (amountWordsIndex >= 0) {
+    return [
+      ...withSelf.slice(0, amountWordsIndex + 1),
+      TELLER_DEPOSIT_COMMISSION_FIELD,
+      ...withSelf.slice(amountWordsIndex + 1)
+    ];
+  }
+
+  return [...withSelf, TELLER_DEPOSIT_COMMISSION_FIELD];
+}
+
+export function validateDepositCaptureWorkflow(
+  product: Pick<TenantBankProduct, "code" | "name" | "bankLabel" | "direction" | "workflowFields">,
+  data: WorkflowData
+): { ok: true; data: WorkflowData } | { ok: false; errors: string[] } {
+  const fields = adaptDepositCaptureFields(product, workflowFieldsForStage(product, "capture"));
+  const selfDeposit = isDepositSelfWorkflow(data);
+
+  const fieldsForValidation = fields.map((field) => {
+    if (selfDeposit && (field.key === "depositor_name" || field.key === "depositor_number")) {
+      return { ...field, required: false };
+    }
+    return field;
+  });
+
+  const result = validateWorkflowFieldValues(fieldsForValidation, data, "capture");
+  if (!result.ok) {
+    return result;
+  }
+
+  const normalized = { ...result.data };
+
+  if (isMomoBankProduct(product)) {
+    const raw = normalized.account_number;
+    if (raw != null && raw !== "") {
+      if (typeof raw !== "string") {
+        return { ok: false, errors: ["Phone number must be exactly 10 digits"] };
+      }
+      const digits = raw.replace(/\D/g, "");
+      if (!/^\d{10}$/.test(digits)) {
+        return { ok: false, errors: ["Phone number must be exactly 10 digits"] };
+      }
+      normalized.account_number = digits;
+    }
+  }
+
+  if (normalized.commission != null && normalized.commission !== "") {
+    const commission = Number(normalized.commission);
+    if (Number.isNaN(commission) || commission < 0) {
+      return { ok: false, errors: ["Commission must be a valid non-negative number"] };
+    }
+    normalized.commission = commission;
+  } else {
+    delete normalized.commission;
+  }
+
+  if (selfDeposit) {
+    delete normalized.depositor_name;
+    delete normalized.depositor_number;
+  }
+
+  return { ok: true, data: normalized };
 }
 
 

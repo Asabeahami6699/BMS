@@ -167,10 +167,6 @@ export function DashboardShell({
           </div>
           <div className="dash-brand-text">
             {companyName ? <p className="dash-brand-company">{companyName}</p> : null}
-            <p className="dash-brand-identity">
-              <span className="dash-brand-user">{userName}</span>
-              <span className="dash-brand-role">{userRole}</span>
-            </p>
           </div>
         </div>
 

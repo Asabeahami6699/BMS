@@ -7,6 +7,7 @@ import {
   SESSION_ACTIVITY_THROTTLE_MS,
   SESSION_GRACE_MS,
   SESSION_IDLE_MS,
+  SESSION_KEEPALIVE_MS,
   SESSION_TOKEN_CHECK_MS,
   SESSION_UNAUTHORIZED_EVENT
 } from "./sessionIdleConfig";
@@ -187,8 +188,27 @@ export function SessionIdleGuard() {
       })();
     }, SESSION_TOKEN_CHECK_MS);
 
+    const keepalive = window.setInterval(() => {
+      if (openRef.current || !user) {
+        return;
+      }
+      if (Date.now() - lastActivityRef.current < SESSION_IDLE_MS) {
+        void refreshAuthSession();
+      }
+    }, SESSION_KEEPALIVE_MS);
+
     function onUnauthorized() {
-      showExpired();
+      void (async () => {
+        if (Date.now() - lastActivityRef.current < SESSION_IDLE_MS && getAuthSession()?.accessToken) {
+          const refreshed = await refreshAuthSession();
+          if (refreshed) {
+            lastActivityRef.current = Date.now();
+            scheduleIdleWarning();
+            return;
+          }
+        }
+        showExpired();
+      })();
     }
     window.addEventListener(SESSION_UNAUTHORIZED_EVENT, onUnauthorized);
 
@@ -198,6 +218,7 @@ export function SessionIdleGuard() {
       }
       window.removeEventListener(SESSION_UNAUTHORIZED_EVENT, onUnauthorized);
       window.clearInterval(tokenCheck);
+      window.clearInterval(keepalive);
       clearIdleTimer();
       if (!openRef.current) {
         clearGraceTimer();

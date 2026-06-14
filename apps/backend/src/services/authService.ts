@@ -10,6 +10,7 @@ import {
   scopeTypeSchema,
   updateTenantUserSchema,
   roleRequiresBranch,
+  roleRequiresTransactionPin,
   type Role,
   type ScopeType,
   type UserJobTitle
@@ -45,6 +46,7 @@ import {
   type StoredTenant
 } from "./authStore.js";
 import { hashPassword, verifyPassword } from "./password.js";
+import { seedTransactionPinResetForNewUser } from "./transactionPinService.js";
 import { loadTenantModules, saveTenantModules, toTenantRecord } from "./tenantModuleService.js";
 import { loadTenantAddons, saveTenantAddons } from "./tenantAddonService.js";
 import type { TenantProductModule } from "@bms/shared";
@@ -648,6 +650,7 @@ export async function createAuthUser(input: {
 
     const tellerType =
       parsed.data.role === "teller" ? (parsed.data.tellerType ?? null) : null;
+    const transactionPinResetRequired = roleRequiresTransactionPin(parsed.data.role);
     const { error: profileError } = await supabase.from("users").insert({
       id: userId,
       tenant_id: parsed.data.tenantId,
@@ -659,7 +662,8 @@ export async function createAuthUser(input: {
       full_name: parsed.data.fullName ?? null,
       auth_user_id: authData.user.id,
       created_by: parsed.data.createdBy,
-      status: "active"
+      status: "active",
+      transaction_pin_reset_required: transactionPinResetRequired
     });
     if (profileError) {
       throw new Error(`Failed to create user profile: ${profileError.message}`);
@@ -679,6 +683,7 @@ export async function createAuthUser(input: {
       createdBy: parsed.data.createdBy,
       createdAt: new Date().toISOString()
     });
+    await seedTransactionPinResetForNewUser(userId, parsed.data.tenantId, parsed.data.role);
   }
 
   const created = findUserById(userId);
