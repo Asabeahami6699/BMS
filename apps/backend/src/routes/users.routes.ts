@@ -36,6 +36,7 @@ import { getCoordinatorsBootstrap } from "../services/coordinatorsBootstrapServi
 import { listCoordinatorRoster } from "../services/coordinatorRosterService.js";
 
 import { listUsersByTenant } from "../services/authStore.js";
+import { fetchUserNameMap } from "../services/userNameResolver.js";
 
 
 
@@ -117,12 +118,30 @@ function mapListUser(user: {
 
   createdBy: string;
 
+  createdByName?: string;
+
   createdAt?: string;
 
 }) {
 
   return user;
 
+}
+
+async function enrichUsersWithCreatorNames<
+  T extends { createdBy: string; createdByName?: string }
+>(tenantId: string, users: T[]): Promise<T[]> {
+  const creatorIds = users
+    .map((user) => user.createdBy)
+    .filter((id) => id && id !== "system");
+  const nameMap = await fetchUserNameMap(tenantId, creatorIds);
+  return users.map((user) => ({
+    ...user,
+    createdByName:
+      user.createdBy === "system"
+        ? "System"
+        : nameMap.get(user.createdBy) ?? user.createdByName ?? user.createdBy
+  }));
 }
 
 
@@ -277,81 +296,44 @@ usersRouter.get("/", requirePermission("users.read"), async (req, res) => {
 
 
 
-    res.json(
-
-      (data ?? []).map((user) =>
-
-        mapListUser({
-
-          userId: user.id,
-
-          email: user.email ?? "",
-
-          fullName: user.full_name ?? undefined,
-
-          role: user.role,
-
-          scopeType: user.scope_type,
-
-          branchId: user.branch_id ?? undefined,
-
-          tellerType:
-            user.teller_type != null ? (Number(user.teller_type) as 1 | 2 | 3 | 4) : undefined,
-
-          tenantId: user.tenant_id,
-
-          createdBy: user.created_by ?? "system",
-
-          status: user.status === "inactive" ? "inactive" : "active",
-
-          createdAt: user.created_at ?? undefined
-
-        })
-
-      )
-
+    const rows = (data ?? []).map((user) =>
+      mapListUser({
+        userId: user.id,
+        email: user.email ?? "",
+        fullName: user.full_name ?? undefined,
+        role: user.role,
+        scopeType: user.scope_type,
+        branchId: user.branch_id ?? undefined,
+        tellerType:
+          user.teller_type != null ? (Number(user.teller_type) as 1 | 2 | 3 | 4) : undefined,
+        tenantId: user.tenant_id,
+        createdBy: user.created_by ?? "system",
+        status: user.status === "inactive" ? "inactive" : "active",
+        createdAt: user.created_at ?? undefined
+      })
     );
 
+    res.json(await enrichUsersWithCreatorNames(tenantId, rows));
     return;
-
   }
 
-
-
-  res.json(
-
-    listUsersByTenant(tenantId).map((user) =>
-
-      mapListUser({
-
-        userId: user.id,
-
-        email: user.email,
-
-        fullName: user.fullName,
-
-        role: user.role,
-
-        scopeType: user.scopeType,
-
-        branchId: user.branchId,
-
-        tellerType: user.tellerType,
-
-        tenantId,
-
-        createdBy: user.createdBy ?? "system",
-
-        status: user.status ?? "active",
-
-        createdAt: user.createdAt
-
-      })
-
-    )
-
+  const rows = listUsersByTenant(tenantId).map((user) =>
+    mapListUser({
+      userId: user.id,
+      email: user.email,
+      fullName: user.fullName,
+      role: user.role,
+      scopeType: user.scopeType,
+      branchId: user.branchId,
+      tellerType: user.tellerType,
+      tenantId,
+      createdBy: user.createdBy ?? "system",
+      status: user.status ?? "active",
+      createdAt: user.createdAt
+    })
   );
 
+  res.json(await enrichUsersWithCreatorNames(tenantId, rows));
 });
 
 

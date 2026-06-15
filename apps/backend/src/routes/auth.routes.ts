@@ -1,12 +1,19 @@
 import { Router } from "express";
 import { setTransactionPinSchema, verifyTransactionPinSchema } from "@bms/shared";
 import { validateBody } from "../middleware/validateBody.js";
-import { changeOwnPassword, loginWithCredentials, logoutAccessToken } from "../services/authService.js";
+import {
+  changeOwnPassword,
+  loginWithCredentials,
+  logoutAccessToken,
+  resolveUserFromAccessToken
+} from "../services/authService.js";
 import { extendSession } from "../services/authStore.js";
+import { getSupabaseAuthClient } from "../config/supabaseClient.js";
 import { resolveEffectiveSusuNavVisibility } from "../services/susuNavVisibilityService.js";
 import {
   getTransactionPinStatus,
   setTransactionPin,
+  TransactionPinError,
   verifyTransactionPin
 } from "../services/transactionPinService.js";
 
@@ -52,20 +59,50 @@ authRouter.get("/me", async (req, res) => {
   });
 });
 
-authRouter.post("/refresh", (req, res) => {
-  if (!req.userContext) {
-    res.status(401).json({ error: "Unauthorized" });
-    return;
-  }
-
+authRouter.post("/refresh", async (req, res) => {
   const authHeader = req.header("authorization");
-  const token = authHeader?.startsWith("Bearer ") ? authHeader.slice("Bearer ".length).trim() : "";
-  if (token.startsWith("sess_") && !extendSession(token)) {
-    res.status(401).json({ error: "Session expired" });
+  const accessToken = authHeader?.startsWith("Bearer ") ? authHeader.slice("Bearer ".length).trim() : "";
+  const refreshToken =
+    typeof req.body?.refreshToken === "string" ? req.body.refreshToken.trim() : "";
+
+  if (accessToken.startsWith("sess_")) {
+    if (!extendSession(accessToken)) {
+      res.status(401).json({ error: "Session expired" });
+      return;
+    }
+    res.json({ ok: true, accessToken });
     return;
   }
 
-  res.json({ ok: true });
+  const authClient = getSupabaseAuthClient();
+  if (refreshToken && authClient) {
+    const { data, error } = await authClient.auth.refreshSession({ refresh_token: refreshToken });
+    if (error || !data.session?.access_token) {
+      res.status(401).json({ error: "Session expired" });
+      return;
+    }
+
+    const user = await resolveUserFromAccessToken(data.session.access_token);
+    if (!user) {
+      res.status(401).json({ error: "Session expired" });
+      return;
+    }
+
+    res.json({
+      ok: true,
+      accessToken: data.session.access_token,
+      refreshToken: data.session.refresh_token,
+      user
+    });
+    return;
+  }
+
+  if (accessToken && req.userContext) {
+    res.json({ ok: true, accessToken });
+    return;
+  }
+
+  res.status(401).json({ error: "Session expired" });
 });
 
 authRouter.post("/change-password", async (req, res) => {
@@ -139,7 +176,11 @@ authRouter.post(
       );
       res.json(result);
     } catch (error) {
-      res.status(401).json({
+      if (error instanceof TransactionPinError) {
+        res.status(400).json({ error: error.message, code: error.code });
+        return;
+      }
+      res.status(400).json({
         error: error instanceof Error ? error.message : "Transaction PIN verification failed"
       });
     }

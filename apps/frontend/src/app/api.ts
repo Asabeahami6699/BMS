@@ -192,6 +192,7 @@ export type UserRecord = {
   tenantId: string;
   status: "active" | "inactive";
   createdBy: string;
+  createdByName?: string;
   createdAt?: string;
 };
 
@@ -566,6 +567,7 @@ export type AuthMe = {
     configured: boolean;
     resetRequired: boolean;
     lockedUntil?: string | null;
+    blockedRequiresAdminReset?: boolean;
   };
 };
 
@@ -594,6 +596,7 @@ export function authMeSignature(me: AuthMe | null | undefined): string {
 
 type AuthSession = {
   accessToken: string;
+  refreshToken?: string;
   user: AuthMe;
 };
 
@@ -701,6 +704,14 @@ export async function fetchJson<T>(url: string, init?: RequestInit, retried = fa
           };
         };
         if (response.status === 401) {
+          const errorCode = (body as { code?: string }).code;
+          const isTransactionPinVerify =
+            url.includes("/transaction-pin/verify") ||
+            errorCode === "TRANSACTION_PIN_INVALID" ||
+            errorCode === "TRANSACTION_PIN_BLOCKED";
+          if (isTransactionPinVerify) {
+            throw new Error(formatApiError(body, response.status));
+          }
           if (!retried && authSession?.accessToken) {
             const refreshed = await refreshAuthSession();
             if (refreshed) {
@@ -769,12 +780,32 @@ export async function refreshAuthSession(): Promise<boolean> {
   try {
     const response = await fetch(`${API_BASE_URL}/api/v1/auth/refresh`, {
       method: "POST",
-      headers: authHeaders()
+      headers: {
+        "Content-Type": "application/json",
+        ...(authSession.accessToken ? { Authorization: `Bearer ${authSession.accessToken}` } : {})
+      },
+      body: JSON.stringify({ refreshToken: authSession.refreshToken ?? "" })
     });
     if (response.status === 401) {
       return false;
     }
-    return response.ok;
+    if (!response.ok) {
+      return Boolean(authSession?.accessToken);
+    }
+    const body = (await response.json()) as {
+      ok?: boolean;
+      accessToken?: string;
+      refreshToken?: string;
+      user?: AuthMe;
+    };
+    if (body.accessToken) {
+      persistSession({
+        accessToken: body.accessToken,
+        refreshToken: body.refreshToken ?? authSession.refreshToken,
+        user: body.user ?? authSession.user
+      });
+    }
+    return true;
   } catch {
     return Boolean(authSession?.accessToken);
   }
@@ -840,14 +871,26 @@ export function setRuntimeBranchId(branchId: string): void {
 }
 
 export async function getAuthMe(): Promise<AuthMe> {
-  let response: Response;
-  try {
-    response = await fetch(`${API_BASE_URL}/api/v1/auth/me`, {
+  async function fetchMe(): Promise<Response> {
+    return fetch(`${API_BASE_URL}/api/v1/auth/me`, {
       headers: authHeaders()
     });
+  }
+
+  let response: Response;
+  try {
+    response = await fetchMe();
   } catch (error) {
     throw error;
   }
+
+  if (response.status === 401 && authSession?.accessToken) {
+    const refreshed = await refreshAuthSession();
+    if (refreshed) {
+      response = await fetchMe();
+    }
+  }
+
   if (response.status === 401) {
     handleUnauthorizedResponse();
     throw new Error("Session expired");
@@ -879,6 +922,7 @@ export type TransactionPinStatus = {
   configured: boolean;
   resetRequired: boolean;
   lockedUntil?: string | null;
+  blockedRequiresAdminReset?: boolean;
 };
 
 export async function getTransactionPinStatus(): Promise<TransactionPinStatus> {
@@ -898,11 +942,30 @@ export async function setTransactionPin(pin: string, confirmPin: string): Promis
 export async function verifyTransactionPin(
   pin: string
 ): Promise<{ token: string; expiresAt: string }> {
-  return fetchJson(`${API_BASE_URL}/api/v1/auth/transaction-pin/verify`, {
-    method: "POST",
-    headers: authHeaders(),
-    body: JSON.stringify({ pin })
-  });
+  const response = await fetch(
+    withBranchScope(`${API_BASE_URL}/api/v1/auth/transaction-pin/verify`),
+    {
+      method: "POST",
+      headers: {
+        ...authHeaders(),
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ pin })
+    }
+  );
+  const body = (await response.json().catch(() => ({}))) as {
+    error?: string;
+    code?: string;
+    token?: string;
+    expiresAt?: string;
+  };
+  if (!response.ok) {
+    throw new Error(formatApiError(body, response.status));
+  }
+  if (!body.token || !body.expiresAt) {
+    throw new Error("Transaction PIN verification failed");
+  }
+  return { token: body.token, expiresAt: body.expiresAt };
 }
 
 export async function requireUserTransactionPinReset(userId: string): Promise<void> {

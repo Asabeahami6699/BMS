@@ -8,6 +8,8 @@ import { BranchCounterCashCalculator } from "./BranchCounterCashCalculator";
 import { BranchCounterStatementPanel } from "./BranchCounterStatement";
 import { filterRowsBySearch } from "../components/AdminDataTable";
 import { useToast } from "../components/Toast";
+import { useTransactionPin } from "../auth/TransactionPinProvider";
+import { ensureTransactionStepUpForRole } from "../lib/ensureTransactionStepUp";
 import { balancesFromLedger } from "../lib/customerBalance";
 import {
   checkTillFloatForTransaction,
@@ -59,6 +61,7 @@ type Props = { role: AppRole };
 
 export function BranchCounterCard({ role }: Props) {
   const { showToast } = useToast();
+  const { requestStepUp } = useTransactionPin();
   const [searchParams, setSearchParams] = useSearchParams();
   const txTypes = allowedTransactionTypes(role);
   const isHeadOfficeRole = role === "admin" || role === "auditor" || role === "accountant";
@@ -286,6 +289,7 @@ export function BranchCounterCard({ role }: Props) {
     }
 
     try {
+      await ensureTransactionStepUpForRole(role, requestStepUp);
       await postTransaction({
         customerId: selectedCustomer.id,
         type,

@@ -8,6 +8,8 @@ import {
 
   adaptDepositCaptureFields,
 
+  AGENCY_BANKING_ACCOUNT_LABEL,
+
   applyWorkflowAutoFields,
 
   bankProductDisplayLabel,
@@ -31,6 +33,9 @@ import {
 } from "@bms/shared";
 
 import { useAuth } from "../../auth/AuthContext";
+import { useTransactionPin } from "../../auth/TransactionPinProvider";
+import { ensureTransactionStepUpForRole } from "../../lib/ensureTransactionStepUp";
+import { ensureTillReadyForAgencyDeposit } from "../../lib/agencyTillGate";
 
 import { BranchCounterCashCalculator } from "../BranchCounterCashCalculator";
 
@@ -49,7 +54,8 @@ import { balancesFromLedger } from "../../lib/customerBalance";
 
 import { toUserFacingError } from "../../lib/networkError";
 
-import type { Customer } from "../api";
+import type { Customer, BranchFloatSummary } from "../api";
+import { getBranchCounterBootstrap } from "../api";
 
 import {
 
@@ -88,7 +94,7 @@ type CustomerSearchTab = "all" | "susu" | "savings";
 export function AgencyDepositsPage() {
 
   const { user } = useAuth();
-
+  const { requestStepUp } = useTransactionPin();
   const { showToast } = useToast();
 
   const [searchParams, setSearchParams] = useSearchParams();
@@ -120,6 +126,7 @@ export function AgencyDepositsPage() {
     bankLabel?: string;
   } | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [confirmPreview, setConfirmPreview] = useState<DepositPreview | null>(null);
   const [pendingPost, setPendingPost] = useState<{
     amount: number;
@@ -374,21 +381,6 @@ export function AgencyDepositsPage() {
 
   const depositSelf = isDepositSelfWorkflow(workflowData);
 
-  useEffect(() => {
-    if (!depositSelf) {
-      return;
-    }
-    setWorkflowData((prev) => {
-      if (prev.depositor_name == null && prev.depositor_number == null) {
-        return prev;
-      }
-      const next = { ...prev };
-      delete next.depositor_name;
-      delete next.depositor_number;
-      return next;
-    });
-  }, [depositSelf]);
-
   const visibleCaptureFields = useMemo(() => {
     if (!depositSelf) {
       return captureFields;
@@ -590,7 +582,10 @@ export function AgencyDepositsPage() {
   async function handlePost() {
 
     if (captureMode === "banks" && !selectedCustomer) {
-      showToast("Select a customer, use banks account lookup, or switch to non-BMS entry", "error");
+      showToast(
+        `Select a customer, use banks account lookup, or switch to ${AGENCY_BANKING_ACCOUNT_LABEL.toLowerCase()} entry`,
+        "error"
+      );
       return;
     }
 
@@ -639,7 +634,7 @@ export function AgencyDepositsPage() {
       typeof normalizedWorkflowData.account_holder_name === "string" &&
       normalizedWorkflowData.account_holder_name.trim()
         ? normalizedWorkflowData.account_holder_name.trim()
-        : selectedCustomer?.fullName?.trim() || "Account holder";
+        : selectedCustomer?.fullName?.trim() || AGENCY_BANKING_ACCOUNT_LABEL;
 
     setPendingPost({
       amount: parsedAmount,
@@ -650,7 +645,7 @@ export function AgencyDepositsPage() {
       accountHolderName,
       accountTypeLabel:
         captureMode === "manual"
-          ? "Non-BMS account holder"
+          ? AGENCY_BANKING_ACCOUNT_LABEL
           : selectedCustomer && hasSusu
             ? isSusuCustomer(selectedCustomer)
               ? "BMS Susu account"
@@ -670,9 +665,11 @@ export function AgencyDepositsPage() {
           ? normalizedWorkflowData.account_number
           : undefined,
       depositorName:
-        typeof normalizedWorkflowData.depositor_name === "string"
-          ? normalizedWorkflowData.depositor_name
-          : undefined,
+        depositSelf || normalizedWorkflowData.depositor_name === "Self"
+          ? "Self"
+          : typeof normalizedWorkflowData.depositor_name === "string"
+            ? normalizedWorkflowData.depositor_name
+            : undefined,
       commission: Number.isFinite(commission) && commission > 0 ? commission : undefined,
       notes: notes.trim() || undefined,
       queuesForBackOffice
@@ -681,50 +678,86 @@ export function AgencyDepositsPage() {
 
   }
 
-  function confirmPost() {
+  async function confirmPost() {
     if (!pendingPost) {
       return;
     }
 
-    const payload = {
-      customerId: selectedCustomer?.id,
-      amount: pendingPost.amount,
-      transactionBranchId,
-      notes: notes.trim() || undefined,
-      bankProductId: bankProductId || undefined,
-      workflowData: pendingPost.workflowData,
-      manualPartnerAccount: pendingPost.queuesForBackOffice
-    };
-    const currentCaptureMode = captureMode;
-    const queued = pendingPost.queuesForBackOffice;
-    const postedAmount = pendingPost.amount;
+    setConfirming(true);
+    try {
+      await ensureTransactionStepUpForRole(user?.role, requestStepUp);
 
-    setConfirmOpen(false);
-    setConfirmPreview(null);
-    setPendingPost(null);
+      if (transactionBranchId) {
+        let floatSummary: BranchFloatSummary | null = null;
+        if (hasSusu) {
+          const bootstrap = await getBranchCounterBootstrap(
+            transactionBranchId,
+            new Date().toISOString().slice(0, 10)
+          );
+          floatSummary = bootstrap.floatSummary;
+        }
+        const tillGate = await ensureTillReadyForAgencyDeposit({
+          hasSusuModule: hasSusu,
+          role: user?.role ?? "",
+          branchId: transactionBranchId,
+          amount: pendingPost.amount,
+          floatSummary
+        });
+        if (!tillGate.ok) {
+          showToast(tillGate.message, "error");
+          return;
+        }
+      }
 
-    if (currentCaptureMode === "manual") {
-      resetDepositForm();
-      setBankProductId("");
-    } else {
-      resetDepositForm();
+      const payload = {
+        customerId: selectedCustomer?.id,
+        amount: pendingPost.amount,
+        transactionBranchId,
+        notes: notes.trim() || undefined,
+        bankProductId: bankProductId || undefined,
+        workflowData: pendingPost.workflowData,
+        manualPartnerAccount: pendingPost.queuesForBackOffice
+      };
+      const currentCaptureMode = captureMode;
+      const queued = pendingPost.queuesForBackOffice;
+      const postedAmount = pendingPost.amount;
+
+      setConfirmOpen(false);
+      setConfirmPreview(null);
+      setPendingPost(null);
+
+      if (currentCaptureMode === "manual") {
+        resetDepositForm();
+        setBankProductId("");
+      } else {
+        resetDepositForm();
+      }
+      clearTellerDepositDraft();
+
+      showToast(`Recording deposit GHS ${postedAmount.toFixed(2)}…`, "info");
+
+      void postDeposit(payload)
+        .then(() => {
+          showToast(
+            queued
+              ? `Deposit GHS ${postedAmount.toFixed(2)} recorded — pending back-office bank execution`
+              : `Deposit GHS ${postedAmount.toFixed(2)} credited to customer account`,
+            "success"
+          );
+        })
+        .catch((err) => {
+          showToast(toUserFacingError(err, "Failed to record deposit"), "error");
+        });
+    } catch (error) {
+      showToast(
+        error instanceof Error && error.message.includes("cancelled")
+          ? "Transaction cancelled — PIN required before recording deposits"
+          : toUserFacingError(error, "Could not verify till float status"),
+        "error"
+      );
+    } finally {
+      setConfirming(false);
     }
-    clearTellerDepositDraft();
-
-    showToast(`Recording deposit GHS ${postedAmount.toFixed(2)}…`, "info");
-
-    void postDeposit(payload)
-      .then(() => {
-        showToast(
-          queued
-            ? `Deposit GHS ${postedAmount.toFixed(2)} recorded — pending back-office bank execution`
-            : `Deposit GHS ${postedAmount.toFixed(2)} credited to customer account`,
-          "success"
-        );
-      })
-      .catch((err) => {
-        showToast(toUserFacingError(err, "Failed to record deposit"), "error");
-      });
   }
 
 
@@ -744,8 +777,8 @@ export function AgencyDepositsPage() {
           <p className="role-workspace__eyebrow">Agency banking · Teller</p>
           <h2>Record deposit</h2>
           <p className="muted branch-counter__subtitle">
-            BMS Susu &amp; Savings credit immediately · non-BMS deposits queue for back-office bank
-            execution · {updatedLabel}
+            BMS Susu &amp; Savings credit immediately · {AGENCY_BANKING_ACCOUNT_LABEL.toLowerCase()} deposits
+            queue for back-office bank execution · {updatedLabel}
           </p>
           {error ? <p className="error-text">{error}</p> : null}
         </div>
@@ -786,14 +819,14 @@ export function AgencyDepositsPage() {
             className={`button agency-deposits-mode-btn${captureMode === "manual" ? " agency-deposits-mode-btn--active" : ""}`}
             onClick={enableManualMode}
           >
-            Non-BMS account holder
+            {AGENCY_BANKING_ACCOUNT_LABEL}
           </button>
 
           {captureMode === "manual" ? (
             <div className="agency-deposits-manual-mode">
               <p className="muted agency-deposits-account-hint">
-                Manual entry — enter all deposit slip details on the form. For walk-in customers without a Susu,
-                savings, or linked bank account in BMS.
+                {AGENCY_BANKING_ACCOUNT_LABEL} — enter all deposit slip details on the form for partner
+                bank deposits without a linked BMS Susu or savings profile.
               </p>
               <button type="button" className="button secondary" onClick={enableBanksMode}>
                 ← Back to account search
@@ -926,14 +959,14 @@ export function AgencyDepositsPage() {
               <div>
                 <p className="branch-counter__hero-eyebrow">
                   {captureMode === "manual"
-                    ? "Manual entry"
+                    ? "Agency banking"
                     : selectedCustomer
                       ? "Selected account"
                       : "Deposit details"}
                 </p>
                 <h3 className="branch-counter__hero-name">
                   {captureMode === "manual"
-                    ? "Non-BMS account holder"
+                    ? AGENCY_BANKING_ACCOUNT_LABEL
                     : selectedCustomer?.fullName ?? "Select or look up an account"}
                 </h3>
                 <p className="muted">
@@ -948,7 +981,7 @@ export function AgencyDepositsPage() {
                       {hasSusu && isSusuCustomer(selectedCustomer) ? " · Susu" : ""}
                     </>
                   ) : (
-                    "Account holder appears here after search or banks lookup"
+                    "Customer name appears here after search or banks lookup"
                   )}
                 </p>
               </div>
@@ -1143,8 +1176,12 @@ export function AgencyDepositsPage() {
       <TellerDepositConfirmModal
         open={confirmOpen}
         preview={confirmPreview}
-        onConfirm={confirmPost}
+        confirming={confirming}
+        onConfirm={() => void confirmPost()}
         onCancel={() => {
+          if (confirming) {
+            return;
+          }
           setConfirmOpen(false);
           setConfirmPreview(null);
           setPendingPost(null);

@@ -10,6 +10,8 @@ import { useToast } from "../../components/Toast";
 import { toUserFacingError } from "../../lib/networkError";
 
 import { useAuth } from "../../auth/AuthContext";
+import { useTransactionPin } from "../../auth/TransactionPinProvider";
+import { ensureTransactionStepUpForRole } from "../../lib/ensureTransactionStepUp";
 
 import { useRoleWorkspaceSync } from "../hooks/useRoleWorkspaceSync";
 
@@ -34,6 +36,7 @@ export function TellerDeskPage({ displayName }: Props) {
   const config = getRoleDeskConfig("teller");
 
   const { user } = useAuth();
+  const { requestStepUp } = useTransactionPin();
 
   const { showToast } = useToast();
 
@@ -102,6 +105,7 @@ export function TellerDeskPage({ displayName }: Props) {
 
   async function handlePay(disclosureId: string) {
     try {
+      await ensureTransactionStepUpForRole(user?.role, requestStepUp);
       await payWithdrawal(disclosureId);
       setPayoutDetail(null);
       void refreshReconciliation();

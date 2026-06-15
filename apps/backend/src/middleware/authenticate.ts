@@ -3,7 +3,7 @@ import { isSupabaseAuthNetworkError } from "../lib/networkError.js";
 import { resolveUserFromAccessToken } from "../services/authService.js";
 import { resolveUserContextFromHeaders } from "../services/userContextService.js";
 
-const PUBLIC_PATHS = new Set(["/api/v1/auth/login"]);
+const PUBLIC_PATHS = new Set(["/api/v1/auth/login", "/api/v1/auth/refresh"]);
 
 function isPublicChatPath(path: string, method: string): boolean {
   if (path === "/api/v1/chat/threads" && method === "POST") {

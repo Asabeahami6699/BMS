@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { roleRequiresTransactionPin } from "@bms/shared";
 import {
   TELLER_TILL_ENTRY_LABELS,
   type TellerTillEntryType,
   type TellerTillJournalEntry
 } from "@bms/shared";
+import { useAuth } from "../../auth/AuthContext";
+import { useTransactionPin } from "../../auth/TransactionPinProvider";
 import { createTellerTillJournalEntry, getRuntimeBranchId, listTellerTillJournalEntries } from "../api";
 import { useToast } from "../../components/Toast";
+import { ensureTransactionStepUpForRole } from "../../lib/ensureTransactionStepUp";
 import { toUserFacingError } from "../../lib/networkError";
 
 const ENTRY_TYPES = Object.keys(TELLER_TILL_ENTRY_LABELS) as TellerTillEntryType[];
@@ -21,7 +25,11 @@ const ENTRY_HINTS: Record<TellerTillEntryType, string> = {
 };
 
 export function TellerTillDaybookPage() {
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const { requestStepUp } = useTransactionPin();
   const { showToast } = useToast();
+  const [pinReady, setPinReady] = useState(() => !roleRequiresTransactionPin(user?.role ?? ""));
   const [businessDate, setBusinessDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [entries, setEntries] = useState<TellerTillJournalEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -32,8 +40,35 @@ export function TellerTillDaybookPage() {
 
   const branchId = getRuntimeBranchId() ?? "";
 
+  useEffect(() => {
+    if (!user || !roleRequiresTransactionPin(user.role)) {
+      setPinReady(true);
+      return;
+    }
+
+    let cancelled = false;
+    void ensureTransactionStepUpForRole(user.role, requestStepUp)
+      .then(() => {
+        if (!cancelled) {
+          setPinReady(true);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          showToast("Transaction PIN required to open till daybook", "error");
+          navigate("/app/banking/teller", { replace: true });
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [navigate, requestStepUp, showToast, user]);
+
   async function loadEntries() {
-    if (!branchId) return;
+    if (!branchId || !pinReady) {
+      return;
+    }
     setLoading(true);
     try {
       const rows = await listTellerTillJournalEntries({ branchId, date: businessDate });
@@ -47,7 +82,7 @@ export function TellerTillDaybookPage() {
 
   useEffect(() => {
     void loadEntries();
-  }, [branchId, businessDate]);
+  }, [branchId, businessDate, pinReady]);
 
   const totals = useMemo(() => {
     const sum = entries.reduce((acc, row) => acc + row.amount, 0);
@@ -86,6 +121,14 @@ export function TellerTillDaybookPage() {
     } finally {
       setPosting(false);
     }
+  }
+
+  if (!pinReady) {
+    return (
+      <div className="agency-banking-page role-workspace teller-daybook-page">
+        <p className="muted">Verifying transaction PIN…</p>
+      </div>
+    );
   }
 
   return (

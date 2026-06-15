@@ -26,7 +26,8 @@ export function checkTillFloatForTransaction(input: {
   if (!input.floatSummary.canTransact) {
     return {
       ok: false,
-      message: "Your till float is not open. Request float or wait for admin release."
+      message:
+        "Your daily till float is not open yet. Open your till float before recording cash transactions."
     };
   }
 

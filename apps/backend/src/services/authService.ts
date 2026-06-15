@@ -55,6 +55,7 @@ import { updateTenantModulesSchema, updateTenantAddonsSchema } from "@bms/shared
 
 export type LoginResult = {
   accessToken: string;
+  refreshToken?: string;
   user: UserContext & { email: string; fullName?: string };
 };
 
@@ -241,6 +242,7 @@ export async function loginWithCredentials(
 
     return {
       accessToken: signInData.session.access_token,
+      refreshToken: signInData.session.refresh_token,
       user: userContext as UserContext & { email: string; fullName?: string }
     };
   }

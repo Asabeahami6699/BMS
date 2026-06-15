@@ -73,6 +73,9 @@ export type InitiateAgencyWithdrawalInput = z.infer<typeof initiateAgencyWithdra
 
 export const AGENCY_WALK_IN_CUSTOMER_NAME = "Agency banking (walk-in)";
 
+/** UI label for manual partner-bank deposits (no linked BMS Susu/savings profile). */
+export const AGENCY_BANKING_ACCOUNT_LABEL = "Agency banking account";
+
 /** Prefer account-holder name from workflow over the shared walk-in customer record. */
 export function resolveAgencyDepositCustomerName(input: {
   customerFullName?: string | null;
@@ -90,13 +93,18 @@ export function resolveAgencyDepositCustomerName(input: {
   if (fullName && fullName !== AGENCY_WALK_IN_CUSTOMER_NAME) {
     return fullName;
   }
-  return input.fallback ?? "Walk-in customer";
+  return input.fallback ?? AGENCY_BANKING_ACCOUNT_LABEL;
 }
+
+export const DEPOSIT_SELF_DEPOSITOR_LABEL = "Self";
 
 /** Depositor name from workflow (person who brought the cash). */
 export function resolveAgencyDepositDepositorName(
   workflow?: Record<string, unknown> | null
 ): string | undefined {
+  if (workflow?.deposit_self === true || workflow?.deposit_self === "true") {
+    return DEPOSIT_SELF_DEPOSITOR_LABEL;
+  }
   const name =
     typeof workflow?.depositor_name === "string" ? workflow.depositor_name.trim() : "";
   return name || undefined;

@@ -8,6 +8,7 @@ type Props = {
   mode: Mode;
   setupContext?: "default" | "admin_reset";
   lockedUntil?: string | null;
+  blockedRequiresAdminReset?: boolean;
   error?: string | null;
   busy?: boolean;
   onClose: () => void;
@@ -21,6 +22,7 @@ export function TransactionPinModal({
   mode,
   setupContext = "default",
   lockedUntil,
+  blockedRequiresAdminReset = false,
   error,
   busy,
   onClose,
@@ -42,11 +44,22 @@ export function TransactionPinModal({
   }, [open]);
 
   const locked =
-    lockedUntil != null && lockedUntil !== "" && new Date(lockedUntil).getTime() > Date.now();
+    blockedRequiresAdminReset ||
+    (lockedUntil != null && lockedUntil !== "" && new Date(lockedUntil).getTime() > Date.now());
 
   const focusInput = useCallback(() => {
     window.setTimeout(() => inputRef.current?.focus(), 0);
   }, []);
+
+  useEffect(() => {
+    if (error && open && !blockedRequiresAdminReset) {
+      setPin("");
+      setConfirmPin("");
+      setStep("enter");
+      pinRef.current = "";
+      focusInput();
+    }
+  }, [blockedRequiresAdminReset, error, focusInput, open]);
 
   useEffect(() => {
     if (open && !busy && !locked) {
@@ -169,21 +182,30 @@ export function TransactionPinModal({
   return (
     <Modal
       open={open}
-      title={mode === "setup" ? setupTitle : "Enter transaction PIN"}
+      title={blockedRequiresAdminReset ? "Transaction PIN locked" : mode === "setup" ? setupTitle : "Enter transaction PIN"}
       subtitle={
-        mode === "setup"
-          ? setupSubtitle
-          : "Confirm your identity before posting this transaction"
+        blockedRequiresAdminReset
+          ? "Your PIN is locked — contact an administrator to reset it"
+          : mode === "setup"
+            ? setupSubtitle
+            : "Confirm your identity before posting this transaction"
       }
       onClose={onClose}
       panelClassName="modal-panel--narrow transaction-pin-modal"
       footer={
         <button type="button" className="button secondary" onClick={onClose} disabled={busy}>
-          Cancel
+          {blockedRequiresAdminReset ? "Close" : "Cancel"}
         </button>
       }
     >
       <div className="transaction-pin-modal__body">
+        {blockedRequiresAdminReset ? (
+          <p className="error-text transaction-pin-modal__blocked" role="alert">
+            Your transaction PIN has been locked after too many incorrect attempts. Contact your
+            administrator to reset it before you can post transactions again.
+          </p>
+        ) : (
+          <>
         <label className="sr-only" htmlFor="transaction-pin-input">
           {mode === "setup" && step === "confirm" ? "Confirm transaction PIN" : "Transaction PIN"}
         </label>
@@ -239,6 +261,8 @@ export function TransactionPinModal({
           ))}
         </div>
         {busy ? <p className="muted transaction-pin-modal__busy">Verifying…</p> : null}
+          </>
+        )}
       </div>
     </Modal>
   );

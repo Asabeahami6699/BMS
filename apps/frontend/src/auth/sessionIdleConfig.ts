@@ -10,7 +10,7 @@ export const SESSION_ACTIVITY_THROTTLE_MS = 1000;
 /** How often to check JWT hard expiry while signed in. */
 export const SESSION_TOKEN_CHECK_MS = 30 * 1000;
 
-/** How often to proactively extend the session while the user is active. */
-export const SESSION_KEEPALIVE_MS = 4 * 60 * 1000;
+/** How often to proactively refresh Supabase JWT while signed in. */
+export const SESSION_KEEPALIVE_MS = 2 * 60 * 1000;
 
 export const SESSION_UNAUTHORIZED_EVENT = "bms:session-unauthorized";

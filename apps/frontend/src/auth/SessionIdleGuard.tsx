@@ -181,6 +181,12 @@ export function SessionIdleGuard() {
           }
         }
         if (tokenExp != null && tokenExp <= Date.now()) {
+          const refreshed = await refreshAuthSession();
+          if (refreshed) {
+            lastActivityRef.current = Date.now();
+            scheduleIdleWarning();
+            return;
+          }
           showExpired();
           return;
         }
@@ -192,9 +198,7 @@ export function SessionIdleGuard() {
       if (openRef.current || !user) {
         return;
       }
-      if (Date.now() - lastActivityRef.current < SESSION_IDLE_MS) {
-        void refreshAuthSession();
-      }
+      void refreshAuthSession();
     }, SESSION_KEEPALIVE_MS);
 
     function onUnauthorized() {

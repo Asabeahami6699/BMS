@@ -15,6 +15,7 @@ type DepositPreview = {
 type Props = {
   open: boolean;
   preview: DepositPreview | null;
+  confirming?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 };
@@ -26,7 +27,13 @@ function money(amount: number): string {
   }).format(amount);
 }
 
-export function TellerDepositConfirmModal({ open, preview, onConfirm, onCancel }: Props) {
+export function TellerDepositConfirmModal({
+  open,
+  preview,
+  confirming = false,
+  onConfirm,
+  onCancel
+}: Props) {
   if (!open || !preview) {
     return null;
   }
@@ -108,11 +115,16 @@ export function TellerDepositConfirmModal({ open, preview, onConfirm, onCancel }
           </p>
         </div>
         <footer className="modal-footer teller-deposit-confirm__actions">
-          <button type="button" className="button secondary" onClick={onCancel}>
+          <button type="button" className="button secondary" onClick={onCancel} disabled={confirming}>
             Go back
           </button>
-          <button type="button" className="button primary" onClick={onConfirm}>
-            Record deposit
+          <button
+            type="button"
+            className="button primary"
+            onClick={onConfirm}
+            disabled={confirming}
+          >
+            {confirming ? "Verifying…" : "Record deposit"}
           </button>
         </footer>
       </div>

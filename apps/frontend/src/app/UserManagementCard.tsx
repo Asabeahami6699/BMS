@@ -94,7 +94,8 @@ export function UserManagementCard({ role }: Props) {
         "scopeType",
         "branchId",
         "status",
-        "createdBy"
+        "createdBy",
+        "createdByName"
       ]),
     [users, search]
   );
@@ -171,7 +172,7 @@ export function UserManagementCard({ role }: Props) {
 
   return (
     <>
-      <section className="card admin-mgmt-card">
+      <section className="card admin-mgmt-card admin-mgmt-card--users">
         <div className="admin-mgmt-head">
           <div>
             <h2>User management</h2>
@@ -194,10 +195,20 @@ export function UserManagementCard({ role }: Props) {
         <AdminDataTable
           columns={[
             { key: "fullName", label: "Name", render: (row) => row.fullName ?? "—" },
-            { key: "email", label: "Email" },
+            {
+              key: "email",
+              label: "Email",
+              className: "admin-table-email",
+              render: (row) => (
+                <span className="admin-table-email__text" title={row.email}>
+                  {row.email}
+                </span>
+              )
+            },
             {
               key: "role",
               label: "Role",
+              className: "admin-table-role",
               render: (row) => row.role.replace(/_/g, " ")
             },
             {
@@ -225,8 +236,12 @@ export function UserManagementCard({ role }: Props) {
                 </span>
               )
             },
-            { key: "userId", label: "User ID", className: "admin-table-mono" },
-            { key: "createdBy", label: "Created by", className: "admin-table-mono" },
+            { key: "userId", label: "User ID", className: "admin-table-mono admin-table-col--hide-desktop" },
+            {
+              key: "createdBy",
+              label: "Created by",
+              render: (row) => row.createdByName ?? (row.createdBy === "system" ? "System" : row.createdBy)
+            },
             {
               key: "createdAt",
               label: "Created",

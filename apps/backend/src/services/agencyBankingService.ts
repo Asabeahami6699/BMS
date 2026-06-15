@@ -1,5 +1,6 @@
 import {
   agencyBootstrapSchema,
+  AGENCY_BANKING_ACCOUNT_LABEL,
   AGENCY_WALK_IN_CUSTOMER_NAME,
   balanceDisclosureSchema,
   initiateAgencyWithdrawalSchema,
@@ -203,7 +204,7 @@ export async function listTellerAgencyDeposits(
       const customerName = resolveAgencyDepositCustomerName({
         customerFullName: customer?.fullName,
         workflow,
-        fallback: "Customer"
+        fallback: AGENCY_BANKING_ACCOUNT_LABEL
       });
       const rowBranchId = String(row.transaction_branch_id);
       const branch = branchById.get(rowBranchId);

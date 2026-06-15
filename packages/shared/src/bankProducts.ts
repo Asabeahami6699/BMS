@@ -1019,7 +1019,7 @@ export function validateDepositCaptureWorkflow(
   }
 
   if (selfDeposit) {
-    delete normalized.depositor_name;
+    normalized.depositor_name = "Self";
     delete normalized.depositor_number;
   }
 

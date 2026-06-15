@@ -1,6 +1,7 @@
 import {
   roleRequiresTransactionPin,
-  TRANSACTION_PIN_LOCKOUT_MS,
+  TRANSACTION_PIN_BLOCKED_CODE,
+  TRANSACTION_PIN_INVALID_CODE,
   TRANSACTION_PIN_MAX_ATTEMPTS,
   TRANSACTION_STEP_UP_TTL_MS,
   validateTransactionPinFormat,
@@ -30,6 +31,7 @@ type StepUpSession = {
 };
 
 const memoryPinByUserId = new Map<string, PinRecord>();
+const pinRecordCache = new Map<string, PinRecord>();
 const stepUpTokens = new Map<string, StepUpSession>();
 
 function memoryKey(userId: string, tenantId: string): string {
@@ -37,6 +39,12 @@ function memoryKey(userId: string, tenantId: string): string {
 }
 
 async function loadPinRecord(userId: string, tenantId: string): Promise<PinRecord | null> {
+  const key = memoryKey(userId, tenantId);
+  const cached = pinRecordCache.get(key);
+  if (cached) {
+    return cached;
+  }
+
   const supabase = getSupabaseAdminClient();
   if (supabase) {
     const { data, error } = await supabase
@@ -53,7 +61,7 @@ async function loadPinRecord(userId: string, tenantId: string): Promise<PinRecor
     if (!data) {
       return null;
     }
-    return {
+    const record = {
       userId: String(data.id),
       tenantId: String(data.tenant_id),
       transactionPinHash: data.transaction_pin_hash ? String(data.transaction_pin_hash) : null,
@@ -64,9 +72,10 @@ async function loadPinRecord(userId: string, tenantId: string): Promise<PinRecor
         : null,
       transactionPinResetRequired: Boolean(data.transaction_pin_reset_required)
     };
+    pinRecordCache.set(key, record);
+    return record;
   }
 
-  const key = memoryKey(userId, tenantId);
   if (memoryPinByUserId.has(key)) {
     return memoryPinByUserId.get(key)!;
   }
@@ -84,29 +93,41 @@ async function loadPinRecord(userId: string, tenantId: string): Promise<PinRecor
     transactionPinResetRequired: false
   };
   memoryPinByUserId.set(key, record);
+  pinRecordCache.set(key, record);
   return record;
 }
 
-async function savePinRecord(record: PinRecord): Promise<void> {
-  const supabase = getSupabaseAdminClient();
-  if (supabase) {
-    const { error } = await supabase
-      .from("users")
-      .update({
-        transaction_pin_hash: record.transactionPinHash,
-        transaction_pin_set_at: record.transactionPinSetAt,
-        transaction_pin_failed_attempts: record.transactionPinFailedAttempts,
-        transaction_pin_locked_until: record.transactionPinLockedUntil,
-        transaction_pin_reset_required: record.transactionPinResetRequired
-      })
-      .eq("id", record.userId)
-      .eq("tenant_id", record.tenantId);
-    if (error) {
-      throw new Error(`Failed to save transaction PIN: ${error.message}`);
+async function savePinRecord(record: PinRecord, options?: { awaitPersist?: boolean }): Promise<void> {
+  const key = memoryKey(record.userId, record.tenantId);
+  pinRecordCache.set(key, record);
+  memoryPinByUserId.set(key, record);
+
+  const persist = async () => {
+    const supabase = getSupabaseAdminClient();
+    if (supabase) {
+      const { error } = await supabase
+        .from("users")
+        .update({
+          transaction_pin_hash: record.transactionPinHash,
+          transaction_pin_set_at: record.transactionPinSetAt,
+          transaction_pin_failed_attempts: record.transactionPinFailedAttempts,
+          transaction_pin_locked_until: record.transactionPinLockedUntil,
+          transaction_pin_reset_required: record.transactionPinResetRequired
+        })
+        .eq("id", record.userId)
+        .eq("tenant_id", record.tenantId);
+      if (error) {
+        throw new Error(`Failed to save transaction PIN: ${error.message}`);
+      }
     }
+  };
+
+  if (options?.awaitPersist === false) {
+    void persist().catch(() => undefined);
     return;
   }
-  memoryPinByUserId.set(memoryKey(record.userId, record.tenantId), record);
+
+  await persist();
 }
 
 function isLocked(record: PinRecord): boolean {
@@ -115,6 +136,26 @@ function isLocked(record: PinRecord): boolean {
   }
   return new Date(record.transactionPinLockedUntil).getTime() > Date.now();
 }
+
+function isPinBlockedByFailedAttempts(record: PinRecord): boolean {
+  return record.transactionPinFailedAttempts >= TRANSACTION_PIN_MAX_ATTEMPTS;
+}
+
+export class TransactionPinError extends Error {
+  readonly code: typeof TRANSACTION_PIN_INVALID_CODE | typeof TRANSACTION_PIN_BLOCKED_CODE;
+
+  constructor(
+    message: string,
+    code: typeof TRANSACTION_PIN_INVALID_CODE | typeof TRANSACTION_PIN_BLOCKED_CODE
+  ) {
+    super(message);
+    this.name = "TransactionPinError";
+    this.code = code;
+  }
+}
+
+const PIN_BLOCKED_MESSAGE =
+  "Too many incorrect PIN attempts. Your transaction PIN has been locked. Contact your administrator to reset it.";
 
 function cleanupStepUpTokens(): void {
   const now = Date.now();
@@ -132,17 +173,31 @@ export async function getTransactionPinStatus(
 ): Promise<TransactionPinStatus> {
   const required = roleRequiresTransactionPin(role);
   if (!required) {
-    return { required: false, configured: false, resetRequired: false, lockedUntil: null };
+    return {
+      required: false,
+      configured: false,
+      resetRequired: false,
+      lockedUntil: null,
+      blockedRequiresAdminReset: false
+    };
   }
   const record = await loadPinRecord(userId, tenantId);
   if (!record) {
-    return { required: true, configured: false, resetRequired: false, lockedUntil: null };
+    return {
+      required: true,
+      configured: false,
+      resetRequired: false,
+      lockedUntil: null,
+      blockedRequiresAdminReset: false
+    };
   }
+  const blocked = isPinBlockedByFailedAttempts(record);
   return {
     required: true,
     configured: Boolean(record.transactionPinHash),
     resetRequired: record.transactionPinResetRequired,
-    lockedUntil: isLocked(record) ? record.transactionPinLockedUntil : null
+    lockedUntil: isLocked(record) ? record.transactionPinLockedUntil : null,
+    blockedRequiresAdminReset: blocked
   };
 }
 
@@ -204,37 +259,40 @@ export async function verifyTransactionPin(
     }
     throw new Error("Contact an administrator to reset your transaction PIN before posting transactions");
   }
+  if (isPinBlockedByFailedAttempts(record)) {
+    throw new TransactionPinError(PIN_BLOCKED_MESSAGE, TRANSACTION_PIN_BLOCKED_CODE);
+  }
   if (isLocked(record)) {
-    throw new Error(
-      `Transaction PIN is locked. Try again after ${new Date(record.transactionPinLockedUntil!).toLocaleTimeString()}`
+    throw new TransactionPinError(
+      `Transaction PIN is locked. Try again after ${new Date(record.transactionPinLockedUntil!).toLocaleTimeString()}`,
+      TRANSACTION_PIN_BLOCKED_CODE
     );
   }
 
   const ok = verifyPassword(pin, record.transactionPinHash);
   if (!ok) {
     const attempts = record.transactionPinFailedAttempts + 1;
-    const lockedUntil =
-      attempts >= TRANSACTION_PIN_MAX_ATTEMPTS
-        ? new Date(Date.now() + TRANSACTION_PIN_LOCKOUT_MS).toISOString()
-        : null;
-    await savePinRecord({
+    const updated = {
       ...record,
       transactionPinFailedAttempts: attempts,
-      transactionPinLockedUntil: lockedUntil
-    });
-    await writeAuditLog({
+      transactionPinLockedUntil: null
+    };
+    void savePinRecord(updated, { awaitPersist: false });
+    void writeAuditLog({
       tenantId,
       actorUserId: userId,
       actorRole: role,
       method: "POST",
       path: "/api/v1/auth/transaction-pin/verify",
-      statusCode: 401
-    });
-    if (lockedUntil) {
-      throw new Error("Too many incorrect PIN attempts. PIN locked for 15 minutes.");
+      statusCode: 400
+    }).catch(() => undefined);
+    if (attempts >= TRANSACTION_PIN_MAX_ATTEMPTS) {
+      throw new TransactionPinError(PIN_BLOCKED_MESSAGE, TRANSACTION_PIN_BLOCKED_CODE);
     }
-    throw new Error(
-      `Incorrect transaction PIN. ${TRANSACTION_PIN_MAX_ATTEMPTS - attempts} attempt(s) left.`
+    const remaining = TRANSACTION_PIN_MAX_ATTEMPTS - attempts;
+    throw new TransactionPinError(
+      `Incorrect transaction PIN. ${remaining} attempt${remaining === 1 ? "" : "s"} remaining.`,
+      TRANSACTION_PIN_INVALID_CODE
     );
   }
 
@@ -249,14 +307,14 @@ export async function verifyTransactionPin(
   const expiresAt = Date.now() + TRANSACTION_STEP_UP_TTL_MS;
   stepUpTokens.set(token, { userId, tenantId, expiresAt });
 
-  await writeAuditLog({
+  void writeAuditLog({
     tenantId,
     actorUserId: userId,
     actorRole: role,
     method: "POST",
     path: "/api/v1/auth/transaction-pin/verify",
     statusCode: 200
-  });
+  }).catch(() => undefined);
 
   return {
     token,
@@ -340,6 +398,9 @@ export async function assertTransactionStepUpReady(
       throw new Error("Your administrator requires you to set a new transaction PIN before posting transactions");
     }
     throw new Error("Contact an administrator to reset your transaction PIN before posting transactions");
+  }
+  if (status.blockedRequiresAdminReset) {
+    throw new Error(PIN_BLOCKED_MESSAGE);
   }
   if (status.lockedUntil && new Date(status.lockedUntil).getTime() > Date.now()) {
     throw new Error("Transaction PIN is locked. Try again later.");
