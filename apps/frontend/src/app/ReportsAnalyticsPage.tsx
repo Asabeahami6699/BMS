@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
+import { useShallow } from "zustand/react/shallow";
 import {
   hasAnyPermission,
   hasTenantModule,
@@ -46,12 +47,13 @@ export function ReportsAnalyticsPage({ role, me }: Props) {
   const hasSusu = hasTenantModule(modules, "susu_management");
   const hasInvestments = hasTenantModule(modules, "investment_management");
   const canInvestmentsRead = hasAnyPermission(me?.permissions, ["investments.read"]);
-  const canLoad = hasSusu && me?.reportsAnalytics !== false;
+  const canReportsRead = hasAnyPermission(me?.permissions, ["reports.read"]);
+  const canLoad = me?.reportsAnalytics !== false && canReportsRead;
 
   useReportsAnalyticsLiveSync(canLoad);
-  useInvestmentsLiveSync(hasInvestments && canInvestmentsRead && me?.reportsAnalytics !== false);
+  useInvestmentsLiveSync(hasInvestments && canInvestmentsRead && canLoad);
 
-  const investmentKpis = useInvestmentStore((s) => selectInvestmentKpis(s));
+  const investmentKpis = useInvestmentStore(useShallow(selectInvestmentKpis));
 
   const { showToast } = useToast();
   const data = useReportsAnalyticsStore((s) => s.data);
@@ -257,7 +259,7 @@ export function ReportsAnalyticsPage({ role, me }: Props) {
         </section>
       ) : null}
 
-      {hasSusu && canLoad ? (
+      {hasSusu ? (
         <>
           <section className="kpi-grid reports-kpis">
             <article className="kpi-card kpi-card--primary">
