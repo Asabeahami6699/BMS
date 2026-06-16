@@ -22,6 +22,7 @@ import {
   printInvestmentCertificate
 } from "./investmentPrint";
 import { InvestmentsLayout } from "./InvestmentsLayout";
+import { usePageLoading } from "../hooks/usePageLoading";
 
 type Props = { role: AppRole };
 
@@ -35,6 +36,8 @@ export function InvestmentDetailPage({ role: _role }: Props) {
   const [audit, setAudit] = useState<InvestmentAuditEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [detailsOpen, setDetailsOpen] = useState(false);
+
+  usePageLoading(loading, "investment-detail");
 
   useEffect(() => {
     if (!investmentId) {

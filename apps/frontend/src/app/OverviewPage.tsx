@@ -112,9 +112,15 @@ export function OverviewPage({
   const topAgents = useCoordinatorStore(useShallow(selectTopAgents));
   const topBranches = useCoordinatorStore(useShallow(selectTopBranches));
 
+  const coordAgentNames = useCoordinatorStore((s) => s.agentNames);
   const perfAgentNames = usePerformanceStore((s) => s.agentNames);
   const perfBranches = usePerformanceStore((s) => s.branches);
   const perfLoading = usePerformanceStore((s) => s.loading);
+
+  const agentNames = useMemo(
+    () => ({ ...perfAgentNames, ...coordAgentNames }),
+    [perfAgentNames, coordAgentNames]
+  );
 
   const withdrawals = useWithdrawalsStore((s) => s.withdrawals);
   const groupTotals = useGroupSavingsStore((s) => s.totals);
@@ -159,7 +165,7 @@ export function OverviewPage({
   const branchName = (branchId: string) =>
     selectBranchDisplayName(branchId, perfBranches.length ? perfBranches : coordBranches);
 
-  const agentName = (agentId: string) => selectAgentDisplayName(agentId, perfAgentNames);
+  const agentName = (agentId: string) => selectAgentDisplayName(agentId, agentNames);
 
   const loading = loadCoordinator && coordLoading && !coordLastFetched;
 

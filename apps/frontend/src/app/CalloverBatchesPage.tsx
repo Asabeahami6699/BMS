@@ -11,6 +11,7 @@ import {
 } from "./api";
 import { useToast } from "../components/Toast";
 import { toUserFacingError } from "../lib/networkError";
+import { usePageLoading } from "./hooks/usePageLoading";
 
 type Props = { role: AppRole };
 
@@ -77,6 +78,8 @@ export function CalloverBatchesPage({ role }: Props) {
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  usePageLoading(loading || busyId !== null, "callover-batches");
 
   const branchById = useMemo(() => new Map(branches.map((b) => [b.id, b])), [branches]);
 

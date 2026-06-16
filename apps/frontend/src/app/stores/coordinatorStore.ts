@@ -34,6 +34,7 @@ type CoordinatorState = {
   agents: AgentReport[];
   branches: Branch[];
   branchReports: BranchReport[];
+  agentNames: Record<string, string>;
   loading: boolean;
   error: string | null;
   lastFetchedAt: number | null;
@@ -127,6 +128,7 @@ function applyCoordinatorBootstrap(
     agents: data.agents,
     branchReports: data.branchReports,
     branches: data.branches,
+    agentNames: data.agentNames ?? {},
     lastFetchedAt: Date.now(),
     error: null
   };
@@ -140,6 +142,7 @@ export const useCoordinatorStore = create<CoordinatorState>((set, get) => ({
   agents: [],
   branches: [],
   branchReports: [],
+  agentNames: {},
   loading: false,
   error: null,
   lastFetchedAt: null,

@@ -101,6 +101,19 @@ export async function fetchUserNameMap(tenantId: string, userIds: string[]): Pro
   return map;
 }
 
+export async function buildAgentNamesRecord(
+  tenantId: string,
+  fieldAgentIds: string[]
+): Promise<Record<string, string>> {
+  const unique = [...new Set(fieldAgentIds.filter((id) => id.length > 0))];
+  const nameMap = await fetchUserNameMap(tenantId, unique);
+  const out: Record<string, string> = {};
+  for (const id of unique) {
+    out[id] = nameMap.get(id) ?? id.slice(0, 8);
+  }
+  return out;
+}
+
 export function ledgerPerformerLabel(input: {
   recordedByName?: string;
   fieldAgentName?: string;

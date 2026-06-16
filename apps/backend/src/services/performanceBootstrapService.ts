@@ -4,7 +4,7 @@ import {
   getBranchPerformanceSummary
 } from "./analyticsService.js";
 import { listBranches } from "./branchService.js";
-import { listTenantFieldAgents } from "./authService.js";
+import { buildAgentNamesRecord } from "./userNameResolver.js";
 
 export type PerformanceBootstrap = {
   summary: Awaited<ReturnType<typeof getBranchPerformanceSummary>>;
@@ -30,18 +30,17 @@ export async function getPerformanceBootstrap(
     filterBranchId: branchFilter?.trim() || undefined
   };
 
-  const [summary, agents, branchReports, branchRows, fieldAgents] = await Promise.all([
+  const [summary, agents, branchReports, branchRows] = await Promise.all([
     getBranchPerformanceSummary(tenantId, scope),
     getAgentPerformance(tenantId, scope),
     getBranchBreakdown(tenantId, scope),
-    listBranches(tenantId).catch(() => []),
-    listTenantFieldAgents(tenantId).catch(() => [])
+    listBranches(tenantId).catch(() => [])
   ]);
 
-  const agentNames: Record<string, string> = {};
-  for (const agent of fieldAgents) {
-    agentNames[agent.userId] = agent.fullName?.trim() || agent.email || agent.userId;
-  }
+  const agentNames = await buildAgentNamesRecord(
+    tenantId,
+    agents.map((agent) => agent.fieldAgentId)
+  );
 
   return {
     summary,

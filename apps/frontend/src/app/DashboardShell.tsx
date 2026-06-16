@@ -6,7 +6,9 @@ import { BmsBrandIcon } from "../components/BmsBrandIcon";
 import { AiHelpPanel } from "../components/AiHelpPanel";
 import { GlobalSearch } from "./components/GlobalSearch";
 import { DashboardNotifications } from "./components/DashboardNotifications";
+import { DashboardLoadingBar } from "./components/DashboardLoadingBar";
 import { ThemeToggle } from "../components/ThemeToggle";
+import { useDashboardPageLoading } from "./hooks/useDashboardPageLoading";
 
 export type { DashboardNavItem };
 
@@ -156,6 +158,7 @@ export function DashboardShell({
   }
 
   const initials = userInitials ?? initialsFromName(userName);
+  const pageLoading = useDashboardPageLoading();
 
   return (
     <div className="dash-root">
@@ -282,18 +285,19 @@ export function DashboardShell({
       </aside>
 
       <div className="dash-main">
-        <header className="dash-header">
-          <div className="dash-header-start">
-            <GlobalSearch canSearchCustomers={canSearchCustomers} canSearchUsers={canSearchUsers} />
-          </div>
+        <div className="dash-header-shell">
+          <header className="dash-header">
+            <div className="dash-header-start">
+              <GlobalSearch canSearchCustomers={canSearchCustomers} canSearchUsers={canSearchUsers} />
+            </div>
 
-          {topbarActions ? <div className="dash-header-center">{topbarActions}</div> : null}
+            {topbarActions ? <div className="dash-header-center">{topbarActions}</div> : null}
 
-          <div className="dash-header-end">
-            <ThemeToggle />
-            <DashboardNotifications enabled={notificationsEnabled} />
+            <div className="dash-header-end">
+              <ThemeToggle />
+              <DashboardNotifications enabled={notificationsEnabled} />
 
-            <div className={`dash-profile-menu${profileOpen ? " is-open" : ""}`} ref={profileRef}>
+              <div className={`dash-profile-menu${profileOpen ? " is-open" : ""}`} ref={profileRef}>
               <button
                 type="button"
                 className="dash-profile-trigger"
@@ -367,6 +371,8 @@ export function DashboardShell({
             </div>
           </div>
         </header>
+          <DashboardLoadingBar active={pageLoading} />
+        </div>
 
         <section className="dash-content">{children}</section>
       </div>

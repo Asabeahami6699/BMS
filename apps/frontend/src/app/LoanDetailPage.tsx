@@ -33,6 +33,7 @@ import {
 } from "./loans/loanUi";
 import { LoanMoneyInput } from "./loans/LoanMoneyInput";
 import { useLoansStore } from "./stores/loansStore";
+import { usePageLoading } from "./hooks/usePageLoading";
 import { applicationToReviewSnapshot } from "./loans/loanDocument";
 import { printLoanDocument } from "./loans/loanPrint";
 
@@ -54,6 +55,8 @@ export function LoanDetailPage({ role: _role }: Props) {
   const [repayAmount, setRepayAmount] = useState("");
   const [repayAmountNum, setRepayAmountNum] = useState(NaN);
   const [repayBranchId, setRepayBranchId] = useState("");
+
+  usePageLoading(loading || busy, "loan-detail");
 
   const load = useCallback(async () => {
     if (!loanId) {

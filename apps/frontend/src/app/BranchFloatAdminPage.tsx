@@ -12,6 +12,7 @@ import {
 } from "./api";
 import { useToast } from "../components/Toast";
 import { toUserFacingError } from "../lib/networkError";
+import { usePageLoading } from "./hooks/usePageLoading";
 
 type Props = { role: AppRole };
 
@@ -44,6 +45,8 @@ export function BranchFloatAdminPage({ role }: Props) {
   const [pushBranchId, setPushBranchId] = useState("");
   const [pushUserId, setPushUserId] = useState("");
   const [pushAmount, setPushAmount] = useState("500");
+
+  usePageLoading(loading || busy, "branch-float");
 
   const counterStaff = useMemo(
     () =>

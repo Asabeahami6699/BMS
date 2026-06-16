@@ -3,6 +3,7 @@ import type { AppRole, Branch, SusuClosingBalanceSnapshot } from "./api";
 import { getSusuClosingBalance, listBranches, saveSusuClosingBalance } from "./api";
 import { useToast } from "../components/Toast";
 import { toUserFacingError } from "../lib/networkError";
+import { usePageLoading } from "./hooks/usePageLoading";
 
 type Props = { role: AppRole };
 
@@ -27,6 +28,8 @@ export function SusuClosingBalancesPage({ role }: Props) {
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+
+  usePageLoading(loading || saving, "susu-closing-balances");
 
   useEffect(() => {
     void listBranches()

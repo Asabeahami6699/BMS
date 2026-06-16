@@ -1785,6 +1785,7 @@ export type CoordinatorBootstrapResponse = {
   agents: AgentReport[];
   branchReports: BranchReport[];
   branches: Branch[];
+  agentNames: Record<string, string>;
 };
 
 export async function getCoordinatorBootstrap(branchId?: string): Promise<CoordinatorBootstrapResponse> {

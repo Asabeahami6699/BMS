@@ -4,6 +4,7 @@ import { listAuditLogs, getTenantId } from "./api";
 import { subscribeToTenantRealtime } from "./realtime";
 import { AdminDataTable, filterRowsBySearch } from "../components/AdminDataTable";
 import { useToast } from "../components/Toast";
+import { usePageLoading } from "./hooks/usePageLoading";
 
 function formatWhen(iso: string): string {
   try {
@@ -28,6 +29,8 @@ export function AuditLogsPage() {
   const [rows, setRows] = useState<AuditLogRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+
+  usePageLoading(loading, "audit-logs");
 
   const load = useCallback(async () => {
     setLoading(true);

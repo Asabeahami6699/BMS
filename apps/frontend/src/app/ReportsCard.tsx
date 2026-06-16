@@ -7,6 +7,7 @@ import {
   selectTopBranches,
   useCoordinatorStore
 } from "./stores/coordinatorStore";
+import { selectAgentDisplayName, selectBranchDisplayName } from "./stores/performanceStore";
 import { useToast } from "../components/Toast";
 import { toUserFacingError } from "../lib/networkError";
 
@@ -19,6 +20,8 @@ export function ReportsCard({ role }: Props) {
   const summary = useCoordinatorStore((s) => s.summary);
   const agents = useCoordinatorStore(useShallow(selectTopAgents));
   const branches = useCoordinatorStore(useShallow(selectTopBranches));
+  const agentNames = useCoordinatorStore((s) => s.agentNames);
+  const coordBranches = useCoordinatorStore((s) => s.branches);
   const branchFilter = useCoordinatorStore((s) => s.branchFilter);
   const setBranchFilter = useCoordinatorStore((s) => s.setBranchFilter);
   const loading = useCoordinatorStore((s) => s.loading);
@@ -94,7 +97,7 @@ export function ReportsCard({ role }: Props) {
       <div className="lines">
         {branches.map((branch) => (
           <div className="line" key={branch.branchId}>
-            <span>{branch.branchId}</span>
+            <span>{selectBranchDisplayName(branch.branchId, coordBranches)}</span>
             <small>
               {branch.transactionCount} tx | {branch.totalAmount.toFixed(2)}
             </small>
@@ -106,7 +109,7 @@ export function ReportsCard({ role }: Props) {
       <div className="lines">
         {agents.map((agent) => (
           <div className="line" key={agent.fieldAgentId}>
-            <span>{agent.fieldAgentId}</span>
+            <span>{selectAgentDisplayName(agent.fieldAgentId, agentNames)}</span>
             <small>{agent.totalCollections.toFixed(2)}</small>
           </div>
         ))}

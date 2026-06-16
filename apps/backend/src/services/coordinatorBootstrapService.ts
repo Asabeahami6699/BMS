@@ -7,6 +7,7 @@ import {
 import { listPendingBalanceDisclosures } from "./balanceDisclosureService.js";
 import { listBranches } from "./branchService.js";
 import { listCustomers } from "./customerService.js";
+import { buildAgentNamesRecord } from "./userNameResolver.js";
 
 type BranchRow = Awaited<ReturnType<typeof listBranches>>[number];
 
@@ -18,6 +19,7 @@ export type CoordinatorBootstrap = {
   agents: Awaited<ReturnType<typeof getAgentPerformance>>;
   branchReports: Awaited<ReturnType<typeof getBranchBreakdown>>;
   branches: BranchRow[];
+  agentNames: Record<string, string>;
 };
 
 function sortCustomers(list: Customer[]): Customer[] {
@@ -59,6 +61,11 @@ export async function getCoordinatorBootstrap(
 
   const pendingRegistrations = customers.filter((c) => c.status === "pending_activation");
 
+  const agentNames = await buildAgentNamesRecord(
+    tenantId,
+    agents.map((agent) => agent.fieldAgentId)
+  );
+
   return {
     customers: sortCustomers(customers),
     pendingRegistrations: sortCustomers(pendingRegistrations),
@@ -66,6 +73,7 @@ export async function getCoordinatorBootstrap(
     summary,
     agents,
     branchReports,
-    branches: branchRows.filter((b) => b.status !== "inactive")
+    branches: branchRows.filter((b) => b.status !== "inactive"),
+    agentNames
   };
 }

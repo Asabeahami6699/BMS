@@ -12,6 +12,7 @@ import { createTellerTillJournalEntry, getRuntimeBranchId, listTellerTillJournal
 import { useToast } from "../../components/Toast";
 import { ensureTransactionStepUpForRole } from "../../lib/ensureTransactionStepUp";
 import { toUserFacingError } from "../../lib/networkError";
+import { usePageLoading } from "../hooks/usePageLoading";
 
 const ENTRY_TYPES = Object.keys(TELLER_TILL_ENTRY_LABELS) as TellerTillEntryType[];
 
@@ -39,6 +40,8 @@ export function TellerTillDaybookPage() {
   const [notes, setNotes] = useState("");
 
   const branchId = getRuntimeBranchId() ?? "";
+
+  usePageLoading(loading || posting, "teller-till-daybook");
 
   useEffect(() => {
     if (!user || !roleRequiresTransactionPin(user.role)) {
