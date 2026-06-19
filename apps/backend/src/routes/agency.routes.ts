@@ -27,6 +27,7 @@ import {
   findPartnerBankAccountByNumber,
   listPartnerBankAccounts
 } from "../services/agencyPartnerAccountService.js";
+import { listAccountOpeningProducts } from "../services/bankProductService.js";
 import { ensureAgencyWalkInCustomer } from "../services/agencyWalkInCustomerService.js";
 import { getAccountantDashboard } from "../services/accountantDashboardService.js";
 import { getAuditorDashboard } from "../services/auditorDashboardService.js";
@@ -149,6 +150,23 @@ agencyRouter.get("/partner-accounts", requirePermission("agency.accounts.create"
     next(error);
   }
 });
+
+agencyRouter.get(
+  "/account-opening/products",
+  requirePermission("agency.accounts.create"),
+  async (req, res, next) => {
+    try {
+      const context = req.userContext!;
+      const products = await listAccountOpeningProducts(context.tenantId, {
+        activeOnly: true,
+        branchId: resolveRequestBranchFilter(req)
+      });
+      res.json({ products });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
 
 agencyRouter.post(
   "/partner-accounts",

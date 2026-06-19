@@ -78,6 +78,51 @@ function formatDate(iso: string): string {
   }
 }
 
+function toLocalDateKey(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) {
+    return "";
+  }
+  return d.toLocaleDateString("en-CA");
+}
+
+function todayLocalDateKey(): string {
+  return new Date().toLocaleDateString("en-CA");
+}
+
+function formatDateRangeLabel(from: string, to: string): string {
+  if (!from && !to) {
+    return "";
+  }
+  const start = from || to;
+  const end = to || from;
+  const [lo, hi] = start <= end ? [start, end] : [end, start];
+  const fmt = (d: string) =>
+    new Date(`${d}T12:00:00`).toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      year: "numeric"
+    });
+  if (lo === hi) {
+    return fmt(lo);
+  }
+  return `${fmt(lo)} – ${fmt(hi)}`;
+}
+
+function matchesDateRange(iso: string, from: string, to: string): boolean {
+  if (!from && !to) {
+    return true;
+  }
+  const key = toLocalDateKey(iso);
+  if (!key) {
+    return false;
+  }
+  const start = from || to;
+  const end = to || from;
+  const [lo, hi] = start <= end ? [start, end] : [end, start];
+  return key >= lo && key <= hi;
+}
+
 export function WithdrawalsPage({ role, permissions, variant = "susu" }: Props) {
   const isAgency = variant === "agency";
   useWithdrawalsLiveSync();
@@ -110,6 +155,12 @@ export function WithdrawalsPage({ role, permissions, variant = "susu" }: Props) 
   const [fulfillmentDate, setFulfillmentDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [fulfillmentRows, setFulfillmentRows] = useState<FieldWithdrawalFulfillmentRow[]>([]);
   const [fulfillmentLoading, setFulfillmentLoading] = useState(false);
+  const [dateFrom, setDateFrom] = useState(() =>
+    variant === "agency" ? todayLocalDateKey() : ""
+  );
+  const [dateTo, setDateTo] = useState(() =>
+    variant === "agency" ? todayLocalDateKey() : ""
+  );
 
   useEffect(() => {
     function loadProducts() {
@@ -137,10 +188,18 @@ export function WithdrawalsPage({ role, permissions, variant = "susu" }: Props) 
   }, [isAgency, fulfillmentDate, branchFilter, lastFetchedAt]);
 
   const initialLoad = loading && lastFetchedAt == null;
-  const kpis = useMemo(() => selectWithdrawalKpis(withdrawals), [withdrawals]);
+
+  const dateScopedWithdrawals = useMemo(() => {
+    if (!isAgency) {
+      return withdrawals;
+    }
+    return withdrawals.filter((row) => matchesDateRange(row.requestedAt, dateFrom, dateTo));
+  }, [withdrawals, dateFrom, dateTo, isAgency]);
+
+  const kpis = useMemo(() => selectWithdrawalKpis(dateScopedWithdrawals), [dateScopedWithdrawals]);
 
   const filtered = useMemo(() => {
-    let list = withdrawals;
+    let list = dateScopedWithdrawals;
     if (statusFilter) {
       list = list.filter((r) => r.status === statusFilter);
     }
@@ -151,7 +210,7 @@ export function WithdrawalsPage({ role, permissions, variant = "susu" }: Props) 
       "momoNumber",
       "momoAccountName"
     ] as (keyof BalanceDisclosure)[]);
-  }, [withdrawals, search, statusFilter]);
+  }, [dateScopedWithdrawals, search, statusFilter]);
 
   function handleApprove(row: BalanceDisclosure) {
     if (row.fulfillmentMode === "momo") {
@@ -280,6 +339,53 @@ export function WithdrawalsPage({ role, permissions, variant = "susu" }: Props) 
             <option value="rejected">Rejected</option>
           </select>
         </label>
+        {isAgency ? (
+          <label className="field agents-page__branch-filter">
+            <span>From</span>
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+            />
+          </label>
+        ) : null}
+        {isAgency ? (
+          <label className="field agents-page__branch-filter">
+            <span>To</span>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+            />
+          </label>
+        ) : null}
+        {isAgency ? (
+          <div className="agents-page__date-presets">
+            <button
+              type="button"
+              className={`button secondary${
+                dateFrom === todayLocalDateKey() && dateTo === todayLocalDateKey() ? " is-active" : ""
+              }`}
+              onClick={() => {
+                const today = todayLocalDateKey();
+                setDateFrom(today);
+                setDateTo(today);
+              }}
+            >
+              Today
+            </button>
+            <button
+              type="button"
+              className={`button secondary${!dateFrom && !dateTo ? " is-active" : ""}`}
+              onClick={() => {
+                setDateFrom("");
+                setDateTo("");
+              }}
+            >
+              All dates
+            </button>
+          </div>
+        ) : null}
       </div>
 
       <section className="card agents-page__table-card">
@@ -359,7 +465,11 @@ export function WithdrawalsPage({ role, permissions, variant = "susu" }: Props) 
           onSearchChange={setSearch}
           searchPlaceholder="Search customer, agent, MoMo…"
           emptyMessage={
-            initialLoad ? "Loading withdrawals…" : "No withdrawal requests match your filters."
+            initialLoad
+              ? "Loading withdrawals…"
+              : isAgency && (dateFrom || dateTo)
+                ? `No withdrawal requests for ${formatDateRangeLabel(dateFrom, dateTo)}.`
+                : "No withdrawal requests match your filters."
           }
           actions={(row) => {
             if (!canApprove || row.status !== "pending" || isManualPartnerWithdrawal(row)) {

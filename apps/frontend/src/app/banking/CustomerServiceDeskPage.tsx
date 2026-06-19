@@ -68,7 +68,7 @@ export function CustomerServiceDeskPage({ displayName }: Props) {
           on the withdrawal desk before payout.
         </p>
         <div className="role-workspace__quick-actions">
-          <Link to="/app/banking/withdrawals/initiate" className="button primary role-workspace__cta">
+          <Link to="/app/banking/withdrawals" className="button primary role-workspace__cta">
             Initiate withdrawal →
           </Link>
           <Link to="/app/banking/account-opening" className="button secondary">

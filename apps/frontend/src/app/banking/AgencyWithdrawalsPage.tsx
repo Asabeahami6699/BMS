@@ -1,6 +1,8 @@
 import { Link } from "react-router-dom";
 import type { AppRole } from "../api";
 import { WithdrawalsPage } from "../WithdrawalsPage";
+import { InitiateAgencyWithdrawalPanel } from "./InitiateAgencyWithdrawalPanel";
+import { useWithdrawalsStore } from "../stores/withdrawalsStore";
 
 type Props = {
   role: AppRole;
@@ -9,6 +11,8 @@ type Props = {
 
 /** Agency banking withdrawal verification — separate from Susu withdrawals nav. */
 export function AgencyWithdrawalsPage({ role, permissions }: Props) {
+  const refreshSilent = useWithdrawalsStore((s) => s.refreshSilent);
+
   return (
     <div className="agency-banking-page">
       <header className="card role-workspace__hero workspace-animate-in agency-withdrawals-header">
@@ -26,6 +30,9 @@ export function AgencyWithdrawalsPage({ role, permissions }: Props) {
           </Link>
         </div>
       </header>
+
+      <InitiateAgencyWithdrawalPanel onInitiated={() => void refreshSilent()} />
+
       <WithdrawalsPage role={role} permissions={permissions} variant="agency" />
     </div>
   );

@@ -1,5 +1,6 @@
 import { useAccountantDeskStore } from "./stores/accountantDeskStore";
 import { useAgencyStore } from "./stores/agencyStore";
+import { useAgencyAccountsStore } from "./stores/agencyAccountsStore";
 import { useAgencyTellerStore } from "./stores/agencyTellerStore";
 import { useAgentsStore } from "./stores/agentsStore";
 import { useAuditorDeskStore } from "./stores/auditorDeskStore";
@@ -212,6 +213,10 @@ export function computeDashboardPageLoading(pathname: string): boolean {
     return s.loading || s.depositsLoading;
   }
 
+  if (path === "banking/account-opening") {
+    return useAgencyAccountsStore.getState().loading || useAgencyTellerStore.getState().loading;
+  }
+
   if (path === "banking/reconciliation") {
     return useTellerReconciliationStore.getState().loading;
   }
@@ -287,6 +292,7 @@ const WATCHED_STORES: StoreLike[] = [
   useRoleWorkspaceStore,
   useBackOfficeStore,
   useAgencyTellerStore,
+  useAgencyAccountsStore,
   useTellerReconciliationStore,
   useAccountantDeskStore,
   useAuditorDeskStore,

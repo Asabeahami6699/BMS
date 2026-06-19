@@ -1,24 +1,36 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useShallow } from "zustand/react/shallow";
-import { bankProductDisplayLabel, workflowFieldsForStage } from "@bms/shared";
-import { filterRowsBySearch } from "../../components/AdminDataTable";
+import type { TenantBankProduct } from "@bms/shared";
+import { AdminDataTable } from "../../components/AdminDataTable";
+import { useAuth } from "../../auth/AuthContext";
 import { useToast } from "../../components/Toast";
 import { toUserFacingError } from "../../lib/networkError";
-import type { TenantBankProduct } from "@bms/shared";
-import { listBankProducts } from "../api";
-import { selectActiveAgencyCustomers, useAgencyTellerStore } from "../stores/agencyTellerStore";
+import { getRuntimeBranchId, listAccountOpeningProducts } from "../api";
+import { usePageLoading } from "../hooks/usePageLoading";
 import { useAgencyAccountsStore } from "../stores/agencyAccountsStore";
-import { DynamicWorkflowForm } from "./DynamicWorkflowForm";
+import { useBranchesStore } from "../stores/branchesStore";
+import {
+  AccountOpeningModal,
+  buildAccountOpeningWorkflowPayload,
+  type AccountOpeningFormValues
+} from "./AccountOpeningModal";
+import {
+  accountOpenedBy,
+  accountOpeningDate,
+  accountOpeningEmail,
+  accountOpeningInitialDeposit,
+  accountOpeningPhone,
+  accountOpeningTypeLabel
+} from "./accountOpeningUi";
 
 export function AgencyAccountOpeningPage() {
+  const { user } = useAuth();
   const { showToast } = useToast();
   const [search, setSearch] = useState("");
-  const [accountNumber, setAccountNumber] = useState("");
-  const [accountName, setAccountName] = useState("");
-  const [externalReference, setExternalReference] = useState("");
-  const [bankProductId, setBankProductId] = useState("");
-  const [workflowData, setWorkflowData] = useState<Record<string, unknown>>({});
+  const [modalOpen, setModalOpen] = useState(false);
+  const [openingProducts, setOpeningProducts] = useState<TenantBankProduct[]>([]);
+  const [productsLoading, setProductsLoading] = useState(true);
 
   const { accounts, loading: accountsLoading, hydrate: hydrateAccounts, createAccount, posting } =
     useAgencyAccountsStore(
@@ -31,218 +43,189 @@ export function AgencyAccountOpeningPage() {
       }))
     );
 
-  const [openingProducts, setOpeningProducts] = useState<TenantBankProduct[]>([]);
+  const branches = useBranchesStore((s) => s.branches);
+  const hydrateBranches = useBranchesStore((s) => s.hydrate);
 
-  const { customers, selectedCustomerId, loading, hydrate, startLiveSync, stopLiveSync, selectCustomer } =
-    useAgencyTellerStore(
-      useShallow((s) => ({
-        customers: s.customers,
-        selectedCustomerId: s.selectedCustomerId,
-        loading: s.loading,
-        hydrate: s.hydrate,
-        startLiveSync: s.startLiveSync,
-        stopLiveSync: s.stopLiveSync,
-        selectCustomer: s.selectCustomer
-      }))
-    );
+  usePageLoading(accountsLoading || productsLoading, "agency-account-opening");
+
+  const loadOpeningProducts = () => {
+    setProductsLoading(true);
+    return listAccountOpeningProducts({ branchId: getRuntimeBranchId() || undefined })
+      .then((products) => {
+        setOpeningProducts(products);
+      })
+      .catch((err) => {
+        showToast(toUserFacingError(err, "Could not load account-opening products"), "error");
+        setOpeningProducts([]);
+      })
+      .finally(() => setProductsLoading(false));
+  };
 
   useEffect(() => {
-    hydrate({ force: true });
     hydrateAccounts({ force: true });
-    startLiveSync();
-    void listBankProducts({ direction: "account_opening", activeOnly: true })
-      .then(setOpeningProducts)
-      .catch(() => setOpeningProducts([]));
-    return () => stopLiveSync();
-  }, [hydrate, hydrateAccounts, startLiveSync, stopLiveSync]);
+    hydrateBranches({ force: true });
+    void loadOpeningProducts();
+  }, [hydrateAccounts, hydrateBranches]);
 
-  useEffect(() => {
-    if (!bankProductId && openingProducts[0]) {
-      setBankProductId(openingProducts[0].id);
+  const tableRows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const sorted = [...accounts].sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+    if (!q) {
+      return sorted;
     }
-  }, [openingProducts, bankProductId]);
+    return sorted.filter((row) =>
+      [
+        row.accountNumber,
+        row.accountName,
+        accountOpeningPhone(row),
+        accountOpeningEmail(row),
+        accountOpenedBy(row),
+        accountOpeningTypeLabel(row),
+        row.branchName,
+        accountOpeningDate(row)
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(q)
+    );
+  }, [accounts, search]);
 
-  const selectedProduct = openingProducts.find((p) => p.id === bankProductId);
-  const openingFields = selectedProduct
-    ? workflowFieldsForStage(selectedProduct, "account_opening")
-    : [];
+  const openedByName =
+    user?.fullName?.trim() || user?.email?.split("@")[0]?.trim() || "Current user";
 
-  const activeCustomers = useMemo(() => selectActiveAgencyCustomers(customers), [customers]);
-  const filteredCustomers = useMemo(
-    () =>
-      filterRowsBySearch(activeCustomers, search, [
-        "fullName",
-        "phone",
-        "accountNumber"
-      ] as (keyof (typeof activeCustomers)[0])[]).slice(0, 12),
-    [activeCustomers, search]
-  );
-
-  const selectedCustomer = activeCustomers.find((c) => c.id === selectedCustomerId) ?? null;
-  const customerAccounts = useMemo(
-    () => accounts.filter((a) => a.customerId === selectedCustomerId),
-    [accounts, selectedCustomerId]
-  );
-
-  async function handleSubmit() {
-    if (!selectedCustomer) {
-      showToast("Select a customer first", "error");
+  async function handleCreate(values: AccountOpeningFormValues) {
+    if (!values.bankProductId) {
+      showToast("Select a type", "error");
       return;
     }
-    if (!bankProductId) {
-      showToast("Select an account-opening bank product", "error");
-      return;
-    }
-    if (!accountNumber.trim() || !accountName.trim()) {
+    if (!values.accountNumber.trim() || !values.accountName.trim()) {
       showToast("Account number and account name are required", "error");
+      return;
+    }
+    if (!values.branchId) {
+      showToast("Select a branch", "error");
       return;
     }
 
     try {
       await createAccount({
-        customerId: selectedCustomer.id,
-        bankProductId,
-        accountNumber: accountNumber.trim(),
-        accountName: accountName.trim(),
-        externalReference: externalReference.trim() || undefined,
-        workflowData
+        bankProductId: values.bankProductId,
+        accountNumber: values.accountNumber.trim(),
+        accountName: values.accountName.trim(),
+        branchId: values.branchId,
+        workflowData: buildAccountOpeningWorkflowPayload(values)
       });
       showToast("Partner bank account recorded", "success");
-      setAccountNumber("");
-      setAccountName("");
-      setExternalReference("");
-      setWorkflowData({});
+      setModalOpen(false);
     } catch (err) {
       showToast(toUserFacingError(err, "Could not record account"), "error");
     }
   }
 
   return (
-    <div className="agency-banking-page role-workspace">
+    <div className="agency-banking-page role-workspace account-opening-page">
       <header className="card role-workspace__hero workspace-animate-in">
         <p className="role-workspace__eyebrow">Agency banking · Customer service</p>
         <div className="role-workspace__hero-row">
           <div>
             <h2>Partner account opening</h2>
             <p className="muted role-workspace__subtitle">
-              Record real accounts created on Ecobank, GCB, or other partner platforms.
+              Record accounts opened on partner bank platforms and review recent openings.
             </p>
           </div>
-          <Link to="/app/banking/customer-service" className="button secondary">
-            ← CS desk
-          </Link>
+          <div className="account-opening-page__hero-actions">
+            <button type="button" className="button primary" onClick={() => setModalOpen(true)}>
+              + Record opening
+            </button>
+            <Link to="/app/banking/customer-service" className="button secondary">
+              ← CS desk
+            </Link>
+          </div>
         </div>
       </header>
 
-      <div className="agency-deposits-layout workspace-animate-in workspace-animate-in--2">
-        <section className="card agency-deposits-layout__customers">
-          <label className="field">
-            <span>Search customer</span>
-            <input
-              type="search"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Name, phone, account…"
-            />
-          </label>
-          <ul className="agency-deposits-customer-list">
-            {filteredCustomers.map((customer) => (
-              <li key={customer.id}>
-                <button
-                  type="button"
-                  className={`agency-deposits-customer${selectedCustomerId === customer.id ? " is-selected" : ""}`}
-                  onClick={() => selectCustomer(customer.id)}
-                >
-                  <strong>{customer.fullName}</strong>
-                  <span className="muted">{customer.accountNumber ?? customer.phone}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-          {selectedCustomer && customerAccounts.length > 0 ? (
-            <div className="partner-accounts-list">
-              <h4>Recorded partner accounts</h4>
-              <ul>
-                {customerAccounts.map((account) => (
-                  <li key={account.id}>
-                    <strong>{account.bankLabel}</strong> · {account.accountNumber}
-                    <span className="muted"> — {account.accountName}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-        </section>
+      <section className="card desk-data-table workspace-animate-in workspace-animate-in--2">
+        <AdminDataTable
+          variant="desk"
+          title="Account openings"
+          subtitle="Partner bank accounts recorded by customer service."
+          search={search}
+          onSearchChange={setSearch}
+          searchPlaceholder="Search account no., name, phone, email, branch…"
+          emptyMessage={
+            accountsLoading ? "Loading account openings…" : "No partner accounts recorded yet."
+          }
+          rowKey={(row) => row.id}
+          rows={tableRows}
+          toolbar={
+            <button type="button" className="button secondary" onClick={() => setModalOpen(true)}>
+              New opening
+            </button>
+          }
+          columns={[
+            {
+              key: "accountNumber",
+              label: "Account No.",
+              className: "admin-table-mono",
+              render: (row) => row.accountNumber
+            },
+            {
+              key: "accountName",
+              label: "Account Name",
+              render: (row) => row.accountName
+            },
+            {
+              key: "openedBy",
+              label: "Opened By",
+              render: (row) => accountOpenedBy(row)
+            },
+            {
+              key: "phone",
+              label: "Phone",
+              render: (row) => accountOpeningPhone(row)
+            },
+            {
+              key: "email",
+              label: "Email",
+              render: (row) => accountOpeningEmail(row)
+            },
+            {
+              key: "initialDeposit",
+              label: "Initial Deposit",
+              render: (row) => accountOpeningInitialDeposit(row)
+            },
+            {
+              key: "type",
+              label: "Type",
+              render: (row) => accountOpeningTypeLabel(row)
+            },
+            {
+              key: "branch",
+              label: "Branch",
+              render: (row) => row.branchName ?? "—"
+            },
+            {
+              key: "date",
+              label: "Date",
+              render: (row) => accountOpeningDate(row)
+            }
+          ]}
+        />
+      </section>
 
-        <section className="card agency-deposits-layout__form">
-          {selectedCustomer ? (
-            <>
-              <h3>{selectedCustomer.fullName}</h3>
-              {openingProducts.length === 0 ? (
-                <p className="muted">
-                  No account-opening bank products configured. Ask an admin to add one under Bank
-                  products → Account opening.
-                </p>
-              ) : (
-                <>
-                  <label className="field">
-                    <span>Bank product</span>
-                    <select value={bankProductId} onChange={(e) => setBankProductId(e.target.value)}>
-                      {openingProducts.map((product) => (
-                        <option key={product.id} value={product.id}>
-                          {bankProductDisplayLabel(product)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="field">
-                    <span>Partner account number</span>
-                    <input
-                      value={accountNumber}
-                      onChange={(e) => setAccountNumber(e.target.value)}
-                      placeholder="From partner bank platform"
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Account name</span>
-                    <input
-                      value={accountName}
-                      onChange={(e) => setAccountName(e.target.value)}
-                      placeholder="As shown on partner bank"
-                    />
-                  </label>
-                  <label className="field">
-                    <span>External reference (optional)</span>
-                    <input
-                      value={externalReference}
-                      onChange={(e) => setExternalReference(e.target.value)}
-                      placeholder="Platform ticket / ref"
-                    />
-                  </label>
-                  <DynamicWorkflowForm
-                    fields={openingFields}
-                    values={workflowData}
-                    disabled={posting}
-                    onChange={(key, value) =>
-                      setWorkflowData((prev) => ({ ...prev, [key]: value }))
-                    }
-                  />
-                  <button
-                    type="button"
-                    className="button primary agency-deposits-submit"
-                    disabled={posting || loading || accountsLoading}
-                    onClick={() => void handleSubmit()}
-                  >
-                    {posting ? "Saving…" : "Record partner account"}
-                  </button>
-                </>
-              )}
-            </>
-          ) : (
-            <p className="muted">Select a customer to record a partner bank account.</p>
-          )}
-        </section>
-      </div>
+      <AccountOpeningModal
+        open={modalOpen}
+        posting={posting}
+        productsLoading={productsLoading}
+        branches={branches.filter((b) => b.status !== "inactive")}
+        openingProducts={openingProducts}
+        openedByName={openedByName}
+        defaultBranchId={getRuntimeBranchId() || undefined}
+        onClose={() => setModalOpen(false)}
+        onSubmit={handleCreate}
+      />
     </div>
   );
 }

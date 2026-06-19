@@ -42,7 +42,12 @@ export async function resolveDepositCustomerByAccountNumber(
     if (!partnerAccount) {
       return null;
     }
-    const linked = localCustomers.find((customer) => customer.id === partnerAccount.customerId);
+    const customerId = partnerAccount.customerId;
+    if (!customerId) {
+      return null;
+    }
+
+    const linked = localCustomers.find((customer) => customer.id === customerId);
     if (linked) {
       return {
         customer: linked,
@@ -51,8 +56,8 @@ export async function resolveDepositCustomerByAccountNumber(
       };
     }
 
-    const searchResults = await searchCustomers(partnerAccount.customerId);
-    const fromSearch = searchResults.find((customer) => customer.id === partnerAccount.customerId);
+    const searchResults = await searchCustomers(customerId);
+    const fromSearch = searchResults.find((customer) => customer.id === customerId);
     if (fromSearch) {
       return {
         customer: fromSearch,
@@ -63,7 +68,7 @@ export async function resolveDepositCustomerByAccountNumber(
 
     return {
       customer: {
-        id: partnerAccount.customerId,
+        id: customerId,
         fullName: partnerAccount.accountName || partnerAccount.customerName || "Account holder",
         phone: "",
         homeBranchId: partnerAccount.branchId ?? "",

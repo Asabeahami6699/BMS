@@ -3334,7 +3334,7 @@ export async function listPartnerBankAccounts(options?: {
 }
 
 export async function createPartnerBankAccount(payload: {
-  customerId: string;
+  customerId?: string;
   bankProductId: string;
   accountNumber: string;
   accountName: string;
@@ -3367,6 +3367,21 @@ export async function listBankProducts(options?: {
   const query = params.toString();
   const payload = await fetchJson<{ products: import("@bms/shared").TenantBankProduct[] }>(
     `${API_BASE_URL}/api/v1/banking/products${query ? `?${query}` : ""}`,
+    { headers: authHeaders() }
+  );
+  return payload.products;
+}
+
+export async function listAccountOpeningProducts(options?: {
+  branchId?: string;
+}): Promise<import("@bms/shared").TenantBankProduct[]> {
+  const params = new URLSearchParams();
+  if (options?.branchId) {
+    params.set("branchId", options.branchId);
+  }
+  const query = params.toString();
+  const payload = await fetchJson<{ products: import("@bms/shared").TenantBankProduct[] }>(
+    `${API_BASE_URL}/api/v1/agency/account-opening/products${query ? `?${query}` : ""}`,
     { headers: authHeaders() }
   );
   return payload.products;

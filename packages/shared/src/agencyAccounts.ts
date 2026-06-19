@@ -8,8 +8,10 @@ export type PartnerBankAccountStatus = z.infer<typeof partnerBankAccountStatusSc
 export const partnerBankAccountSchema = z.object({
   id: z.string().uuid(),
   tenantId: z.string().min(1),
-  customerId: z.string().min(1),
+  customerId: z.string().min(1).optional(),
   customerName: z.string().optional(),
+  customerPhone: z.string().optional(),
+  customerEmail: z.string().optional(),
   bankProductId: z.string().uuid().nullable().optional(),
   bankProductName: z.string().optional(),
   bankLabel: z.string().min(1),
@@ -29,7 +31,7 @@ export const partnerBankAccountSchema = z.object({
 export type PartnerBankAccount = z.infer<typeof partnerBankAccountSchema>;
 
 export const createPartnerBankAccountSchema = z.object({
-  customerId: z.string().min(1),
+  customerId: z.string().min(1).optional(),
   bankProductId: z.string().uuid(),
   accountNumber: z.string().trim().min(1).max(64),
   accountName: z.string().trim().min(1).max(120),

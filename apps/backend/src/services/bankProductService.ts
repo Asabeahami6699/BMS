@@ -1,6 +1,7 @@
 import {
   bankProductSchema,
   createBankProductSchema,
+  defaultWorkflowFieldsForDirection,
   normalizeBankProductCode,
   suggestBankProductCode,
   bankProductAppliesToBranch,
@@ -133,6 +134,78 @@ async function ensureUniqueCode(
 }
 
 export async function listBankProducts(
+  tenantId: string,
+  options?: ListOptions
+): Promise<TenantBankProduct[]> {
+  if (options?.direction === "account_opening") {
+    await ensureDefaultAccountOpeningProducts(tenantId);
+  }
+  return queryBankProducts(tenantId, options);
+}
+
+/** Account-opening products for customer service (auto-seeds Ecobank + GCB defaults). */
+export async function listAccountOpeningProducts(
+  tenantId: string,
+  options?: { activeOnly?: boolean; branchId?: string }
+): Promise<TenantBankProduct[]> {
+  await ensureDefaultAccountOpeningProducts(tenantId);
+  return queryBankProducts(tenantId, {
+    direction: "account_opening",
+    activeOnly: options?.activeOnly ?? true,
+    branchId: options?.branchId
+  });
+}
+
+const DEFAULT_ACCOUNT_OPENING_PRODUCTS = [
+  { name: "Ecobank account opening", bankLabel: "Ecobank", code: "ECOBANK_OPEN" },
+  { name: "GCB account opening", bankLabel: "GCB", code: "GCB_OPEN" }
+] as const;
+
+const ensuringAccountOpeningByTenant = new Map<string, Promise<void>>();
+
+export async function ensureDefaultAccountOpeningProducts(tenantId: string): Promise<void> {
+  const inFlight = ensuringAccountOpeningByTenant.get(tenantId);
+  if (inFlight) {
+    await inFlight;
+    return;
+  }
+
+  const task = (async () => {
+    const existing = await queryBankProducts(tenantId, { direction: "account_opening" });
+    if (existing.length > 0) {
+      return;
+    }
+
+    const workflowFields = defaultWorkflowFieldsForDirection("account_opening");
+    for (let index = 0; index < DEFAULT_ACCOUNT_OPENING_PRODUCTS.length; index++) {
+      const def = DEFAULT_ACCOUNT_OPENING_PRODUCTS[index]!;
+      try {
+        await createSingleBankProduct(tenantId, {
+          name: def.name,
+          code: def.code,
+          direction: "account_opening",
+          bankLabel: def.bankLabel,
+          branchId: null,
+          isActive: true,
+          sortOrder: index,
+          workflowFields
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (!/already exists|duplicate key|unique constraint/i.test(message)) {
+          throw error;
+        }
+      }
+    }
+  })().finally(() => {
+    ensuringAccountOpeningByTenant.delete(tenantId);
+  });
+
+  ensuringAccountOpeningByTenant.set(tenantId, task);
+  await task;
+}
+
+async function queryBankProducts(
   tenantId: string,
   options?: ListOptions
 ): Promise<TenantBankProduct[]> {

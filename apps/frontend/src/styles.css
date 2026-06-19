@@ -13139,6 +13139,30 @@ select:disabled {
   font-size: 0.9rem;
 }
 
+.agency-withdrawals-initiate {
+  margin-bottom: 1rem;
+}
+
+.agency-withdrawals-initiate__head {
+  margin-bottom: 1rem;
+}
+
+.agency-withdrawals-initiate__head h3 {
+  margin: 0 0 0.35rem;
+}
+
+.agents-page__date-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.agents-page__date-presets .button.is-active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .agents-page--agency-embedded .agents-page__kpis {
   margin-top: 0;
 }
@@ -13297,6 +13321,83 @@ select:disabled {
   padding-left: 1.1rem;
   display: grid;
   gap: 0.35rem;
+}
+
+.account-opening-page__hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.account-opening-form {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.account-opening-form__customer-list {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.account-opening-form__customer-option {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface-elevated);
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.account-opening-form__customer-option:hover,
+.account-opening-form__customer-option.is-selected {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.account-opening-form__hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
+}
+
+.account-opening-form__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem 1rem;
+}
+
+.account-opening-form__span-2 {
+  grid-column: 1 / -1;
+}
+
+.account-opening-form__extras h3 {
+  margin: 0 0 0.75rem;
+  font-size: 0.92rem;
+}
+
+.account-opening-form .is-readonly {
+  background: var(--bg-input);
+  color: var(--text-muted);
+  cursor: default;
+}
+
+@media (max-width: 760px) {
+  .account-opening-form__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .account-opening-form__span-2 {
+    grid-column: auto;
+  }
 }
 
 .investment-form__section {

@@ -1,8 +1,6 @@
 import {
   createPartnerBankAccountSchema,
   partnerBankAccountSchema,
-  validateWorkflowFieldValues,
-  workflowFieldsForStage,
   type PartnerBankAccount
 } from "@bms/shared";
 import type { TransactionRequestContext } from "./transactionService.js";
@@ -12,18 +10,28 @@ import { assertBranchAccess } from "../middleware/branchScope.js";
 import { getCustomerById } from "./customerService.js";
 import { getBankProductById } from "./bankProductService.js";
 import { listBranches } from "./branchService.js";
+import { fetchUserNameMap } from "./userNameResolver.js";
 
 const memoryAccounts = new Map<string, PartnerBankAccount[]>();
 
 function mapRow(
   row: Record<string, unknown>,
-  extras?: { customerName?: string; branchName?: string; bankProductName?: string; createdByName?: string }
+  extras?: {
+    customerName?: string;
+    customerPhone?: string;
+    customerEmail?: string;
+    branchName?: string;
+    bankProductName?: string;
+    createdByName?: string;
+  }
 ): PartnerBankAccount {
   return partnerBankAccountSchema.parse({
     id: String(row.id),
     tenantId: String(row.tenant_id),
-    customerId: String(row.customer_id),
+    customerId: row.customer_id != null ? String(row.customer_id) : undefined,
     customerName: extras?.customerName,
+    customerPhone: extras?.customerPhone,
+    customerEmail: extras?.customerEmail,
     bankProductId: row.bank_product_id != null ? String(row.bank_product_id) : null,
     bankProductName: extras?.bankProductName,
     bankLabel: String(row.bank_label),
@@ -73,17 +81,31 @@ export async function listPartnerBankAccounts(
     const branchById = new Map(branches.map((b) => [b.id, b.name]));
 
     const rows = data ?? [];
+    const creatorIds = rows.map((row) => String(row.created_by_user_id));
+    const creatorNames = await fetchUserNameMap(context.tenantId, creatorIds);
+
     const enriched = await Promise.all(
       rows.map(async (row) => {
-        const customer = await getCustomerById(context.tenantId, String(row.customer_id));
+        const customer =
+          row.customer_id != null
+            ? await getCustomerById(context.tenantId, String(row.customer_id))
+            : null;
         const product =
           row.bank_product_id != null
             ? await getBankProductById(context.tenantId, String(row.bank_product_id))
             : null;
+        const workflow = (row.workflow_data as Record<string, unknown> | null) ?? {};
         return mapRow(row as Record<string, unknown>, {
           customerName: customer?.fullName,
+          customerPhone:
+            (typeof workflow.contact_phone === "string" && workflow.contact_phone.trim()) ||
+            customer?.phone,
+          customerEmail:
+            (typeof workflow.contact_email === "string" && workflow.contact_email.trim()) ||
+            customer?.email,
           branchName: row.branch_id ? branchById.get(String(row.branch_id)) : undefined,
-          bankProductName: product?.name
+          bankProductName: product?.name,
+          createdByName: creatorNames.get(String(row.created_by_user_id))
         });
       })
     );
@@ -128,7 +150,10 @@ export async function findPartnerBankAccountByNumber(
     if (!data) {
       return null;
     }
-    const customer = await getCustomerById(context.tenantId, String(data.customer_id));
+    const customer =
+      data.customer_id != null
+        ? await getCustomerById(context.tenantId, String(data.customer_id))
+        : null;
     const product =
       data.bank_product_id != null
         ? await getBankProductById(context.tenantId, String(data.bank_product_id))
@@ -151,8 +176,10 @@ export async function createPartnerBankAccount(
   input: unknown
 ): Promise<PartnerBankAccount> {
   const parsed = createPartnerBankAccountSchema.parse(input);
-  const customer = await getCustomerById(context.tenantId, parsed.customerId);
-  if (!customer) {
+  const customer = parsed.customerId
+    ? await getCustomerById(context.tenantId, parsed.customerId)
+    : null;
+  if (parsed.customerId && !customer) {
     throw new Error("Customer not found");
   }
 
@@ -161,34 +188,26 @@ export async function createPartnerBankAccount(
     throw new Error("Select an active account-opening bank product");
   }
 
-  const branchId = parsed.branchId ?? customer.homeBranchId;
-  if (branchId) {
-    assertBranchAccess(context, branchId);
+  const branchId = parsed.branchId ?? customer?.homeBranchId;
+  if (!branchId) {
+    throw new Error("Branch is required");
   }
+  assertBranchAccess(context, branchId);
 
-  const fields = workflowFieldsForStage(product, "account_opening");
-  const validation = validateWorkflowFieldValues(
-    fields,
-    parsed.workflowData ?? {},
-    "account_opening"
-  );
-  if (!validation.ok) {
-    throw new Error(validation.errors.join("; "));
-  }
-
+  const workflowData = parsed.workflowData ?? {};
   const now = new Date().toISOString();
   const id = randomUUID();
   const row = {
     id,
     tenant_id: context.tenantId,
-    customer_id: parsed.customerId,
+    customer_id: parsed.customerId ?? null,
     bank_product_id: parsed.bankProductId,
     bank_label: product.bankLabel,
     account_number: parsed.accountNumber.trim(),
     account_name: parsed.accountName.trim(),
-    branch_id: branchId ?? null,
+    branch_id: branchId,
     external_reference: parsed.externalReference?.trim() ?? null,
-    workflow_data: validation.data,
+    workflow_data: workflowData,
     status: "active",
     created_by_user_id: context.userId,
     created_at: now,
@@ -209,15 +228,27 @@ export async function createPartnerBankAccount(
       throw new Error(`Failed to record partner account: ${error.message}`);
     }
     const branches = await listBranches(context.tenantId).catch(() => []);
+    const creatorNames = await fetchUserNameMap(context.tenantId, [context.userId]);
     return mapRow(data as Record<string, unknown>, {
-      customerName: customer.fullName,
-      branchName: branchId ? branches.find((b) => b.id === branchId)?.name : undefined,
-      bankProductName: product.name
+      customerName: customer?.fullName,
+      customerPhone:
+        (typeof workflowData.contact_phone === "string" && workflowData.contact_phone.trim()) ||
+        customer?.phone,
+      customerEmail:
+        (typeof workflowData.contact_email === "string" && workflowData.contact_email.trim()) ||
+        customer?.email,
+      branchName: branches.find((b) => b.id === branchId)?.name,
+      bankProductName: product.name,
+      createdByName: creatorNames.get(context.userId)
     });
   }
 
   const account = mapRow(row as unknown as Record<string, unknown>, {
-    customerName: customer.fullName,
+    customerName: customer?.fullName,
+    customerPhone:
+      typeof workflowData.contact_phone === "string" ? workflowData.contact_phone : customer?.phone,
+    customerEmail:
+      typeof workflowData.contact_email === "string" ? workflowData.contact_email : customer?.email,
     bankProductName: product.name
   });
   const list = memoryAccounts.get(context.tenantId) ?? [];

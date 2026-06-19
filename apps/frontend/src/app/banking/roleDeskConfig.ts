@@ -56,7 +56,7 @@ export const AGENCY_ROLE_DESKS: RoleDeskConfig[] = [
     ],
     quickLinks: [
       {
-        to: "/app/banking/withdrawals/initiate",
+        to: "/app/banking/withdrawals",
         label: "Initiate withdrawal",
         description: "Collect details & start a withdrawal request"
       },

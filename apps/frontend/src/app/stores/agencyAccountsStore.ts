@@ -20,7 +20,7 @@ type AgencyAccountsState = {
   refresh: () => Promise<void>;
   refreshSilent: () => Promise<void>;
   createAccount: (payload: {
-    customerId: string;
+    customerId?: string;
     bankProductId: string;
     accountNumber: string;
     accountName: string;
