@@ -716,6 +716,55 @@ export async function approveBalanceDisclosure(
       return mapRow(updated, { customerName: customer.fullName });
     }
 
+    if (!isMomo && isLegacyCoordinator) {
+      await postWithdrawalForApprovedDisclosure({
+        tenantId,
+        customerId: row.customer_id,
+        homeBranchId: customer.homeBranchId,
+        amount,
+        disclosureId,
+        recordedByUserId: coordinatorId,
+        fieldAgentId: row.field_agent_id,
+        notes: withdrawalApprovalNotes(disclosureId, row.fulfillment_mode, null)
+      });
+
+      const balanceAfterWithdrawal = await computeCustomerBalance(tenantId, row.customer_id);
+
+      const patch = {
+        status: "approved" as const,
+        balance_amount: balanceAfterWithdrawal,
+        approved_at: approvedAt.toISOString(),
+        approved_by: coordinatorId
+      };
+
+      const supabase = getSupabaseAdminClient();
+      if (supabase) {
+        const { error } = await supabase
+          .from("customer_balance_disclosures")
+          .update(patch)
+          .eq("tenant_id", tenantId)
+          .eq("id", disclosureId);
+        if (error) {
+          throw disclosureDbError("Failed to approve withdrawal", error.message);
+        }
+      } else {
+        Object.assign(row, patch);
+      }
+
+      const updated: DisclosureRow = { ...row, ...patch, status: "approved" };
+
+      await createAgentNotification({
+        tenantId,
+        userId: row.field_agent_id,
+        customerId: row.customer_id,
+        kind: "withdrawal_request_approved",
+        title: "Withdrawal approved",
+        body: `${customer.fullName}: GHS ${amount.toFixed(2)} approved by coordinator.`
+      });
+
+      return mapRow(updated, { customerName: customer.fullName });
+    }
+
     if (!isMomo) {
       if (!hasCsApproval && context.role !== "admin") {
         throw new Error("Only Customer Service can verify cash withdrawal requests.");

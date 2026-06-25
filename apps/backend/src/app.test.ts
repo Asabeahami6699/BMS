@@ -72,7 +72,7 @@ describe("money route safeguards", () => {
 
     const txRes = await request(app)
       .post("/api/v1/transactions")
-      .set(authHeaders("field_agent", "branch", testBranchId))
+      .set(authHeaders("admin", "branch", testBranchId))
       .set("Idempotency-Key", "tx-branch-mismatch")
       .send({
         customerId,
@@ -102,7 +102,7 @@ describe("money route safeguards", () => {
 
     const txRes = await request(app)
       .post("/api/v1/transactions")
-      .set(authHeaders("field_agent", "branch", testBranchId))
+      .set(authHeaders("admin", "branch", testBranchId))
       .set("Idempotency-Key", "tx-insufficient-withdrawal")
       .send({
         customerId,

@@ -2,7 +2,7 @@ import request from "supertest";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { SAVINGS_INITIAL_DEPOSIT_GHS } from "@bms/shared";
 import { createApp } from "./app.js";
-import { resolveTestBranchId } from "./testHelpers.js";
+import { resolveTestBranchId, fundCustomerViaCollection } from "./testHelpers.js";
 
 const app = createApp();
 
@@ -28,6 +28,16 @@ function coordinatorHeaders() {
     "x-tenant-id": "tenant-demo",
     "x-role": "coordinator",
     "x-scope-type": "head_office"
+  };
+}
+
+function adminBranchHeaders() {
+  return {
+    "x-user-id": "test-admin-branch",
+    "x-tenant-id": "tenant-demo",
+    "x-role": "admin",
+    "x-scope-type": "branch",
+    "x-branch-id": branchId
   };
 }
 
@@ -277,16 +287,14 @@ describe("field agent flows", () => {
       .patch(`/api/v1/customers/${customerId}/approve`)
       .set(coordinatorHeaders());
 
-    await request(app)
-      .post("/api/v1/transactions")
-      .set(agentHeaders())
-      .set("Idempotency-Key", "fa-wd-fund")
-      .send({
-        customerId,
-        type: "deposit",
-        amount: 100,
-        transactionBranchId: branchId
-      });
+    await fundCustomerViaCollection(app, {
+      customerId,
+      customerName: "Withdrawal Test Customer",
+      amount: 100,
+      branchId,
+      agentHeaders: agentHeaders(),
+      coordinatorHeaders: coordinatorHeaders()
+    });
 
     const wd = await request(app)
       .post(`/api/v1/field-agents/me/customers/${customerId}/customer-request`)
@@ -327,6 +335,41 @@ describe("field agent flows", () => {
     expect(last.balanceAfter).toBe(60);
   });
 
+  it("rejects direct deposit by field agent", async () => {
+    const reg = await request(app)
+      .post("/api/v1/customers/registrations")
+      .set(agentHeaders())
+      .send({
+        fullName: "Direct Deposit Block Customer",
+        phone: "0244999000",
+        location: "Accra",
+        houseNumber: "7",
+        accountType: "susu",
+        idCardNumber: "GHA-FA-NODEP",
+        idCardPhotoUrl: FAKE_ID_CARD_PHOTO,
+        nextOfKin: { fullName: "Kin", phone: "0244999001", location: "Accra" },
+        dailyContributionAmount: 10
+      });
+    expect(reg.status).toBe(201);
+    const customerId = reg.body.id as string;
+    await request(app)
+      .patch(`/api/v1/customers/${customerId}/approve`)
+      .set(coordinatorHeaders());
+
+    const tx = await request(app)
+      .post("/api/v1/transactions")
+      .set(agentHeaders())
+      .set("Idempotency-Key", "fa-direct-deposit-blocked")
+      .send({
+        customerId,
+        type: "deposit",
+        amount: 10,
+        transactionBranchId: branchId
+      });
+    expect(tx.status).toBe(400);
+    expect(String(tx.body.error)).toMatch(/cannot post deposits|Forbidden/i);
+  });
+
   it("credits non-withdrawable initial deposit when savings account is approved", async () => {
     const reg = await request(app)
       .post("/api/v1/customers/registrations")
@@ -354,21 +397,20 @@ describe("field agent flows", () => {
     expect(approve.body.lockedBalance).toBe(SAVINGS_INITIAL_DEPOSIT_GHS);
 
     const wdBlocked = await request(app)
-      .post("/api/v1/transactions")
+      .post(`/api/v1/field-agents/me/customers/${customerId}/customer-request`)
       .set(agentHeaders())
-      .set("Idempotency-Key", "fa-sav-wd-blocked")
       .send({
-        customerId,
         type: "withdrawal",
+        reason: "Trying to withdraw locked opening deposit",
         amount: SAVINGS_INITIAL_DEPOSIT_GHS,
-        transactionBranchId: branchId
+        fulfillmentMode: "next_day_cash"
       });
     expect(wdBlocked.status).toBe(400);
     expect(String(wdBlocked.body.error)).toMatch(/withdrawable/i);
 
     await request(app)
       .post("/api/v1/transactions")
-      .set(agentHeaders())
+      .set(adminBranchHeaders())
       .set("Idempotency-Key", "fa-sav-topup")
       .send({
         customerId,
@@ -379,7 +421,7 @@ describe("field agent flows", () => {
 
     const wdOk = await request(app)
       .post("/api/v1/transactions")
-      .set(agentHeaders())
+      .set(adminBranchHeaders())
       .set("Idempotency-Key", "fa-sav-wd-ok")
       .send({
         customerId,
@@ -412,7 +454,7 @@ describe("field agent flows", () => {
 
     const firstCollect = await request(app)
       .post("/api/v1/transactions")
-      .set(agentHeaders())
+      .set(adminBranchHeaders())
       .set("Idempotency-Key", "fa-sav-fee-deduct")
       .send({
         customerId: deductId,

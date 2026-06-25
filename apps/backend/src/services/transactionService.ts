@@ -317,10 +317,16 @@ export async function createTransaction(
 ): Promise<Transaction> {
   const payload = createTransactionInputSchema.parse(input);
 
-  if (context.role === "field_agent" && payload.type === "daily_susu") {
-    throw new Error(
-      "Field agents cannot credit accounts directly. Record collections, complete call-over, then send for coordinator approval."
-    );
+  if (context.role === "field_agent") {
+    if (
+      payload.type === "daily_susu" ||
+      payload.type === "deposit" ||
+      payload.type === "withdrawal"
+    ) {
+      throw new Error(
+        "Field agents cannot post deposits or withdrawals directly. Record collections for coordinator approval, or submit a customer withdrawal request."
+      );
+    }
   }
 
   const customer = await getCustomerById(context.tenantId, payload.customerId);
