@@ -30,11 +30,11 @@ export function ProtectedRoute({ children, allowedRoles, forbiddenRoles }: Props
   }
 
   if (allowedRoles && isBuiltinRole(effectiveUser.role) && !allowedRoles.includes(effectiveUser.role as AppRole)) {
-    return <Navigate to={getHomePathForRole(effectiveUser.role)} replace />;
+    return <Navigate to={getHomePathForRole(effectiveUser.role, effectiveUser.subscribedModules)} replace />;
   }
 
   if (forbiddenRoles && isBuiltinRole(effectiveUser.role) && forbiddenRoles.includes(effectiveUser.role as AppRole)) {
-    return <Navigate to={getHomePathForRole(effectiveUser.role)} replace />;
+    return <Navigate to={getHomePathForRole(effectiveUser.role, effectiveUser.subscribedModules)} replace />;
   }
 
   return <>{children}</>;

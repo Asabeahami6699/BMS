@@ -279,7 +279,7 @@ export function LandingPage() {
 
   function handlePrimaryCta() {
     if (session?.accessToken && user) {
-      navigate(getHomePathForRole(user.role));
+      navigate(getHomePathForRole(user.role, user.subscribedModules));
       return;
     }
     navigate("/login");

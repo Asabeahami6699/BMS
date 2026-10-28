@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Navigate } from "react-router-dom";
 import {
   hasTenantModule,
   resolveAgencyRoutePermissions,
@@ -14,6 +15,7 @@ import { PermissionGate } from "./PermissionGate";
 import { SettingsPermissionGate } from "./SettingsPermissionGate";
 import { SusuPermissionGate } from "./SusuPermissionGate";
 import type { AuthMe } from "./api";
+import { subscribedHomePath } from "../auth/roleRedirect";
 
 export function AccessDenied() {
   return (
@@ -31,13 +33,11 @@ type ModuleGateProps = {
 };
 
 export function TenantModuleGate({ module, modules, children }: ModuleGateProps) {
+  if (!modules) {
+    return null;
+  }
   if (!hasTenantModule(modules, module)) {
-    return (
-      <article className="card">
-        <h2>Product not enabled</h2>
-        <p className="muted">This department is not on your company subscription.</p>
-      </article>
-    );
+    return <Navigate to={subscribedHomePath(modules, module)} replace />;
   }
   return <>{children}</>;
 }

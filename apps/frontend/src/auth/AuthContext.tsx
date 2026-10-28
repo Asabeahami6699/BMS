@@ -95,7 +95,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await apiLogin(email, password);
       const me = await getAuthMe();
       applyUser(me);
-      return getHomePathForRole(me.role as AppRole);
+      return getHomePathForRole(me.role as AppRole, me.subscribedModules);
     },
     [applyUser]
   );

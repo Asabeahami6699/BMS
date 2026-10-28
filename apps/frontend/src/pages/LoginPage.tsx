@@ -36,7 +36,7 @@ export function LoginPage() {
 
   if (session?.accessToken && user) {
 
-    return <Navigate to={getHomePathForRole(user.role)} replace />;
+    return <Navigate to={getHomePathForRole(user.role, user.subscribedModules)} replace />;
 
   }
 
