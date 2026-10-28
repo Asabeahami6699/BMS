@@ -4,7 +4,7 @@ import { useShallow } from "zustand/react/shallow";
 import { hasAnyPermission } from "@bms/shared";
 import { useAuth } from "../auth/AuthContext";
 import { buildTenantNav } from "../config/tenantModules";
-import type { AppRole, AuthMe } from "./api";
+import { getCompanyProfile, type AppRole, type AuthMe, type CompanyProfile } from "./api";
 import { BranchManagementCard } from "./BranchManagementCard";
 import { AccountNumberPolicyCard } from "./AccountNumberPolicyCard";
 import { CommissionPolicyCard } from "./CommissionPolicyCard";
@@ -17,6 +17,7 @@ import { ReportsAnalyticsPage } from "./ReportsAnalyticsPage";
 import { UserProfilePage } from "./UserProfilePage";
 import { RoleManagementPage } from "./RoleManagementPage";
 import { AuditLogsPage } from "./AuditLogsPage";
+import { SettingsCompanyProfilePage, COMPANY_PROFILE_UPDATED_EVENT } from "./settings/SettingsCompanyProfilePage";
 import { SettingsNotificationsPage } from "./settings/SettingsNotificationsPage";
 import { SettingsSubscriptionPage } from "./settings/SettingsSubscriptionPage";
 import { SettingsHubPage } from "./SettingsHubPage";
@@ -170,6 +171,38 @@ export function TenantApp() {
     navigate("/login", { replace: true });
   }
 
+  const [companyBrand, setCompanyBrand] = useState<Pick<CompanyProfile, "logoUrl" | "brandColor"> | null>(null);
+
+  useEffect(() => {
+    if (!user?.tenantId || user.tenantId === "platform" || role === "field_agent") {
+      return;
+    }
+    let cancelled = false;
+    const load = () => {
+      void getCompanyProfile()
+        .then((profile) => {
+          if (!cancelled) {
+            setCompanyBrand({ logoUrl: profile.logoUrl, brandColor: profile.brandColor });
+          }
+        })
+        .catch(() => undefined);
+    };
+    load();
+    const onUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<CompanyProfile>).detail;
+      if (detail) {
+        setCompanyBrand({ logoUrl: detail.logoUrl, brandColor: detail.brandColor });
+      } else {
+        load();
+      }
+    };
+    window.addEventListener(COMPANY_PROFILE_UPDATED_EVENT, onUpdated);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(COMPANY_PROFILE_UPDATED_EVENT, onUpdated);
+    };
+  }, [user?.tenantId, role]);
+
   const companyName = user?.tenantName ?? user?.tenantId ?? undefined;
 
   if (role === "field_agent") {
@@ -186,6 +219,8 @@ export function TenantApp() {
       workspaceSubtitle="Department operations for your cooperative."
       navItems={navItems}
       companyName={companyName}
+      companyLogoUrl={companyBrand?.logoUrl}
+      brandColor={companyBrand?.brandColor}
       userName={displayName}
       userRole={role.replace(/_/g, " ")}
       canSearchCustomers={canSearchCustomers}
@@ -744,7 +779,7 @@ export function TenantApp() {
           path="/settings/profile"
           element={
             <TenantSettingsRoute route="settings/profile" role={role} permissions={permissions}>
-              <FeaturePlaceholderPage title="Company Profile" description="Company name, logo, contact, address, tax, and branding." />
+              <SettingsCompanyProfilePage />
             </TenantSettingsRoute>
           }
         />

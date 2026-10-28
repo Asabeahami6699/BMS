@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import type { DashboardNavChild, DashboardNavItem } from "../config/tenantModules";
 import { getNavIcon } from "./navIcons";
@@ -16,6 +16,8 @@ type Props = {
   workspaceSubtitle: string;
   navItems: DashboardNavItem[];
   companyName?: string;
+  companyLogoUrl?: string;
+  brandColor?: string;
   userName: string;
   userRole: string;
   userInitials?: string;
@@ -60,6 +62,8 @@ export function DashboardShell({
   workspaceSubtitle,
   navItems,
   companyName,
+  companyLogoUrl,
+  brandColor,
   userName,
   userRole,
   userInitials,
@@ -161,11 +165,24 @@ export function DashboardShell({
   const pageLoading = useDashboardPageLoading();
 
   return (
-    <div className="dash-root">
+    <div
+      className="dash-root"
+      style={
+        brandColor
+          ? ({ "--primary": brandColor, "--primary-hover": brandColor } as CSSProperties)
+          : undefined
+      }
+    >
       <aside className="dash-sidebar">
         <div className="dash-brand">
           <div className="dash-brand-title-row">
-            <BmsBrandIcon />
+            {companyLogoUrl ? (
+              <div className="dash-brand-icon dash-brand-icon--logo" aria-hidden>
+                <img src={companyLogoUrl} alt="" />
+              </div>
+            ) : (
+              <BmsBrandIcon />
+            )}
             <p className="dash-brand-name">BMS</p>
           </div>
           <div className="dash-brand-text">

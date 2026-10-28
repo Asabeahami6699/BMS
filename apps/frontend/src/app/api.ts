@@ -1051,6 +1051,39 @@ export async function updateCommissionPolicy(body: CommissionPolicy): Promise<Co
   return response.json() as Promise<CommissionPolicy>;
 }
 
+export type CompanyProfile = {
+  tenantId: string;
+  name: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  taxId?: string;
+  logoUrl?: string;
+  brandColor?: string;
+};
+
+export async function getCompanyProfile(): Promise<CompanyProfile> {
+  return fetchJson<CompanyProfile>(`${API_BASE_URL}/api/v1/tenant/profile`, {
+    headers: authHeaders()
+  });
+}
+
+export async function updateCompanyProfile(body: {
+  name: string;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+  taxId?: string | null;
+  logoUrl?: string | null;
+  brandColor?: string | null;
+}): Promise<CompanyProfile> {
+  return fetchJson<CompanyProfile>(`${API_BASE_URL}/api/v1/tenant/profile`, {
+    method: "PUT",
+    headers: authHeaders(),
+    body: JSON.stringify(body)
+  });
+}
+
 export type TenantSmsSettings = {
   tenantId: string;
   enabled: boolean;

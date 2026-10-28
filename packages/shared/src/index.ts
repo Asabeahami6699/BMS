@@ -29,3 +29,4 @@ export * from "./ghanaCard.js";
 export * from "./sms.js";
 export * from "./email.js";
 export * from "./customerNotifications.js";
+export * from "./companyProfile.js";
