@@ -14,6 +14,7 @@ import {
 } from "./savingsOpeningFeeService.js";
 import { applyTransactionToFloat } from "./branchFloatService.js";
 import { createAgencyPendingDeposit, usesAgencyDepositFlow } from "./agencyBankingService.js";
+import { notifyCustomerTransaction } from "./customerNotificationService.js";
 import {
   getBankProductById,
   resolveBankProductForTransaction
@@ -28,6 +29,7 @@ export type TransactionRequestContext = {
   scopeType: "head_office" | "branch";
   branchId?: string;
   permissions?: string[];
+  subscribedAddons?: import("@bms/shared").TenantAddon[];
 };
 
 function getTenantTransactions(tenantId: string): Transaction[] {
@@ -220,6 +222,19 @@ export async function postWithdrawalForApprovedDisclosure(params: {
       );
     }
 
+    void notifyCustomerTransaction({
+      tenantId: params.tenantId,
+      customerId: params.customerId,
+      transactionId,
+      type: "withdrawal",
+      amount: params.amount
+    }).catch((error) => {
+      console.warn(
+        "[notifications] withdrawal notification skipped:",
+        error instanceof Error ? error.message : error
+      );
+    });
+
     return transactionId;
   }
 
@@ -251,6 +266,20 @@ export async function postWithdrawalForApprovedDisclosure(params: {
     amount: params.amount,
     transactionBranchId: params.homeBranchId
   });
+
+  void notifyCustomerTransaction({
+    tenantId: params.tenantId,
+    customerId: params.customerId,
+    transactionId,
+    type: "withdrawal",
+    amount: params.amount
+  }).catch((error) => {
+    console.warn(
+      "[notifications] withdrawal notification skipped:",
+      error instanceof Error ? error.message : error
+    );
+  });
+
   return transactionId;
 }
 
@@ -343,11 +372,6 @@ export async function createTransaction(
   }
 
   if (payload.type === "withdrawal") {
-    if (context.role === "teller") {
-      throw new Error(
-        "Tellers pay approved withdrawals from the payout queue after Customer Service and Back Officer steps."
-      );
-    }
     const withdrawable = await getCustomerWithdrawableBalance(
       context.tenantId,
       payload.customerId
@@ -508,6 +532,26 @@ export async function createTransaction(
   }
 
   await applyTransactionToFloat(context, transaction);
+
+  if (
+    transaction.type === "deposit" ||
+    transaction.type === "withdrawal" ||
+    transaction.type === "daily_susu"
+  ) {
+    void notifyCustomerTransaction({
+      tenantId: context.tenantId,
+      customerId: transaction.customerId,
+      transactionId: transaction.id,
+      type: transaction.type,
+      amount: ledgerAmount,
+      subscribedAddons: context.subscribedAddons
+    }).catch((error) => {
+      console.warn(
+        "[notifications] transaction notification skipped:",
+        error instanceof Error ? error.message : error
+      );
+    });
+  }
 
   return enrichTransactionProduct(context.tenantId, transaction);
 }

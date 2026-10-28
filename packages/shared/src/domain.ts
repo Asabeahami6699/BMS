@@ -261,7 +261,7 @@ export const ledgerEntrySchema = z.object({
   /** Assigned field agent on the transaction when different from recorder. */
   fieldAgentName: z.string().optional(),
 
-  /** Display label combining recorder and agent when they differ. */
+  /** Display label. Deposits show the poster only; field collections may also name the agent. */
   performedByName: z.string().optional(),
 
   transactionType: z.string().optional()

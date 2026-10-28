@@ -2,6 +2,11 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import ws from "ws";
 import { env, hasSupabaseAuthConfig, hasSupabaseConfig } from "./env.js";
 
+export function resetSupabaseClients(): void {
+  adminClient = null;
+  authClient = null;
+}
+
 let adminClient: SupabaseClient | null = null;
 let authClient: SupabaseClient | null = null;
 

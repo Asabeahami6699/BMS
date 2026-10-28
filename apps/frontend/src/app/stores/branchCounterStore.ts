@@ -110,6 +110,13 @@ function reconcileBranchScope(
   if (branches.length === 0) {
     return {};
   }
+  if (branches.length === 1) {
+    const only = branches[0].id;
+    return {
+      ...(statementBranchId === only ? {} : { statementBranchId: only }),
+      transactionBranchId: only
+    };
+  }
   if (branches.some((b) => b.id === statementBranchId)) {
     return {};
   }

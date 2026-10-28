@@ -22,6 +22,8 @@ import {
 
   depositProductsForCustomerTab,
 
+  bankProductsForSubscription,
+
   formatGhanaCardInput,
 
   STANDARD_DEPOSIT_CAPTURE_FIELDS,
@@ -138,6 +140,7 @@ export function AgencyDepositsPage() {
 
 
   const hasSusu = hasTenantModule(user?.subscribedModules, "susu_management");
+  const hasBanking = hasTenantModule(user?.subscribedModules, "banking");
 
 
 
@@ -298,10 +301,12 @@ export function AgencyDepositsPage() {
 
   const activeCustomers = useMemo(() => selectActiveAgencyCustomers(customers), [customers]);
 
-  const depositProducts = useMemo(
-    () => depositProductsForCustomerTab(bankProducts, customerSearchTab),
-    [bankProducts, customerSearchTab]
-  );
+  const depositProducts = useMemo(() => {
+    if ((hasSusu && !hasBanking) || (!hasSusu && hasBanking)) {
+      return bankProductsForSubscription(bankProducts, user?.subscribedModules, "deposit");
+    }
+    return depositProductsForCustomerTab(bankProducts, customerSearchTab);
+  }, [bankProducts, customerSearchTab, hasSusu, hasBanking, user?.subscribedModules]);
 
   const customersForSearchTab = useMemo(() => {
     if (customerSearchTab === "susu") {
@@ -338,6 +343,12 @@ export function AgencyDepositsPage() {
     }
     return branches[0]?.id ?? "";
   }, [user?.branchId, transactionBranchId, branches]);
+
+  useEffect(() => {
+    if (branches.length === 1 && transactionBranchId !== branches[0].id) {
+      setTransactionBranchId(branches[0].id);
+    }
+  }, [branches, transactionBranchId, setTransactionBranchId]);
 
   useEffect(() => {
     if (!branchSelectable && tellerBranchId && transactionBranchId !== tellerBranchId) {
@@ -1064,7 +1075,7 @@ export function AgencyDepositsPage() {
                       disabled={posting || !branchSelectable}
                       onChange={(e) => setTransactionBranchId(e.target.value)}
                     >
-                      <option value="">Select branch</option>
+                      {branches.length === 1 ? null : <option value="">Select branch</option>}
                       {branches.map((branch) => (
                         <option key={branch.id} value={branch.id}>
                           {branch.name} ({branch.code})

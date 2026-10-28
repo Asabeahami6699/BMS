@@ -37,8 +37,8 @@ export const ADDON_LABELS: Record<TenantAddon, string> = {
 
 export const ADDON_DESCRIPTIONS: Record<TenantAddon, string> = {
   mobile_money: "MoMo collections and reconciliation.",
-  sms_notifications: "Transactional SMS alerts for staff and customers.",
-  email_notifications: "Email alerts and statements.",
+  sms_notifications: "Transactional SMS alerts via Arkesel (paid per message).",
+  email_notifications: "Free transactional email alerts for customers with an email on file.",
   api_access: "REST API keys and webhook integrations.",
   multi_branch: "Extended branch hierarchy and cross-branch reporting.",
   advanced_analytics: "Deep dashboards beyond standard reports.",

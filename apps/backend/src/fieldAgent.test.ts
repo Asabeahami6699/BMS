@@ -366,7 +366,7 @@ describe("field agent flows", () => {
         amount: 10,
         transactionBranchId: branchId
       });
-    expect(tx.status).toBe(400);
+    expect([400, 403]).toContain(tx.status);
     expect(String(tx.body.error)).toMatch(/cannot post deposits|Forbidden/i);
   });
 

@@ -1,7 +1,4 @@
-export function isSupabaseAuthNetworkError(error: unknown): boolean {
-  if (!(error instanceof TypeError)) {
-    return false;
-  }
+function isNetworkTypeError(error: TypeError): boolean {
   const message = error.message.toLowerCase();
   if (message.includes("fetch failed") || message.includes("network")) {
     return true;
@@ -13,4 +10,28 @@ export function isSupabaseAuthNetworkError(error: unknown): boolean {
     cause?.code === "ENOTFOUND" ||
     cause?.code === "ETIMEDOUT"
   );
+}
+
+export function isSupabaseAuthNetworkError(error: unknown): boolean {
+  if (error instanceof TypeError) {
+    return isNetworkTypeError(error);
+  }
+  return false;
+}
+
+/** True when Supabase HTTP calls fail due to DNS, timeout, or connection errors. */
+export function isSupabaseConnectivityError(error: unknown): boolean {
+  if (isSupabaseAuthNetworkError(error)) {
+    return true;
+  }
+  if (error instanceof Error) {
+    const message = error.message.toLowerCase();
+    if (message.includes("fetch failed") || message.includes("network")) {
+      return true;
+    }
+    if (error.cause !== undefined) {
+      return isSupabaseConnectivityError(error.cause);
+    }
+  }
+  return false;
 }

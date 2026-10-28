@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { amountFigureToWords } from "./amountInWords.js";
 import { normalizeGhanaCardNumber } from "./ghanaCard.js";
+import { hasTenantModule, type TenantProductModule } from "./modules.js";
 
 
 
@@ -909,6 +910,27 @@ export function depositProductsForCustomerTab(
     return deposits.filter(isSavingsDepositBankProduct);
   }
   return deposits;
+}
+
+/** Active products for a transaction direction, limited to the company's subscribed products. */
+export function bankProductsForSubscription(
+  products: TenantBankProduct[],
+  modules: TenantProductModule[] | undefined,
+  direction: BankProductDirection
+): TenantBankProduct[] {
+  const active = products.filter((product) => product.isActive && product.direction === direction);
+  if (!modules || modules.length === 0) {
+    return active;
+  }
+  const hasSusu = hasTenantModule(modules, "susu_management");
+  const hasBanking = hasTenantModule(modules, "banking");
+  if (hasSusu && !hasBanking) {
+    return active.filter((product) => /\bsusu\b/.test(bankProductMatchText(product)));
+  }
+  if (hasBanking && !hasSusu) {
+    return active.filter((product) => !/\bsusu\b/.test(bankProductMatchText(product)));
+  }
+  return active;
 }
 
 export const TELLER_DEPOSIT_SELF_FIELD: BankProductWorkflowField = {

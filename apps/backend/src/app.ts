@@ -36,6 +36,9 @@ import { agencyRouter } from "./routes/agency.routes.js";
 import { bankProductsRouter } from "./routes/bankProducts.routes.js";
 import { operationsRouter } from "./routes/operations.routes.js";
 import { investmentsRouter } from "./routes/investments.routes.js";
+import { smsSettingsRouter } from "./routes/smsSettings.routes.js";
+import { emailSettingsRouter } from "./routes/emailSettings.routes.js";
+import { notificationPlatformRouter } from "./routes/notificationPlatform.routes.js";
 
 export function createApp() {
   const app = express();
@@ -77,6 +80,9 @@ export function createApp() {
   app.use("/api/v1/banking/products", adminMutationRateLimit, bankProductsRouter);
   app.use("/api/v1/operations", operationsRouter);
   app.use("/api/v1/investments", moneyMutationRateLimit, investmentsRouter);
+  app.use("/api/v1/tenant/sms-settings", adminMutationRateLimit, smsSettingsRouter);
+  app.use("/api/v1/tenant/email-settings", adminMutationRateLimit, emailSettingsRouter);
+  app.use("/api/v1/tenant/notifications", notificationPlatformRouter);
 
   return app;
 }

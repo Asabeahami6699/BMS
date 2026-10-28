@@ -1,6 +1,8 @@
 import type { TenantProductModule } from "@bms/shared";
 import { getSupabaseAdminClient } from "../config/supabaseClient.js";
-import { env, getSuperAdminCredentials, hasSupabaseConfig } from "../config/env.js";
+import { disableSupabaseRuntime, env, getSuperAdminCredentials, hasSupabaseConfig } from "../config/env.js";
+import { resetSupabaseClients } from "../config/supabaseClient.js";
+import { isSupabaseConnectivityError } from "../lib/networkError.js";
 import { hashPassword } from "./password.js";
 import {
   findUserByEmail,
@@ -177,6 +179,24 @@ export async function bootstrapSupabaseSeed(options: { resetPassword?: boolean }
 
   const superAdmin = getSuperAdminCredentials();
 
+  try {
+    await bootstrapSupabaseSeedRemote(supabase, superAdmin, options);
+  } catch (error) {
+    if (!isSupabaseConnectivityError(error)) {
+      throw error;
+    }
+    disableSupabaseRuntime(error instanceof Error ? error.message : "connection failed");
+    resetSupabaseClients();
+    seedLocalOnly();
+    logBootstrapReady(superAdmin);
+  }
+}
+
+async function bootstrapSupabaseSeedRemote(
+  supabase: NonNullable<ReturnType<typeof getSupabaseAdminClient>>,
+  superAdmin: ReturnType<typeof getSuperAdminCredentials>,
+  options: { resetPassword?: boolean }
+): Promise<void> {
   const seedTenants: StoredTenant[] = [
     {
       id: "platform",
@@ -255,6 +275,10 @@ export async function bootstrapSupabaseSeed(options: { resetPassword?: boolean }
     await ensureAuthUser(supabase, seed, { resetPassword: options.resetPassword });
   }
 
+  logBootstrapReady(superAdmin);
+}
+
+function logBootstrapReady(superAdmin: ReturnType<typeof getSuperAdminCredentials>): void {
   console.info(
     `[bootstrap] Platform super admin ready: ${superAdmin.email} (password from SUPER_ADMIN_PASSWORD in .env)`
   );
@@ -293,4 +317,11 @@ function seedLocalOnly(): void {
       fullName: "Demo Company Admin"
     });
   }
+  upsertTenantInStore({
+    id: "platform",
+    name: "BMS Platform",
+    subscriptionStatus: "active",
+    subscribedModules: [],
+    createdAt: new Date().toISOString()
+  });
 }

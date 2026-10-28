@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useShallow } from "zustand/react/shallow";
-import { SAVINGS_INITIAL_DEPOSIT_GHS, bankProductDisplayLabel } from "@bms/shared";
+import { SAVINGS_INITIAL_DEPOSIT_GHS, bankProductDisplayLabel, bankProductsForSubscription, type Permission, type TenantProductModule } from "@bms/shared";
 import type { AppRole } from "./api";
 import { BranchCounterFloatPanel } from "./BranchCounterFloatPanel";
 import { BranchCounterCashCalculator } from "./BranchCounterCashCalculator";
@@ -34,9 +34,13 @@ const TX_LABELS: Record<TxType, string> = {
 
 const QUICK_AMOUNTS = [20, 50, 100, 200, 500];
 
-function allowedTransactionTypes(role: AppRole): TxType[] {
+function allowedTransactionTypes(role: AppRole, permissions: Permission[] | undefined): TxType[] {
   if (role === "teller") {
-    return ["deposit"];
+    const types: TxType[] = ["deposit"];
+    if (permissions?.includes("transactions.create.withdrawal")) {
+      types.push("withdrawal");
+    }
+    return types;
   }
   if (role === "coordinator" || role === "admin" || role === "field_agent") {
     return ["deposit", "withdrawal", "daily_susu"];
@@ -57,13 +61,13 @@ function formatLedgerDate(iso: string): string {
   }
 }
 
-type Props = { role: AppRole };
+type Props = { role: AppRole; permissions?: Permission[]; modules?: TenantProductModule[] };
 
-export function BranchCounterCard({ role }: Props) {
+export function BranchCounterCard({ role, permissions, modules }: Props) {
   const { showToast } = useToast();
   const { requestStepUp } = useTransactionPin();
   const [searchParams, setSearchParams] = useSearchParams();
-  const txTypes = allowedTransactionTypes(role);
+  const txTypes = allowedTransactionTypes(role, permissions);
   const isHeadOfficeRole = role === "admin" || role === "auditor" || role === "accountant";
 
   const [search, setSearch] = useState("");
@@ -187,8 +191,14 @@ export function BranchCounterCard({ role }: Props) {
     if (type === "daily_susu") {
       return [];
     }
-    return bankProducts.filter((p) => p.direction === type && p.isActive);
-  }, [bankProducts, type]);
+    return bankProductsForSubscription(bankProducts, modules, type);
+  }, [bankProducts, modules, type]);
+
+  useEffect(() => {
+    if (branches.length === 1 && transactionBranchId !== branches[0].id) {
+      setTransactionBranchId(branches[0].id);
+    }
+  }, [branches, transactionBranchId, setTransactionBranchId]);
 
   useEffect(() => {
     if (productsForType.length === 0) {
@@ -622,7 +632,7 @@ export function BranchCounterCard({ role }: Props) {
                   }
                   onChange={(e) => setTransactionBranchId(e.target.value)}
                 >
-                  <option value="">Select branch</option>
+                  {branches.length === 1 ? null : <option value="">Select branch</option>}
                   {branches.map((b) => (
                     <option key={b.id} value={b.id}>
                       {b.name} ({b.code})

@@ -119,6 +119,7 @@ export function ledgerPerformerLabel(input: {
   fieldAgentName?: string;
   recordedByUserId?: string;
   fieldAgentId?: string;
+  transactionType?: string;
 }): string | undefined {
   const recorded = input.recordedByName?.trim();
   const agent = input.fieldAgentName?.trim();
@@ -126,6 +127,7 @@ export function ledgerPerformerLabel(input: {
     return undefined;
   }
   if (
+    input.transactionType === "deposit" ||
     !agent ||
     recorded === agent ||
     (input.recordedByUserId && input.fieldAgentId && input.recordedByUserId === input.fieldAgentId)

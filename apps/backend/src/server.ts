@@ -11,6 +11,8 @@ async function main() {
     console.error("[bootstrap] Failed:", error instanceof Error ? error.message : error);
     if (hasSupabaseConfig()) {
       console.error("[bootstrap] Super admin login may not work until bootstrap succeeds.");
+    } else {
+      console.error("[bootstrap] Super admin login uses in-memory credentials from .env.");
     }
   }
 

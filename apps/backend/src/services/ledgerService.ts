@@ -161,7 +161,8 @@ async function enrichLedgerEntries(
             recordedByName,
             fieldAgentName,
             recordedByUserId: tx.recordedByUserId,
-            fieldAgentId: tx.fieldAgentId
+            fieldAgentId: tx.fieldAgentId,
+            transactionType: tx.type
           })
         : undefined
     });

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import {
   bankProductDisplayLabel,
+  bankProductsForSubscription,
   hasTenantModule,
   workflowFieldsForStage,
   type TenantBankProduct
@@ -30,6 +31,7 @@ export function InitiateAgencyWithdrawalPanel({ onInitiated }: Props) {
   const { user } = useAuth();
   const { showToast } = useToast();
   const hasSusu = hasTenantModule(user?.subscribedModules, "susu_management");
+  const modules = user?.subscribedModules;
 
   const [captureMode, setCaptureMode] = useState<WithdrawalCaptureMode>("bms");
   const [search, setSearch] = useState("");
@@ -77,9 +79,15 @@ export function InitiateAgencyWithdrawalPanel({ onInitiated }: Props) {
 
   useEffect(() => {
     void listBankProducts({ direction: "withdrawal", activeOnly: true })
-      .then(setWithdrawalProducts)
+      .then((products) => setWithdrawalProducts(bankProductsForSubscription(products, modules, "withdrawal")))
       .catch(() => setWithdrawalProducts([]));
-  }, []);
+  }, [modules]);
+
+  useEffect(() => {
+    if (branches.length === 1 && transactionBranchId !== branches[0].id) {
+      setTransactionBranchId(branches[0].id);
+    }
+  }, [branches, transactionBranchId, setTransactionBranchId]);
 
   useEffect(() => {
     if (withdrawalProducts.length === 0) {
@@ -422,7 +430,7 @@ export function InitiateAgencyWithdrawalPanel({ onInitiated }: Props) {
                         disabled={submitting || branches.length <= 1}
                         onChange={(e) => setTransactionBranchId(e.target.value)}
                       >
-                        <option value="">Select branch</option>
+                        {branches.length === 1 ? null : <option value="">Select branch</option>}
                         {branches.map((branch) => (
                           <option key={branch.id} value={branch.id}>
                             {branch.name} ({branch.code})

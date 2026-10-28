@@ -1051,6 +1051,55 @@ export async function updateCommissionPolicy(body: CommissionPolicy): Promise<Co
   return response.json() as Promise<CommissionPolicy>;
 }
 
+export type TenantSmsSettings = {
+  tenantId: string;
+  enabled: boolean;
+  notifyDeposit: boolean;
+  notifyWithdrawal: boolean;
+  notifyDailySusu: boolean;
+  senderId?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+};
+
+export async function getSmsPlatformStatus(): Promise<{ configured: boolean }> {
+  return fetchJson<{ configured: boolean }>(`${API_BASE_URL}/api/v1/tenant/sms-settings/status`, {
+    headers: authHeaders()
+  });
+}
+
+export async function getTenantSmsSettings(): Promise<TenantSmsSettings> {
+  return fetchJson<TenantSmsSettings>(`${API_BASE_URL}/api/v1/tenant/sms-settings`, {
+    headers: authHeaders()
+  });
+}
+
+export async function updateTenantSmsSettings(
+  body: Partial<
+    Pick<TenantSmsSettings, "enabled" | "notifyDeposit" | "notifyWithdrawal" | "notifyDailySusu">
+  > & { senderId?: string | null }
+): Promise<TenantSmsSettings> {
+  return fetchJson<TenantSmsSettings>(`${API_BASE_URL}/api/v1/tenant/sms-settings`, {
+    method: "PUT",
+    headers: authHeaders(),
+    body: JSON.stringify(body)
+  });
+}
+
+export async function sendTenantTestSms(body: {
+  phone: string;
+  message?: string;
+}): Promise<{ sent: boolean; phone: string; message: string }> {
+  return fetchJson<{ sent: boolean; phone: string; message: string }>(
+    `${API_BASE_URL}/api/v1/tenant/sms-settings/test`,
+    {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify(body)
+    }
+  );
+}
+
 export async function getAccountNumberPolicy(): Promise<AccountNumberPolicy> {
   const response = await fetch(`${API_BASE_URL}/api/v1/tenant/account-number-policy`, {
     headers: authHeaders()
