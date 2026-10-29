@@ -425,10 +425,11 @@ export function AgencyDepositsPage() {
         if (!value || !captureFieldKeys.includes(key)) {
           return;
         }
-        if (next[key] !== value) {
-          next[key] = value;
-          changed = true;
+        if (next[key]) {
+          return;
         }
+        next[key] = value;
+        changed = true;
       };
 
       if (selectedBranch) {

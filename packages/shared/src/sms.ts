@@ -1,6 +1,12 @@
 import { z } from "zod";
 
-export const smsEventTypeSchema = z.enum(["deposit", "withdrawal", "daily_susu", "test"]);
+export const smsEventTypeSchema = z.enum([
+  "deposit",
+  "withdrawal",
+  "daily_susu",
+  "account_opened",
+  "test"
+]);
 export type SmsEventType = z.infer<typeof smsEventTypeSchema>;
 
 export const tenantSmsSettingsSchema = z.object({

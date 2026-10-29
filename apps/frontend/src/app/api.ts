@@ -2205,17 +2205,19 @@ export async function getBranchCounterStatement(
   );
 }
 
-export async function createTransaction(payload: {
-  customerId: string;
-  type: "daily_susu" | "deposit" | "withdrawal";
-  amount: number;
-  transactionBranchId: string;
-  notes?: string;
-  bankProductId?: string;
-  workflowData?: Record<string, unknown>;
-  manualPartnerAccount?: boolean;
-}): Promise<Transaction> {
-  const idempotencyKey = crypto.randomUUID();
+export async function createTransaction(
+  payload: {
+    customerId: string;
+    type: "daily_susu" | "deposit" | "withdrawal";
+    amount: number;
+    transactionBranchId: string;
+    notes?: string;
+    bankProductId?: string;
+    workflowData?: Record<string, unknown>;
+    manualPartnerAccount?: boolean;
+  },
+  idempotencyKey = crypto.randomUUID()
+): Promise<Transaction> {
   return withTransactionStepUp((transactionAuthToken) =>
     fetchJson<Transaction>(`${API_BASE_URL}/api/v1/transactions`, {
       method: "POST",

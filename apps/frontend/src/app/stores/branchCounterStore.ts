@@ -80,6 +80,19 @@ type BranchCounterState = {
 
 let fetchInFlight: Promise<void> | null = null;
 let ledgerInFlight = new Map<string, Promise<void>>();
+let postInFlight: { fingerprint: string; promise: Promise<Transaction> } | null = null;
+let postRetry: { fingerprint: string; key: string } | null = null;
+
+function postFingerprint(payload: PostPayload): string {
+  return [
+    payload.customerId,
+    payload.type,
+    String(payload.amount),
+    payload.transactionBranchId,
+    payload.notes ?? "",
+    payload.bankProductId ?? ""
+  ].join("|");
+}
 
 function isUnauthorized(error: unknown): boolean {
   return (
@@ -374,18 +387,32 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
   },
 
   postTransaction: async (payload) => {
-    set({ posting: true });
-    try {
-      const transaction = await createTransaction(payload);
-      const customerId = payload.customerId;
-      await Promise.all([
-        get().loadLedger(customerId, { silent: true, force: true }),
-        get().refreshSilent()
-      ]);
-      return transaction;
-    } finally {
-      set({ posting: false });
+    const fingerprint = postFingerprint(payload);
+    if (postInFlight?.fingerprint === fingerprint) {
+      return postInFlight.promise;
     }
+    const key = postRetry?.fingerprint === fingerprint ? postRetry.key : crypto.randomUUID();
+    postRetry = { fingerprint, key };
+    const promise = (async () => {
+      set({ posting: true });
+      try {
+        const transaction = await createTransaction(payload, key);
+        postRetry = null;
+        const customerId = payload.customerId;
+        await Promise.all([
+          get().loadLedger(customerId, { silent: true, force: true }),
+          get().refreshSilent()
+        ]);
+        return transaction;
+      } finally {
+        set({ posting: false });
+        if (postInFlight?.promise === promise) {
+          postInFlight = null;
+        }
+      }
+    })();
+    postInFlight = { fingerprint, promise };
+    return promise;
   }
 }));
 

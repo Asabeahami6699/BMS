@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useShallow } from "zustand/react/shallow";
 import { SAVINGS_INITIAL_DEPOSIT_GHS, bankProductDisplayLabel, bankProductsForSubscription, type Permission, type TenantProductModule } from "@bms/shared";
@@ -72,6 +72,7 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
 
   const [search, setSearch] = useState("");
   const [type, setType] = useState<TxType>(txTypes[0] ?? "deposit");
+  const postLock = useRef(false);
   const [amount, setAmount] = useState("");
   const [notes, setNotes] = useState("");
   const [bankProductId, setBankProductId] = useState("");
@@ -202,10 +203,9 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
 
   useEffect(() => {
     if (productsForType.length === 0) {
-      setBankProductId("");
       return;
     }
-    if (!productsForType.some((p) => p.id === bankProductId)) {
+    if (!bankProductId || !productsForType.some((p) => p.id === bankProductId)) {
       setBankProductId(productsForType[0]?.id ?? "");
     }
   }, [productsForType, bankProductId]);
@@ -255,10 +255,15 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
   }
 
   async function handlePost() {
+    if (postLock.current || posting) {
+      return;
+    }
     if (sessionExpired) {
       showToast("Sign in again to post transactions", "error");
       return;
     }
+    postLock.current = true;
+    try {
     if (!selectedCustomer) {
       showToast("Select an active customer first", "error");
       return;
@@ -317,6 +322,9 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
       setConfirmWithdraw(false);
     } catch (err) {
       showToast(toUserFacingError(err, "Failed to post transaction"), "error");
+    }
+    } finally {
+      postLock.current = false;
     }
   }
 

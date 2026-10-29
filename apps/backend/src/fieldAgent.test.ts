@@ -367,7 +367,7 @@ describe("field agent flows", () => {
         transactionBranchId: branchId
       });
     expect([400, 403]).toContain(tx.status);
-    expect(String(tx.body.error)).toMatch(/cannot post deposits|Forbidden/i);
+    expect(String(tx.body.error)).toMatch(/cannot post deposits|do not have permission/i);
   });
 
   it("credits non-withdrawable initial deposit when savings account is approved", async () => {

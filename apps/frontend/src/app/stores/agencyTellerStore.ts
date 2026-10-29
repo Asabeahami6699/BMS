@@ -24,6 +24,8 @@ import {
 const LEDGER_STALE_MS = 45_000;
 const silentScheduler = createSilentRefreshScheduler();
 const liveSyncMgr = createLiveSyncManager();
+let depositFlight: { fingerprint: string; promise: Promise<void> } | null = null;
+let depositRetry: { fingerprint: string; key: string } | null = null;
 
 type AgencyTellerState = {
   customers: Customer[];
@@ -271,43 +273,67 @@ export const useAgencyTellerStore = create<AgencyTellerState>((set, get) => ({
   },
 
   postDeposit: async (payload) => {
-    set({ posting: true, error: null });
-    try {
-      let customerId = payload.customerId;
-      if (!customerId) {
-        const cached = get().walkInCustomerIdByBranch[payload.transactionBranchId];
-        if (cached) {
-          customerId = cached;
-        } else {
-          const walkIn = await getAgencyWalkInCustomer(payload.transactionBranchId);
-          customerId = walkIn.id;
-          set({
-            walkInCustomerIdByBranch: {
-              ...get().walkInCustomerIdByBranch,
-              [payload.transactionBranchId]: customerId
-            }
-          });
+    const fingerprint = [
+      payload.customerId ?? "",
+      String(payload.amount),
+      payload.transactionBranchId,
+      payload.bankProductId ?? "",
+      payload.notes ?? ""
+    ].join("|");
+    if (depositFlight?.fingerprint === fingerprint) {
+      return depositFlight.promise;
+    }
+    const key =
+      depositRetry?.fingerprint === fingerprint ? depositRetry.key : crypto.randomUUID();
+    depositRetry = { fingerprint, key };
+    const promise = (async () => {
+      set({ posting: true, error: null });
+      try {
+        let customerId = payload.customerId;
+        if (!customerId) {
+          const cached = get().walkInCustomerIdByBranch[payload.transactionBranchId];
+          if (cached) {
+            customerId = cached;
+          } else {
+            const walkIn = await getAgencyWalkInCustomer(payload.transactionBranchId);
+            customerId = walkIn.id;
+            set({
+              walkInCustomerIdByBranch: {
+                ...get().walkInCustomerIdByBranch,
+                [payload.transactionBranchId]: customerId
+              }
+            });
+          }
+        }
+        await createTransaction(
+          {
+            customerId,
+            type: "deposit",
+            amount: payload.amount,
+            transactionBranchId: payload.transactionBranchId,
+            notes: payload.notes,
+            bankProductId: payload.bankProductId,
+            workflowData: payload.workflowData,
+            manualPartnerAccount: payload.manualPartnerAccount
+          },
+          key
+        );
+        depositRetry = null;
+        void get().refreshSilent();
+        void get().loadLedger(customerId, { force: true });
+        void get().refreshDeposits();
+      } catch (error) {
+        set({ error: toUserFacingError(error, "Deposit failed") });
+        throw error;
+      } finally {
+        set({ posting: false });
+        if (depositFlight?.promise === promise) {
+          depositFlight = null;
         }
       }
-      await createTransaction({
-        customerId,
-        type: "deposit",
-        amount: payload.amount,
-        transactionBranchId: payload.transactionBranchId,
-        notes: payload.notes,
-        bankProductId: payload.bankProductId,
-        workflowData: payload.workflowData,
-        manualPartnerAccount: payload.manualPartnerAccount
-      });
-      void get().refreshSilent();
-      void get().loadLedger(customerId, { force: true });
-      void get().refreshDeposits();
-    } catch (error) {
-      set({ error: toUserFacingError(error, "Deposit failed") });
-      throw error;
-    } finally {
-      set({ posting: false });
-    }
+    })();
+    depositFlight = { fingerprint, promise };
+    return promise;
   },
 
   startLiveSync: () => {

@@ -1,4 +1,5 @@
 import {
+  buildAccountOpenedMessage,
   buildTransactionAlertMessage,
   hasTenantAddon,
   normalizeCustomerEmail,
@@ -172,6 +173,49 @@ export async function notifyCustomerTransactionEmail(input: NotifyInput): Promis
     message: alert.text,
     idempotencyKey: `email:tx:${input.transactionId}`,
     transactionId: input.transactionId,
+    fromName: displayName,
+    replyTo: settings.replyToEmail || undefined
+  });
+}
+
+/** Email after a registration is approved, including the full account number. */
+export async function notifyCustomerAccountOpenedEmail(input: {
+  tenantId: string;
+  customerId: string;
+}): Promise<void> {
+  const addons = (await loadTenantAddons(input.tenantId)) ?? [];
+  if (!hasTenantAddon(addons, "email_notifications")) {
+    return;
+  }
+
+  const settings = await getTenantEmailSettings(input.tenantId);
+  if (!settings.enabled) {
+    return;
+  }
+
+  const customer = await getCustomerById(input.tenantId, input.customerId);
+  const accountNumber = customer?.accountNumber?.trim();
+  const toEmail = normalizeCustomerEmail(customer?.email);
+  if (!toEmail || !accountNumber) {
+    return;
+  }
+
+  const brand = await resolveTenantName(input.tenantId);
+  const displayName = settings.fromName?.trim() || brand;
+  const alert = buildAccountOpenedMessage({
+    brand: displayName,
+    accountNumber,
+    customerName: customer?.fullName
+  });
+
+  await deliverEmail({
+    tenantId: input.tenantId,
+    customerId: input.customerId,
+    eventType: "account_opened",
+    toEmail,
+    subject: alert.subject,
+    message: alert.text,
+    idempotencyKey: `email:account-opened:${input.customerId}:${accountNumber}`,
     fromName: displayName,
     replyTo: settings.replyToEmail || undefined
   });

@@ -12,7 +12,7 @@ import { z } from "zod";
 
 import { getSupabaseAdminClient } from "../config/supabaseClient.js";
 
-import { requirePermission } from "../middleware/requirePermission.js";
+import { requireAnyPermission, requirePermission } from "../middleware/requirePermission.js";
 
 import {
 
@@ -364,7 +364,7 @@ usersRouter.get("/field-agents", requirePermission("customers.read"), async (req
 
 });
 
-usersRouter.get("/agents-bootstrap", requirePermission("users.read"), async (req, res) => {
+usersRouter.get("/agents-bootstrap", requireAnyPermission("customers.read", "users.read"), async (req, res) => {
   const context = req.userContext;
   if (!context?.tenantId || context.tenantId === "platform") {
     res.status(401).json({ error: "Unauthorized" });

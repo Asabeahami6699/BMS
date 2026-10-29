@@ -266,9 +266,15 @@ customersRouter.patch("/:customerId/approve", requirePermission("customers.creat
 
   try {
 
-    res.json(
-      await approveCustomerRegistration(context.tenantId, customerId, context.userId)
-    );
+    const approved = await approveCustomerRegistration(context.tenantId, customerId, context.userId);
+    if (approved.accountNumber) {
+      const { notifyCustomerAccountOpened } = await import("../services/customerNotificationService.js");
+      void notifyCustomerAccountOpened({
+        tenantId: context.tenantId,
+        customerId: approved.id
+      });
+    }
+    res.json(approved);
 
   } catch (error) {
 

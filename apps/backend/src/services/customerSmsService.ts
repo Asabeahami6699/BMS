@@ -1,4 +1,5 @@
 import {
+  buildAccountOpenedMessage,
   buildTransactionAlertMessage,
   hasTenantAddon,
   normalizeGhanaPhone,
@@ -181,6 +182,50 @@ export async function notifyCustomerTransactionSms(input: NotifyInput): Promise<
     message,
     idempotencyKey: `tx:${input.transactionId}`,
     transactionId: input.transactionId,
+    senderId: settings.senderId
+  });
+}
+
+/** SMS after a registration is approved, including the full account number. */
+export async function notifyCustomerAccountOpenedSms(input: {
+  tenantId: string;
+  customerId: string;
+}): Promise<void> {
+  const addons = (await loadTenantAddons(input.tenantId)) ?? [];
+  if (!hasTenantAddon(addons, "sms_notifications")) {
+    return;
+  }
+
+  const settings = await getTenantSmsSettings(input.tenantId);
+  if (!settings.enabled) {
+    return;
+  }
+
+  const customer = await getCustomerById(input.tenantId, input.customerId);
+  const accountNumber = customer?.accountNumber?.trim();
+  if (!customer?.phone || !accountNumber) {
+    return;
+  }
+
+  const phone = normalizeGhanaPhone(customer.phone);
+  if (!phone) {
+    return;
+  }
+
+  const brand = await resolveTenantName(input.tenantId);
+  const message = buildAccountOpenedMessage({
+    brand,
+    accountNumber,
+    customerName: customer.fullName
+  }).text;
+
+  await deliverSms({
+    tenantId: input.tenantId,
+    customerId: input.customerId,
+    eventType: "account_opened",
+    phone,
+    message,
+    idempotencyKey: `account-opened:${input.customerId}:${accountNumber}`,
     senderId: settings.senderId
   });
 }

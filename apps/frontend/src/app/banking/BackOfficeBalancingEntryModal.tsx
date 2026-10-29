@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { bankProductAppliesToBranch, type OpenBackOfficeDayInput } from "@bms/shared";
 import { Modal } from "../../components/Modal";
 
@@ -51,6 +51,7 @@ export function BackOfficeBalancingEntryModal({
   const [ecashAmount, setEcashAmount] = useState("");
   const [ecashNotes, setEcashNotes] = useState("");
   const [ecashAccountId, setEcashAccountId] = useState("");
+  const seededRef = useRef(false);
 
   const branchAccounts = useMemo(
     () =>
@@ -62,27 +63,39 @@ export function BackOfficeBalancingEntryModal({
 
   useEffect(() => {
     if (!open) {
+      seededRef.current = false;
       return;
     }
     const preferred =
       defaultBranchId && defaultBranchId !== "all" && branches.some((b) => b.id === defaultBranchId)
         ? defaultBranchId
         : branches[0]?.id ?? "";
-    setBranchId(preferred);
-    setEcashAmount("");
-    setEcashNotes("");
+    if (!seededRef.current) {
+      seededRef.current = true;
+      setBranchId(preferred);
+      setEcashAmount("");
+      setEcashNotes("");
+      return;
+    }
+    setBranchId((current) => current || preferred);
   }, [open, branches, defaultBranchId]);
 
   useEffect(() => {
     if (!open) {
       return;
     }
-    const next: Record<string, { opening: string; ecash: string }> = {};
-    for (const account of branchAccounts) {
-      next[account.id] = { opening: "", ecash: "0" };
-    }
-    setOpeningDraft(next);
-    setEcashAccountId(branchAccounts[0]?.id ?? "");
+    setOpeningDraft((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const account of branchAccounts) {
+        if (!next[account.id]) {
+          next[account.id] = { opening: "", ecash: "0" };
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+    setEcashAccountId((current) => current || branchAccounts[0]?.id || "");
   }, [open, branchAccounts]);
 
   async function handleOpenDay(event: FormEvent) {

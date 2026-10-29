@@ -1,6 +1,12 @@
 import { z } from "zod";
 
-export const emailEventTypeSchema = z.enum(["deposit", "withdrawal", "daily_susu", "test"]);
+export const emailEventTypeSchema = z.enum([
+  "deposit",
+  "withdrawal",
+  "daily_susu",
+  "account_opened",
+  "test"
+]);
 export type EmailEventType = z.infer<typeof emailEventTypeSchema>;
 
 export const tenantEmailSettingsSchema = z.object({

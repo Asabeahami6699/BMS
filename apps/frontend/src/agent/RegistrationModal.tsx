@@ -71,6 +71,83 @@ async function preparePhoto(dataUrl: string | undefined): Promise<string | undef
   return compressed;
 }
 
+function RegistrationPreview({
+  form,
+  isOffice,
+  isSavings,
+  savingsOpeningFeeCollected,
+  branchLabel,
+  agentLabel,
+  photoUrl,
+  idCardPhotoUrl
+}: {
+  form: typeof EMPTY_FORM;
+  isOffice: boolean;
+  isSavings: boolean;
+  savingsOpeningFeeCollected: boolean | null;
+  branchLabel: string;
+  agentLabel: string;
+  photoUrl?: string;
+  idCardPhotoUrl?: string;
+}) {
+  const accountLabel = ACCOUNT_TYPES.find((type) => type.value === form.accountType)?.label ?? form.accountType;
+  const kinAddress = form.kinUseCustomerAddress
+    ? [form.location, form.houseNumber].filter(Boolean).join(", ")
+    : [form.kinLocation, form.kinHouseNumber].filter(Boolean).join(", ");
+  return (
+    <div className="agent-reg-preview">
+      <p className="muted">Check these details, then confirm. Nothing is sent until you confirm.</p>
+      <dl>
+        {isOffice ? (
+          <>
+            <dt>Home branch</dt>
+            <dd>{branchLabel || "—"}</dd>
+            <dt>Assigned field agent</dt>
+            <dd>{agentLabel || "—"}</dd>
+          </>
+        ) : null}
+        <dt>Full name</dt>
+        <dd>{form.fullName}</dd>
+        <dt>Phone</dt>
+        <dd>{form.phone}</dd>
+        {form.email ? (
+          <>
+            <dt>Email</dt>
+            <dd>{form.email}</dd>
+          </>
+        ) : null}
+        <dt>Address</dt>
+        <dd>{[form.location, form.houseNumber].filter(Boolean).join(", ")}</dd>
+        <dt>Account type</dt>
+        <dd>{accountLabel}</dd>
+        {isSavings ? (
+          <>
+            <dt>Opening fee</dt>
+            <dd>
+              {savingsOpeningFeeCollected
+                ? `GHS ${OPENING_FEE.toFixed(2)} collected now`
+                : `Not collected — deduct up to GHS ${OPENING_FEE.toFixed(2)} later`}
+            </dd>
+          </>
+        ) : null}
+        <dt>ID card number</dt>
+        <dd>{form.idCardNumber}</dd>
+        <dt>Next of kin</dt>
+        <dd>
+          {form.kinName} · {form.kinPhone}
+          {kinAddress ? ` · ${kinAddress}` : ""}
+        </dd>
+        <dt>Daily contribution</dt>
+        <dd>GHS {parseDailyContribution(form.dailyContributionAmount).toFixed(2)}</dd>
+      </dl>
+      <div className="agent-reg-preview__photos">
+        {idCardPhotoUrl ? <img src={idCardPhotoUrl} alt="ID card preview" /> : null}
+        {photoUrl ? <img src={photoUrl} alt="Customer photo preview" /> : null}
+      </div>
+    </div>
+  );
+}
+
 function FieldHint({ children, id }: { children: React.ReactNode; id?: string }) {
   return (
     <p className="field-hint muted" id={id}>
@@ -90,6 +167,7 @@ export function RegistrationModal({
   const { showToast } = useToast();
   const isOffice = variant === "office";
   const [submitting, setSubmitting] = useState(false);
+  const [step, setStep] = useState<"form" | "preview">("form");
   const [form, setForm] = useState(EMPTY_FORM);
   const [photoUrl, setPhotoUrl] = useState<string | undefined>();
   const [photoName, setPhotoName] = useState<string | undefined>();
@@ -131,8 +209,12 @@ export function RegistrationModal({
     if (!open || !isOffice) {
       return;
     }
-    const branchId = defaultBranchId ?? activeBranches[0]?.id ?? "";
-    setHomeBranchId(branchId);
+    setHomeBranchId((current) => {
+      if (current && activeBranches.some((branch) => branch.id === current)) {
+        return current;
+      }
+      return defaultBranchId ?? activeBranches[0]?.id ?? "";
+    });
   }, [open, isOffice, defaultBranchId, activeBranches]);
 
   useEffect(() => {
@@ -147,6 +229,7 @@ export function RegistrationModal({
 
   useEffect(() => {
     if (!open) {
+      setStep("form");
       setForm(EMPTY_FORM);
       setPhotoUrl(undefined);
       setPhotoName(undefined);
@@ -168,32 +251,49 @@ export function RegistrationModal({
     setForm((prev) => ({ ...prev, [key]: value }));
   }
 
-  async function handleSubmit(event: FormEvent) {
-    event.preventDefault();
-
+  function reviewError(): string | null {
+    if (!form.fullName.trim() || !form.phone.trim() || !form.location.trim() || !form.houseNumber.trim()) {
+      return "Fill in the customer's name, phone, location, and house number.";
+    }
+    if (!form.idCardNumber.trim() || !form.kinName.trim() || !form.kinPhone.trim()) {
+      return "Fill in the ID card number and next of kin.";
+    }
     if (!idCardPhotoUrl) {
-      showToast("Take a photo of the customer's ID card.", "error");
-      return;
+      return "Take a photo of the customer's ID card.";
     }
-
     if (isSavings && savingsOpeningFeeCollected === null) {
-      showToast("Choose how the GHS 20 opening fee was handled.", "error");
-      return;
+      return "Choose how the GHS 20 opening fee was handled.";
     }
-
     if (isOffice) {
-      if (!homeBranchId || !assignedFieldAgentId) {
-        showToast("Select home branch and assigned field agent.", "error");
-        return;
-      }
       if (activeBranches.length === 0) {
-        showToast("Add an active branch before registering customers.", "error");
-        return;
+        return "Add an active branch before registering customers.";
+      }
+      if (!homeBranchId || !assignedFieldAgentId) {
+        return "Select home branch and assigned field agent.";
       }
       if (agentsForBranch.length === 0) {
-        showToast("Add an active field agent for this branch first.", "error");
-        return;
+        return "Add an active field agent for this branch first.";
       }
+    }
+    return null;
+  }
+
+  function handleReview(event: FormEvent) {
+    event.preventDefault();
+    const error = reviewError();
+    if (error) {
+      showToast(error, "error");
+      return;
+    }
+    setStep("preview");
+  }
+
+  async function handleSubmit() {
+    const error = reviewError();
+    if (error) {
+      showToast(error, "error");
+      setStep("form");
+      return;
     }
 
     setSubmitting(true);
@@ -257,6 +357,8 @@ export function RegistrationModal({
   }
 
   const officeReady = activeBranches.length > 0 && agentsForBranch.length > 0;
+  const previewBranch = activeBranches.find((branch) => branch.id === homeBranchId);
+  const previewAgent = agentsForBranch.find((agent) => agent.userId === assignedFieldAgentId);
 
   return (
     <Modal
@@ -270,22 +372,51 @@ export function RegistrationModal({
       onClose={onClose}
       panelClassName="modal-panel--70 modal-panel--registration"
       footer={
-        <>
-          <button type="button" className="button secondary" onClick={onClose}>
-            Cancel
-          </button>
-          <button
-            type="submit"
-            form="agent-registration-form"
-            className="button"
-            disabled={submitting || (isOffice && !officeReady)}
-          >
-            {submitting ? "Submitting…" : "Submit registration"}
-          </button>
-        </>
+        step === "preview" ? (
+          <>
+            <button type="button" className="button secondary" onClick={() => setStep("form")} disabled={submitting}>
+              Back
+            </button>
+            <button type="button" className="button" onClick={() => void handleSubmit()} disabled={submitting}>
+              {submitting ? "Submitting…" : "Confirm and submit"}
+            </button>
+          </>
+        ) : (
+          <>
+            <button type="button" className="button secondary" onClick={onClose}>
+              Cancel
+            </button>
+            <button
+              type="submit"
+              form="agent-registration-form"
+              className="button"
+              disabled={submitting || (isOffice && !officeReady)}
+            >
+              Review details
+            </button>
+          </>
+        )
       }
     >
-      <form id="agent-registration-form" className="stack-form agent-form" onSubmit={handleSubmit}>
+      {step === "preview" ? (
+        <RegistrationPreview
+          form={form}
+          isOffice={isOffice}
+          isSavings={isSavings}
+          savingsOpeningFeeCollected={savingsOpeningFeeCollected}
+          branchLabel={previewBranch ? `${previewBranch.name} (${previewBranch.code})` : ""}
+          agentLabel={previewAgent?.fullName?.trim() || previewAgent?.email || ""}
+          photoUrl={photoUrl}
+          idCardPhotoUrl={idCardPhotoUrl}
+        />
+      ) : null}
+      <form
+        id="agent-registration-form"
+        className="stack-form agent-form"
+        onSubmit={handleReview}
+        autoComplete="off"
+        hidden={step === "preview"}
+      >
         {isOffice ? (
           <section className="agent-form__section">
             <h3 className="agent-form__section-title">Branch &amp; servicing</h3>

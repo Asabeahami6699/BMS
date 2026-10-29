@@ -22,6 +22,8 @@ type DragState = {
 export function Modal({ open, title, subtitle, onClose, children, footer, panelClassName }: Props) {
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const dragRef = useRef<DragState | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (!open) {
@@ -30,7 +32,7 @@ export function Modal({ open, title, subtitle, onClose, children, footer, panelC
     setOffset({ x: 0, y: 0 });
     function onKey(event: KeyboardEvent) {
       if (event.key === "Escape") {
-        onClose();
+        onCloseRef.current();
       }
     }
     document.addEventListener("keydown", onKey);
@@ -39,7 +41,7 @@ export function Modal({ open, title, subtitle, onClose, children, footer, panelC
       document.removeEventListener("keydown", onKey);
       document.body.style.overflow = "";
     };
-  }, [open, onClose]);
+  }, [open]);
 
   function startDrag(event: PointerEvent<HTMLElement>) {
     if (event.button !== 0) {

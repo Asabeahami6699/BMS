@@ -1,6 +1,12 @@
 import type { TenantAddon } from "@bms/shared";
-import { notifyCustomerTransactionEmail } from "./customerEmailService.js";
-import { notifyCustomerTransactionSms } from "./customerSmsService.js";
+import {
+  notifyCustomerAccountOpenedEmail,
+  notifyCustomerTransactionEmail
+} from "./customerEmailService.js";
+import {
+  notifyCustomerAccountOpenedSms,
+  notifyCustomerTransactionSms
+} from "./customerSmsService.js";
 
 type NotifyInput = {
   tenantId: string;
@@ -16,6 +22,17 @@ export async function notifyCustomerTransaction(input: NotifyInput): Promise<voi
   await Promise.allSettled([
     notifyCustomerTransactionSms(input),
     notifyCustomerTransactionEmail(input)
+  ]);
+}
+
+/** Tell the customer their account number after registration approval. */
+export async function notifyCustomerAccountOpened(input: {
+  tenantId: string;
+  customerId: string;
+}): Promise<void> {
+  await Promise.allSettled([
+    notifyCustomerAccountOpenedSms(input),
+    notifyCustomerAccountOpenedEmail(input)
   ]);
 }
 

@@ -30,13 +30,15 @@ let lastSnapshotKey = "";
 const silentScheduler = createSilentRefreshScheduler();
 const liveSync = createLiveSyncManager();
 
-function routesSnapshotKey(routes: FieldRoute[]): string {
-  return routes
+function routesSnapshotKey(routes: FieldRoute[], branches: Branch[]): string {
+  const routeKey = routes
     .map(
       (r) =>
         `${r.id}:${r.status}:${r.name}:${r.memberCount ?? 0}:${r.assignedFieldAgentId ?? ""}`
     )
     .join("|");
+  const branchKey = branches.map((b) => `${b.id}:${b.status}:${b.name}:${b.code}`).join("|");
+  return `${routeKey}#${branchKey}`;
 }
 
 export const useRoutesStore = create<RoutesState>((set, get) => ({
@@ -85,7 +87,7 @@ export const useRoutesStore = create<RoutesState>((set, get) => ({
     fetchInFlight = (async () => {
       try {
         const data = await getRoutesBootstrap();
-        const key = routesSnapshotKey(data.routes);
+        const key = routesSnapshotKey(data.routes, data.branches);
         if (key !== lastSnapshotKey) {
           lastSnapshotKey = key;
           set({
@@ -112,7 +114,7 @@ export const useRoutesStore = create<RoutesState>((set, get) => ({
     fetchInFlight = (async () => {
       try {
         const data = await getRoutesBootstrap();
-        const key = routesSnapshotKey(data.routes);
+        const key = routesSnapshotKey(data.routes, data.branches);
         if (key !== lastSnapshotKey) {
           lastSnapshotKey = key;
           set({
@@ -135,7 +137,7 @@ export const useRoutesStore = create<RoutesState>((set, get) => ({
     set({ liveSyncActive: true });
     liveSync.start({
       getTenantId,
-      tables: ["field_routes", "customers"],
+      tables: ["field_routes", "customers", "branches"],
       onRefresh: () => void get().refreshSilent(),
       isStale: () => !isFresh(get().lastFetchedAt)
     });

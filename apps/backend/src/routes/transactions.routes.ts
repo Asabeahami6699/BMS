@@ -1,7 +1,7 @@
 import { createTransactionInputSchema } from "@bms/shared";
 import { Router } from "express";
 import { requireIdempotencyKey } from "../middleware/idempotency.js";
-import { requirePermission } from "../middleware/requirePermission.js";
+import { PERMISSION_DENIED_MESSAGE, requirePermission } from "../middleware/requirePermission.js";
 import { requireTransactionStepUp } from "../middleware/requireTransactionStepUp.js";
 import { validateBody } from "../middleware/validateBody.js";
 import { resolveBranchId } from "../services/branchService.js";
@@ -88,7 +88,7 @@ transactionsRouter.post(
     (type === "withdrawal" && context.permissions.includes("transactions.create.withdrawal"));
 
   if (!canPost) {
-    res.status(403).json({ error: "Forbidden for transaction type" });
+    res.status(403).json({ error: PERMISSION_DENIED_MESSAGE });
     return;
   }
 
@@ -262,7 +262,7 @@ transactionsRouter.get("/branch-float/sessions", requirePermission("transactions
     return;
   }
   if (context.role !== "admin" && context.role !== "coordinator") {
-    res.status(403).json({ error: "Forbidden" });
+    res.status(403).json({ error: PERMISSION_DENIED_MESSAGE });
     return;
   }
   const businessDate = typeof req.query.date === "string" ? req.query.date : undefined;
@@ -288,7 +288,7 @@ transactionsRouter.get("/branch-float/pending", requirePermission("transactions.
     return;
   }
   if (context.role !== "admin" && context.role !== "coordinator") {
-    res.status(403).json({ error: "Forbidden" });
+    res.status(403).json({ error: PERMISSION_DENIED_MESSAGE });
     return;
   }
   try {

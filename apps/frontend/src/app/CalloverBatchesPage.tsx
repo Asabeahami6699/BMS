@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AppRole, Branch, Customer, PendingCollectionBatch } from "./api";
 import {
   getAuthMe,
@@ -191,7 +191,13 @@ export function CalloverBatchesPage({ role }: Props) {
 
   const allReady = batches.length > 0 && totals.ready === batches.length;
 
+  const postingRef = useRef(false);
+
   async function handlePostBatch(batchId: string) {
+    if (postingRef.current) {
+      return;
+    }
+    postingRef.current = true;
     setBusyId(batchId);
     try {
       await postCollectionBatch(batchId);
@@ -200,6 +206,7 @@ export function CalloverBatchesPage({ role }: Props) {
     } catch (error) {
       showToast(toUserFacingError(error, "Failed to post batch"), "error");
     } finally {
+      postingRef.current = false;
       setBusyId(null);
     }
   }
@@ -213,6 +220,10 @@ export function CalloverBatchesPage({ role }: Props) {
       showToast("Fix mismatched batches before posting all", "error");
       return;
     }
+    if (postingRef.current) {
+      return;
+    }
+    postingRef.current = true;
     setBusyId("all");
     try {
       const result = await postAllCollectionBatches({
@@ -225,6 +236,7 @@ export function CalloverBatchesPage({ role }: Props) {
     } catch (error) {
       showToast(toUserFacingError(error, "Failed to post batches"), "error");
     } finally {
+      postingRef.current = false;
       setBusyId(null);
     }
   }

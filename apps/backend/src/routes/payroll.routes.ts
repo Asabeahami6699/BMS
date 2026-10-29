@@ -1,6 +1,6 @@
 import { currentPayrollPeriod, runPayrollInputSchema } from "@bms/shared";
 import { Router } from "express";
-import { requirePermission } from "../middleware/requirePermission.js";
+import { PERMISSION_DENIED_MESSAGE, requirePermission } from "../middleware/requirePermission.js";
 import { getCommissionPolicy } from "../services/commissionPolicyService.js";
 import {
   getMyPayslips,
@@ -203,7 +203,7 @@ payrollRouter.get("/payslips/:id", requirePermission("payroll.read"), async (req
       context.role === "admin" || context.role === "auditor" || context.role === "accountant";
 
     if (!isSelf && !canViewAll) {
-      res.status(403).json({ error: "Forbidden" });
+      res.status(403).json({ error: PERMISSION_DENIED_MESSAGE });
       return;
     }
 

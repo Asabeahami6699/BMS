@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { Branch, FieldRoute } from "./api";
-import { createFieldRoute, listFieldAgents, updateFieldRoute } from "./api";
+import { createFieldRoute, listBranches, listFieldAgents, updateFieldRoute } from "./api";
 import { Modal } from "../components/Modal";
 import { useToast } from "../components/Toast";
 
@@ -40,15 +40,16 @@ export function RouteFormModal({ open, mode, route, branches, onClose, onSaved }
   const [agentId, setAgentId] = useState("");
   const [status, setStatus] = useState<"active" | "inactive">("active");
   const [agents, setAgents] = useState<AgentOption[]>([]);
+  const [loadedBranches, setLoadedBranches] = useState<Branch[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [createStep, setCreateStep] = useState<CreateStep>("details");
   const [createdRoute, setCreatedRoute] = useState<FieldRoute | null>(null);
   const wasOpenRef = useRef(false);
 
-  const activeBranches = useMemo(
-    () => branches.filter((b) => b.status !== "inactive"),
-    [branches]
-  );
+  const activeBranches = useMemo(() => {
+    const source = branches.length > 0 ? branches : loadedBranches;
+    return source.filter((b) => b.status !== "inactive");
+  }, [branches, loadedBranches]);
 
   const assignBranchId = createdRoute?.branchId ?? branchId;
 
@@ -83,6 +84,11 @@ export function RouteFormModal({ open, mode, route, branches, onClose, onSaved }
       resetCreateFlow();
       return;
     }
+    if (branches.length === 0) {
+      void listBranches()
+        .then((rows) => setLoadedBranches(rows))
+        .catch(() => setLoadedBranches([]));
+    }
     void listFieldAgents()
       .then((rows) =>
         setAgents(
@@ -96,7 +102,7 @@ export function RouteFormModal({ open, mode, route, branches, onClose, onSaved }
         )
       )
       .catch(() => setAgents([]));
-  }, [open]);
+  }, [open, branches.length]);
 
   useEffect(() => {
     if (!open) {

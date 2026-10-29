@@ -6,7 +6,7 @@ import {
   tellerTypeLabel,
   TENANT_STAFF_ROLES
 } from "@bms/shared";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import type { AppRole, Branch, RoleDefinition, UserRecord } from "./api";
 import {
   assignRole,
@@ -78,11 +78,18 @@ export function UserFormModal({ open, mode, user, branches, createDefaults, onCl
 
   const requiresBranch = isBuiltinRole(userRole) && roleRequiresBranch(userRole);
   const activeBranches = branches.filter((b) => b.status !== "inactive");
+  const rolesSeededRef = useRef(false);
+  const formSeededRef = useRef(false);
 
   useEffect(() => {
     if (!open) {
+      rolesSeededRef.current = false;
       return;
     }
+    if (rolesSeededRef.current) {
+      return;
+    }
+    rolesSeededRef.current = true;
     void getRoles()
       .then(setAllTenantRoles)
       .catch(() => setAllTenantRoles([]));
@@ -107,8 +114,16 @@ export function UserFormModal({ open, mode, user, branches, createDefaults, onCl
 
   useEffect(() => {
     if (!open) {
+      formSeededRef.current = false;
       return;
     }
+    if (formSeededRef.current) {
+      if (mode === "create") {
+        setBranchId((current) => current || branches.find((b) => b.status !== "inactive")?.id || "");
+      }
+      return;
+    }
+    formSeededRef.current = true;
     if (mode === "edit" && user) {
       setFullName(user.fullName ?? "");
       setEmail(user.email);

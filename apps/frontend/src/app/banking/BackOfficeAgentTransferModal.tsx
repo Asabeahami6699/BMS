@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { bankProductAppliesToBranch } from "@bms/shared";
 import { Modal } from "../../components/Modal";
 
@@ -45,6 +45,7 @@ export function BackOfficeAgentTransferModal({
   const [toId, setToId] = useState("");
   const [amount, setAmount] = useState("");
   const [notes, setNotes] = useState("");
+  const seededRef = useRef(false);
 
   const branchAccounts = useMemo(
     () =>
@@ -56,23 +57,29 @@ export function BackOfficeAgentTransferModal({
 
   useEffect(() => {
     if (!open) {
+      seededRef.current = false;
       return;
     }
     const preferred =
       defaultBranchId && defaultBranchId !== "all" && branches.some((b) => b.id === defaultBranchId)
         ? defaultBranchId
         : branches[0]?.id ?? "";
-    setBranchId(preferred);
-    setAmount("");
-    setNotes("");
+    if (!seededRef.current) {
+      seededRef.current = true;
+      setBranchId(preferred);
+      setAmount("");
+      setNotes("");
+      return;
+    }
+    setBranchId((current) => current || preferred);
   }, [open, branches, defaultBranchId]);
 
   useEffect(() => {
     if (!open) {
       return;
     }
-    setFromId(branchAccounts[0]?.id ?? "");
-    setToId(branchAccounts[1]?.id ?? branchAccounts[0]?.id ?? "");
+    setFromId((current) => current || branchAccounts[0]?.id || "");
+    setToId((current) => current || branchAccounts[1]?.id || branchAccounts[0]?.id || "");
   }, [open, branchAccounts]);
 
   async function handleSubmit(event: FormEvent) {

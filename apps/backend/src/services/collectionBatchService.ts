@@ -3,6 +3,7 @@ import type { SubmitCalloverInput } from "./calloverReportService.js";
 import { submitCalloverReport } from "./calloverReportService.js";
 import { getCustomerById } from "./customerService.js";
 import { getSupabaseAdminClient } from "../config/supabaseClient.js";
+import { beginIdempotency } from "../middleware/idempotency.js";
 import { createTransaction } from "./transactionService.js";
 import { createAgentNotification, notifyTenantStaff } from "./notificationService.js";
 import { listUsersByTenant } from "./authStore.js";
@@ -591,12 +592,41 @@ export async function getCollectionBatchById(
   return { ...batch, fieldAgentName: agent.name, fieldAgentEmail: agent.email, branchId: agent.branchId };
 }
 
+const batchPostLocks = new Map<string, Promise<unknown>>();
+
+function withBatchLock<T>(batchId: string, work: () => Promise<T>): Promise<T> {
+  const previous = batchPostLocks.get(batchId) ?? Promise.resolve();
+  const run = previous.then(work, work);
+  const tail = run.then(
+    () => undefined,
+    () => undefined
+  );
+  batchPostLocks.set(batchId, tail);
+  return run.finally(() => {
+    if (batchPostLocks.get(batchId) === tail) {
+      batchPostLocks.delete(batchId);
+    }
+  });
+}
+
 async function postSingleBatch(context: CoordinatorContext, batch: CollectionBatch): Promise<CollectionBatch> {
-  if (batch.status !== "pending_approval") {
+  return withBatchLock(batch.id, () => postSingleBatchUnlocked(context, batch));
+}
+
+async function postSingleBatchUnlocked(
+  context: CoordinatorContext,
+  batch: CollectionBatch
+): Promise<CollectionBatch> {
+  const fresh = await loadBatchRow(context.tenantId, batch.fieldAgentId, batch.businessDate);
+  const current = fresh ?? batch;
+  if (current.status === "posted") {
+    return current;
+  }
+  if (current.status !== "pending_approval") {
     throw new Error("Only pending batches can be posted");
   }
 
-  for (const line of batch.lines) {
+  for (const line of current.lines) {
     if (line.transactionId) {
       continue;
     }
@@ -609,30 +639,57 @@ async function postSingleBatch(context: CoordinatorContext, batch: CollectionBat
       throw new Error(`No branch for customer ${customer.fullName}`);
     }
 
-    const tx = await createTransaction(
-      {
-        tenantId: context.tenantId,
-        userId: context.userId,
-        role: context.role,
-        branchId: context.branchId,
-        scopeType: context.scopeType
-      },
-      {
-        customerId: line.customerId,
-        type: "daily_susu",
-        amount: line.amount,
-        transactionBranchId: branchId,
-        notes: line.notes ? `${line.notes} · batch ${batch.id.slice(0, 8)}` : `Batch ${batch.id.slice(0, 8)}`
+    const claim = await beginIdempotency(context.tenantId, `collection-line:${line.id}`);
+    let transactionId = line.transactionId;
+    if (!claim.owned) {
+      const replay = claim.body as { id?: string; error?: string } | null;
+      if (claim.statusCode >= 300 || !replay?.id) {
+        throw new Error(replay?.error || "This collection line is already being posted");
       }
-    );
+      transactionId = replay.id;
+    } else {
+      try {
+        const tx = await createTransaction(
+          {
+            tenantId: context.tenantId,
+            userId: context.userId,
+            role: context.role,
+            branchId: context.branchId,
+            scopeType: context.scopeType
+          },
+          {
+            customerId: line.customerId,
+            type: "daily_susu",
+            amount: line.amount,
+            transactionBranchId: branchId,
+            notes: line.notes
+              ? `${line.notes} · batch ${current.id.slice(0, 8)}`
+              : `Batch ${current.id.slice(0, 8)}`
+          }
+        );
+        await claim.finish(201, tx);
+        transactionId = tx.id;
+      } catch (error) {
+        claim.abort();
+        throw error;
+      }
+    }
 
-    line.transactionId = tx.id;
+    if (!transactionId) {
+      continue;
+    }
+    line.transactionId = transactionId;
 
     const supabase = getSupabaseAdminClient();
     if (supabase) {
-      await supabase.from("field_agent_collection_batch_lines").update({ transaction_id: tx.id }).eq("id", line.id);
+      await supabase
+        .from("field_agent_collection_batch_lines")
+        .update({ transaction_id: transactionId })
+        .eq("id", line.id);
     }
   }
+
+  batch = current;
 
   batch.status = "posted";
   batch.postedAt = new Date().toISOString();

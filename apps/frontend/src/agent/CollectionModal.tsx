@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import type { Customer } from "../app/api";
 import { useAuth } from "../auth/AuthContext";
 import { Modal } from "../components/Modal";
@@ -22,13 +22,15 @@ export function CollectionModal({ open, customer, topUp, priorAmount = 0, onClos
   const [amountText, setAmountText] = useState("");
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const submitLock = useRef(false);
 
   useEffect(() => {
-    if (customer) {
-      setAmountText("");
-      setNotes("");
+    if (!open) {
+      return;
     }
-  }, [customer]);
+    setAmountText("");
+    setNotes("");
+  }, [open, customer?.id]);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -53,6 +55,10 @@ export function CollectionModal({ open, customer, topUp, priorAmount = 0, onClos
       showToast("No branch assigned to your account. Contact your administrator.", "error");
       return;
     }
+    if (submitLock.current) {
+      return;
+    }
+    submitLock.current = true;
     setSubmitting(true);
     try {
       const result = await submitCollectionOnlineOrQueue({
@@ -76,6 +82,7 @@ export function CollectionModal({ open, customer, topUp, priorAmount = 0, onClos
     } catch (error) {
       showToast(toUserFacingError(error, "Failed to record collection"), "error");
     } finally {
+      submitLock.current = false;
       setSubmitting(false);
     }
   }

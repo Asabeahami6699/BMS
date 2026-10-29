@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import type { DashboardNavChild, DashboardNavItem } from "../config/tenantModules";
 import { getNavIcon } from "./navIcons";
@@ -9,6 +9,7 @@ import { DashboardNotifications } from "./components/DashboardNotifications";
 import { DashboardLoadingBar } from "./components/DashboardLoadingBar";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { useDashboardPageLoading } from "./hooks/useDashboardPageLoading";
+import { brandColorStyle } from "./brandColor";
 
 export type { DashboardNavItem };
 
@@ -168,9 +169,7 @@ export function DashboardShell({
     <div
       className="dash-root"
       style={
-        brandColor
-          ? ({ "--primary": brandColor, "--primary-hover": brandColor } as CSSProperties)
-          : undefined
+        brandColor ? brandColorStyle(brandColor) : undefined
       }
     >
       <aside className="dash-sidebar">

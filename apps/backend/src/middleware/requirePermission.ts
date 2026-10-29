@@ -1,6 +1,8 @@
 import type { Permission } from "@bms/shared";
 import type { NextFunction, Request, Response } from "express";
 
+export const PERMISSION_DENIED_MESSAGE = "You do not have permission to access this.";
+
 export function requirePermission(permission: Permission) {
   return (req: Request, res: Response, next: NextFunction): void => {
     if (!req.userContext) {
@@ -9,7 +11,7 @@ export function requirePermission(permission: Permission) {
     }
 
     if (!req.userContext.permissions.includes(permission)) {
-      res.status(403).json({ error: "Forbidden", missingPermission: permission });
+      res.status(403).json({ error: PERMISSION_DENIED_MESSAGE, missingPermission: permission });
       return;
     }
 
@@ -26,7 +28,7 @@ export function requireAnyPermission(...permissions: Permission[]) {
 
     const held = req.userContext.permissions;
     if (!permissions.some((p) => held.includes(p))) {
-      res.status(403).json({ error: "Forbidden", missingPermission: permissions[0] });
+      res.status(403).json({ error: PERMISSION_DENIED_MESSAGE, missingPermission: permissions[0] });
       return;
     }
 

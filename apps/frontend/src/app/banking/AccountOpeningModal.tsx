@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { bankProductDisplayLabel, type TenantBankProduct } from "@bms/shared";
 import type { Branch } from "../api";
 import { Modal } from "../../components/Modal";
@@ -53,17 +53,28 @@ export function AccountOpeningModal({
   onSubmit
 }: Props) {
   const [form, setForm] = useState<AccountOpeningFormValues>(EMPTY_FORM);
+  const seededRef = useRef(false);
 
   useEffect(() => {
     if (!open) {
+      seededRef.current = false;
       return;
     }
-    setForm({
-      ...EMPTY_FORM,
-      bankProductId: openingProducts[0]?.id ?? "",
-      branchId: defaultBranchId ?? branches[0]?.id ?? "",
-      openingDate: todayIso()
-    });
+    if (!seededRef.current) {
+      seededRef.current = true;
+      setForm({
+        ...EMPTY_FORM,
+        bankProductId: openingProducts[0]?.id ?? "",
+        branchId: defaultBranchId ?? branches[0]?.id ?? "",
+        openingDate: todayIso()
+      });
+      return;
+    }
+    setForm((prev) => ({
+      ...prev,
+      bankProductId: prev.bankProductId || openingProducts[0]?.id || "",
+      branchId: prev.branchId || defaultBranchId || branches[0]?.id || ""
+    }));
   }, [open, openingProducts, branches, defaultBranchId]);
 
   function patchForm(patch: Partial<AccountOpeningFormValues>) {

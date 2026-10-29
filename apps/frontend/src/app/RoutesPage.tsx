@@ -9,6 +9,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useToast } from "../components/Toast";
 import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { useRoutesLiveSync } from "./hooks/useRoutesLiveSync";
+import { useBranchesStore } from "./stores/branchesStore";
 import { useRoutesStore } from "./stores/routesStore";
 import { RouteAssignAgentModal } from "./RouteAssignAgentModal";
 import { RouteFormModal } from "./RouteFormModal";
@@ -127,7 +128,9 @@ export function RoutesPage({ role }: Props) {
   const canManage = role === "admin" || role === "coordinator";
 
   const routes = useRoutesStore((s) => s.routes);
-  const branches = useRoutesStore((s) => s.branches);
+  const routeBranches = useRoutesStore((s) => s.branches);
+  const liveBranches = useBranchesStore((s) => s.branches);
+  const branches = liveBranches.length > 0 ? liveBranches : routeBranches;
   const loading = useRoutesStore((s) => s.loading);
   const error = useRoutesStore((s) => s.error);
   const lastFetchedAt = useRoutesStore((s) => s.lastFetchedAt);
@@ -167,6 +170,10 @@ export function RoutesPage({ role }: Props) {
   }, [routes]);
 
   function openCreate() {
+    if (branches.length === 0) {
+      void useBranchesStore.getState().refresh();
+      void refresh();
+    }
     setFormMode("create");
     setEditingRoute(null);
     setFormOpen(true);
