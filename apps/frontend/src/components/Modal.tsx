@@ -9,6 +9,11 @@ type Props = {
   footer?: ReactNode;
   /** e.g. `modal-panel--70` for 70vw × 70vh */
   panelClassName?: string;
+  /** Draw above another open modal. */
+  stacked?: boolean;
+  /** When false, Escape and the backdrop leave this modal open. */
+  captureDismiss?: boolean;
+  titleId?: string;
 };
 
 type DragState = {
@@ -19,14 +24,25 @@ type DragState = {
   origY: number;
 };
 
-export function Modal({ open, title, subtitle, onClose, children, footer, panelClassName }: Props) {
+export function Modal({
+  open,
+  title,
+  subtitle,
+  onClose,
+  children,
+  footer,
+  panelClassName,
+  stacked = false,
+  captureDismiss = true,
+  titleId = "modal-title"
+}: Props) {
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const dragRef = useRef<DragState | null>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 
   useEffect(() => {
-    if (!open) {
+    if (!open || !captureDismiss) {
       return;
     }
     setOffset({ x: 0, y: 0 });
@@ -41,7 +57,7 @@ export function Modal({ open, title, subtitle, onClose, children, footer, panelC
       document.removeEventListener("keydown", onKey);
       document.body.style.overflow = "";
     };
-  }, [open]);
+  }, [open, captureDismiss]);
 
   function startDrag(event: PointerEvent<HTMLElement>) {
     if (event.button !== 0) {
@@ -89,12 +105,16 @@ export function Modal({ open, title, subtitle, onClose, children, footer, panelC
   }
 
   return (
-    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+    <div
+      className={stacked ? "modal-backdrop modal-backdrop--stacked" : "modal-backdrop"}
+      role="presentation"
+      onClick={captureDismiss ? onClose : undefined}
+    >
       <div
         className={panelClassName ? `modal-panel ${panelClassName}` : "modal-panel"}
         role="dialog"
         aria-modal="true"
-        aria-labelledby="modal-title"
+        aria-labelledby={titleId}
         style={{ transform: `translate(${offset.x}px, ${offset.y}px)` }}
         onClick={(event) => event.stopPropagation()}
       >
@@ -106,7 +126,7 @@ export function Modal({ open, title, subtitle, onClose, children, footer, panelC
           onPointerCancel={endDrag}
         >
           <div className="modal-header__text">
-            <h2 id="modal-title">{title}</h2>
+            <h2 id={titleId}>{title}</h2>
             {subtitle ? <p className="muted modal-subtitle">{subtitle}</p> : null}
           </div>
           <button type="button" className="modal-close" onClick={onClose} aria-label="Close">

@@ -2,6 +2,11 @@ import { z } from "zod";
 
 const hexColor = z.string().regex(/^#[0-9A-Fa-f]{6}$/, "Choose a brand color");
 
+/** 0 keeps the app’s current size. Each step adds 2px on the root font. */
+export const FONT_SIZE_STEP_MAX = 3;
+export const FONT_SIZE_STEP_PX = 2;
+export const fontSizeStepSchema = z.number().int().min(0).max(FONT_SIZE_STEP_MAX);
+
 function emptyToNull(value: unknown): unknown {
   if (typeof value !== "string") {
     return value;
@@ -18,7 +23,8 @@ export const companyProfileSchema = z.object({
   address: z.string().max(300).optional(),
   taxId: z.string().max(40).optional(),
   logoUrl: z.string().max(900_000).optional(),
-  brandColor: hexColor.optional()
+  brandColor: hexColor.optional(),
+  fontSizeStep: fontSizeStepSchema.default(0)
 });
 
 export type CompanyProfile = z.infer<typeof companyProfileSchema>;
@@ -30,7 +36,8 @@ export const updateCompanyProfileSchema = z.object({
   address: z.preprocess(emptyToNull, z.string().max(300).nullable().optional()),
   taxId: z.preprocess(emptyToNull, z.string().max(40).nullable().optional()),
   logoUrl: z.string().max(900_000).nullable().optional(),
-  brandColor: z.preprocess(emptyToNull, hexColor.nullable().optional())
+  brandColor: z.preprocess(emptyToNull, hexColor.nullable().optional()),
+  fontSizeStep: fontSizeStepSchema.optional()
 });
 
 export type UpdateCompanyProfileInput = z.infer<typeof updateCompanyProfileSchema>;

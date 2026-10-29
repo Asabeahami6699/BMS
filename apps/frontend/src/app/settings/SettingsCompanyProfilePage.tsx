@@ -3,6 +3,7 @@ import { useAuth } from "../../auth/AuthContext";
 import { useToast } from "../../components/Toast";
 import { compressImageDataUrl, isDataUrlWithinLimit } from "../../lib/imageCompress";
 import { getCompanyProfile, updateCompanyProfile, type CompanyProfile } from "../api";
+import { applyTenantFontStep, clampFontSizeStep, FONT_SIZE_OPTIONS } from "../fontSize";
 
 export const COMPANY_PROFILE_UPDATED_EVENT = "bms:company-profile-updated";
 
@@ -29,6 +30,8 @@ export function SettingsCompanyProfilePage() {
   const [taxId, setTaxId] = useState("");
   const [logoUrl, setLogoUrl] = useState<string | undefined>();
   const [brandColor, setBrandColor] = useState(DEFAULT_BRAND);
+  const [fontSizeStep, setFontSizeStep] = useState(0);
+  const savedFontStep = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -54,6 +57,12 @@ export function SettingsCompanyProfilePage() {
     };
   }, [showToast]);
 
+  useEffect(() => {
+    return () => {
+      applyTenantFontStep(savedFontStep.current);
+    };
+  }, []);
+
   function applyProfile(profile: CompanyProfile) {
     setName(profile.name);
     setPhone(profile.phone ?? "");
@@ -62,6 +71,10 @@ export function SettingsCompanyProfilePage() {
     setTaxId(profile.taxId ?? "");
     setLogoUrl(profile.logoUrl);
     setBrandColor(profile.brandColor ?? DEFAULT_BRAND);
+    const step = clampFontSizeStep(profile.fontSizeStep);
+    savedFontStep.current = step;
+    setFontSizeStep(step);
+    applyTenantFontStep(step);
   }
 
   function onLogoFile(file: File) {
@@ -104,7 +117,8 @@ export function SettingsCompanyProfilePage() {
         address: address.trim() || null,
         taxId: taxId.trim() || null,
         logoUrl: logoUrl ?? null,
-        brandColor
+        brandColor,
+        fontSizeStep
       });
       applyProfile(saved);
       window.dispatchEvent(new CustomEvent(COMPANY_PROFILE_UPDATED_EVENT, { detail: saved }));
@@ -129,7 +143,7 @@ export function SettingsCompanyProfilePage() {
   return (
     <article className="card">
       <h2>Company Profile</h2>
-      <p className="muted">Company name, logo, contact, address, tax, and branding.</p>
+      <p className="muted">Company name, logo, contact, address, tax, branding, and font size.</p>
 
       <div className="company-profile-layout">
         <div className="company-profile-form">
@@ -227,6 +241,25 @@ export function SettingsCompanyProfilePage() {
                 }}
               />
             </span>
+          </label>
+
+          <label className="field">
+            <span>Font size</span>
+            <select
+              value={fontSizeStep}
+              onChange={(e) => {
+                const step = clampFontSizeStep(Number(e.target.value));
+                setFontSizeStep(step);
+                applyTenantFontStep(step);
+              }}
+            >
+              {FONT_SIZE_OPTIONS.map((option) => (
+                <option key={option.step} value={option.step}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <p className="muted">Default keeps the current size. A larger step applies to everyone in this company.</p>
           </label>
 
           <div className="form-actions">

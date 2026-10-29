@@ -1060,6 +1060,7 @@ export type CompanyProfile = {
   taxId?: string;
   logoUrl?: string;
   brandColor?: string;
+  fontSizeStep?: number;
 };
 
 export async function getCompanyProfile(): Promise<CompanyProfile> {
@@ -1076,6 +1077,7 @@ export async function updateCompanyProfile(body: {
   taxId?: string | null;
   logoUrl?: string | null;
   brandColor?: string | null;
+  fontSizeStep?: number;
 }): Promise<CompanyProfile> {
   return fetchJson<CompanyProfile>(`${API_BASE_URL}/api/v1/tenant/profile`, {
     method: "PUT",

@@ -18,6 +18,7 @@ import { UserProfilePage } from "./UserProfilePage";
 import { RoleManagementPage } from "./RoleManagementPage";
 import { AuditLogsPage } from "./AuditLogsPage";
 import { SettingsCompanyProfilePage, COMPANY_PROFILE_UPDATED_EVENT } from "./settings/SettingsCompanyProfilePage";
+import { applyTenantFontStep } from "./fontSize";
 import { SettingsNotificationsPage } from "./settings/SettingsNotificationsPage";
 import { SettingsSubscriptionPage } from "./settings/SettingsSubscriptionPage";
 import { SettingsHubPage } from "./SettingsHubPage";
@@ -174,7 +175,8 @@ export function TenantApp() {
   const [companyBrand, setCompanyBrand] = useState<Pick<CompanyProfile, "logoUrl" | "brandColor"> | null>(null);
 
   useEffect(() => {
-    if (!user?.tenantId || user.tenantId === "platform" || role === "field_agent") {
+    if (!user?.tenantId || user.tenantId === "platform") {
+      applyTenantFontStep(0);
       return;
     }
     let cancelled = false;
@@ -183,6 +185,7 @@ export function TenantApp() {
         .then((profile) => {
           if (!cancelled) {
             setCompanyBrand({ logoUrl: profile.logoUrl, brandColor: profile.brandColor });
+            applyTenantFontStep(profile.fontSizeStep);
           }
         })
         .catch(() => undefined);
@@ -192,6 +195,7 @@ export function TenantApp() {
       const detail = (event as CustomEvent<CompanyProfile>).detail;
       if (detail) {
         setCompanyBrand({ logoUrl: detail.logoUrl, brandColor: detail.brandColor });
+        applyTenantFontStep(detail.fontSizeStep);
       } else {
         load();
       }
@@ -199,6 +203,7 @@ export function TenantApp() {
     window.addEventListener(COMPANY_PROFILE_UPDATED_EVENT, onUpdated);
     return () => {
       cancelled = true;
+      applyTenantFontStep(0);
       window.removeEventListener(COMPANY_PROFILE_UPDATED_EVENT, onUpdated);
     };
   }, [user?.tenantId, role]);

@@ -96,7 +96,6 @@ function RegistrationPreview({
     : [form.kinLocation, form.kinHouseNumber].filter(Boolean).join(", ");
   return (
     <div className="agent-reg-preview">
-      <p className="muted">Check these details, then confirm. Nothing is sent until you confirm.</p>
       <dl>
         {isOffice ? (
           <>
@@ -361,6 +360,7 @@ export function RegistrationModal({
   const previewAgent = agentsForBranch.find((agent) => agent.userId === assignedFieldAgentId);
 
   return (
+    <>
     <Modal
       open={open}
       title={isOffice ? "Register walk-in customer" : "Create new account"}
@@ -371,51 +371,28 @@ export function RegistrationModal({
       }
       onClose={onClose}
       panelClassName="modal-panel--70 modal-panel--registration"
+      captureDismiss={step !== "preview"}
       footer={
-        step === "preview" ? (
-          <>
-            <button type="button" className="button secondary" onClick={() => setStep("form")} disabled={submitting}>
-              Back
-            </button>
-            <button type="button" className="button" onClick={() => void handleSubmit()} disabled={submitting}>
-              {submitting ? "Submitting…" : "Confirm and submit"}
-            </button>
-          </>
-        ) : (
-          <>
-            <button type="button" className="button secondary" onClick={onClose}>
-              Cancel
-            </button>
-            <button
-              type="submit"
-              form="agent-registration-form"
-              className="button"
-              disabled={submitting || (isOffice && !officeReady)}
-            >
-              Review details
-            </button>
-          </>
-        )
+        <>
+          <button type="button" className="button secondary" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="submit"
+            form="agent-registration-form"
+            className="button"
+            disabled={submitting || (isOffice && !officeReady)}
+          >
+            Review details
+          </button>
+        </>
       }
     >
-      {step === "preview" ? (
-        <RegistrationPreview
-          form={form}
-          isOffice={isOffice}
-          isSavings={isSavings}
-          savingsOpeningFeeCollected={savingsOpeningFeeCollected}
-          branchLabel={previewBranch ? `${previewBranch.name} (${previewBranch.code})` : ""}
-          agentLabel={previewAgent?.fullName?.trim() || previewAgent?.email || ""}
-          photoUrl={photoUrl}
-          idCardPhotoUrl={idCardPhotoUrl}
-        />
-      ) : null}
       <form
         id="agent-registration-form"
         className="stack-form agent-form"
         onSubmit={handleReview}
         autoComplete="off"
-        hidden={step === "preview"}
       >
         {isOffice ? (
           <section className="agent-form__section">
@@ -728,5 +705,40 @@ export function RegistrationModal({
         <p className="muted agent-form__foot">Account number appears after approval.</p>
       </form>
     </Modal>
+    <Modal
+      open={open && step === "preview"}
+      stacked
+      title="Review registration"
+      titleId="registration-preview-title"
+      subtitle="Check these details, then confirm. Nothing is sent until you confirm."
+      onClose={() => {
+        if (!submitting) {
+          setStep("form");
+        }
+      }}
+      panelClassName="modal-panel--70 modal-panel--registration"
+      footer={
+        <>
+          <button type="button" className="button secondary" onClick={() => setStep("form")} disabled={submitting}>
+            Back
+          </button>
+          <button type="button" className="button" onClick={() => void handleSubmit()} disabled={submitting}>
+            {submitting ? "Submitting…" : "Confirm and submit"}
+          </button>
+        </>
+      }
+    >
+      <RegistrationPreview
+        form={form}
+        isOffice={isOffice}
+        isSavings={isSavings}
+        savingsOpeningFeeCollected={savingsOpeningFeeCollected}
+        branchLabel={previewBranch ? `${previewBranch.name} (${previewBranch.code})` : ""}
+        agentLabel={previewAgent?.fullName?.trim() || previewAgent?.email || ""}
+        photoUrl={photoUrl}
+        idCardPhotoUrl={idCardPhotoUrl}
+      />
+    </Modal>
+    </>
   );
 }

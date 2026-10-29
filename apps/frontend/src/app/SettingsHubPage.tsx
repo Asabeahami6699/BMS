@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 
 const SETTINGS_ENTRIES = [
-  { to: "settings/profile", label: "Company Profile", description: "Name, logo, contact, address, tax, branding." },
+  { to: "settings/profile", label: "Company Profile", description: "Name, logo, contact, address, tax, branding, and font size." },
   { to: "settings/branches", label: "Branches", description: "Branch network and codes." },
   {
     to: "settings/account-numbers",

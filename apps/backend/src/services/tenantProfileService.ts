@@ -8,7 +8,8 @@ import {
 import { getSupabaseAdminClient } from "../config/supabaseClient.js";
 import { getTenantFromStore, upsertTenantInStore } from "./authStore.js";
 
-const PROFILE_COLUMNS = "id, name, phone, email, address, tax_id, logo_url, brand_color";
+const PROFILE_COLUMNS_BASE = "id, name, phone, email, address, tax_id, logo_url, brand_color";
+const PROFILE_COLUMNS = `${PROFILE_COLUMNS_BASE}, font_size_step`;
 
 const memoryProfiles = new Map<string, CompanyProfile>();
 
@@ -18,6 +19,14 @@ function optionalText(value: unknown): string | undefined {
   }
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function fontSizeStepFrom(value: unknown): number {
+  const step = typeof value === "number" ? value : Number(value);
+  if (!Number.isInteger(step) || step < 0 || step > 3) {
+    return 0;
+  }
+  return step;
 }
 
 function mapRow(tenantId: string, row: Record<string, unknown>, fallbackName?: string): CompanyProfile {
@@ -32,7 +41,8 @@ function mapRow(tenantId: string, row: Record<string, unknown>, fallbackName?: s
     address: optionalText(row.address),
     taxId: optionalText(row.tax_id),
     logoUrl: logoUrl && logoUrl.startsWith("data:image/") ? logoUrl : undefined,
-    brandColor: brandColor && /^#[0-9A-Fa-f]{6}$/.test(brandColor) ? brandColor : undefined
+    brandColor: brandColor && /^#[0-9A-Fa-f]{6}$/.test(brandColor) ? brandColor : undefined,
+    fontSizeStep: fontSizeStepFrom(row.font_size_step)
   });
 }
 
@@ -59,7 +69,12 @@ export async function getCompanyProfile(tenantId: string): Promise<CompanyProfil
     );
   }
 
-  const { data, error } = await supabase.from("tenants").select(PROFILE_COLUMNS).eq("id", tenantId).maybeSingle();
+  let { data, error } = await supabase.from("tenants").select(PROFILE_COLUMNS).eq("id", tenantId).maybeSingle();
+  if (error && /font_size_step/i.test(error.message)) {
+    const retry = await supabase.from("tenants").select(PROFILE_COLUMNS_BASE).eq("id", tenantId).maybeSingle();
+    data = retry.data;
+    error = retry.error;
+  }
   if (error) {
     if (/phone|email|address|tax_id|logo_url|brand_color|column/i.test(error.message) && stored) {
       return cached ?? companyProfileSchema.parse({ tenantId, name: stored.name });
@@ -91,23 +106,34 @@ export async function updateCompanyProfile(
     address: parsed.address === null ? undefined : (parsed.address ?? current.address),
     taxId: parsed.taxId === null ? undefined : (parsed.taxId ?? current.taxId),
     logoUrl: parsed.logoUrl === null ? undefined : (parsed.logoUrl ?? current.logoUrl),
-    brandColor: parsed.brandColor === null ? undefined : (parsed.brandColor ?? current.brandColor)
+    brandColor: parsed.brandColor === null ? undefined : (parsed.brandColor ?? current.brandColor),
+    fontSizeStep: parsed.fontSizeStep ?? current.fontSizeStep
   });
 
   const supabase = getSupabaseAdminClient();
   if (supabase) {
-    const { error } = await supabase
-      .from("tenants")
-      .update({
-        name: next.name,
-        phone: next.phone ?? null,
-        email: next.email ?? null,
-        address: next.address ?? null,
-        tax_id: next.taxId ?? null,
-        logo_url: next.logoUrl ?? null,
-        brand_color: next.brandColor ?? null
-      })
-      .eq("id", tenantId);
+    const profileUpdate = {
+      name: next.name,
+      phone: next.phone ?? null,
+      email: next.email ?? null,
+      address: next.address ?? null,
+      tax_id: next.taxId ?? null,
+      logo_url: next.logoUrl ?? null,
+      brand_color: next.brandColor ?? null,
+      font_size_step: next.fontSizeStep
+    };
+    let { error } = await supabase.from("tenants").update(profileUpdate).eq("id", tenantId);
+    if (error && /font_size_step/i.test(error.message)) {
+      if (next.fontSizeStep !== 0) {
+        throw new Error(
+          "Font size storage is not ready. Apply migration 068_tenant_font_size.sql in Supabase, then save again."
+        );
+      }
+      const { font_size_step: _fontSizeStep, ...withoutFont } = profileUpdate;
+      void _fontSizeStep;
+      const retry = await supabase.from("tenants").update(withoutFont).eq("id", tenantId);
+      error = retry.error;
+    }
     if (error) {
       if (/phone|email|address|tax_id|logo_url|brand_color|column/i.test(error.message)) {
         throw new Error(
