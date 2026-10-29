@@ -286,7 +286,11 @@ export const useAgencyTellerStore = create<AgencyTellerState>((set, get) => ({
     const key =
       depositRetry?.fingerprint === fingerprint ? depositRetry.key : crypto.randomUUID();
     depositRetry = { fingerprint, key };
-    const promise = (async () => {
+    const flight: { fingerprint: string; promise: Promise<void> } = {
+      fingerprint,
+      promise: Promise.resolve()
+    };
+    flight.promise = (async () => {
       set({ posting: true, error: null });
       try {
         let customerId = payload.customerId;
@@ -327,13 +331,13 @@ export const useAgencyTellerStore = create<AgencyTellerState>((set, get) => ({
         throw error;
       } finally {
         set({ posting: false });
-        if (depositFlight?.promise === promise) {
+        if (depositFlight === flight) {
           depositFlight = null;
         }
       }
     })();
-    depositFlight = { fingerprint, promise };
-    return promise;
+    depositFlight = flight;
+    return flight.promise;
   },
 
   startLiveSync: () => {

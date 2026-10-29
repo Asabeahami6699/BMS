@@ -2216,7 +2216,7 @@ export async function createTransaction(
     workflowData?: Record<string, unknown>;
     manualPartnerAccount?: boolean;
   },
-  idempotencyKey = crypto.randomUUID()
+  idempotencyKey: string = crypto.randomUUID()
 ): Promise<Transaction> {
   return withTransactionStepUp((transactionAuthToken) =>
     fetchJson<Transaction>(`${API_BASE_URL}/api/v1/transactions`, {

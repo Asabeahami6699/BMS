@@ -393,7 +393,11 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
     }
     const key = postRetry?.fingerprint === fingerprint ? postRetry.key : crypto.randomUUID();
     postRetry = { fingerprint, key };
-    const promise = (async () => {
+    const flight: { fingerprint: string; promise: Promise<Transaction> } = {
+      fingerprint,
+      promise: Promise.resolve({} as Transaction)
+    };
+    flight.promise = (async () => {
       set({ posting: true });
       try {
         const transaction = await createTransaction(payload, key);
@@ -406,13 +410,13 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
         return transaction;
       } finally {
         set({ posting: false });
-        if (postInFlight?.promise === promise) {
+        if (postInFlight === flight) {
           postInFlight = null;
         }
       }
     })();
-    postInFlight = { fingerprint, promise };
-    return promise;
+    postInFlight = flight;
+    return flight.promise;
   }
 }));
 
