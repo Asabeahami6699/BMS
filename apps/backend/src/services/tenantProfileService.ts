@@ -69,7 +69,9 @@ export async function getCompanyProfile(tenantId: string): Promise<CompanyProfil
     );
   }
 
-  let { data, error } = await supabase.from("tenants").select(PROFILE_COLUMNS).eq("id", tenantId).maybeSingle();
+  const selected = await supabase.from("tenants").select(PROFILE_COLUMNS).eq("id", tenantId).maybeSingle();
+  let data = selected.data as Record<string, unknown> | null;
+  let error = selected.error;
   if (error && /font_size_step/i.test(error.message)) {
     const retry = await supabase.from("tenants").select(PROFILE_COLUMNS_BASE).eq("id", tenantId).maybeSingle();
     data = retry.data;
@@ -84,7 +86,7 @@ export async function getCompanyProfile(tenantId: string): Promise<CompanyProfil
   if (!data) {
     return cached ?? companyProfileSchema.parse({ tenantId, name: stored?.name ?? tenantId });
   }
-  return remember(mapRow(tenantId, data as Record<string, unknown>, stored?.name));
+  return remember(mapRow(tenantId, data, stored?.name));
 }
 
 export async function updateCompanyProfile(
