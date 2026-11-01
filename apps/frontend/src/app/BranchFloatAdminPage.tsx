@@ -3,16 +3,19 @@ import { Link } from "react-router-dom";
 import type { AppRole, Branch, BranchFloatSession, UserRecord } from "./api";
 import {
   allocateBranchFloat,
+  isFloatTopUpRequest,
   listBranchFloatSessions,
   listBranches,
   listPendingBranchFloats,
   listUsers,
+  pendingFloatAmount,
   pushBranchFloat,
   settleBranchFloat
 } from "./api";
 import { useToast } from "../components/Toast";
 import { toUserFacingError } from "../lib/networkError";
 import { usePageLoading } from "./hooks/usePageLoading";
+import { formatBranchLabel } from "./branchDisplay";
 
 type Props = { role: AppRole };
 
@@ -68,10 +71,7 @@ export function BranchFloatAdminPage({ role }: Props) {
   );
 
   const branchLabel = useCallback(
-    (branchId: string) => {
-      const b = branches.find((x) => x.id === branchId);
-      return b ? `${b.name} (${b.code})` : branchId;
-    },
+    (branchId: string) => formatBranchLabel(branchId, branches),
     [branches]
   );
 
@@ -102,11 +102,14 @@ export function BranchFloatAdminPage({ role }: Props) {
   }, [load]);
 
   async function handleAllocate(session: BranchFloatSession) {
-    const amount = Number(allocateAmount[session.id] ?? session.openingFloat);
+    const amount = Number(allocateAmount[session.id] ?? pendingFloatAmount(session));
     setBusy(true);
     try {
       await allocateBranchFloat(session.id, amount);
-      showToast("Float released — teller till is open", "success");
+      showToast(
+        isFloatTopUpRequest(session) ? "Top-up released onto the open till" : "Float released — teller till is open",
+        "success"
+      );
       await load();
     } catch (error) {
       showToast(toUserFacingError(error, "Could not release float"), "error");
@@ -236,10 +239,11 @@ export function BranchFloatAdminPage({ role }: Props) {
                     <div>
                       <strong>{userLabel(s.cashierUserId)}</strong>
                       <p className="muted">
-                        {branchLabel(s.branchId)} · {s.businessDate} · requested{" "}
-                        {formatMoney(s.openingFloat)}
+                        {branchLabel(s.branchId)} · {s.businessDate} ·{" "}
+                        {isFloatTopUpRequest(s) ? "top-up" : "requested"} {formatMoney(pendingFloatAmount(s))}
                       </p>
-                      {s.requestedNote ? <p className="muted">{s.requestedNote}</p> : null}
+                      {isFloatTopUpRequest(s) && s.topUpNote ? <p className="muted">{s.topUpNote}</p> : null}
+                      {!isFloatTopUpRequest(s) && s.requestedNote ? <p className="muted">{s.requestedNote}</p> : null}
                     </div>
                     <div className="branch-float__pending-actions">
                       <input
@@ -247,7 +251,7 @@ export function BranchFloatAdminPage({ role }: Props) {
                         min={0}
                         step="0.01"
                         className="branch-float__allocate-input"
-                        value={allocateAmount[s.id] ?? String(s.openingFloat)}
+                        value={allocateAmount[s.id] ?? String(pendingFloatAmount(s))}
                         onChange={(e) =>
                           setAllocateAmount((prev) => ({ ...prev, [s.id]: e.target.value }))
                         }
@@ -258,7 +262,7 @@ export function BranchFloatAdminPage({ role }: Props) {
                         disabled={busy}
                         onClick={() => void handleAllocate(s)}
                       >
-                        Approve &amp; release
+                        {isFloatTopUpRequest(s) ? "Release top-up" : "Approve & release"}
                       </button>
                     </div>
                   </li>

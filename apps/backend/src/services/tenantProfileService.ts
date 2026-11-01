@@ -10,6 +10,7 @@ import { getTenantFromStore, upsertTenantInStore } from "./authStore.js";
 
 const PROFILE_COLUMNS_BASE = "id, name, phone, email, address, tax_id, logo_url, brand_color";
 const PROFILE_COLUMNS = `${PROFILE_COLUMNS_BASE}, font_size_step`;
+const PROFILE_COLUMNS_FULL = `${PROFILE_COLUMNS}, savings_opening_fee_ghs`;
 
 const memoryProfiles = new Map<string, CompanyProfile>();
 
@@ -29,6 +30,14 @@ function fontSizeStepFrom(value: unknown): number {
   return step;
 }
 
+function savingsOpeningFeeFrom(value: unknown): number {
+  const amount = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(amount) || amount < 0) {
+    return 20;
+  }
+  return Math.round(amount * 100) / 100;
+}
+
 function mapRow(tenantId: string, row: Record<string, unknown>, fallbackName?: string): CompanyProfile {
   const email = optionalText(row.email);
   const brandColor = optionalText(row.brand_color);
@@ -42,7 +51,8 @@ function mapRow(tenantId: string, row: Record<string, unknown>, fallbackName?: s
     taxId: optionalText(row.tax_id),
     logoUrl: logoUrl && logoUrl.startsWith("data:image/") ? logoUrl : undefined,
     brandColor: brandColor && /^#[0-9A-Fa-f]{6}$/.test(brandColor) ? brandColor : undefined,
-    fontSizeStep: fontSizeStepFrom(row.font_size_step)
+    fontSizeStep: fontSizeStepFrom(row.font_size_step),
+    savingsOpeningFeeGhs: savingsOpeningFeeFrom(row.savings_opening_fee_ghs)
   });
 }
 
@@ -69,9 +79,14 @@ export async function getCompanyProfile(tenantId: string): Promise<CompanyProfil
     );
   }
 
-  const selected = await supabase.from("tenants").select(PROFILE_COLUMNS).eq("id", tenantId).maybeSingle();
+  const selected = await supabase.from("tenants").select(PROFILE_COLUMNS_FULL).eq("id", tenantId).maybeSingle();
   let data = selected.data as Record<string, unknown> | null;
   let error = selected.error;
+  if (error && /savings_opening_fee_ghs/i.test(error.message)) {
+    const retry = await supabase.from("tenants").select(PROFILE_COLUMNS).eq("id", tenantId).maybeSingle();
+    data = retry.data;
+    error = retry.error;
+  }
   if (error && /font_size_step/i.test(error.message)) {
     const retry = await supabase.from("tenants").select(PROFILE_COLUMNS_BASE).eq("id", tenantId).maybeSingle();
     data = retry.data;
@@ -109,7 +124,8 @@ export async function updateCompanyProfile(
     taxId: parsed.taxId === null ? undefined : (parsed.taxId ?? current.taxId),
     logoUrl: parsed.logoUrl === null ? undefined : (parsed.logoUrl ?? current.logoUrl),
     brandColor: parsed.brandColor === null ? undefined : (parsed.brandColor ?? current.brandColor),
-    fontSizeStep: parsed.fontSizeStep ?? current.fontSizeStep
+    fontSizeStep: parsed.fontSizeStep ?? current.fontSizeStep,
+    savingsOpeningFeeGhs: parsed.savingsOpeningFeeGhs ?? current.savingsOpeningFeeGhs
   });
 
   const supabase = getSupabaseAdminClient();
@@ -122,18 +138,33 @@ export async function updateCompanyProfile(
       tax_id: next.taxId ?? null,
       logo_url: next.logoUrl ?? null,
       brand_color: next.brandColor ?? null,
-      font_size_step: next.fontSizeStep
+      font_size_step: next.fontSizeStep,
+      savings_opening_fee_ghs: next.savingsOpeningFeeGhs
     };
-    let { error } = await supabase.from("tenants").update(profileUpdate).eq("id", tenantId);
+    let payload: Record<string, unknown> = { ...profileUpdate };
+    let { error } = await supabase.from("tenants").update(payload).eq("id", tenantId);
+    if (error && /savings_opening_fee_ghs/i.test(error.message)) {
+      if (next.savingsOpeningFeeGhs !== 20) {
+        throw new Error(
+          "Savings opening amount storage is not ready. Apply migration 072_savings_opening_fee.sql in Supabase, then save again."
+        );
+      }
+      const { savings_opening_fee_ghs: _openingFee, ...withoutFee } = payload;
+      void _openingFee;
+      payload = withoutFee;
+      const retry = await supabase.from("tenants").update(payload).eq("id", tenantId);
+      error = retry.error;
+    }
     if (error && /font_size_step/i.test(error.message)) {
       if (next.fontSizeStep !== 0) {
         throw new Error(
           "Font size storage is not ready. Apply migration 068_tenant_font_size.sql in Supabase, then save again."
         );
       }
-      const { font_size_step: _fontSizeStep, ...withoutFont } = profileUpdate;
+      const { font_size_step: _fontSizeStep, ...withoutFont } = payload;
       void _fontSizeStep;
-      const retry = await supabase.from("tenants").update(withoutFont).eq("id", tenantId);
+      payload = withoutFont;
+      const retry = await supabase.from("tenants").update(payload).eq("id", tenantId);
       error = retry.error;
     }
     if (error) {
@@ -147,4 +178,25 @@ export async function updateCompanyProfile(
   }
 
   return remember(next);
+}
+
+/** Keeps the in-memory profile in step when form setup changes the opening amount. */
+export function cacheSavingsOpeningFee(tenantId: string, amount: number): void {
+  const existing = memoryProfiles.get(tenantId);
+  const stored = getTenantFromStore(tenantId);
+  const base =
+    existing ??
+    companyProfileSchema.parse({
+      tenantId,
+      name: stored?.name ?? tenantId
+    });
+  memoryProfiles.set(tenantId, {
+    ...base,
+    savingsOpeningFeeGhs: savingsOpeningFeeFrom(amount)
+  });
+}
+
+export async function getSavingsOpeningFeeGhs(tenantId: string): Promise<number> {
+  const profile = await getCompanyProfile(tenantId);
+  return savingsOpeningFeeFrom(profile.savingsOpeningFeeGhs);
 }

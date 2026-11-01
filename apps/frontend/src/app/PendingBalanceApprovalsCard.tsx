@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { DEFAULT_APPROVAL_WORKFLOW, roleMayApprove } from "@bms/shared";
+import { useAuth } from "../auth/AuthContext";
 import type { BalanceDisclosure } from "./api";
 import { approveBalanceDisclosure, rejectBalanceDisclosure } from "./api";
 import { BalanceApproveModal } from "./BalanceApproveModal";
@@ -24,6 +26,10 @@ function fulfillmentLabel(mode?: BalanceDisclosure["fulfillmentMode"]): string {
 }
 
 export function PendingBalanceApprovalsCard() {
+  const { user } = useAuth();
+  const workflow = user?.approvalWorkflow ?? DEFAULT_APPROVAL_WORKFLOW;
+  const canApproveWithdrawal = roleMayApprove(workflow, "withdrawal", user?.role ?? "");
+  const canReviewBalance = user?.role === "admin" || user?.role === "coordinator";
   useCoordinatorLiveSync();
   const { showToast } = useToast();
   const pending = useCoordinatorStore((s) => s.pendingRequests);
@@ -35,6 +41,12 @@ export function PendingBalanceApprovalsCard() {
   const [momoRequest, setMomoRequest] = useState<BalanceDisclosure | null>(null);
   const [balanceApproveTarget, setBalanceApproveTarget] = useState<BalanceDisclosure | null>(null);
   const [declineTarget, setDeclineTarget] = useState<BalanceDisclosure | null>(null);
+  const visible = pending.filter((row) =>
+    row.requestType === "withdrawal" ? canApproveWithdrawal : canReviewBalance
+  );
+  if (!canApproveWithdrawal && !canReviewBalance) {
+    return null;
+  }
 
   async function handleApproveCash(row: BalanceDisclosure, visibleHours?: number) {
     setBusyId(row.id);
@@ -102,12 +114,14 @@ export function PendingBalanceApprovalsCard() {
           upload the transaction
           screenshot — a receipt is sent to the agent&apos;s alerts.
         </p>
-        {loading && pending.length === 0 ? <p className="muted">Loading…</p> : null}
+        {loading && visible.length === 0 ? <p className="muted">Loading…</p> : null}
         <div className="lines">
-          {pending.length === 0 && !loading ? (
-            <p className="muted">No pending requests.</p>
+          {visible.length === 0 && !loading ? (
+            <p className="muted">
+              {pending.length > 0 ? "No requests waiting for your role." : "No pending requests."}
+            </p>
           ) : (
-            pending.map((row) => (
+            visible.map((row) => (
               <div className="line tenant-line" key={row.id}>
                 <div>
                   <strong>

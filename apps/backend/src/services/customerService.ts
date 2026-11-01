@@ -3,6 +3,8 @@ import {
   createCustomerInputSchema,
   customerRegistrationInputSchema,
   customerSchema,
+  registrationFormIssue,
+  registrationPayloadForSetup,
   loanBorrowerRegistrationSchema,
   rejectCustomerSchema,
   type Customer,
@@ -23,6 +25,7 @@ import { fetchUserNameMap } from "./userNameResolver.js";
 import { computeCustomerBalance } from "./ledgerService.js";
 import { generateCustomerAccountNumber } from "./accountNumberPolicyService.js";
 import { applySavingsInitialDepositOnApproval } from "./savingsInitialDepositService.js";
+import { getRegistrationFormSetup } from "./registrationFormService.js";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -364,6 +367,12 @@ export async function submitCustomerRegistration(
 ): Promise<Customer> {
 
   const payload = customerRegistrationInputSchema.parse(input) as CustomerRegistrationInput;
+  const formSetup = await getRegistrationFormSetup(tenantId);
+  const formIssue = registrationFormIssue(payload, formSetup);
+  if (formIssue) {
+    throw new Error(formIssue);
+  }
+  const normalized = registrationPayloadForSetup(payload, formSetup);
   const homeBranchId = await resolveHomeBranchId(
     tenantId,
     agentBranchId,
@@ -378,27 +387,35 @@ export async function submitCustomerRegistration(
 
     fullName: payload.fullName,
 
-    email: payload.email || undefined,
+    email: normalized.email || undefined,
 
     phone: payload.phone,
 
     location: payload.location,
-    houseNumber: payload.houseNumber,
+    houseNumber: normalized.houseNumber,
     accountType: payload.accountType,
-    idCardNumber: payload.idCardNumber,
-    photoUrl: payload.photoUrl,
-    idCardPhotoUrl: payload.idCardPhotoUrl,
+    idCardNumber: normalized.idCardNumber,
+    photoUrl: normalized.photoUrl,
+    idCardPhotoUrl: normalized.idCardPhotoUrl,
     savingsOpeningFeeCollected:
       payload.accountType === "savings" ? Boolean(payload.savingsOpeningFeeCollected) : false,
     savingsOpeningFeeRecovered: 0,
-    nextOfKin: payload.nextOfKin,
+    nextOfKin:
+      normalized.nextOfKin?.fullName && normalized.nextOfKin.phone && normalized.nextOfKin.location
+        ? {
+            fullName: normalized.nextOfKin.fullName,
+            phone: normalized.nextOfKin.phone,
+            location: normalized.nextOfKin.location,
+            houseNumber: normalized.nextOfKin.houseNumber
+          }
+        : undefined,
     homeBranchId,
 
     assignedFieldAgentId: payload.assignedFieldAgentId ?? agentUserId,
 
     createdByFieldAgentId: agentUserId,
 
-    dailyContributionAmount: payload.dailyContributionAmount ?? 0,
+    dailyContributionAmount: normalized.dailyContributionAmount ?? 0,
 
     status: "pending_activation"
 

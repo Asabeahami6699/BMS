@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import type { UserRecord } from "../../api";
 import { AdminDataTable, filterRowsBySearch } from "../../../components/AdminDataTable";
@@ -6,6 +6,7 @@ import { useBranchesLiveSync } from "../../hooks/useBranchesLiveSync";
 import { useBranchesStore } from "../../stores/branchesStore";
 import { useHrDeskStore } from "../../stores/hrDeskStore";
 import { HrSectionShell } from "./HrSectionShell";
+import { formatBranchLabel } from "../../branchDisplay";
 
 type Props = { displayName?: string };
 
@@ -49,14 +50,10 @@ export function HrAppointmentPage({ displayName }: Props) {
     return () => stopLiveSync();
   }, [hydrateRoster, startLiveSync, stopLiveSync]);
 
-  const branchById = useMemo(() => new Map(branches.map((b) => [b.id, b])), [branches]);
-
   const filtered = filterRowsBySearch(
     users.map((u) => ({
       ...u,
-      branchLabel: u.branchId
-        ? `${branchById.get(u.branchId)?.name ?? u.branchId} (${branchById.get(u.branchId)?.code ?? ""})`
-        : "Head office"
+      branchLabel: u.branchId ? formatBranchLabel(u.branchId, branches) : "Head office"
     })),
     search,
     ["fullName", "email", "role", "branchLabel"] as (keyof UserRecord)[]
@@ -96,9 +93,7 @@ export function HrAppointmentPage({ displayName }: Props) {
           fullName: u.fullName,
           email: u.email,
           role: u.role.replace(/_/g, " "),
-          branchLabel: u.branchId
-            ? `${branchById.get(u.branchId)?.name ?? u.branchId}`
-            : "Head office",
+          branchLabel: u.branchId ? formatBranchLabel(u.branchId, branches) : "Head office",
           employmentDate: employmentDate(u),
           status: u.status
         }))}

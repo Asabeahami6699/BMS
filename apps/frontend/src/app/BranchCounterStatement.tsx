@@ -2,12 +2,14 @@ import { useMemo } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useToast } from "../components/Toast";
 import { downloadBranchCounterStatementCsv } from "../lib/branchCounterCsv";
+import { formatBranchLabel } from "./branchDisplay";
 import { useBranchCounterStore } from "./stores/branchCounterStore";
 
 const TX_LABELS: Record<string, string> = {
   deposit: "Deposit",
   withdrawal: "Withdrawal",
-  daily_susu: "Daily Susu"
+  daily_susu: "Daily Susu",
+  susu_reversal: "Susu reversal"
 };
 
 const ROLE_LABELS: Record<string, string> = {
@@ -57,10 +59,10 @@ export function BranchCounterStatementPanel() {
     }))
   );
 
-  const branchLabel = useMemo(() => {
-    const match = branches.find((b) => b.id === statementBranchId);
-    return match ? `${match.name} (${match.code})` : statementBranchId || "—";
-  }, [branches, statementBranchId]);
+  const branchLabel = useMemo(
+    () => formatBranchLabel(statementBranchId, branches),
+    [branches, statementBranchId]
+  );
 
   const summary = statement?.summary;
   const lines = statement?.lines ?? [];
@@ -214,6 +216,7 @@ export function BranchCounterStatementPanel() {
                   </span>
                   <span className={`branch-counter__tx--${line.type}`}>
                     {TX_LABELS[line.type] ?? line.type}
+                    {line.reversedAt ? " · Reversed" : ""}
                   </span>
                   <span className="branch-counter__ledger-amt">{formatMoney(line.amount)}</span>
                   <span className="cif-ledger__by" title={line.recordedByRole}>

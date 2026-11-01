@@ -30,3 +30,6 @@ export * from "./sms.js";
 export * from "./email.js";
 export * from "./customerNotifications.js";
 export * from "./companyProfile.js";
+export * from "./approvalWorkflow.js";
+export * from "./registrationForm.js";
+export * from "./tenantHost.js";

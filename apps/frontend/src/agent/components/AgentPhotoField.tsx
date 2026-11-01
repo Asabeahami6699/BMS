@@ -12,6 +12,8 @@ type Props = {
   photoName?: string;
   onPhotoChange: (url: string | undefined, name?: string) => void;
   required?: boolean;
+  captureGuide?: string;
+  facingMode?: "user" | "environment";
 };
 
 export function AgentPhotoField({
@@ -20,7 +22,9 @@ export function AgentPhotoField({
   photoUrl,
   photoName,
   onPhotoChange,
-  required
+  required,
+  captureGuide,
+  facingMode
 }: Props) {
   const { showToast } = useToast();
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -75,6 +79,8 @@ export function AgentPhotoField({
         open={cameraOpen}
         onClose={() => setCameraOpen(false)}
         onCapture={(dataUrl, name) => onPhotoChange(dataUrl, name)}
+        guide={captureGuide}
+        initialFacingMode={facingMode}
       />
       <input
         ref={uploadInputRef}

@@ -24,6 +24,8 @@ export type StoredTenant = {
   subscribedModules?: TenantProductModule[];
   subscribedAddons?: import("@bms/shared").TenantAddon[];
   createdAt: string;
+  /** Public address label: {subdomain}.aabanking.com */
+  subdomain?: string;
 };
 
 const tenants = new Map<string, StoredTenant>();
@@ -42,6 +44,7 @@ function seedIfEmpty(): void {
     subscriptionStatus: "active",
     accountNumberPrefix: "233000",
     subscribedModules: ["banking", "susu_management"],
+    subdomain: "tenant-demo",
     createdAt: new Date().toISOString()
   };
   tenants.set(demoTenant.id, demoTenant);

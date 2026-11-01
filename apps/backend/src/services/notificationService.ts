@@ -26,7 +26,8 @@ export type AgentNotificationKind =
   | "back_office_ecash_requested"
   | "back_office_ecash_approved"
   | "withdrawal_cs_approved"
-  | "withdrawal_ready_for_teller";
+  | "withdrawal_ready_for_teller"
+  | "susu_collection_reversed";
 
 export type AgentNotification = {
   id: string;

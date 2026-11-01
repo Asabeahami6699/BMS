@@ -8,6 +8,7 @@ import type {
   FieldAgentRosterRow
 } from "../api";
 import { getAgentsBootstrap, getTenantId } from "../api";
+import { formatBranchLabel } from "../branchDisplay";
 import { toUserFacingError } from "../../lib/networkError";
 import {
   createLiveSyncManager,
@@ -42,11 +43,7 @@ type AgentsState = {
 };
 
 function branchLabel(branchId: string | undefined, branches: Branch[]): string {
-  if (!branchId) {
-    return "—";
-  }
-  const match = branches.find((b) => b.id === branchId);
-  return match ? `${match.name} (${match.code})` : branchId;
+  return formatBranchLabel(branchId, branches);
 }
 
 function buildRoster(

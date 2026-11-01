@@ -37,6 +37,16 @@ function ensureTenantBranches(tenantId: string): Branch[] {
   return seeded;
 }
 
+/** Name and code for staff-facing text. Never returns the database id. */
+export async function branchDisplayLabel(tenantId: string, branchId: string): Promise<string> {
+  const branches = await listBranches(tenantId).catch(() => [] as Branch[]);
+  const match = branches.find((branch) => branch.id === branchId);
+  if (!match) {
+    return "the branch";
+  }
+  return `${match.name} (${match.code})`;
+}
+
 export async function listBranches(tenantId: string): Promise<Branch[]> {
   const supabase = getSupabaseAdminClient();
   if (supabase) {

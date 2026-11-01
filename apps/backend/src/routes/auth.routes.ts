@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { setTransactionPinSchema, verifyTransactionPinSchema } from "@bms/shared";
+import { applyApprovalWorkflowToSusuNav, setTransactionPinSchema, verifyTransactionPinSchema, tenantSignInHost, type ApprovalWorkflow } from "@bms/shared";
 import { validateBody } from "../middleware/validateBody.js";
 import {
   changeOwnPassword,
@@ -7,8 +7,10 @@ import {
   logoutAccessToken,
   resolveUserFromAccessToken
 } from "../services/authService.js";
+import { findTenantBySubdomain } from "../services/tenantHostService.js";
 import { extendSession } from "../services/authStore.js";
 import { getSupabaseAuthClient } from "../config/supabaseClient.js";
+import { getApprovalWorkflow } from "../services/approvalWorkflowService.js";
 import { resolveEffectiveSusuNavVisibility } from "../services/susuNavVisibilityService.js";
 import {
   getTransactionPinStatus,
@@ -18,6 +20,26 @@ import {
 } from "../services/transactionPinService.js";
 
 export const authRouter = Router();
+
+authRouter.get("/company-host", async (req, res) => {
+  const subdomain = typeof req.query.subdomain === "string" ? req.query.subdomain : "";
+  try {
+    const tenant = await findTenantBySubdomain(subdomain);
+    if (!tenant) {
+      res.status(404).json({ error: "This company address is not set up yet." });
+      return;
+    }
+    res.json({
+      name: tenant.name,
+      subdomain: tenant.subdomain,
+      signInHost: tenantSignInHost(tenant.subdomain)
+    });
+  } catch (error) {
+    res.status(400).json({
+      error: error instanceof Error ? error.message : "Failed to look up company address"
+    });
+  }
+});
 
 authRouter.post("/login", async (req, res) => {
   try {
@@ -44,9 +66,18 @@ authRouter.get("/me", async (req, res) => {
 
   const context = req.userContext;
   let susuNavVisibility;
+  let approvalWorkflow: ApprovalWorkflow | undefined;
+  if (context.tenantId && context.tenantId !== "platform") {
+    try {
+      approvalWorkflow = await getApprovalWorkflow(context.tenantId);
+    } catch {
+      approvalWorkflow = undefined;
+    }
+  }
   if (context.tenantId && context.tenantId !== "platform" && context.role !== "field_agent") {
     try {
-      susuNavVisibility = await resolveEffectiveSusuNavVisibility(context.tenantId);
+      const rows = await resolveEffectiveSusuNavVisibility(context.tenantId);
+      susuNavVisibility = approvalWorkflow ? applyApprovalWorkflowToSusuNav(rows, approvalWorkflow) : rows;
     } catch {
       susuNavVisibility = undefined;
     }
@@ -55,6 +86,7 @@ authRouter.get("/me", async (req, res) => {
   res.json({
     ...context,
     susuNavVisibility,
+    approvalWorkflow,
     transactionPin: await getTransactionPinStatus(context.userId, context.tenantId, context.role)
   });
 });

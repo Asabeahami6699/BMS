@@ -1,6 +1,6 @@
 import { FormEvent, useState } from "react";
 import type { TenantAddon, TenantProductModule } from "@bms/shared";
-import { ADDON_LABELS, MODULE_LABELS } from "@bms/shared";
+import { ADDON_LABELS, MODULE_LABELS, TENANT_ROOT_DOMAIN, tenantSignInHost } from "@bms/shared";
 import type { TenantRecord } from "../api";
 import { createPlatformTenant } from "../api";
 import { AddonPicker } from "../../components/AddonPicker";
@@ -23,8 +23,8 @@ export function RegisterCompanyModal({ open, onClose, onCreated }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [created, setCreated] = useState<TenantRecord | null>(null);
 
-  const [tenantId, setTenantId] = useState("tenant-acme");
-  const [tenantName, setTenantName] = useState("Acme Cooperative");
+  const [tenantId, setTenantId] = useState("");
+  const [tenantName, setTenantName] = useState("");
   const [subscriptionStatus, setSubscriptionStatus] = useState<"active" | "inactive">("active");
   const [subscribedModules, setSubscribedModules] = useState<TenantProductModule[]>(DEFAULT_MODULES);
   const [subscribedAddons, setSubscribedAddons] = useState<TenantAddon[]>([]);
@@ -80,8 +80,21 @@ export function RegisterCompanyModal({ open, onClose, onCreated }: Props) {
       {step === "form" ? (
         <form className="stack-form" onSubmit={handleSubmit}>
           <label className="field">
-            <span>Company ID</span>
-            <input value={tenantId} onChange={(e) => setTenantId(e.target.value)} required />
+            <span>Web address</span>
+            <input
+              value={tenantId}
+              onChange={(e) => setTenantId(e.target.value.trim().toLowerCase())}
+              placeholder="evanssusu"
+              autoCapitalize="none"
+              required
+            />
+            <p className="muted">
+              Staff sign in at{" "}
+              {tenantId.trim()
+                ? tenantSignInHost(tenantId.trim().toLowerCase())
+                : `name.${TENANT_ROOT_DOMAIN}`}
+              . Use letters, numbers, and hyphens.
+            </p>
           </label>
           <label className="field">
             <span>Company Name</span>
@@ -119,6 +132,7 @@ export function RegisterCompanyModal({ open, onClose, onCreated }: Props) {
           shareTitle={`BMS — ${created.name} registered`}
           fields={[
             { label: "Company name", value: created.name },
+            { label: "Sign-in address", value: tenantSignInHost(created.subdomain || created.id) },
             { label: "Company ID", value: created.id },
             { label: "Subscription", value: created.subscriptionStatus },
             {

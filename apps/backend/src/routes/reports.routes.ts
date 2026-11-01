@@ -17,6 +17,7 @@ import {
 } from "../services/susuClosingBalanceService.js";
 
 import { resolveRequestBranchFilter } from "../middleware/branchScope.js";
+import { listBranches } from "../services/branchService.js";
 
 export const reportsRouter = Router();
 
@@ -238,7 +239,7 @@ reportsRouter.get("/export.csv", requirePermission("reports.read"), async (req, 
 
   const branchIdFilter = resolveRequestBranchFilter(req);
   try {
-    const [summary, agents, branches] = await Promise.all([
+    const [summary, agents, branches, branchDirectory] = await Promise.all([
       getBranchPerformanceSummary(context.tenantId, {
         role: context.role,
         scopeType: context.scopeType,
@@ -256,15 +257,19 @@ reportsRouter.get("/export.csv", requirePermission("reports.read"), async (req, 
         scopeType: context.scopeType,
         branchId: context.branchId,
         filterBranchId: branchIdFilter
-      })
+      }),
+      listBranches(context.tenantId).catch(() => [])
     ]);
+    const branchNameById = new Map(
+      branchDirectory.map((branch) => [branch.id, `${branch.name} (${branch.code})`])
+    );
 
     const csv = toCsv(
       [
         "section",
         "key",
         "value",
-        "branch_id",
+        "branch",
         "agent_id",
         "transactions",
         "deposits",
@@ -280,7 +285,7 @@ reportsRouter.get("/export.csv", requirePermission("reports.read"), async (req, 
           "branch",
           "totalAmount",
           b.totalAmount,
-          b.branchId,
+          branchNameById.get(b.branchId) ?? "",
           "",
           b.transactionCount,
           b.depositAmount,

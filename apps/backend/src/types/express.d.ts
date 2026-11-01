@@ -13,6 +13,7 @@ export interface UserContext {
   subscribedModules?: TenantProductModule[];
   subscribedAddons?: TenantAddon[];
   reportsAnalytics?: boolean;
+  tenantSubdomain?: string;
 }
 
 declare global {

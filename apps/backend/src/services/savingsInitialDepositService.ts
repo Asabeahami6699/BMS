@@ -1,7 +1,8 @@
-import { SAVINGS_INITIAL_DEPOSIT_GHS, type Customer } from "@bms/shared";
+import type { Customer } from "@bms/shared";
 import { randomUUID } from "node:crypto";
 import { getSupabaseAdminClient } from "../config/supabaseClient.js";
 import { addLedgerEntry } from "./ledgerService.js";
+import { getSavingsOpeningFeeGhs } from "./tenantProfileService.js";
 
 const INITIAL_DEPOSIT_NOTES = "Savings initial deposit (non-withdrawable)";
 
@@ -14,7 +15,7 @@ export async function applySavingsInitialDepositOnApproval(
     return;
   }
 
-  const amount = SAVINGS_INITIAL_DEPOSIT_GHS;
+  const amount = await getSavingsOpeningFeeGhs(tenantId);
   if ((customer.lockedBalance ?? 0) >= amount) {
     return;
   }

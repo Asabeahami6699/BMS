@@ -8,6 +8,7 @@ import type {
 import { formatInvestmentTenureLabel } from "@bms/shared";
 import { resolveInvestmentIdPhotoUrl, resolveInvestmentPortraitUrl } from "./investmentImages";
 import { investmentSectionsOrdered, visibleInvestmentFields, formatInvestmentMoney } from "./investmentUi";
+import { formatBranchLabel } from "../branchDisplay";
 
 const SECTION_ICONS: Record<string, ReactNode> = {
   personal: "👤",
@@ -92,7 +93,7 @@ export function InvestmentDetailsView({ investment, formConfig }: Props) {
               <span className="cif-account-card__dot" aria-hidden>
                 ·
               </span>
-              <span>{investment.branchName ?? investment.branchId}</span>
+              <span>{formatBranchLabel(investment.branchId, [], investment.branchName)}</span>
             </p>
           </div>
           <span

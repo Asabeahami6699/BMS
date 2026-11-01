@@ -44,18 +44,22 @@ function scopedTransactions(transactions: Transaction[], context: RoleScope): Tr
 
 function summarizeTransactions(transactions: Transaction[]) {
   const summary = {
-    transactionCount: transactions.length,
+    transactionCount: 0,
     totalDeposits: 0,
     totalWithdrawals: 0,
     totalDailySusu: 0
   };
 
   for (const transaction of transactions) {
+    if (transaction.type === "susu_reversal" || (transaction.type === "daily_susu" && transaction.reversedAt)) {
+      continue;
+    }
+    summary.transactionCount += 1;
     if (transaction.type === "deposit") {
       summary.totalDeposits += transaction.amount;
     } else if (transaction.type === "withdrawal") {
       summary.totalWithdrawals += transaction.amount;
-    } else if (transaction.type === "daily_susu") {
+    } else if (transaction.type === "daily_susu" && !transaction.reversedAt) {
       summary.totalDailySusu += transaction.amount;
     }
   }
@@ -201,6 +205,9 @@ export async function buildAiPlatformSnapshot(
         totalCollections: 0,
         dailySusuCount: 0
       };
+      if (transaction.type === "susu_reversal" || (transaction.type === "daily_susu" && transaction.reversedAt)) {
+        continue;
+      }
       existing.totalCollections += transaction.amount;
       if (transaction.type === "daily_susu") {
         existing.dailySusuCount += 1;

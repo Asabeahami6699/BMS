@@ -10,6 +10,7 @@ import { RegistrationModal } from "../agent/RegistrationModal";
 import { CustomerDetailModal } from "./CustomerDetailModal";
 import { useCustomersLiveSync } from "./hooks/useCustomersLiveSync";
 import { useCustomersStore } from "./stores/customersStore";
+import { formatBranchLabel } from "./branchDisplay";
 
 type Props = { role: AppRole };
 
@@ -30,8 +31,7 @@ const STATUS_LABEL: Record<Customer["status"], string> = {
 };
 
 function branchLabel(branchId: string, branches: Branch[]): string {
-  const match = branches.find((b) => b.id === branchId);
-  return match ? `${match.name} (${match.code})` : branchId;
+  return formatBranchLabel(branchId, branches);
 }
 
 export function CustomerOpsCard({ role }: Props) {

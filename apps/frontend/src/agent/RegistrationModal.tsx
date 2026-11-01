@@ -1,8 +1,12 @@
-import type { AccountType, CustomerRegistrationInput } from "@bms/shared";
-import { SAVINGS_INITIAL_DEPOSIT_GHS } from "@bms/shared";
+import type { AccountType, CustomerRegistrationInput, RegistrationFormSetup } from "@bms/shared";
+import {
+  defaultRegistrationFormSetup,
+  registrationFormIssue,
+  registrationPayloadForSetup
+} from "@bms/shared";
 import type { Branch, Customer, FieldAgentOption } from "../app/api";
-import { listFieldAgents, submitCustomerRegistration } from "../app/api";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { getRegistrationFormSetup, listFieldAgents, submitCustomerRegistration } from "../app/api";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { AgentPhotoField } from "./components/AgentPhotoField";
 import { Modal } from "../components/Modal";
 import { useToast } from "../components/Toast";
@@ -10,14 +14,9 @@ import { submitRegistrationOnlineOrQueue } from "./agentSync";
 import { compressImageDataUrl, isDataUrlWithinLimit } from "../lib/imageCompress";
 import { toUserFacingError } from "../lib/networkError";
 
-const OPENING_FEE = SAVINGS_INITIAL_DEPOSIT_GHS;
-
-const ACCOUNT_TYPES: { value: AccountType; label: string; hint: string }[] = [
-  { value: "susu", label: "Susu (daily collection)", hint: "Regular daily Susu contributions." },
-  { value: "savings", label: "Savings", hint: "Fixed GHS 20 opening fee and locked minimum balance." },
-  { value: "group", label: "Group", hint: "Group savings account." },
-  { value: "meba_daakye", label: "Meba Daakye", hint: "Meba Daakye product." }
-];
+function money(amount: number): string {
+  return `GHS ${amount.toFixed(2)}`;
+}
 
 const EMPTY_FORM = {
   fullName: "",
@@ -79,7 +78,10 @@ function RegistrationPreview({
   branchLabel,
   agentLabel,
   photoUrl,
-  idCardPhotoUrl
+  idCardPhotoUrl,
+  openingFee,
+  accountLabel,
+  fields
 }: {
   form: typeof EMPTY_FORM;
   isOffice: boolean;
@@ -89,8 +91,10 @@ function RegistrationPreview({
   agentLabel: string;
   photoUrl?: string;
   idCardPhotoUrl?: string;
+  openingFee: number;
+  accountLabel: string;
+  fields: RegistrationFormSetup["fields"];
 }) {
-  const accountLabel = ACCOUNT_TYPES.find((type) => type.value === form.accountType)?.label ?? form.accountType;
   const kinAddress = form.kinUseCustomerAddress
     ? [form.location, form.houseNumber].filter(Boolean).join(", ")
     : [form.kinLocation, form.kinHouseNumber].filter(Boolean).join(", ");
@@ -109,39 +113,52 @@ function RegistrationPreview({
         <dd>{form.fullName}</dd>
         <dt>Phone</dt>
         <dd>{form.phone}</dd>
-        {form.email ? (
+        {fields.email !== "hidden" && form.email ? (
           <>
             <dt>Email</dt>
             <dd>{form.email}</dd>
           </>
         ) : null}
         <dt>Address</dt>
-        <dd>{[form.location, form.houseNumber].filter(Boolean).join(", ")}</dd>
+        <dd>
+          {[form.location, fields.houseNumber === "hidden" ? "" : form.houseNumber].filter(Boolean).join(", ") || "—"}
+        </dd>
         <dt>Account type</dt>
         <dd>{accountLabel}</dd>
-        {isSavings ? (
+        {isSavings && openingFee > 0 ? (
           <>
             <dt>Opening fee</dt>
             <dd>
               {savingsOpeningFeeCollected
-                ? `GHS ${OPENING_FEE.toFixed(2)} collected now`
-                : `Not collected — deduct up to GHS ${OPENING_FEE.toFixed(2)} later`}
+                ? `${money(openingFee)} collected now`
+                : `Not collected — deduct up to ${money(openingFee)} later`}
             </dd>
           </>
         ) : null}
-        <dt>ID card number</dt>
-        <dd>{form.idCardNumber}</dd>
-        <dt>Next of kin</dt>
-        <dd>
-          {form.kinName} · {form.kinPhone}
-          {kinAddress ? ` · ${kinAddress}` : ""}
-        </dd>
-        <dt>Daily contribution</dt>
-        <dd>GHS {parseDailyContribution(form.dailyContributionAmount).toFixed(2)}</dd>
+        {fields.idCardNumber !== "hidden" ? (
+          <>
+            <dt>ID card number</dt>
+            <dd>{form.idCardNumber || "—"}</dd>
+          </>
+        ) : null}
+        {fields.nextOfKin !== "hidden" ? (
+          <>
+            <dt>Next of kin</dt>
+            <dd>
+              {[form.kinName, form.kinPhone, kinAddress].filter(Boolean).join(" · ") || "—"}
+            </dd>
+          </>
+        ) : null}
+        {fields.dailyContribution !== "hidden" ? (
+          <>
+            <dt>Daily contribution</dt>
+            <dd>GHS {parseDailyContribution(form.dailyContributionAmount).toFixed(2)}</dd>
+          </>
+        ) : null}
       </dl>
       <div className="agent-reg-preview__photos">
-        {idCardPhotoUrl ? <img src={idCardPhotoUrl} alt="ID card preview" /> : null}
-        {photoUrl ? <img src={photoUrl} alt="Customer photo preview" /> : null}
+        {fields.idCardPhoto !== "hidden" && idCardPhotoUrl ? <img src={idCardPhotoUrl} alt="ID card preview" /> : null}
+        {fields.customerPhoto !== "hidden" && photoUrl ? <img src={photoUrl} alt="Customer photo preview" /> : null}
       </div>
     </div>
   );
@@ -173,6 +190,8 @@ export function RegistrationModal({
   const [idCardPhotoUrl, setIdCardPhotoUrl] = useState<string | undefined>();
   const [idCardPhotoName, setIdCardPhotoName] = useState<string | undefined>();
   const [savingsOpeningFeeCollected, setSavingsOpeningFeeCollected] = useState<boolean | null>(null);
+  const [formSetup, setFormSetup] = useState<RegistrationFormSetup>(() => defaultRegistrationFormSetup());
+  const appliedDailyKey = useRef("");
   const [homeBranchId, setHomeBranchId] = useState("");
   const [assignedFieldAgentId, setAssignedFieldAgentId] = useState("");
   const [agents, setAgents] = useState<FieldAgentOption[]>([]);
@@ -193,7 +212,12 @@ export function RegistrationModal({
   }, [agents, homeBranchId]);
 
   const isSavings = form.accountType === "savings";
-  const accountHint = ACCOUNT_TYPES.find((t) => t.value === form.accountType)?.hint;
+  const openingFee = formSetup.savingsOpeningFeeGhs;
+  const activeForm = formSetup.forms.find((item) => item.id === form.accountType);
+  const offeredForms = formSetup.forms.filter((item) => item.enabled);
+  const accountHint = isSavings
+    ? `${money(openingFee)} opening fee. ${activeForm?.hint ?? ""}`.trim()
+    : activeForm?.hint;
 
   useEffect(() => {
     if (!open || !isOffice) {
@@ -246,22 +270,91 @@ export function RegistrationModal({
     }
   }, [form.accountType]);
 
+  useEffect(() => {
+    if (!open) {
+      appliedDailyKey.current = "";
+      return;
+    }
+    const selected = formSetup.forms.find((item) => item.id === form.accountType);
+    const active = selected?.enabled ? selected : formSetup.forms.find((item) => item.enabled);
+    if (!active) {
+      return;
+    }
+    const key = `${active.id}:${active.defaultDailyContributionGhs}:${formSetup.fields.dailyContribution}:${formSetup.savingsOpeningFeeGhs}`;
+    if (appliedDailyKey.current === key) {
+      return;
+    }
+    appliedDailyKey.current = key;
+    const daily =
+      formSetup.fields.dailyContribution === "hidden" ? "0" : active.defaultDailyContributionGhs.toFixed(2);
+    setForm((prev) => ({ ...prev, accountType: active.id, dailyContributionAmount: daily }));
+  }, [open, form.accountType, formSetup]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    let cancelled = false;
+    void getRegistrationFormSetup()
+      .then((setup) => {
+        if (!cancelled) {
+          setFormSetup(setup);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setFormSetup(defaultRegistrationFormSetup());
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
   function updateField<K extends keyof typeof EMPTY_FORM>(key: K, value: (typeof EMPTY_FORM)[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
 
+  function draftRegistration() {
+    const askKin = formSetup.fields.nextOfKin !== "hidden";
+    const kinStarted = Boolean(
+      form.kinName.trim() ||
+        form.kinPhone.trim() ||
+        form.kinLocation.trim() ||
+        form.kinHouseNumber.trim()
+    );
+    const includeKin = askKin && (formSetup.fields.nextOfKin === "required" || kinStarted);
+    return {
+      accountType: form.accountType,
+      email: form.email,
+      houseNumber: form.houseNumber,
+      idCardNumber: form.idCardNumber,
+      idCardPhotoUrl,
+      photoUrl,
+      nextOfKin: includeKin
+        ? {
+            fullName: form.kinName,
+            phone: form.kinPhone,
+            location: form.kinUseCustomerAddress ? form.location : form.kinLocation,
+            houseNumber: form.kinUseCustomerAddress
+              ? form.houseNumber || undefined
+              : form.kinHouseNumber || undefined
+          }
+        : undefined,
+      dailyContributionAmount: parseDailyContribution(form.dailyContributionAmount)
+    };
+  }
+
   function reviewError(): string | null {
-    if (!form.fullName.trim() || !form.phone.trim() || !form.location.trim() || !form.houseNumber.trim()) {
-      return "Fill in the customer's name, phone, location, and house number.";
+    if (!form.fullName.trim() || !form.phone.trim() || !form.location.trim()) {
+      return "Fill in the customer's name, phone, and location.";
     }
-    if (!form.idCardNumber.trim() || !form.kinName.trim() || !form.kinPhone.trim()) {
-      return "Fill in the ID card number and next of kin.";
+    const issue = registrationFormIssue(draftRegistration(), formSetup);
+    if (issue) {
+      return issue;
     }
-    if (!idCardPhotoUrl) {
-      return "Take a photo of the customer's ID card.";
-    }
-    if (isSavings && savingsOpeningFeeCollected === null) {
-      return "Choose how the GHS 20 opening fee was handled.";
+    if (isSavings && openingFee > 0 && savingsOpeningFeeCollected === null) {
+      return `Choose how the ${money(openingFee)} opening fee was handled.`;
     }
     if (isOffice) {
       if (activeBranches.length === 0) {
@@ -299,32 +392,42 @@ export function RegistrationModal({
     try {
       const photoForSubmit = await preparePhoto(photoUrl);
       const idCardForSubmit = await preparePhoto(idCardPhotoUrl);
-      if (!idCardForSubmit) {
-        showToast("Take a photo of the customer's ID card.", "error");
+      const cleaned = registrationPayloadForSetup(
+        {
+          ...draftRegistration(),
+          idCardPhotoUrl: idCardForSubmit,
+          photoUrl: photoForSubmit
+        },
+        formSetup
+      );
+      const submitIssue = registrationFormIssue(cleaned, formSetup);
+      if (submitIssue) {
+        showToast(submitIssue, "error");
         setSubmitting(false);
+        setStep("form");
         return;
       }
 
       const payload: CustomerRegistrationInput = {
         fullName: form.fullName,
-        email: form.email.trim() || undefined,
+        email: cleaned.email,
         phone: form.phone,
         location: form.location,
-        houseNumber: form.houseNumber,
+        houseNumber: cleaned.houseNumber,
         accountType: form.accountType,
-        idCardNumber: form.idCardNumber,
-        photoUrl: photoForSubmit,
-        idCardPhotoUrl: idCardForSubmit,
-        savingsOpeningFeeCollected: isSavings ? savingsOpeningFeeCollected === true : undefined,
-        nextOfKin: {
-          fullName: form.kinName,
-          phone: form.kinPhone,
-          location: form.kinUseCustomerAddress ? form.location : form.kinLocation,
-          houseNumber: form.kinUseCustomerAddress
-            ? form.houseNumber || undefined
-            : form.kinHouseNumber || undefined
-        },
-        dailyContributionAmount: parseDailyContribution(form.dailyContributionAmount),
+        idCardNumber: cleaned.idCardNumber,
+        photoUrl: cleaned.photoUrl,
+        idCardPhotoUrl: cleaned.idCardPhotoUrl,
+        savingsOpeningFeeCollected: isSavings ? openingFee <= 0 || savingsOpeningFeeCollected === true : undefined,
+        nextOfKin: cleaned.nextOfKin?.fullName && cleaned.nextOfKin.phone && cleaned.nextOfKin.location
+          ? {
+              fullName: cleaned.nextOfKin.fullName,
+              phone: cleaned.nextOfKin.phone,
+              location: cleaned.nextOfKin.location,
+              houseNumber: cleaned.nextOfKin.houseNumber
+            }
+          : undefined,
+        dailyContributionAmount: cleaned.dailyContributionAmount ?? 0,
         ...(isOffice
           ? { homeBranchId, assignedFieldAgentId }
           : {})
@@ -452,16 +555,19 @@ export function RegistrationModal({
               />
             </label>
 
+            {formSetup.fields.email !== "hidden" ? (
             <label className="field">
-              <span>Email (optional)</span>
+              <span>Email{formSetup.fields.email === "optional" ? " (optional)" : ""}</span>
               <input
                 type="email"
                 value={form.email}
                 onChange={(e) => updateField("email", e.target.value)}
                 placeholder="e.g. kwame@email.com"
                 autoComplete="email"
+                required={formSetup.fields.email === "required"}
               />
             </label>
+            ) : null}
 
             <label className="field">
               <span>Phone</span>
@@ -486,15 +592,17 @@ export function RegistrationModal({
               />
             </label>
 
+            {formSetup.fields.houseNumber !== "hidden" ? (
             <label className="field">
-              <span>House number</span>
+              <span>House number{formSetup.fields.houseNumber === "optional" ? " (optional)" : ""}</span>
               <input
                 value={form.houseNumber}
                 onChange={(e) => updateField("houseNumber", e.target.value)}
                 placeholder="e.g. H/12, Block B"
-                required
+                required={formSetup.fields.houseNumber === "required"}
               />
             </label>
+            ) : null}
 
             <label className="field agent-form__span-2">
               <span>Account type</span>
@@ -503,8 +611,8 @@ export function RegistrationModal({
                 onChange={(e) => updateField("accountType", e.target.value as AccountType)}
                 aria-describedby="account-type-hint"
               >
-                {ACCOUNT_TYPES.map((t) => (
-                  <option key={t.value} value={t.value}>
+                {(offeredForms.length > 0 ? offeredForms : formSetup.forms).map((t) => (
+                  <option key={t.id} value={t.id}>
                     {t.label}
                   </option>
                 ))}
@@ -516,24 +624,24 @@ export function RegistrationModal({
           </div>
         </section>
 
-        {isSavings ? (
+        {isSavings && openingFee > 0 ? (
           <section className="agent-savings-panel agent-form__span-2" aria-labelledby="savings-opening-fee-title">
             <h3 id="savings-opening-fee-title" className="agent-savings-panel__title">
-              Savings — GHS {OPENING_FEE.toFixed(2)} opening fee
+              Savings — {money(openingFee)} opening fee
             </h3>
             <ol className="agent-savings-panel__steps muted">
               <li>
-                <strong>GHS {OPENING_FEE.toFixed(2)} cash from customer</strong> —{" "}
+                <strong>{money(openingFee)} cash from customer</strong> —{" "}
                 {isOffice ? "collect at the branch" : "you collect this fee"} (choose an option below).
               </li>
               <li>
-                <strong>GHS {OPENING_FEE.toFixed(2)} on the account</strong> — credited when approved; customer cannot
+                <strong>{money(openingFee)} on the account</strong> — credited when approved; customer cannot
                 withdraw this amount.
               </li>
             </ol>
 
             <p className="agent-savings-panel__prompt">
-              How was the <strong>GHS {OPENING_FEE.toFixed(2)} opening fee</strong> handled?
+              How was the <strong>{money(openingFee)} opening fee</strong> handled?
             </p>
 
             <div className="agent-fee-choices" role="radiogroup" aria-label="Opening fee collection">
@@ -549,7 +657,7 @@ export function RegistrationModal({
                 <span className="agent-fee-choice__body">
                   <span className="agent-fee-choice__title">Cash collected now</span>
                   <span className="agent-fee-choice__detail muted">
-                    GHS {OPENING_FEE.toFixed(2)} collected from the customer in cash.
+                    {money(openingFee)} collected from the customer in cash.
                   </span>
                 </span>
               </label>
@@ -566,7 +674,7 @@ export function RegistrationModal({
                 <span className="agent-fee-choice__body">
                   <span className="agent-fee-choice__title">Not collected — deduct later</span>
                   <span className="agent-fee-choice__detail muted">
-                    Customer did not pay now. Up to GHS {OPENING_FEE.toFixed(2)} will be taken from their first
+                    Customer did not pay now. Up to {money(openingFee)} will be taken from their first
                     deposit(s) after approval.
                   </span>
                 </span>
@@ -575,47 +683,63 @@ export function RegistrationModal({
           </section>
         ) : null}
 
+        {formSetup.fields.idCardNumber !== "hidden" ||
+        formSetup.fields.idCardPhoto !== "hidden" ||
+        formSetup.fields.customerPhoto !== "hidden" ? (
         <section className="agent-form__section">
           <h3 className="agent-form__section-title">Identity &amp; KYC</h3>
+          {formSetup.fields.idCardNumber !== "hidden" ? (
           <div className="agent-form__grid">
             <label className="field agent-form__span-2">
-              <span>ID card number</span>
+              <span>ID card number{formSetup.fields.idCardNumber === "optional" ? " (optional)" : ""}</span>
               <input
                 value={form.idCardNumber}
                 onChange={(e) => updateField("idCardNumber", e.target.value)}
                 placeholder="e.g. GHA-123456789-0"
-                required
+                required={formSetup.fields.idCardNumber === "required"}
               />
             </label>
           </div>
+          ) : null}
           <div className="agent-form__photos">
+            {formSetup.fields.idCardPhoto !== "hidden" ? (
             <AgentPhotoField
               label="ID card photo"
               hint="Capture the front of the Ghana Card or other ID — must be readable."
+              captureGuide="Center the ID card in the frame"
+              facingMode="environment"
               photoUrl={idCardPhotoUrl}
               photoName={idCardPhotoName}
               onPhotoChange={(url, name) => {
                 setIdCardPhotoUrl(url);
                 setIdCardPhotoName(name);
               }}
-              required
+              required={formSetup.fields.idCardPhoto === "required"}
             />
+            ) : null}
 
+            {formSetup.fields.customerPhoto !== "hidden" ? (
             <AgentPhotoField
               label="Customer photo"
               hint="Face photo of the customer for the account file."
+              captureGuide="Center the customer's face in the frame"
+              facingMode="user"
               photoUrl={photoUrl}
               photoName={photoName}
               onPhotoChange={(url, name) => {
                 setPhotoUrl(url);
                 setPhotoName(name);
               }}
+              required={formSetup.fields.customerPhoto === "required"}
             />
+            ) : null}
           </div>
         </section>
+        ) : null}
 
+        {formSetup.fields.nextOfKin !== "hidden" ? (
         <fieldset className="agent-fieldset agent-form__section">
-          <legend>Next of kin</legend>
+          <legend>Next of kin{formSetup.fields.nextOfKin === "optional" ? " (optional)" : ""}</legend>
           <div className="agent-form__grid">
             <label className="field">
               <span>Name</span>
@@ -623,7 +747,7 @@ export function RegistrationModal({
                 value={form.kinName}
                 onChange={(e) => updateField("kinName", e.target.value)}
                 placeholder="e.g. Ama Mensah"
-                required
+                required={formSetup.fields.nextOfKin === "required"}
               />
             </label>
             <label className="field">
@@ -634,7 +758,7 @@ export function RegistrationModal({
                 value={form.kinPhone}
                 onChange={(e) => updateField("kinPhone", e.target.value)}
                 placeholder="e.g. 055 987 6543"
-                required
+                required={formSetup.fields.nextOfKin === "required"}
               />
             </label>
             <label className="field agent-field-checkbox agent-form__span-2">
@@ -659,7 +783,7 @@ export function RegistrationModal({
                     value={form.kinLocation}
                     onChange={(e) => updateField("kinLocation", e.target.value)}
                     placeholder="e.g. Kumasi, Asokwa"
-                    required
+                    required={formSetup.fields.nextOfKin === "required"}
                   />
                 </label>
                 <label className="field">
@@ -674,12 +798,17 @@ export function RegistrationModal({
             )}
           </div>
         </fieldset>
+        ) : null}
 
+        {formSetup.fields.dailyContribution !== "hidden" ? (
         <section className="agent-form__section">
           <h3 className="agent-form__section-title">Contribution plan</h3>
           <div className="agent-form__grid agent-form__grid--center">
             <label className="field agent-form__field--amount">
-              <span>Daily contribution (GHS)</span>
+              <span>
+                Daily contribution (GHS)
+                {formSetup.fields.dailyContribution === "optional" ? " (optional)" : ""}
+              </span>
               <input
                 type="text"
                 inputMode="decimal"
@@ -691,16 +820,18 @@ export function RegistrationModal({
                     updateField("dailyContributionAmount", next);
                   }
                 }}
-                placeholder={isSavings ? "0.00" : "20.00"}
+                placeholder={(activeForm?.defaultDailyContributionGhs ?? 0).toFixed(2)}
+                required={formSetup.fields.dailyContribution === "required"}
               />
               <FieldHint>
-                {isSavings
-                  ? "Enter 0.00 if the customer does not pay a fixed amount every day."
-                  : "Amount the customer is expected to pay each collection day."}
+                {formSetup.fields.dailyContribution === "required"
+                  ? "Amount the customer is expected to pay each collection day."
+                  : "Enter 0.00 if the customer does not pay a fixed amount every day."}
               </FieldHint>
             </label>
           </div>
         </section>
+        ) : null}
 
         <p className="muted agent-form__foot">Account number appears after approval.</p>
       </form>
@@ -737,6 +868,9 @@ export function RegistrationModal({
         agentLabel={previewAgent?.fullName?.trim() || previewAgent?.email || ""}
         photoUrl={photoUrl}
         idCardPhotoUrl={idCardPhotoUrl}
+        openingFee={openingFee}
+        accountLabel={activeForm?.label ?? form.accountType}
+        fields={formSetup.fields}
       />
     </Modal>
     </>

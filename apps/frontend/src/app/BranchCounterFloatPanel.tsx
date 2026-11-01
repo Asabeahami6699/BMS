@@ -1,6 +1,7 @@
 import { FormEvent, useState } from "react";
 import { Link } from "react-router-dom";
 import type { AppRole, Branch, BranchFloatSession, BranchFloatSummary } from "./api";
+import { isFloatTopUpRequest, pendingFloatAmount } from "./api";
 import {
   allocateBranchFloat,
   closeBranchFloat,
@@ -62,7 +63,10 @@ export function BranchCounterFloatPanel({
         requestedAmount: Number(requestAmount),
         note: requestNote.trim() || undefined
       });
-      showToast("Float request sent to admin", "success");
+      showToast(
+        floatSession?.status === "open" ? "Top-up request sent to admin" : "Float request sent to admin",
+        "success"
+      );
       onUpdated();
     } catch (error) {
       showToast(toUserFacingError(error, "Request failed"), "error");
@@ -72,11 +76,14 @@ export function BranchCounterFloatPanel({
   }
 
   async function handleAllocate(session: BranchFloatSession) {
-    const amount = Number(allocateAmount[session.id] ?? session.openingFloat);
+    const amount = Number(allocateAmount[session.id] ?? pendingFloatAmount(session));
     setBusy(true);
     try {
       await allocateBranchFloat(session.id, amount);
-      showToast("Float released — till is open", "success");
+      showToast(
+        isFloatTopUpRequest(session) ? "Top-up released onto the open till" : "Float released — till is open",
+        "success"
+      );
       onUpdated();
     } catch (error) {
       showToast(toUserFacingError(error, "Could not release float"), "error");
@@ -198,8 +205,9 @@ export function BranchCounterFloatPanel({
               </div>
               {floatSummary.isLowFloat ? (
                 <p className="branch-float__balance-warn" role="status">
-                  Float is running low (below GHS {floatSummary.lowFloatThreshold.toFixed(2)}). Request
-                  additional float from admin before large deposits.
+                  {floatSummary.floatBalance <= 0
+                    ? "This till float is used up. Request a top-up below before taking more deposits."
+                    : `Float is running low (below GHS ${floatSummary.lowFloatThreshold.toFixed(2)}). Request a top-up below before large deposits.`}
                 </p>
               ) : null}
             </div>
@@ -232,6 +240,43 @@ export function BranchCounterFloatPanel({
                 </button>
               </form>
             </div>
+          ) : null}
+
+          {needsFloat && floatSession?.status === "open" && isFloatTopUpRequest(floatSession) ? (
+            <p className="muted">
+              Waiting for admin or coordinator to release a top-up of{" "}
+              <strong>{formatMoney(floatSession.topUpRequested ?? 0)}</strong>.
+              {floatSession.topUpNote ? ` ${floatSession.topUpNote}` : ""}
+            </p>
+          ) : null}
+
+          {needsFloat && floatSession?.status === "open" && !isFloatTopUpRequest(floatSession) ? (
+            <form className="branch-float__request-form" onSubmit={(e) => void handleRequest(e)}>
+              <h3>Request top-up float</h3>
+              <p className="muted">
+                {floatSummary && floatSummary.floatBalance <= 0
+                  ? "The float for today is used up. Ask for more cash on this same till."
+                  : "Ask for more cash on this same till if the float will not last the day."}
+              </p>
+              <label className="field">
+                <span>Amount needed (GHS)</span>
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={requestAmount}
+                  onChange={(e) => setRequestAmount(e.target.value)}
+                  required
+                />
+              </label>
+              <label className="field">
+                <span>Note (optional)</span>
+                <input value={requestNote} onChange={(e) => setRequestNote(e.target.value)} />
+              </label>
+              <button type="submit" className="button" disabled={busy}>
+                Request top-up float
+              </button>
+            </form>
           ) : null}
 
           {floatSession ? (
@@ -326,8 +371,8 @@ export function BranchCounterFloatPanel({
                 {pendingFloatRequests.map((s) => (
                   <li key={s.id} className="branch-float__pending-item">
                     <span>
-                      Cashier {s.cashierUserId.slice(0, 8)}… · {s.businessDate} · requested{" "}
-                      {formatMoney(s.openingFloat)}
+                      Cashier {s.cashierUserId.slice(0, 8)}… · {s.businessDate} ·{" "}
+                      {isFloatTopUpRequest(s) ? "top-up" : "requested"} {formatMoney(pendingFloatAmount(s))}
                     </span>
                     <div className="branch-float__pending-actions">
                       <input
@@ -336,7 +381,7 @@ export function BranchCounterFloatPanel({
                         step="0.01"
                         className="branch-float__allocate-input"
                         placeholder="Release amount"
-                        value={allocateAmount[s.id] ?? String(s.openingFloat)}
+                        value={allocateAmount[s.id] ?? String(pendingFloatAmount(s))}
                         onChange={(e) =>
                           setAllocateAmount((prev) => ({ ...prev, [s.id]: e.target.value }))
                         }
@@ -347,7 +392,7 @@ export function BranchCounterFloatPanel({
                         disabled={busy}
                         onClick={() => void handleAllocate(s)}
                       >
-                        Release float
+                        {isFloatTopUpRequest(s) ? "Release top-up" : "Release float"}
                       </button>
                     </div>
                   </li>

@@ -92,12 +92,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(
     async (email: string, password: string) => {
-      await apiLogin(email, password);
-      const me = await getAuthMe();
-      applyUser(me);
-      return getHomePathForRole(me.role as AppRole, me.subscribedModules);
+      const session = await apiLogin(email, password);
+      applyUser(session.user);
+      void refreshMe();
+      return getHomePathForRole(session.user.role as AppRole, session.user.subscribedModules);
     },
-    [applyUser]
+    [applyUser, refreshMe]
   );
 
   const logout = useCallback(async () => {

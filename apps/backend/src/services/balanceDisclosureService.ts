@@ -3,11 +3,13 @@ import {
   balanceDisclosureSchema,
   rejectBalanceDisclosureSchema,
   requestCustomerApprovalSchema,
+  roleMayApprove,
   type BalanceDisclosure,
   type CustomerRequestType
 } from "@bms/shared";
 import { randomUUID } from "node:crypto";
 import { getSupabaseAdminClient } from "../config/supabaseClient.js";
+import { getApprovalWorkflow } from "./approvalWorkflowService.js";
 import {
   getCustomerById,
   getCustomerWithdrawableBalance,
@@ -636,6 +638,11 @@ export async function approveBalanceDisclosure(
   const ledgerBalance = await computeCustomerBalance(tenantId, row.customer_id);
 
   if (row.request_type === "withdrawal") {
+    const workflow = await getApprovalWorkflow(tenantId);
+    if (!roleMayApprove(workflow, "withdrawal", context.role)) {
+      throw new Error("Your role is not allowed to approve withdrawals.");
+    }
+
     const amount = Number(row.withdrawal_amount ?? 0);
     if (amount <= 0) {
       throw new Error("Invalid withdrawal amount on request");
@@ -649,10 +656,9 @@ export async function approveBalanceDisclosure(
 
     const isMomo = row.fulfillment_mode === "momo";
     const hasCsApproval = context.permissions?.includes("agency.withdrawals.approve");
-    const isLegacyCoordinator =
-      (context.role === "admin" || context.role === "coordinator") && !hasCsApproval;
+    const postsDirectly = !hasCsApproval;
 
-    if (isMomo && isLegacyCoordinator) {
+    if (isMomo && postsDirectly) {
       if (!approvalPayload.transactionProofImage?.trim()) {
         throw new Error("Upload the MoMo transaction screenshot before approving.");
       }
@@ -716,7 +722,7 @@ export async function approveBalanceDisclosure(
       return mapRow(updated, { customerName: customer.fullName });
     }
 
-    if (!isMomo && isLegacyCoordinator) {
+    if (!isMomo && postsDirectly) {
       await postWithdrawalForApprovedDisclosure({
         tenantId,
         customerId: row.customer_id,
@@ -834,7 +840,8 @@ export async function rejectBalanceDisclosure(
   tenantId: string,
   coordinatorId: string,
   disclosureId: string,
-  input: unknown
+  input: unknown,
+  actorRole?: string
 ): Promise<BalanceDisclosure> {
   const parsed = rejectBalanceDisclosureSchema.parse(input ?? {});
   const row = await getRowById(tenantId, disclosureId);
@@ -843,6 +850,15 @@ export async function rejectBalanceDisclosure(
   }
   if (row.status !== "pending") {
     throw new Error("Only pending requests can be rejected");
+  }
+
+  if (row.request_type === "withdrawal") {
+    const workflow = await getApprovalWorkflow(tenantId);
+    if (!actorRole || !roleMayApprove(workflow, "withdrawal", actorRole)) {
+      throw new Error("Your role is not allowed to decline withdrawals.");
+    }
+  } else if (actorRole !== "admin" && actorRole !== "coordinator") {
+    throw new Error("Only admin or coordinator can decline balance requests.");
   }
 
   const customer = await getCustomerById(tenantId, row.customer_id);

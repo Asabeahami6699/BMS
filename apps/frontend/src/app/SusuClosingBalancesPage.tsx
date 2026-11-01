@@ -4,6 +4,7 @@ import { getSusuClosingBalance, listBranches, saveSusuClosingBalance } from "./a
 import { useToast } from "../components/Toast";
 import { toUserFacingError } from "../lib/networkError";
 import { usePageLoading } from "./hooks/usePageLoading";
+import { formatBranchLabel } from "./branchDisplay";
 
 type Props = { role: AppRole };
 
@@ -66,10 +67,10 @@ export function SusuClosingBalancesPage({ role }: Props) {
     void load();
   }, [load]);
 
-  const branchLabel = useMemo(() => {
-    const match = branches.find((b) => b.id === branchId);
-    return match ? `${match.name} (${match.code})` : branchId;
-  }, [branches, branchId]);
+  const branchLabel = useMemo(
+    () => formatBranchLabel(branchId, branches),
+    [branches, branchId]
+  );
 
   async function handleSave(event: FormEvent) {
     event.preventDefault();

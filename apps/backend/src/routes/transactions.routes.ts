@@ -5,13 +5,14 @@ import { PERMISSION_DENIED_MESSAGE, requirePermission } from "../middleware/requ
 import { requireTransactionStepUp } from "../middleware/requireTransactionStepUp.js";
 import { validateBody } from "../middleware/validateBody.js";
 import { resolveBranchId } from "../services/branchService.js";
-import { resolveRequestBranchFilter } from "../middleware/branchScope.js";
+import { BranchAccessError, resolveRequestBranchFilter } from "../middleware/branchScope.js";
 import { getBranchCounterBootstrap } from "../services/branchCounterBootstrapService.js";
 import {
   listBranchCounterStatement,
   summarizeBranchCounterStatement
 } from "../services/branchCounterStatementService.js";
 import { listTransactions, createTransaction } from "../services/transactionService.js";
+import { getSusuCollectionDetail, listSusuReversals, reverseSusuCollection } from "../services/susuReversalService.js";
 import {
   allocateBranchFloat,
   closeBranchFloat,
@@ -359,6 +360,67 @@ transactionsRouter.post(
     } catch (error) {
       res.status(400).json({
         error: error instanceof Error ? error.message : "Failed to settle float"
+      });
+    }
+  }
+);
+
+function reversalErrorStatus(error: unknown): number {
+  if (error instanceof BranchAccessError) {
+    return 403;
+  }
+  return 400;
+}
+
+transactionsRouter.get("/susu-reversals", requirePermission("transactions.read"), async (req, res) => {
+  const context = req.userContext;
+  if (!context) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  try {
+    const branchId = resolveRequestBranchFilter(req);
+    res.json(await listSusuReversals(context, branchId));
+  } catch (error) {
+    res.status(reversalErrorStatus(error)).json({
+      error: error instanceof Error ? error.message : "Failed to load susu reversals"
+    });
+  }
+});
+
+transactionsRouter.get("/:transactionId/susu-collection", requirePermission("transactions.read"), async (req, res) => {
+  const context = req.userContext;
+  if (!context) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  try {
+    const transactionId = String(req.params.transactionId);
+    res.json(await getSusuCollectionDetail(context, transactionId));
+  } catch (error) {
+    res.status(reversalErrorStatus(error)).json({
+      error: error instanceof Error ? error.message : "Failed to load susu collection"
+    });
+  }
+});
+
+transactionsRouter.post(
+  "/:transactionId/reverse",
+  requirePermission("transactions.reverse.daily_susu"),
+  requireIdempotencyKey,
+  async (req, res) => {
+    const context = req.userContext;
+    if (!context) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    try {
+      const transactionId = String(req.params.transactionId);
+      const detail = await reverseSusuCollection(context, transactionId, req.body);
+      res.status(201).json(detail);
+    } catch (error) {
+      res.status(reversalErrorStatus(error)).json({
+        error: error instanceof Error ? error.message : "Failed to reverse susu collection"
       });
     }
   }

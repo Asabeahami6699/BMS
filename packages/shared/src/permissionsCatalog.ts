@@ -244,6 +244,14 @@ export const PERMISSION_CATALOG: PermissionCatalogEntry[] = [
     suggests: ["customers.read"]
   },
   {
+    id: "transactions.reverse.daily_susu",
+    label: "Reverse susu collections",
+    description:
+      "Reverse a posted susu credit with a reason. The original entry stays. Company admin and coordinator always keep this duty.",
+    group: "transactions",
+    requires: ["transactions.read", "ledger.read"]
+  },
+  {
     id: "branch_float.manage",
     label: "Manage till float",
     description: "Approve float requests, push opening cash, and settle end-of-day sessions.",
@@ -822,6 +830,12 @@ export const SETTINGS_ROUTE_VISIBILITY: SettingsRouteVisibilityRow[] = [
   {
     routePath: "settings/profile",
     label: "Company profile",
+    anyPermissions: ["users.read"],
+    roles: ["admin"]
+  },
+  {
+    routePath: "settings/form-setup",
+    label: "Form setup",
     anyPermissions: ["users.read"],
     roles: ["admin"]
   },

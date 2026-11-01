@@ -101,6 +101,7 @@ function buildSusuNavChildren(susuNav?: SusuNavVisibilityRow[]): NavChildDef[] {
 /** Always shown under Settings when the tenant has any subscribed product */
 const SETTINGS_CHILDREN: NavChildDef[] = [
   { to: "settings/profile", label: "Company Profile", roleCheck: (r) => r === "admin" },
+  { to: "settings/form-setup", label: "Form setup", roleCheck: (r) => r === "admin" },
   { to: "settings/branches", label: "Branches", roleCheck: (r) => r === "admin", anyPermissions: ["branches.read"] },
   {
     to: "settings/account-numbers",

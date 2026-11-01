@@ -10,10 +10,12 @@ import {
 } from "./api";
 import {
   bankProductDisplayLabel,
-  hasAnyPermission,
+  DEFAULT_APPROVAL_WORKFLOW,
   isManualPartnerWithdrawal,
+  roleMayApprove,
   workflowFieldsForStage
 } from "@bms/shared";
+import { useAuth } from "../auth/AuthContext";
 import { DynamicWorkflowForm } from "./banking/DynamicWorkflowForm";
 import { prefillWithdrawalVerificationData } from "./banking/workflowPrefill";
 import type { TenantBankProduct } from "@bms/shared";
@@ -123,12 +125,12 @@ function matchesDateRange(iso: string, from: string, to: string): boolean {
   return key >= lo && key <= hi;
 }
 
-export function WithdrawalsPage({ role, permissions, variant = "susu" }: Props) {
+export function WithdrawalsPage({ role, variant = "susu" }: Props) {
   const isAgency = variant === "agency";
   useWithdrawalsLiveSync();
   const { showToast } = useToast();
-  const canApprove =
-    hasAnyPermission(permissions, ["agency.withdrawals.approve"]) || role === "admin";
+  const { user } = useAuth();
+  const canApprove = roleMayApprove(user?.approvalWorkflow ?? DEFAULT_APPROVAL_WORKFLOW, "withdrawal", role);
 
   const withdrawals = useWithdrawalsStore((s) => s.withdrawals);
   const branches = useWithdrawalsStore((s) => s.branches);

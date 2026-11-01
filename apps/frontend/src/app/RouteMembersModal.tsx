@@ -4,6 +4,7 @@ import { listRouteMembers, setRouteMembers } from "./api";
 import { useCustomersStore } from "./stores/customersStore";
 import { Modal } from "../components/Modal";
 import { useToast } from "../components/Toast";
+import { formatBranchLabel } from "./branchDisplay";
 
 type Props = {
   route: FieldRoute | null;
@@ -93,7 +94,7 @@ export function RouteMembersModal({ route, open, onClose, onUpdated }: Props) {
     <Modal
       open={open}
       title={`Members — ${route.name}`}
-      subtitle={`${route.area} · ${route.branchName ?? route.branchId}`}
+      subtitle={`${route.area} · ${formatBranchLabel(route.branchId, [], route.branchName, route.branchCode)}`}
       onClose={onClose}
       panelClassName="modal-panel--70"
       footer={

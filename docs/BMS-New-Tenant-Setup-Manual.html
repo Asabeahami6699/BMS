@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>BMS — Setting up a new tenant</title>
+  <style>
+    @page { size: A4; margin: 16mm 16mm 18mm; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: #1c2430;
+      font-family: "Segoe UI", Calibri, sans-serif;
+      font-size: 11pt;
+      line-height: 1.45;
+    }
+    h1 { font-size: 26pt; line-height: 1.15; margin: 0 0 8px; color: #1a237e; }
+    h2 { font-size: 15pt; margin: 22px 0 8px; color: #1a237e; page-break-after: avoid; }
+    h3 { font-size: 12pt; margin: 14px 0 6px; color: #283593; page-break-after: avoid; }
+    p { margin: 0 0 8px; }
+    ol, ul { margin: 0 0 10px; padding-left: 1.2em; }
+    li { margin: 0 0 4px; }
+    .cover {
+      min-height: 250mm;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      page-break-after: always;
+    }
+    .kicker { letter-spacing: 0.14em; text-transform: uppercase; color: #3d5afe; font-size: 10pt; font-weight: 700; }
+    .subtitle { font-size: 14pt; color: #445068; margin-top: 8px; }
+    .meta { margin-top: 28px; color: #5c6b7f; font-size: 10.5pt; }
+    table { width: 100%; border-collapse: collapse; margin: 8px 0 14px; page-break-inside: avoid; }
+    th, td { border: 1px solid #d5dce6; padding: 6px 8px; vertical-align: top; text-align: left; }
+    th { background: #eef2ff; color: #1a237e; font-weight: 650; }
+    .note, .warn {
+      border-left: 4px solid #3d5afe;
+      background: #f4f6ff;
+      padding: 8px 12px;
+      margin: 8px 0 12px;
+      page-break-inside: avoid;
+    }
+    .warn { border-left-color: #e69500; background: #fff8eb; }
+    code { font-family: Consolas, monospace; font-size: 10pt; background: #f3f5f8; padding: 0 3px; }
+    .step { font-weight: 700; color: #1a237e; }
+  </style>
+</head>
+<body>
+  <section class="cover">
+    <p class="kicker">BMS operator manual</p>
+    <h1>Setting up a new tenant</h1>
+    <p class="subtitle">How a platform administrator registers a company, and how that company’s admin finishes branches, staff, products, and customer SMS.</p>
+    <p class="meta">Banking Management System<br>For cooperatives and microfinance institutions<br>October 2026</p>
+  </section>
+
+  <h2>1. Who does what</h2>
+  <p>A tenant is one company on BMS. Each company has its own customers, branches, staff, and settings. Two people set a company up.</p>
+  <table>
+    <tr><th>Person</th><th>Signs in as</th><th>Does this</th></tr>
+    <tr><td>Platform super admin</td><td>Platform workspace</td><td>Registers the company, chooses products and add-ons, and creates the company admin login.</td></tr>
+    <tr><td>Company admin</td><td>The company workspace</td><td>Sets the profile, branches, account numbers, staff, bank products, and SMS.</td></tr>
+  </table>
+  <p>Use a separate company name and a separate SMS sender for every tenant. Customers of Proto Susu must not receive messages headed Evans Susu.</p>
+
+  <h2>2. Before you start</h2>
+  <ul>
+    <li>The legal company name, and a short Company ID you will not change later. Example: name <strong>Proto Susu</strong>, ID <strong>proto-susu</strong>.</li>
+    <li>Which departments the company paid for: Susu Management, Agency Banking, Loans, Treasury, Investment Management.</li>
+    <li>Which add-ons they paid for. SMS is a separate add-on. It does not unlock a department.</li>
+    <li>The company admin’s full name, email, and a password of at least 8 characters.</li>
+    <li>Branch names and short codes.</li>
+    <li>A numeric account-number prefix shorter than 12 digits.</li>
+    <li>If they want deposit and withdrawal texts: an Arkesel sender name of at most 11 characters, approved on the platform Arkesel account.</li>
+  </ul>
+
+  <h2>3. Register the company</h2>
+  <p>Sign in as the platform super admin. Open <strong>Companies</strong>.</p>
+  <ol>
+    <li>Click <strong>+ Register company</strong>.</li>
+    <li><span class="step">Company ID.</span> A short permanent code, such as <code>proto-susu</code>. Use letters, numbers, and hyphens. Do not reuse another company’s ID.</li>
+    <li><span class="step">Company Name.</span> The name staff and customers should recognise, such as <code>Proto Susu</code>.</li>
+    <li><span class="step">Subscription.</span> Leave this on <strong>active</strong>. Inactive companies cannot sign in.</li>
+    <li><span class="step">Product modules.</span> Tick only what this company subscribed to. At least one product is required.</li>
+    <li><span class="step">Add-ons.</span> Tick paid extras now, or add them later with <strong>Edit add-ons</strong>.</li>
+    <li>Click <strong>Register company</strong>. Copy the registration details and keep them with the company file.</li>
+  </ol>
+
+  <h3>Products</h3>
+  <table>
+    <tr><th>Tick this</th><th>The company can use</th></tr>
+    <tr><td>Susu Management</td><td>Customers, field agents, coordinators, daily susu, callover, and the susu counter.</td></tr>
+    <tr><td>Agency Banking</td><td>Teller deposits and withdrawals, partner bank products, and back office.</td></tr>
+    <tr><td>Loans</td><td>Loan products, applications, disbursement, and repayments.</td></tr>
+    <tr><td>Treasury</td><td>Cash positions and treasury movements.</td></tr>
+    <tr><td>Investment Management</td><td>Fixed deposits, treasury bills, bonds, and shares.</td></tr>
+  </table>
+  <div class="note">A susu-only company sees bank products whose name contains “susu”. A banking-only company does not see those susu products. A company with both sees the products for the transaction they are posting.</div>
+  <p>If a menu says <strong>Product not enabled</strong>, that department was not ticked for this company. SMS does not turn a department on. Open the company row, click <strong>Edit products</strong>, tick the department, and ask the company admin to sign in again.</p>
+
+  <h3>Add-ons</h3>
+  <table>
+    <tr><th>Add-on</th><th>What to tell the company</th></tr>
+    <tr><td>SMS Notifications</td><td>Required before deposit, withdrawal, or daily susu texts can be sent.</td></tr>
+    <tr><td>Email Notifications</td><td>Email alerts for customers who have an email address.</td></tr>
+    <tr><td>Mobile Money Integration</td><td>MoMo collections.</td></tr>
+    <tr><td>Custom Branding</td><td>Logo and colours. The company still fills these in under Company Profile.</td></tr>
+    <tr><td>Multi-Branch</td><td>Extra branch reporting. Create the branches either way.</td></tr>
+    <tr><td>Bulk Import</td><td>CSV or Excel import.</td></tr>
+    <tr><td>API Access</td><td>Keys and webhooks.</td></tr>
+    <tr><td>Advanced Analytics</td><td>Extra dashboards beyond standard reports.</td></tr>
+  </table>
+  <p>On the company row, <strong>Edit add-ons</strong> changes this list later. The company admin sees <strong>Product Subscription</strong> as read-only. They cannot turn a product or add-on on themselves.</p>
+
+  <h2>4. Create the company admin</h2>
+  <p>Still on <strong>Companies</strong>, click <strong>+ Create company admin</strong>. You can also use <strong>Add admin</strong> on that company’s row if you need a second admin later.</p>
+  <ol>
+    <li>Select the company.</li>
+    <li>Enter the admin’s full name.</li>
+    <li>Enter the email they will use to sign in.</li>
+    <li>Enter a password of at least 8 characters.</li>
+    <li>Click <strong>Create company admin</strong>.</li>
+    <li>Copy the login panel and send it to the admin on a private channel. It shows the company, company ID, name, email, and password.</li>
+  </ol>
+  <div class="warn">The password is shown once on that success screen. Store it before you close the window.</div>
+
+  <h2>5. Company admin: first sign-in</h2>
+  <p>The company admin signs in on the BMS sign-in page with the email and password you created. They land in their company workspace, not the platform Companies page.</p>
+  <p>Work through Settings in this order.</p>
+
+  <h3>5.1 Company Profile</h3>
+  <p>Open <strong>Settings → Company Profile</strong>.</p>
+  <ol>
+    <li>Confirm or correct the company name. This name is also used inside customer SMS.</li>
+    <li>Enter the phone, email, address, and tax identification number.</li>
+    <li>Upload a JPEG, PNG, or WebP logo.</li>
+    <li>Choose the brand colour.</li>
+    <li>Click <strong>Save company profile</strong>.</li>
+  </ol>
+  <p>You can open this screen again later, change any field, and save. The sidebar name, logo, and colour update after each save. Removing the logo and saving clears it.</p>
+
+  <h3>5.2 Branches</h3>
+  <p>Open <strong>Settings → Branches</strong>. Add every office the company operates.</p>
+  <ol>
+    <li>Enter a short branch code, such as <code>ACC</code>.</li>
+    <li>Enter the branch name.</li>
+    <li>Leave the status <strong>active</strong>.</li>
+    <li>Save, and repeat for each branch.</li>
+  </ol>
+  <p>If the company has only one branch, BMS selects that branch automatically on deposit and withdrawal screens. Staff do not see an empty “Select branch” option.</p>
+
+  <h3>5.3 Account numbers</h3>
+  <p>Open <strong>Settings → Account numbers</strong>. Customer account numbers are 12 digits. Type the company’s numeric prefix. BMS adds random digits when a registration is approved. The prefix must be shorter than 12 digits. Save the prefix before the first customer is approved.</p>
+
+  <h3>5.4 Users and permissions</h3>
+  <p>Open <strong>Settings → Users</strong> and create each staff member: tellers, field agents, coordinators, customer service, and back office. Assign the branch they work in.</p>
+  <p>Open <strong>Settings → Roles &amp; Permissions</strong> when a job needs a duty that is not on by default.</p>
+  <ul>
+    <li>A teller records susu deposits with the teller role.</li>
+    <li>To let a teller record a susu withdrawal, tick <strong>Record withdrawals</strong>. Do not use <strong>Open partner bank accounts</strong> for that job.</li>
+    <li>After you save a role, that person must sign out and sign in again before the new duty appears.</li>
+  </ul>
+  <p>On a teller deposit, the ledger shows the teller who posted it. It does not add the customer’s field agent to that line. Field-collection batches still show the agent.</p>
+
+  <h3>5.5 Bank products</h3>
+  <p>Create the savings or partner-bank products the counter will post against. Put the word <strong>susu</strong> in the name of every susu deposit product, for example <code>Susu Savings</code>. A susu-only company will not see a product that does not contain that word.</p>
+
+  <h2>6. Customer SMS</h2>
+  <p>Do this only when the SMS Notifications add-on is on the company. One Arkesel account serves the whole platform. Each company still needs its own approved sender name.</p>
+
+  <h3>6.1 Approve the sender on Arkesel</h3>
+  <ol>
+    <li>Sign in to the same Arkesel account that already holds the platform API key. Do not create a second Arkesel account.</li>
+    <li>Open <strong>Sender ID</strong>. Do not use <strong>Send Bulk SMS</strong> to register a name. That page only sends a campaign.</li>
+    <li>Request a new sender ID. Use the company’s own short name, at most 11 characters, including spaces. <code>Proto Susu</code> is 10 characters.</li>
+    <li>Paste a purpose of at least 50 characters, for example: <em>Proto Susu sends transactional SMS alerts to its customers when a deposit is credited or a withdrawal is debited on their savings account.</em></li>
+    <li>Upload the business certificate if Arkesel asks for it.</li>
+    <li>Wait until that exact spelling shows as approved. Approval is per name. Evans Susu does not approve Proto Susu.</li>
+  </ol>
+  <div class="warn">A bulk campaign is not part of setup. It spends SMS credits. Use it only if Arkesel support asks for a portal test.</div>
+
+  <h3>6.2 Turn SMS on in BMS</h3>
+  <p>Sign in as the company admin. Open <strong>Settings → Notification Settings</strong>.</p>
+  <ol>
+    <li>Turn on <strong>Enable customer SMS alerts</strong>.</li>
+    <li>Tick <strong>Deposit credited</strong>, <strong>Withdrawal debited</strong>, and <strong>Daily susu collection posted</strong> for the events this company wants.</li>
+    <li>Set <strong>Sender ID</strong> to the approved name, including the space. Example: <code>Proto Susu</code>.</li>
+    <li>Click <strong>Save SMS settings</strong>.</li>
+    <li>Enter your own mobile number and click <strong>Send test</strong>.</li>
+  </ol>
+  <p>The test is an API SMS. In the Arkesel log, wait until that row says <strong>DELIVERED</strong>. <strong>SUBMITTING</strong> or <strong>RECHECK</strong> means it is still in progress. <strong>FAILED</strong> means the phone did not get it. Do not keep sending tests. Each test uses a credit. Give Arkesel the message ID and ask why that API SMS failed.</p>
+  <p>Portal messages and API messages are different. A portal row can be <strong>DELIVERED</strong> while an API row to the same number is <strong>FAILED</strong>. BMS uses the API. The sender must work on API SMS before customers will receive alerts.</p>
+
+  <h3>6.3 What the customer receives</h3>
+  <p>After a deposit is posted to the ledger, the customer with a valid Ghana number receives a text like this:</p>
+  <div class="note">A sum of GHS 50.00 has been credited to your Account # **********4563 being deposited by Ama Mensah - GHS 50.00. current balance is: Ghs 1,250.00</div>
+  <p>A withdrawal uses “debited” and “withdrawal” in the same sentence. The text is sent only after the transaction is posted. Collecting on the field-agent screen does not send a second message. Daily susu sends one text per customer when the batch is posted.</p>
+  <p>The customer record must have a Ghana mobile number: <code>024XXXXXXX</code>, <code>23324XXXXXXX</code>, or 9 digits without the leading zero.</p>
+
+  <h2>7. Go-live check</h2>
+  <ol>
+    <li>Company subscription is <strong>active</strong>.</li>
+    <li>Only the paid products and add-ons are ticked.</li>
+    <li>The company admin can sign in and sign out.</li>
+    <li>Company Profile is saved.</li>
+    <li>Every branch exists, and a one-branch company opens with that branch already selected.</li>
+    <li>The account-number prefix is saved.</li>
+    <li>A teller can post a deposit. If they should pay withdrawals, <strong>Record withdrawals</strong> is ticked and they have signed in again.</li>
+    <li>Susu products contain the word susu.</li>
+    <li>The Arkesel sender for this company is approved, saved in Notification Settings, and one API test is <strong>DELIVERED</strong>.</li>
+    <li>Create one test customer with your phone number, post a small deposit, and confirm the credited SMS and the teller’s name on the ledger.</li>
+  </ol>
+
+  <h2>8. If something fails</h2>
+  <table>
+    <tr><th>What you see</th><th>What to do</th></tr>
+    <tr><td>Product not enabled</td><td>The department is not on this company’s subscription. Edit products as super admin, then sign the company user in again.</td></tr>
+    <tr><td>Open partner bank accounts requires banking.products.read</td><td>You opened the wrong duty. For a susu withdrawal, tick Record withdrawals.</td></tr>
+    <tr><td>You are not allowed to use this Sender ID</td><td>The name in BMS is not approved on Arkesel, or the spelling does not match. Approve that exact name, including spaces.</td></tr>
+    <tr><td>API SMS FAILED, and the credit was used</td><td>BMS handed the message to Arkesel. Ask Arkesel for the network reason and for the sender to be enabled on API SMS. Do not send another test until they reply.</td></tr>
+    <tr><td>Company profile storage is not ready</td><td>Run migration <code>065_tenant_company_profile.sql</code> in the Supabase SQL editor, then save the profile again.</td></tr>
+    <tr><td>SMS settings are missing</td><td>SMS Notifications is not on this company’s add-ons. Edit add-ons, then sign in again.</td></tr>
+  </table>
+
+  <h2>9. Example: Proto Susu</h2>
+  <table>
+    <tr><th>Item</th><th>Value</th></tr>
+    <tr><td>Company ID</td><td>proto-susu</td></tr>
+    <tr><td>Company name</td><td>Proto Susu</td></tr>
+    <tr><td>Subscription</td><td>active</td></tr>
+    <tr><td>Products</td><td>Susu Management, and Agency Banking only if they paid for the counter</td></tr>
+    <tr><td>Add-on</td><td>SMS Notifications</td></tr>
+    <tr><td>Sender ID</td><td>Proto Susu, approved on the existing Arkesel account</td></tr>
+    <tr><td>Account prefix</td><td>A short number they choose, shorter than 12 digits</td></tr>
+    <tr><td>First branch</td><td>One code and name. It will be selected automatically.</td></tr>
+  </table>
+  <p>Evans Susu stays on the Evans Susu company only. Proto Susu gets its own admin, its own profile, and its own sender.</p>
+</body>
+</html>

@@ -2,6 +2,11 @@ import { Link } from "react-router-dom";
 
 const SETTINGS_ENTRIES = [
   { to: "settings/profile", label: "Company Profile", description: "Name, logo, contact, address, tax, branding, and font size." },
+  {
+    to: "settings/form-setup",
+    label: "Form setup",
+    description: "Account registration forms. Change them for this company, or keep the defaults."
+  },
   { to: "settings/branches", label: "Branches", description: "Branch network and codes." },
   {
     to: "settings/account-numbers",
@@ -15,8 +20,8 @@ const SETTINGS_ENTRIES = [
   },
   { to: "settings/users", label: "Users", description: "Staff accounts and assignments." },
   { to: "settings/roles", label: "Roles & Permissions", description: "Roles, duties, and permissions." },
-  { to: "settings/approval-workflows", label: "Approval Workflows", description: "Customer and withdrawal approval chains." },
-  { to: "settings/notifications", label: "Notification Settings", description: "SMS and email notification preferences." },
+  { to: "settings/approval-workflows", label: "Approval Workflows", description: "Choose who approves new accounts and withdrawals." },
+  { to: "settings/notifications", label: "Notification Settings", description: "SMS and email preferences, and the customer message log." },
   { to: "settings/audit-logs", label: "Audit Logs", description: "Activity trail across the workspace." }
 ] as const;
 

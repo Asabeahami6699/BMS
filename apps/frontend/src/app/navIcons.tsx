@@ -80,6 +80,7 @@ const iconByPath: Record<string, string> = {
   "products/investments": "◆",
   treasury: "◇",
   "settings/profile": "🏢",
+  "settings/form-setup": "✎",
   "settings/branches": "⌂",
   "settings/account-numbers": "#",
   "settings/subscription": "💳",

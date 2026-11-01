@@ -15,6 +15,7 @@ import { useInvestmentPermissions } from "../hooks/useInvestmentPermissions";
 import { useInvestmentStore } from "../stores/investmentStore";
 import { InvestmentCustomerDetailModal } from "./InvestmentCustomerDetailModal";
 import { formatInvestmentMoney } from "./investmentUi";
+import { formatBranchLabel } from "../branchDisplay";
 import {
   downloadInvestmentApplicationPdf,
   downloadInvestmentCertificatePdf,
@@ -191,7 +192,7 @@ export function InvestmentDetailPage({ role: _role }: Props) {
           </div>
           <div>
             <dt>Branch</dt>
-            <dd>{investment.branchName ?? investment.branchId}</dd>
+            <dd>{formatBranchLabel(investment.branchId, [], investment.branchName)}</dd>
           </div>
         </dl>
       </section>

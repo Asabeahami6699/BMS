@@ -49,7 +49,7 @@ export function BranchManagementCard({ role }: Props) {
   }, [role]);
 
   const filtered = useMemo(
-    () => filterRowsBySearch(branches, search, ["id", "code", "name", "status"]),
+    () => filterRowsBySearch(branches, search, ["code", "name", "status"]),
     [branches, search]
   );
 
@@ -116,7 +116,6 @@ export function BranchManagementCard({ role }: Props) {
           columns={[
             { key: "code", label: "Code" },
             { key: "name", label: "Name" },
-            { key: "id", label: "Branch ID", className: "admin-table-mono" },
             {
               key: "status",
               label: "Status",
@@ -136,7 +135,7 @@ export function BranchManagementCard({ role }: Props) {
           rowKey={(row) => row.id}
           search={search}
           onSearchChange={setSearch}
-          searchPlaceholder="Search by code, name, or ID…"
+          searchPlaceholder="Search by code or name…"
           emptyMessage={loading ? "Loading…" : "No branches match your search."}
           actions={
             canManage

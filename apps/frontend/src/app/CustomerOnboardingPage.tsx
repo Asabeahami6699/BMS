@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { DEFAULT_APPROVAL_WORKFLOW, roleMayApprove } from "@bms/shared";
 import type { AppRole, Customer } from "./api";
+import { useAuth } from "../auth/AuthContext";
 import { RegistrationModal } from "../agent/RegistrationModal";
 import { AdminDataTable, filterRowsBySearch } from "../components/AdminDataTable";
 import { useToast } from "../components/Toast";
@@ -35,8 +37,9 @@ export function CustomerOnboardingPage({ role }: Props) {
   useCustomersLiveSync();
   const { showToast } = useToast();
 
+  const { user } = useAuth();
   const canRegister = role === "admin" || role === "coordinator" || role === "field_agent";
-  const canReview = role === "admin" || role === "coordinator";
+  const canReview = roleMayApprove(user?.approvalWorkflow ?? DEFAULT_APPROVAL_WORKFLOW, "registration", role);
 
   const pending = useCoordinatorStore((s) => s.pendingRegistrations);
   const branches = useCoordinatorStore((s) => s.branches);

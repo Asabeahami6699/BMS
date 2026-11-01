@@ -6,6 +6,7 @@ import type { Payslip } from "./api";
 import { PayslipViewer } from "./PayslipViewer";
 import { useToast } from "../components/Toast";
 import { toUserFacingError } from "../lib/networkError";
+import { formatBranchLabel } from "./branchDisplay";
 
 type Props = {
   me: AuthMe | null;
@@ -38,8 +39,7 @@ export function UserProfilePage({ me, branches, role }: Props) {
     if (!me?.branchId) {
       return me?.scopeType === "head_office" ? "Head office (all branches)" : "—";
     }
-    const match = branches.find((b) => b.id === me.branchId);
-    return match ? `${match.name} (${match.code})` : me.branchId;
+    return formatBranchLabel(me.branchId, branches);
   }, [me, branches]);
 
   useEffect(() => {

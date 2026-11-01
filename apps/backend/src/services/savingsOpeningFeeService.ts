@@ -1,4 +1,4 @@
-import { SAVINGS_INITIAL_DEPOSIT_GHS, type Customer } from "@bms/shared";
+import type { Customer } from "@bms/shared";
 import { getSupabaseAdminClient } from "../config/supabaseClient.js";
 import { getCustomerById } from "./customerService.js";
 
@@ -11,14 +11,17 @@ export type OpeningFeeDeduction = {
 
 export function computeOpeningFeeDeduction(
   customer: Customer,
-  collectionAmount: number
+  collectionAmount: number,
+  openingFeeGhs: number
 ): OpeningFeeDeduction | null {
   if (customer.accountType !== "savings" || customer.savingsOpeningFeeCollected) {
     return null;
   }
 
   const recovered = customer.savingsOpeningFeeRecovered ?? 0;
-  const remaining = Math.max(0, SAVINGS_INITIAL_DEPOSIT_GHS - recovered);
+  const locked = customer.lockedBalance ?? 0;
+  const target = locked > 0 ? locked : openingFeeGhs;
+  const remaining = Math.max(0, target - recovered);
   if (remaining <= 0) {
     return null;
   }

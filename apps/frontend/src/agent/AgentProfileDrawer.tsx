@@ -81,8 +81,8 @@ export function AgentProfileDrawer({ open, onClose, onLogout }: Props) {
               {dashboard?.profile.tenantName ? (
                 <p className="muted">{dashboard.profile.tenantName}</p>
               ) : null}
-              {dashboard?.profile.branchId ? (
-                <p className="muted">Branch: {dashboard.profile.branchId}</p>
+              {dashboard?.profile.branchName ? (
+                <p className="muted">Branch: {dashboard.profile.branchName}</p>
               ) : null}
               {dashboard ? <p className="muted">Period: {dashboard.period.label}</p> : null}
             </div>

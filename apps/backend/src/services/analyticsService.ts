@@ -1,4 +1,4 @@
-import type { Transaction } from "@bms/shared";
+import { isActiveDailySusu, type Transaction } from "@bms/shared";
 import { listTransactions } from "./transactionService.js";
 
 type RoleContext = {
@@ -33,18 +33,22 @@ export async function getBranchPerformanceSummary(
   const transactions = scopedTransactions(await listTransactions(tenantId), context);
 
   const summary = {
-    totalTransactions: transactions.length,
+    totalTransactions: 0,
     totalDeposits: 0,
     totalWithdrawals: 0,
     totalDailySusu: 0
   };
 
   for (const transaction of transactions) {
+    if (transaction.type === "susu_reversal" || (transaction.type === "daily_susu" && transaction.reversedAt)) {
+      continue;
+    }
+    summary.totalTransactions += 1;
     if (transaction.type === "deposit") {
       summary.totalDeposits += transaction.amount;
     } else if (transaction.type === "withdrawal") {
       summary.totalWithdrawals += transaction.amount;
-    } else if (transaction.type === "daily_susu") {
+    } else if (isActiveDailySusu(transaction)) {
       summary.totalDailySusu += transaction.amount;
     }
   }
@@ -82,7 +86,7 @@ export async function getAgentPerformance(
       withdrawalAmount: 0
     };
 
-    if (transaction.type === "daily_susu") {
+    if (isActiveDailySusu(transaction)) {
       existing.dailySusuCount += 1;
       existing.dailySusuAmount += transaction.amount;
       existing.totalCollections += transaction.amount;
@@ -136,13 +140,16 @@ export async function getBranchBreakdown(
       withdrawalAmount: 0,
       dailySusuAmount: 0
     };
+    if (transaction.type === "susu_reversal" || (transaction.type === "daily_susu" && transaction.reversedAt)) {
+      continue;
+    }
     bucket.transactionCount += 1;
     bucket.totalAmount += transaction.amount;
     if (transaction.type === "deposit") {
       bucket.depositAmount += transaction.amount;
     } else if (transaction.type === "withdrawal") {
       bucket.withdrawalAmount += transaction.amount;
-    } else {
+    } else if (isActiveDailySusu(transaction)) {
       bucket.dailySusuAmount += transaction.amount;
     }
     map.set(transaction.transactionBranchId, bucket);
@@ -193,12 +200,15 @@ export async function getDailyTransactionTrend(
     if (!bucket) {
       continue;
     }
+    if (tx.type === "susu_reversal" || (tx.type === "daily_susu" && tx.reversedAt)) {
+      continue;
+    }
     bucket.transactionCount += 1;
     if (tx.type === "deposit") {
       bucket.deposits += tx.amount;
     } else if (tx.type === "withdrawal") {
       bucket.withdrawals += tx.amount;
-    } else {
+    } else if (isActiveDailySusu(tx)) {
       bucket.dailySusu += tx.amount;
     }
     bucket.net = bucket.deposits + bucket.dailySusu - bucket.withdrawals;

@@ -2,7 +2,8 @@ import {
   assignCustomerFieldAgentSchema,
   createCustomerInputSchema,
   customerRegistrationInputSchema,
-  rejectCustomerSchema
+  rejectCustomerSchema,
+  roleMayApprove
 } from "@bms/shared";
 
 import { Router } from "express";
@@ -30,6 +31,7 @@ import {
 
 } from "../services/customerService.js";
 import { getCustomerBootstrap } from "../services/customerBootstrapService.js";
+import { getApprovalWorkflow } from "../services/approvalWorkflowService.js";
 
 import {
   approveBalanceDisclosure,
@@ -240,7 +242,7 @@ customersRouter.get("/search", requirePermission("customers.read"), async (req, 
 
 
 
-customersRouter.patch("/:customerId/approve", requirePermission("customers.create"), async (req, res) => {
+customersRouter.patch("/:customerId/approve", requireAnyPermission("customers.create", "customers.read"), async (req, res) => {
 
   const context = req.userContext;
 
@@ -252,12 +254,10 @@ customersRouter.patch("/:customerId/approve", requirePermission("customers.creat
 
   }
 
-  if (context.role !== "admin" && context.role !== "coordinator") {
-
-    res.status(403).json({ error: "Only admin or coordinator can approve registrations" });
-
+  const workflow = await getApprovalWorkflow(context.tenantId);
+  if (!roleMayApprove(workflow, "registration", context.role)) {
+    res.status(403).json({ error: "Your role is not allowed to approve account registrations." });
     return;
-
   }
 
 
@@ -286,7 +286,7 @@ customersRouter.patch("/:customerId/approve", requirePermission("customers.creat
 
 
 
-customersRouter.patch("/:customerId/reject", requirePermission("customers.create"), async (req, res) => {
+customersRouter.patch("/:customerId/reject", requireAnyPermission("customers.create", "customers.read"), async (req, res) => {
 
   const context = req.userContext;
 
@@ -298,12 +298,10 @@ customersRouter.patch("/:customerId/reject", requirePermission("customers.create
 
   }
 
-  if (context.role !== "admin" && context.role !== "coordinator") {
-
-    res.status(403).json({ error: "Only admin or coordinator can reject registrations" });
-
+  const workflow = await getApprovalWorkflow(context.tenantId);
+  if (!roleMayApprove(workflow, "registration", context.role)) {
+    res.status(403).json({ error: "Your role is not allowed to reject account registrations." });
     return;
-
   }
 
 
@@ -369,8 +367,14 @@ customersRouter.get("/balance-disclosures/pending", requirePermission("customers
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
-  if (context.role !== "admin" && context.role !== "coordinator") {
-    res.status(403).json({ error: "Only admin or coordinator can review balance requests" });
+  const workflow = await getApprovalWorkflow(context.tenantId);
+  const canReviewQueue =
+    context.role === "admin" ||
+    context.role === "coordinator" ||
+    roleMayApprove(workflow, "registration", context.role) ||
+    roleMayApprove(workflow, "withdrawal", context.role);
+  if (!canReviewQueue) {
+    res.status(403).json({ error: "Your role is not allowed to review these requests." });
     return;
   }
 
@@ -429,18 +433,13 @@ customersRouter.patch(
       res.status(401).json({ error: "Unauthorized" });
       return;
     }
-    if (context.role !== "admin" && context.role !== "coordinator") {
-      res.status(403).json({ error: "Only admin or coordinator can reject balance requests" });
-      return;
-    }
-
     const disclosureId = Array.isArray(req.params.disclosureId)
       ? req.params.disclosureId[0]
       : req.params.disclosureId;
 
     try {
       res.json(
-        await rejectBalanceDisclosure(context.tenantId, context.userId, disclosureId, req.body)
+        await rejectBalanceDisclosure(context.tenantId, context.userId, disclosureId, req.body, context.role)
       );
     } catch (error) {
       res.status(400).json({

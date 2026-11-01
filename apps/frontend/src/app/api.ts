@@ -28,6 +28,7 @@ import type {
   InvestmentAuditEvent
 } from "@bms/shared";
 import { isNetworkError, toUserFacingError, withNetworkRetry } from "../lib/networkError";
+import { parseTenantSubdomain } from "@bms/shared";
 import { withTransactionStepUp } from "../lib/transactionPinBridge";
 import { SESSION_UNAUTHORIZED_EVENT } from "../auth/sessionIdleConfig";
 
@@ -51,6 +52,7 @@ export type TenantRecord = {
   subscribedModules: TenantProductModule[];
   subscribedAddons?: TenantAddon[];
   reportsAnalytics?: boolean;
+  subdomain?: string;
   createdAt?: string;
 };
 
@@ -355,12 +357,13 @@ export type AuditLogRecord = {
 export type Transaction = {
   id: string;
   customerId: string;
-  type: "daily_susu" | "deposit" | "withdrawal";
+  type: "daily_susu" | "deposit" | "withdrawal" | "susu_reversal";
   amount: number;
   transactionBranchId: string;
   createdAt: string;
   notes?: string;
   recordedByUserId?: string;
+  reversedAt?: string;
 };
 
 export type BranchCounterStatementLine = Transaction & {
@@ -438,6 +441,7 @@ export type FieldAgentDashboard = {
     fullName: string;
     email: string;
     branchId?: string;
+    branchName?: string;
     tenantName?: string;
     role: string;
   };
@@ -480,6 +484,49 @@ export type LedgerEntry = {
   fieldAgentName?: string;
   performedByName?: string;
   transactionType?: string;
+  reversalStatus?: "posted" | "reversed";
+  reversalReference?: string;
+  reversalReason?: string;
+  reversedByName?: string;
+  reversedAt?: string;
+};
+
+export type SusuCollectionDetail = {
+  transactionId: string;
+  customerId: string;
+  customerName: string;
+  accountNumber?: string;
+  amount: number;
+  collectedAt: string;
+  postedByUserId: string;
+  postedByName: string;
+  branchId: string;
+  notes?: string;
+  status: "posted" | "reversed";
+  reversalReference?: string;
+  reversalTransactionId?: string;
+  reversalReason?: string;
+  reversedByUserId?: string;
+  reversedByName?: string;
+  reversedAt?: string;
+  canReverse: boolean;
+  receiptText: string;
+};
+
+export type SusuReversalHistoryItem = {
+  reversalTransactionId: string;
+  reversalReference: string;
+  originalTransactionId: string;
+  customerId: string;
+  customerName: string;
+  accountNumber?: string;
+  amount: number;
+  collectedAt: string;
+  reversedAt: string;
+  postedByName: string;
+  reversedByName: string;
+  reason: string;
+  branchId: string;
 };
 
 export type SummaryReport = {
@@ -558,10 +605,12 @@ export type AuthMe = {
   email?: string;
   fullName?: string;
   tenantName?: string;
+  tenantSubdomain?: string;
   subscribedModules?: TenantProductModule[];
   subscribedAddons?: TenantAddon[];
   reportsAnalytics?: boolean;
   susuNavVisibility?: SusuNavVisibilityRow[];
+  approvalWorkflow?: import("@bms/shared").ApprovalWorkflow;
   transactionPin?: {
     required: boolean;
     configured: boolean;
@@ -589,7 +638,9 @@ export function authMeSignature(me: AuthMe | null | undefined): string {
     fullName: me.fullName ?? "",
     email: me.email ?? "",
     tenantName: me.tenantName ?? "",
+    tenantSubdomain: me.tenantSubdomain ?? "",
     susuNavVisibility: me.susuNavVisibility ?? null,
+    approvalWorkflow: me.approvalWorkflow ?? null,
     transactionPin: me.transactionPin ?? null
   });
 }
@@ -745,12 +796,24 @@ export async function fetchJson<T>(url: string, init?: RequestInit, retried = fa
   });
 }
 
+export async function lookupCompanyHost(subdomain: string): Promise<{
+  name: string;
+  subdomain: string;
+  signInHost: string;
+}> {
+  return fetchJson(`${API_BASE_URL}/api/v1/auth/company-host?subdomain=${encodeURIComponent(subdomain)}`);
+}
+
 export async function login(email: string, password: string): Promise<AuthSession> {
   try {
     const payload = await fetchJson<AuthSession>(`${API_BASE_URL}/api/v1/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password })
+      body: JSON.stringify({
+        email,
+        password,
+        tenantSubdomain: parseTenantSubdomain(window.location.hostname) ?? undefined
+      })
     });
     persistSession(payload);
     return payload;
@@ -1061,7 +1124,24 @@ export type CompanyProfile = {
   logoUrl?: string;
   brandColor?: string;
   fontSizeStep?: number;
+  savingsOpeningFeeGhs?: number;
 };
+
+export async function getApprovalWorkflow(): Promise<import("@bms/shared").ApprovalWorkflow> {
+  return fetchJson<import("@bms/shared").ApprovalWorkflow>(`${API_BASE_URL}/api/v1/tenant/approval-workflows`, {
+    headers: authHeaders()
+  });
+}
+
+export async function updateApprovalWorkflow(
+  body: import("@bms/shared").ApprovalWorkflow
+): Promise<import("@bms/shared").ApprovalWorkflow> {
+  return fetchJson<import("@bms/shared").ApprovalWorkflow>(`${API_BASE_URL}/api/v1/tenant/approval-workflows`, {
+    method: "PUT",
+    headers: authHeaders(),
+    body: JSON.stringify(body)
+  });
+}
 
 export async function getCompanyProfile(): Promise<CompanyProfile> {
   return fetchJson<CompanyProfile>(`${API_BASE_URL}/api/v1/tenant/profile`, {
@@ -1078,8 +1158,25 @@ export async function updateCompanyProfile(body: {
   logoUrl?: string | null;
   brandColor?: string | null;
   fontSizeStep?: number;
+  savingsOpeningFeeGhs?: number;
 }): Promise<CompanyProfile> {
   return fetchJson<CompanyProfile>(`${API_BASE_URL}/api/v1/tenant/profile`, {
+    method: "PUT",
+    headers: authHeaders(),
+    body: JSON.stringify(body)
+  });
+}
+
+export async function getRegistrationFormSetup(): Promise<import("@bms/shared").RegistrationFormSetup> {
+  return fetchJson<import("@bms/shared").RegistrationFormSetup>(`${API_BASE_URL}/api/v1/tenant/form-setup`, {
+    headers: authHeaders()
+  });
+}
+
+export async function updateRegistrationFormSetup(
+  body: import("@bms/shared").RegistrationFormSetup
+): Promise<import("@bms/shared").RegistrationFormSetup> {
+  return fetchJson<import("@bms/shared").RegistrationFormSetup>(`${API_BASE_URL}/api/v1/tenant/form-setup`, {
     method: "PUT",
     headers: authHeaders(),
     body: JSON.stringify(body)
@@ -1119,6 +1216,25 @@ export async function updateTenantSmsSettings(
     headers: authHeaders(),
     body: JSON.stringify(body)
   });
+}
+
+export type MessageLogItem = {
+  id: string;
+  channel: "sms" | "email";
+  eventType: string;
+  recipient: string;
+  customerName?: string;
+  status: "pending" | "sent" | "failed" | "logged";
+  errorMessage?: string;
+  preview: string;
+  createdAt: string;
+};
+
+export async function getMessageLog(): Promise<{ items: MessageLogItem[]; storageReady: boolean }> {
+  return fetchJson<{ items: MessageLogItem[]; storageReady: boolean }>(
+    `${API_BASE_URL}/api/v1/tenant/notifications/log`,
+    { headers: authHeaders() }
+  );
 }
 
 export async function sendTenantTestSms(body: {
@@ -2072,7 +2188,17 @@ export type BranchFloatSession = {
   settledBy?: string;
   settledAt?: string;
   varianceNote?: string;
+  topUpRequested?: number;
+  topUpNote?: string;
 };
+
+export function isFloatTopUpRequest(session: BranchFloatSession): boolean {
+  return session.status === "open" && (session.topUpRequested ?? 0) > 0;
+}
+
+export function pendingFloatAmount(session: BranchFloatSession): number {
+  return isFloatTopUpRequest(session) ? (session.topUpRequested ?? 0) : session.openingFloat;
+}
 
 export type BranchFloatSummary = {
   expectedCash: number;
@@ -2232,6 +2358,36 @@ export async function createTransaction(
   );
 }
 
+export async function getSusuCollectionDetail(transactionId: string): Promise<SusuCollectionDetail> {
+  return fetchJson<SusuCollectionDetail>(
+    `${API_BASE_URL}/api/v1/transactions/${transactionId}/susu-collection`,
+    { headers: authHeaders() }
+  );
+}
+
+export async function reverseSusuCollection(
+  transactionId: string,
+  reason: string,
+  idempotencyKey: string
+): Promise<SusuCollectionDetail> {
+  return fetchJson<SusuCollectionDetail>(`${API_BASE_URL}/api/v1/transactions/${transactionId}/reverse`, {
+    method: "POST",
+    headers: {
+      ...authHeaders(),
+      "Content-Type": "application/json",
+      "Idempotency-Key": idempotencyKey
+    },
+    body: JSON.stringify({ reason })
+  });
+}
+
+export async function listSusuReversals(branchId?: string): Promise<SusuReversalHistoryItem[]> {
+  const query = branchId ? `?branchId=${encodeURIComponent(branchId)}` : "";
+  return fetchJson<SusuReversalHistoryItem[]>(`${API_BASE_URL}/api/v1/transactions/susu-reversals${query}`, {
+    headers: authHeaders()
+  });
+}
+
 export async function getCustomerLedger(customerId: string): Promise<LedgerEntry[]> {
   const response = await fetch(`${API_BASE_URL}/api/v1/ledger/customers/${customerId}`, {
     headers: authHeaders()
@@ -2383,6 +2539,22 @@ export async function listPlatformTenants(): Promise<TenantRecord[]> {
     throw new Error("Failed to load companies");
   }
   return response.json() as Promise<TenantRecord[]>;
+}
+
+export async function updateTenantSubdomain(
+  tenantId: string,
+  subdomain: string
+): Promise<TenantRecord> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/platform/tenants/${tenantId}/subdomain`, {
+    method: "PATCH",
+    headers: authHeaders(),
+    body: JSON.stringify({ subdomain })
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? "Failed to save web address");
+  }
+  return response.json() as Promise<TenantRecord>;
 }
 
 export async function createPlatformTenant(payload: {

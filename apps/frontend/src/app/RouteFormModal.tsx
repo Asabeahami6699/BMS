@@ -3,6 +3,7 @@ import type { Branch, FieldRoute } from "./api";
 import { createFieldRoute, listBranches, listFieldAgents, updateFieldRoute } from "./api";
 import { Modal } from "../components/Modal";
 import { useToast } from "../components/Toast";
+import { formatBranchLabel } from "./branchDisplay";
 
 type Mode = "create" | "edit";
 type CreateStep = "details" | "assign-agent";
@@ -23,13 +24,7 @@ type Props = {
 };
 
 function branchLabelForRoute(route: FieldRoute, branches: Branch[]): string {
-  const branch = branches.find((b) => b.id === route.branchId);
-  if (branch) {
-    return `${branch.name} (${branch.code})`;
-  }
-  return route.branchName && route.branchCode
-    ? `${route.branchName} (${route.branchCode})`
-    : route.branchId;
+  return formatBranchLabel(route.branchId, branches, route.branchName, route.branchCode);
 }
 
 export function RouteFormModal({ open, mode, route, branches, onClose, onSaved }: Props) {

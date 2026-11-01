@@ -1,12 +1,60 @@
 import { useEffect, useState } from "react";
-import { ADDON_LABELS, MODULE_LABELS } from "@bms/shared";
+import { ADDON_LABELS, MODULE_LABELS, TENANT_ROOT_DOMAIN, isTenantSubdomain, tenantSignInHost } from "@bms/shared";
 import type { TenantRecord } from "../api";
-import { listPlatformTenants, updateTenantSubscription } from "../api";
+import { listPlatformTenants, updateTenantSubdomain, updateTenantSubscription } from "../api";
 import { useToast } from "../../components/Toast";
 import { CreateAdminModal } from "./CreateAdminModal";
 import { EditTenantAddonsModal } from "./EditTenantAddonsModal";
 import { EditTenantModulesModal } from "./EditTenantModulesModal";
 import { RegisterCompanyModal } from "./RegisterCompanyModal";
+
+function CompanyAddressField({
+  tenant,
+  onSaved
+}: {
+  tenant: TenantRecord;
+  onSaved: (tenant: TenantRecord) => void;
+}) {
+  const { showToast } = useToast();
+  const current = tenant.subdomain || (isTenantSubdomain(tenant.id) ? tenant.id : "");
+  const [value, setValue] = useState(current);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setValue(current);
+  }, [current]);
+
+  async function save() {
+    setSaving(true);
+    try {
+      const saved = await updateTenantSubdomain(tenant.id, value.trim().toLowerCase());
+      onSaved(saved);
+      showToast(`Saved ${tenantSignInHost(saved.subdomain || value.trim().toLowerCase())}`, "success");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Failed to save web address", "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const preview = value.trim() ? tenantSignInHost(value.trim().toLowerCase()) : `name.${TENANT_ROOT_DOMAIN}`;
+
+  return (
+    <div className="tenant-address">
+      <input
+        value={value}
+        aria-label={`Web address for ${tenant.name}`}
+        placeholder="evanssusu"
+        autoCapitalize="none"
+        onChange={(event) => setValue(event.target.value.toLowerCase())}
+      />
+      <button type="button" className="button secondary" disabled={saving || !value.trim()} onClick={() => void save()}>
+        {saving ? "Saving…" : "Save address"}
+      </button>
+      <span className="muted">{preview}</span>
+    </div>
+  );
+}
 
 export function CompaniesPage() {
   const { showToast } = useToast();
@@ -122,7 +170,10 @@ export function CompaniesPage() {
               <div>
                 <strong>{tenant.name}</strong>
                 <small>
-                  {tenant.id} ·{" "}
+                  {isTenantSubdomain(tenant.subdomain || tenant.id)
+                    ? tenantSignInHost(tenant.subdomain || tenant.id)
+                    : tenant.id}{" "}
+                  ·{" "}
                   <span
                     className={`status-pill status-pill--${tenant.subscriptionStatus === "active" ? "active" : "inactive"}`}
                   >
@@ -147,6 +198,12 @@ export function CompaniesPage() {
                     </>
                   )}
                 </div>
+                <CompanyAddressField
+                  tenant={tenant}
+                  onSaved={(saved) =>
+                    setTenants((current) => current.map((item) => (item.id === saved.id ? saved : item)))
+                  }
+                />
               </div>
               <div className="tenant-line-actions">
                 <button

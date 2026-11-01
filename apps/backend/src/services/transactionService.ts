@@ -12,6 +12,7 @@ import {
   openingFeeNote,
   recordOpeningFeeRecovery
 } from "./savingsOpeningFeeService.js";
+import { getSavingsOpeningFeeGhs } from "./tenantProfileService.js";
 import { applyTransactionToFloat } from "./branchFloatService.js";
 import { createAgencyPendingDeposit, usesAgencyDepositFlow } from "./agencyBankingService.js";
 import { notifyCustomerTransaction } from "./customerNotificationService.js";
@@ -38,6 +39,67 @@ function getTenantTransactions(tenantId: string): Transaction[] {
 
 function setTenantTransactions(tenantId: string, transactions: Transaction[]): void {
   transactionStore.set(tenantId, transactions);
+}
+
+export function mapTransactionRow(row: Record<string, unknown>): Transaction {
+  return transactionSchema.parse({
+    id: row.id,
+    tenantId: row.tenant_id,
+    customerId: row.customer_id,
+    type: row.type,
+    amount: Number(row.amount),
+    transactionBranchId: row.transaction_branch_id,
+    homeBranchId: row.home_branch_id,
+    recordedByUserId: row.recorded_by_user_id,
+    fieldAgentId: row.field_agent_id,
+    createdAt: row.created_at,
+    notes: row.notes ?? undefined,
+    reversesTransactionId: row.reverses_transaction_id ?? undefined,
+    reversedByTransactionId: row.reversed_by_transaction_id ?? undefined,
+    reversalReason: row.reversal_reason ?? undefined,
+    reversedByUserId: row.reversed_by_user_id ?? undefined,
+    reversedAt: row.reversed_at ?? undefined,
+    executionStatus: row.execution_status ?? "completed",
+    bankExecutedByUserId: row.bank_executed_by_user_id ?? undefined,
+    bankExecutedAt: row.bank_executed_at ?? undefined,
+    bankProductId: row.bank_product_id ?? undefined
+  });
+}
+
+export async function findTransaction(
+  tenantId: string,
+  transactionId: string
+): Promise<Transaction | null> {
+  const supabase = getSupabaseAdminClient();
+  if (!supabase) {
+    return getTenantTransactions(tenantId).find((tx) => tx.id === transactionId) ?? null;
+  }
+
+  const { data, error } = await supabase
+    .from("customer_transactions")
+    .select("*")
+    .eq("tenant_id", tenantId)
+    .eq("id", transactionId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to load transaction: ${error.message}`);
+  }
+  if (!data) {
+    return null;
+  }
+  return mapTransactionRow(data as Record<string, unknown>);
+}
+
+export function upsertMemoryTransaction(tenantId: string, transaction: Transaction): void {
+  const rows = [...getTenantTransactions(tenantId)];
+  const index = rows.findIndex((tx) => tx.id === transaction.id);
+  if (index >= 0) {
+    rows[index] = transaction;
+  } else {
+    rows.unshift(transaction);
+  }
+  setTenantTransactions(tenantId, rows);
 }
 
 async function persistBankProductId(
@@ -346,6 +408,10 @@ export async function createTransaction(
 ): Promise<Transaction> {
   const payload = createTransactionInputSchema.parse(input);
 
+  if (payload.type === "susu_reversal") {
+    throw new Error("Susu reversals are created only with Reverse collection.");
+  }
+
   if (context.role === "field_agent") {
     if (
       payload.type === "daily_susu" ||
@@ -390,7 +456,11 @@ export async function createTransaction(
 
   const feeDeduction =
     payload.type !== "withdrawal"
-      ? computeOpeningFeeDeduction(customer, payload.amount)
+      ? computeOpeningFeeDeduction(
+          customer,
+          payload.amount,
+          await getSavingsOpeningFeeGhs(context.tenantId)
+        )
       : null;
 
   const ledgerAmount = feeDeduction ? feeDeduction.creditAmount : payload.amount;
@@ -582,23 +652,5 @@ export async function listTransactions(
     throw new Error(`Failed to list transactions: ${error.message}`);
   }
 
-  return (data ?? []).map((row) =>
-    transactionSchema.parse({
-      id: row.id,
-      tenantId: row.tenant_id,
-      customerId: row.customer_id,
-      type: row.type,
-      amount: Number(row.amount),
-      transactionBranchId: row.transaction_branch_id,
-      homeBranchId: row.home_branch_id,
-      recordedByUserId: row.recorded_by_user_id,
-      fieldAgentId: row.field_agent_id,
-      createdAt: row.created_at,
-      notes: row.notes ?? undefined,
-      executionStatus: row.execution_status ?? "completed",
-      bankExecutedByUserId: row.bank_executed_by_user_id ?? undefined,
-      bankExecutedAt: row.bank_executed_at ?? undefined,
-      bankProductId: row.bank_product_id ?? undefined
-    })
-  );
+  return (data ?? []).map((row) => mapTransactionRow(row as Record<string, unknown>));
 }

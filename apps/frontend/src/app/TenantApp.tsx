@@ -10,7 +10,7 @@ import { AccountNumberPolicyCard } from "./AccountNumberPolicyCard";
 import { CommissionPolicyCard } from "./CommissionPolicyCard";
 import { CustomerOpsCard } from "./CustomerOpsCard";
 import { DashboardShell } from "./DashboardShell";
-import { FeaturePlaceholderPage } from "./FeaturePlaceholderPage";
+import { SettingsApprovalWorkflowsPage } from "./settings/SettingsApprovalWorkflowsPage";
 import { ModulePlaceholderCard } from "./ModulePlaceholderCard";
 import { PayslipCard } from "./PayslipCard";
 import { ReportsAnalyticsPage } from "./ReportsAnalyticsPage";
@@ -18,6 +18,7 @@ import { UserProfilePage } from "./UserProfilePage";
 import { RoleManagementPage } from "./RoleManagementPage";
 import { AuditLogsPage } from "./AuditLogsPage";
 import { SettingsCompanyProfilePage, COMPANY_PROFILE_UPDATED_EVENT } from "./settings/SettingsCompanyProfilePage";
+import { SettingsFormSetupPage } from "./settings/SettingsFormSetupPage";
 import { applyTenantFontStep } from "./fontSize";
 import { SettingsNotificationsPage } from "./settings/SettingsNotificationsPage";
 import { SettingsSubscriptionPage } from "./settings/SettingsSubscriptionPage";
@@ -98,6 +99,7 @@ import { BankingOverviewPage } from "./BankingOverviewPage";
 import { useBranchesLiveSync } from "./hooks/useBranchesLiveSync";
 import { useBranchesStore } from "./stores/branchesStore";
 import { ALL_BRANCHES_SCOPE, getRuntimeBranchId, setRuntimeBranchId } from "./api";
+import { formatBranchLabel } from "./branchDisplay";
 import { useBranchContextSync } from "./hooks/useBranchContextSync";
 import { FieldAgentApp } from "../agent/FieldAgentApp";
 import { OverviewPage } from "./OverviewPage";
@@ -106,13 +108,6 @@ import { PendingApprovalsCard } from "./PendingApprovalsCard";
 import { PendingBalanceApprovalsCard } from "./PendingBalanceApprovalsCard";
 import { CustomerOnboardingPage } from "./CustomerOnboardingPage";
 import { SusuClosingBalancesPage } from "./SusuClosingBalancesPage";
-
-const APPROVAL_WORKFLOW_STEPS = [
-  "Field agent registration or withdrawal request",
-  "Coordinator review",
-  "Customer account credited or debited",
-  "Callover batch posted to ledger"
-];
 
 export function TenantApp() {
   const { user, logout, refreshMe } = useAuth();
@@ -249,6 +244,11 @@ export function TenantApp() {
               }}
             >
               <option value={ALL_BRANCHES_SCOPE}>All branches</option>
+              {selectedBranch &&
+              selectedBranch !== ALL_BRANCHES_SCOPE &&
+              !branches.some((b) => b.id === selectedBranch) ? (
+                <option value={selectedBranch}>{formatBranchLabel(selectedBranch, branches)}</option>
+              ) : null}
               {branches.map((b) => (
                 <option key={b.id} value={b.id}>
                   {b.name} ({b.code})
@@ -789,6 +789,14 @@ export function TenantApp() {
           }
         />
         <Route
+          path="/settings/form-setup"
+          element={
+            <TenantSettingsRoute route="settings/form-setup" role={role} permissions={permissions}>
+              <SettingsFormSetupPage />
+            </TenantSettingsRoute>
+          }
+        />
+        <Route
           path="/settings/subscription"
           element={
             <TenantSettingsRoute route="settings/subscription" role={role} permissions={permissions}>
@@ -809,11 +817,7 @@ export function TenantApp() {
           path="/settings/approval-workflows"
           element={
             <TenantSettingsRoute route="settings/approval-workflows" role={role} permissions={permissions}>
-              <FeaturePlaceholderPage
-                title="Approval Workflows"
-                description="Configure customer and withdrawal approval chains."
-                workflow={APPROVAL_WORKFLOW_STEPS}
-              />
+              <SettingsApprovalWorkflowsPage />
             </TenantSettingsRoute>
           }
         />

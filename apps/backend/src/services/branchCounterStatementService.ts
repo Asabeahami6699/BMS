@@ -92,6 +92,13 @@ function mapTransactionRow(row: Record<string, unknown>): Transaction {
     fieldAgentId: String(row.field_agent_id),
     createdAt: String(row.created_at),
     notes: row.notes ? String(row.notes) : undefined,
+    reversesTransactionId: row.reverses_transaction_id ? String(row.reverses_transaction_id) : undefined,
+    reversedByTransactionId: row.reversed_by_transaction_id
+      ? String(row.reversed_by_transaction_id)
+      : undefined,
+    reversalReason: row.reversal_reason ? String(row.reversal_reason) : undefined,
+    reversedByUserId: row.reversed_by_user_id ? String(row.reversed_by_user_id) : undefined,
+    reversedAt: row.reversed_at ? String(row.reversed_at) : undefined,
     executionStatus: row.execution_status ?? "completed",
     bankProductId: row.bank_product_id != null ? String(row.bank_product_id) : undefined,
     workflowData: (row.workflow_data as Record<string, unknown>) ?? undefined
@@ -183,19 +190,27 @@ export function summarizeBranchCounterStatement(
   let totalDeposits = 0;
   let totalWithdrawals = 0;
   let totalDailySusu = 0;
+  let counted = 0;
   const staffMap = new Map<
     string,
     { userId: string; name: string; role: string; count: number; totalAmount: number }
   >();
 
   for (const line of lines) {
+    const countsAsSusu = line.type === "daily_susu" && !line.reversedAt;
+    if (line.type === "susu_reversal" || (line.type === "daily_susu" && line.reversedAt)) {
+      continue;
+    }
     if (line.type === "deposit") {
       totalDeposits += line.amount;
     } else if (line.type === "withdrawal") {
       totalWithdrawals += line.amount;
-    } else {
+    } else if (countsAsSusu) {
       totalDailySusu += line.amount;
+    } else {
+      continue;
     }
+    counted += 1;
 
     const existing = staffMap.get(line.recordedByUserId);
     if (existing) {
@@ -217,7 +232,7 @@ export function summarizeBranchCounterStatement(
   return {
     date,
     branchId,
-    transactionCount: lines.length,
+    transactionCount: counted,
     totalDeposits,
     totalWithdrawals,
     totalDailySusu,

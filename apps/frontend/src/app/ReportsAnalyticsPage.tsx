@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useShallow } from "zustand/react/shallow";
 import {
@@ -7,8 +7,8 @@ import {
   listSubscribedProductModules,
   MODULE_LABELS
 } from "@bms/shared";
-import type { AppRole, AuthMe, BranchReport } from "./api";
-import { exportReportsCsv } from "./api";
+import type { AppRole, AuthMe, BranchReport, SusuReversalHistoryItem } from "./api";
+import { exportReportsCsv, listSusuReversals } from "./api";
 import { useReportsAnalyticsLiveSync } from "./hooks/useReportsAnalyticsLiveSync";
 import { useInvestmentsLiveSync } from "./hooks/useInvestmentsLiveSync";
 import { selectAgentDisplayName, selectBranchDisplayName } from "./stores/performanceStore";
@@ -32,6 +32,14 @@ function barPct(value: number, max: number): number {
     return 0;
   }
   return Math.round((value / max) * 100);
+}
+
+function formatWhen(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return iso;
+  }
+  return date.toLocaleString();
 }
 
 function formatShortDate(iso: string): string {
@@ -140,6 +148,53 @@ export function ReportsAnalyticsPage({ role, me }: Props) {
       pct: barPct(b.totalAmount, max)
     }));
   }, [data?.branchReports, branches]);
+
+  const [reversalQuery, setReversalQuery] = useState("");
+  const [reversals, setReversals] = useState<SusuReversalHistoryItem[]>([]);
+  const [reversalsError, setReversalsError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!hasSusu || !canReportsRead) {
+      return;
+    }
+    let cancelled = false;
+    void listSusuReversals(branchFilter || undefined)
+      .then((rows) => {
+        if (!cancelled) {
+          setReversals(rows);
+          setReversalsError(null);
+        }
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setReversals([]);
+          setReversalsError(toUserFacingError(err, "Could not load reversal history"));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [hasSusu, canReportsRead, branchFilter]);
+
+  const filteredReversals = useMemo(() => {
+    const query = reversalQuery.trim().toLowerCase();
+    if (!query) {
+      return reversals;
+    }
+    return reversals.filter((row) =>
+      [
+        row.customerName,
+        row.accountNumber,
+        row.reversalReference,
+        row.originalTransactionId,
+        row.reason,
+        row.postedByName,
+        row.reversedByName
+      ]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(query))
+    );
+  }, [reversals, reversalQuery]);
 
   const canExport = role === "admin" || role === "accountant" || role === "auditor";
   const canFilterBranch =
@@ -446,6 +501,58 @@ export function ReportsAnalyticsPage({ role, me }: Props) {
               ))}
             </section>
           </div>
+
+          <section className="overview-panel reports-panel--wide" aria-label="Susu reversal history">
+            <h2 className="overview-panel__title">Susu reversal history</h2>
+            <p className="muted">
+              Reversed susu credits stay on the customer record and are left out of the collection totals above.
+            </p>
+            <label className="field">
+              <span>Reversal history filter</span>
+              <input
+                value={reversalQuery}
+                onChange={(event) => setReversalQuery(event.target.value)}
+                placeholder="Customer, account, reference, or reason"
+              />
+            </label>
+            {reversalsError ? <p className="overview-error">{reversalsError}</p> : null}
+            {filteredReversals.length === 0 ? (
+              <p className="muted">No reversed susu collections match this filter.</p>
+            ) : (
+              <div className="admin-table-scroll">
+                <table className="susu-reversal__table">
+                  <thead>
+                    <tr>
+                      <th>Reversed</th>
+                      <th>Customer</th>
+                      <th>Account</th>
+                      <th>Amount</th>
+                      <th>Original reference</th>
+                      <th>Reversal reference</th>
+                      <th>Reason</th>
+                      <th>Posted by</th>
+                      <th>Reversed by</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredReversals.map((row) => (
+                      <tr key={row.reversalTransactionId}>
+                        <td>{formatWhen(row.reversedAt)}</td>
+                        <td>{row.customerName}</td>
+                        <td>{row.accountNumber ?? "—"}</td>
+                        <td>{formatMoney(row.amount)}</td>
+                        <td>{row.originalTransactionId}</td>
+                        <td>{row.reversalReference}</td>
+                        <td>{row.reason}</td>
+                        <td>{row.postedByName}</td>
+                        <td>{row.reversedByName}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
 
           <p className="muted reports-footnote">
             Branch counter till float and EOD balancing live under{" "}

@@ -71,9 +71,7 @@ export async function getAuditorDashboard(
     })
   );
 
-  const reversedTransactions = scopedTransactions.filter(
-    (tx) => String(tx.notes ?? "").toLowerCase().includes("revers")
-  ).length;
+  const reversedTransactions = scopedTransactions.filter((tx) => tx.type === "susu_reversal").length;
 
   const highValueTransactions = scopedTransactions.filter(
     (tx) => tx.amount >= HIGH_VALUE_DEFAULT

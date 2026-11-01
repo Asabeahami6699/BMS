@@ -14,6 +14,7 @@ import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { useBranchesLiveSync } from "./hooks/useBranchesLiveSync";
 import { useBranchesStore } from "./stores/branchesStore";
 import { useHrDeskStore } from "./stores/hrDeskStore";
+import { formatBranchLabel } from "./branchDisplay";
 
 type Props = {
   role: AppRole;
@@ -31,11 +32,7 @@ function formatDate(value?: string): string {
 }
 
 function branchLabel(branchId: string | undefined, branches: Branch[]): string {
-  if (!branchId) {
-    return "—";
-  }
-  const match = branches.find((b) => b.id === branchId);
-  return match ? `${match.name} (${match.code})` : branchId;
+  return formatBranchLabel(branchId, branches);
 }
 
 export function UserManagementCard({ role }: Props) {

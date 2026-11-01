@@ -1,4 +1,4 @@
-import { createTenantSchema } from "@bms/shared";
+import { createTenantSchema, tenantSubdomainSchema } from "@bms/shared";
 import { Router } from "express";
 import { z } from "zod";
 import {
@@ -7,7 +7,8 @@ import {
   listPlatformTenants,
   updateTenantProductModules,
   updateTenantAddons,
-  updateTenantSubscription
+  updateTenantSubscription,
+  updateTenantSubdomain
 } from "../services/authService.js";
 import { requirePermission } from "../middleware/requirePermission.js";
 
@@ -41,7 +42,7 @@ platformRouter.post("/tenants", requirePermission("platform.tenants.create"), as
   try {
     const parsed = createTenantSchema.safeParse(req.body);
     if (!parsed.success) {
-      res.status(400).json({ error: "Invalid tenant payload", details: parsed.error.flatten() });
+      res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid tenant payload" });
       return;
     }
     const tenant = await createPlatformTenant(parsed.data);
@@ -73,6 +74,24 @@ platformRouter.patch(
       res.json(tenant);
     } catch (error) {
       res.status(400).json({ error: error instanceof Error ? error.message : "Failed to update add-ons" });
+    }
+  }
+);
+
+platformRouter.patch(
+  "/tenants/:tenantId/subdomain",
+  requirePermission("platform.tenants.update"),
+  async (req, res) => {
+    const parsed = z.object({ subdomain: tenantSubdomainSchema }).safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid web address" });
+      return;
+    }
+    try {
+      const tenant = await updateTenantSubdomain(String(req.params.tenantId), parsed.data.subdomain);
+      res.json(tenant);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : "Failed to save web address" });
     }
   }
 );

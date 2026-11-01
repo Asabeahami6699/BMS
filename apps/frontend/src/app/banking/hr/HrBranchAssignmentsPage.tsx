@@ -7,6 +7,7 @@ import { useBranchesLiveSync } from "../../hooks/useBranchesLiveSync";
 import { useBranchesStore } from "../../stores/branchesStore";
 import { useHrDeskStore } from "../../stores/hrDeskStore";
 import { HrSectionShell } from "./HrSectionShell";
+import { formatBranchLabel } from "../../branchDisplay";
 
 type Props = { displayName?: string };
 
@@ -60,7 +61,6 @@ export function HrBranchAssignmentsPage({ displayName }: Props) {
     "role"
   ] as (keyof UserRecord)[]);
 
-  const branchById = useMemo(() => new Map(branches.map((b) => [b.id, b])), [branches]);
 
   const updatedLabel = lastFetchedAt
     ? `Updated ${new Date(lastFetchedAt).toLocaleTimeString()}`
@@ -111,9 +111,7 @@ export function HrBranchAssignmentsPage({ displayName }: Props) {
           name: u.fullName ?? u.email,
           role: u.role.replace(/_/g, " "),
           scope: u.scopeType === "head_office" ? "Head office" : "Branch",
-          branch: u.branchId
-            ? `${branchById.get(u.branchId)?.name ?? u.branchId} (${branchById.get(u.branchId)?.code ?? ""})`
-            : "—",
+          branch: u.branchId ? formatBranchLabel(u.branchId, branches) : "—",
           teller: u.role === "teller" && u.tellerType ? tellerTypeLabel(u.tellerType) : "—"
         }))}
         rowKey={(r) => r.id}

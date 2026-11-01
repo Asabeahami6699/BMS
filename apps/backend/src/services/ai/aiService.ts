@@ -48,11 +48,13 @@ async function buildHelpSystemPrompt(
     ? `\nPLATFORM DATA SNAPSHOT (as of ${snapshot.generatedAt}):\n${formatSnapshotForPrompt(snapshot)}\n\n${PLATFORM_ANALYSIS_INSTRUCTIONS}\n`
     : "";
 
+  const branchScope = snapshot?.scope.branchName ? ` (${snapshot.scope.branchName})` : "";
+
   return `${BMS_PRODUCT_KNOWLEDGE}
 ${snapshotBlock}
 Signed-in user context (do not repeat verbatim unless helpful):
 - Role: ${context.role}
-- Scope: ${context.scopeType}${context.branchId ? ` (branch ${context.branchId})` : ""}
+- Scope: ${context.scopeType}${branchScope}
 - Subscribed modules: ${subscribedModulesSummary(context)}
 - Permissions: ${permissionsSummary(context)}
 

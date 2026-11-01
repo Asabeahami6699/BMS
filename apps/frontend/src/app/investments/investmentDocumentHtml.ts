@@ -6,6 +6,7 @@ import type {
 } from "@bms/shared";
 import { formatInvestmentTenureLabel } from "@bms/shared";
 import { investmentSectionsOrdered, visibleInvestmentFields, formatInvestmentMoney } from "./investmentUi";
+import { formatBranchLabel } from "../branchDisplay";
 
 const RAIL_SECTION_IDS = new Set(["photo"]);
 const SKIP_FIELD_TYPES = new Set(["file", "signature"]);
@@ -284,7 +285,7 @@ function buildSectionsHtml(
               String(snapshot.autoRenewal ?? investment.autoRenewal).replace(/_/g, " ")
             ),
             infoRow("Status", investment.status),
-            infoRow("Branch", investment.branchName ?? investment.branchId)
+            infoRow("Branch", formatBranchLabel(investment.branchId, [], investment.branchName))
           ].join("")
         )
       )

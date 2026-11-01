@@ -8,6 +8,7 @@ import { DeskMetricGrid, formatDeskMoney } from "./DeskMetricGrid";
 import { DeskSummaryTable } from "./DeskSummaryTable";
 import { getRoleDeskConfig } from "./roleDeskConfig";
 import { RoleDeskShell } from "./RoleDeskShell";
+import { formatBranchLabel } from "../branchDisplay";
 
 type Props = { displayName?: string };
 
@@ -162,10 +163,7 @@ export function AccountantDeskPage({ displayName }: Props) {
               key: "branch",
               label: "Branch",
               render: (row) => (
-                <>
-                  <strong>{row.branchName ?? row.branchId}</strong>
-                  {row.branchCode ? <span className="muted"> ({row.branchCode})</span> : null}
-                </>
+                <strong>{formatBranchLabel(row.branchId, [], row.branchName, row.branchCode)}</strong>
               )
             },
             {

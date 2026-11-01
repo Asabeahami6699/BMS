@@ -74,14 +74,6 @@ export function BranchFormModal({ open, mode, branch, onClose, onSaved }: Props)
       }
     >
       <form id="branch-form" className="stack-form" onSubmit={handleSubmit}>
-        {mode === "edit" && branch ? (
-          <label className="field">
-            <span>Branch ID</span>
-            <input value={branch.id} disabled readOnly />
-          </label>
-        ) : (
-          <p className="muted">A unique branch ID is assigned automatically when you save.</p>
-        )}
         <label className="field">
           <span>Branch code</span>
           <input value={code} onChange={(e) => setCode(e.target.value)} required />

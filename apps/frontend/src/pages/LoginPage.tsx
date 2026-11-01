@@ -1,12 +1,14 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 
 import { Link, Navigate, useNavigate } from "react-router-dom";
 
-import { getAuthSession } from "../app/api";
+import { getAuthSession, lookupCompanyHost } from "../app/api";
 
 import { useAuth } from "../auth/AuthContext";
 
 import { getHomePathForRole } from "../auth/roleRedirect";
+
+import { parseTenantSubdomain } from "@bms/shared";
 
 import { BmsBrandIcon } from "../components/BmsBrandIcon";
 import { ThemeToggle } from "../components/ThemeToggle";
@@ -30,11 +32,44 @@ export function LoginPage() {
 
   const [submitting, setSubmitting] = useState(false);
 
+  const hostSubdomain = parseTenantSubdomain(window.location.hostname);
+
+  const [companyName, setCompanyName] = useState("");
+
+  const [unknownHost, setUnknownHost] = useState(false);
+
 
 
   const session = getAuthSession();
 
-  if (session?.accessToken && user) {
+  const ownsHost =
+    !hostSubdomain ||
+    (user?.tenantSubdomain || user?.tenantId || "").toLowerCase() === hostSubdomain;
+
+  useEffect(() => {
+    if (!hostSubdomain) {
+      return;
+    }
+    let cancelled = false;
+    void lookupCompanyHost(hostSubdomain)
+      .then((company) => {
+        if (!cancelled) {
+          setCompanyName(company.name);
+          setUnknownHost(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCompanyName("");
+          setUnknownHost(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [hostSubdomain]);
+
+  if (session?.accessToken && user && ownsHost) {
 
     return <Navigate to={getHomePathForRole(user.role, user.subscribedModules)} replace />;
 
@@ -49,6 +84,12 @@ export function LoginPage() {
     setSubmitting(true);
 
     setStatus("");
+
+    if (unknownHost) {
+      setStatus("This company address is not set up yet.");
+      setSubmitting(false);
+      return;
+    }
 
     try {
 
@@ -99,9 +140,15 @@ export function LoginPage() {
 
         </div>
 
-        <h1>Sign in</h1>
+        <h1>Sign in{companyName ? ` to ${companyName}` : ""}</h1>
 
-        <p className="muted">Use the email and password provided by your administrator.</p>
+        <p className="muted">
+          {unknownHost
+            ? "This company address is not set up yet."
+            : hostSubdomain
+              ? `Use the email and password for ${companyName || hostSubdomain}.`
+              : "Use the email and password provided by your administrator."}
+        </p>
 
         <form className="login-form" onSubmit={handleSubmit}>
 
@@ -191,7 +238,7 @@ export function LoginPage() {
 
           </label>
 
-          <button type="submit" className="button" disabled={submitting}>
+          <button type="submit" className="button" disabled={submitting || unknownHost}>
 
             {submitting ? "Signing in..." : "Sign in"}
 

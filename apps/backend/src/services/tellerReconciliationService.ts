@@ -69,6 +69,10 @@ async function mapTransactionLine(
       bankLabel = product.bankLabel;
     }
   }
+  if (line.type === "susu_reversal") {
+    throw new Error("Susu reversals are not teller cash lines");
+  }
+
   return {
     id: line.id,
     createdAt: line.createdAt,
@@ -171,7 +175,9 @@ export async function getTellerReconciliationBootstrap(
   }
 
   const transactions = await Promise.all(
-    filtered.map((line) => mapTransactionLine(context.tenantId, line))
+    filtered
+      .filter((line) => line.type !== "susu_reversal")
+      .map((line) => mapTransactionLine(context.tenantId, line))
   );
 
   return tellerReconciliationBootstrapSchema.parse({

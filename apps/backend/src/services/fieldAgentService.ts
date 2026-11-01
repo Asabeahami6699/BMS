@@ -11,6 +11,7 @@ import {
   profileDeductions
 } from "./userPayrollProfileService.js";
 import { listTransactions } from "./transactionService.js";
+import { listBranches } from "./branchService.js";
 
 type AgentContext = {
   userId: string;
@@ -43,6 +44,7 @@ export type FieldAgentDashboard = {
     fullName: string;
     email: string;
     branchId?: string;
+    branchName?: string;
     tenantName?: string;
     role: string;
   };
@@ -123,6 +125,7 @@ export async function getFieldAgentTodayCollections(
       (tx) =>
         tx.fieldAgentId === context.userId &&
         tx.type === "daily_susu" &&
+        !tx.reversedAt &&
         isToday(tx.createdAt)
     )
     .map((tx) => ({
@@ -170,6 +173,7 @@ async function resolveProfile(context: AgentContext): Promise<FieldAgentDashboar
   let fullName = context.fullName;
   let email = context.email ?? "";
   let tenantName = context.tenantName;
+  let branchName: string | undefined;
   const supabase = getSupabaseAdminClient();
   if (supabase) {
     const { data } = await supabase
@@ -190,11 +194,19 @@ async function resolveProfile(context: AgentContext): Promise<FieldAgentDashboar
       tenantName = String(tenant.name);
     }
   }
+  if (context.branchId) {
+    const branches = await listBranches(context.tenantId).catch(() => []);
+    const match = branches.find((branch) => branch.id === context.branchId);
+    if (match) {
+      branchName = `${match.name} (${match.code})`;
+    }
+  }
   return {
     userId: context.userId,
     fullName: fullName ?? email.split("@")[0] ?? "Field agent",
     email,
     branchId: context.branchId,
+    branchName,
     tenantName,
     role: context.role
   };
@@ -236,6 +248,7 @@ export async function getFieldAgentDashboard(context: AgentContext): Promise<Fie
     (tx) =>
       tx.fieldAgentId === context.userId &&
       tx.type === "daily_susu" &&
+      !tx.reversedAt &&
       isInRange(tx.createdAt, period.startIso, period.endIso)
   );
   const totalCollectedThisMonth = agentMonthTx.reduce((sum, tx) => sum + tx.amount, 0);

@@ -1,4 +1,6 @@
 import { useMemo, useState } from "react";
+import { DEFAULT_APPROVAL_WORKFLOW, roleMayApprove } from "@bms/shared";
+import { useAuth } from "../auth/AuthContext";
 import type { Customer } from "./api";
 import { RegistrationReviewModal } from "./RegistrationReviewModal";
 import { useCoordinatorLiveSync } from "./hooks/useCoordinatorLiveSync";
@@ -7,13 +9,21 @@ import { formatFieldAgent } from "../lib/formatFieldAgent";
 import { formatNextOfKin } from "../lib/formatNextOfKin";
 
 export function PendingApprovalsCard() {
+  const { user } = useAuth();
+  const canReview = roleMayApprove(
+    user?.approvalWorkflow ?? DEFAULT_APPROVAL_WORKFLOW,
+    "registration",
+    user?.role ?? ""
+  );
   useCoordinatorLiveSync();
   const pending = useCoordinatorStore((s) => s.pendingRegistrations);
   const branches = useCoordinatorStore((s) => s.branches);
   const loading = useCoordinatorStore((s) => s.loading);
   const [reviewCustomer, setReviewCustomer] = useState<Customer | null>(null);
-
   const branchById = useMemo(() => new Map(branches.map((b) => [b.id, b])), [branches]);
+  if (!canReview) {
+    return null;
+  }
 
   function branchLabel(customer: Customer): string | undefined {
     const branch = branchById.get(customer.homeBranchId);

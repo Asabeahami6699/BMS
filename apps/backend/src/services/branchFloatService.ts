@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getSupabaseAdminClient } from "../config/supabaseClient.js";
 import { isMissingSupabaseResource } from "../lib/supabaseSchema.js";
-import { resolveBranchId } from "./branchService.js";
+import { branchDisplayLabel, resolveBranchId } from "./branchService.js";
 import type { Transaction } from "@bms/shared";
 import { notifyTenantStaff, createAgentNotification } from "./notificationService.js";
 
@@ -37,6 +37,9 @@ export type BranchFloatSession = {
   settledBy?: string;
   settledAt?: string;
   varianceNote?: string;
+  /** Extra cash asked for while this till is already open. */
+  topUpRequested?: number;
+  topUpNote?: string;
 };
 
 type ActorContext = {
@@ -99,7 +102,9 @@ function rowToSession(row: Record<string, unknown>): BranchFloatSession {
     closedAt: row.closed_at != null ? String(row.closed_at) : undefined,
     settledBy: row.settled_by != null ? String(row.settled_by) : undefined,
     settledAt: row.settled_at != null ? String(row.settled_at) : undefined,
-    varianceNote: row.variance_note != null ? String(row.variance_note) : undefined
+    varianceNote: row.variance_note != null ? String(row.variance_note) : undefined,
+    topUpRequested: row.top_up_requested != null ? Number(row.top_up_requested) : undefined,
+    topUpNote: row.top_up_note != null ? String(row.top_up_note) : undefined
   };
 }
 
@@ -127,6 +132,8 @@ function sessionToRow(session: BranchFloatSession): Record<string, unknown> {
     settled_by: session.settledBy ?? null,
     settled_at: session.settledAt ?? null,
     variance_note: session.varianceNote ?? null,
+    top_up_requested: session.topUpRequested ?? null,
+    top_up_note: session.topUpNote ?? null,
     updated_at: new Date().toISOString()
   };
 }
@@ -145,7 +152,20 @@ async function persistSession(session: BranchFloatSession): Promise<void> {
     return;
   }
 
-  const { error } = await supabase.from("branch_float_sessions").upsert(sessionToRow(session));
+  const row = sessionToRow(session);
+  let { error } = await supabase.from("branch_float_sessions").upsert(row);
+  if (error && /top_up_requested|top_up_note/i.test(error.message)) {
+    if ((session.topUpRequested ?? 0) > 0 || session.topUpNote) {
+      throw new Error(
+        "Float top-up storage is not ready. Apply migration 070_branch_float_top_up.sql in Supabase, then try again."
+      );
+    }
+    const { top_up_requested: _topUpAmount, top_up_note: _topUpNote, ...withoutTopUp } = row;
+    void _topUpAmount;
+    void _topUpNote;
+    const retry = await supabase.from("branch_float_sessions").upsert(withoutTopUp);
+    error = retry.error;
+  }
   if (error && !isMissingSupabaseResource(error.message)) {
     throw new Error(`Failed to save float session: ${error.message}`);
   }
@@ -235,6 +255,9 @@ export async function requestBranchFloat(
     branchId
   );
   if (existing && existing.status !== "rejected") {
+    if (existing.status === "open") {
+      return requestFloatTopUp(context, existing, input.requestedAmount, input.note);
+    }
     throw new Error("You already have a float session for this branch and date");
   }
 
@@ -264,7 +287,39 @@ export async function requestBranchFloat(
       roles: ["admin", "coordinator"],
       kind: "float_requested",
       title: "Till float requested",
-      body: `GHS ${session.openingFloat.toFixed(2)} requested for branch ${branchId} on ${businessDate}.`
+      body: `GHS ${session.openingFloat.toFixed(2)} requested for ${await branchDisplayLabel(context.tenantId, branchId)} on ${businessDate}.`
+    });
+  } catch {
+    // Non-blocking
+  }
+  return session;
+}
+
+async function requestFloatTopUp(
+  context: ActorContext,
+  session: BranchFloatSession,
+  requestedAmount: number,
+  note?: string
+): Promise<BranchFloatSession> {
+  const amount = Math.max(0, requestedAmount);
+  if (amount <= 0) {
+    throw new Error("Enter the top-up amount you need");
+  }
+  if ((session.topUpRequested ?? 0) > 0) {
+    throw new Error("A top-up is already waiting to be released");
+  }
+
+  session.topUpRequested = amount;
+  session.topUpNote = note?.trim() || undefined;
+  await persistSession(session);
+
+  try {
+    await notifyTenantStaff({
+      tenantId: context.tenantId,
+      roles: ["admin", "coordinator"],
+      kind: "float_requested",
+      title: "Till float top-up requested",
+      body: `GHS ${amount.toFixed(2)} top-up requested for ${await branchDisplayLabel(context.tenantId, session.branchId)} on ${session.businessDate}.`
     });
   } catch {
     // Non-blocking
@@ -286,6 +341,36 @@ export async function allocateBranchFloat(
   if (!session) {
     throw new Error("Float session not found");
   }
+  if (session.status === "open" && (session.topUpRequested ?? 0) > 0) {
+    const added = Math.max(0, input.openingFloat);
+    if (added <= 0) {
+      throw new Error("Enter the top-up amount to release");
+    }
+    session.openingFloat = Math.round((session.openingFloat + added) * 100) / 100;
+    session.topUpRequested = undefined;
+    session.topUpNote = undefined;
+    session.expectedClosing = expectedCash(session);
+    await persistSession(session);
+    await recordMovement(session, {
+      movementType: "adjustment",
+      amount: added,
+      createdBy: context.userId,
+      notes: "Float top-up released"
+    });
+    try {
+      await createAgentNotification({
+        tenantId: session.tenantId,
+        userId: session.cashierUserId,
+        kind: "float_allocated",
+        title: "Till float topped up",
+        body: `GHS ${added.toFixed(2)} was added to your till for ${session.businessDate}.`
+      });
+    } catch {
+      // Non-blocking
+    }
+    return session;
+  }
+
   if (session.status !== "requested" && session.status !== "approved") {
     throw new Error("Float session cannot be opened in its current status");
   }
@@ -401,7 +486,7 @@ export async function pushBranchFloat(
 export async function listPendingFloatRequests(tenantId: string): Promise<BranchFloatSession[]> {
   const sessions = await listSessions(tenantId);
   return sessions
-    .filter((s) => s.status === "requested")
+    .filter((s) => s.status === "requested" || (s.status === "open" && (s.topUpRequested ?? 0) > 0))
     .sort((a, b) => b.requestedAt.localeCompare(a.requestedAt));
 }
 
@@ -457,7 +542,7 @@ export async function closeBranchFloat(
       roles: ["admin", "coordinator"],
       kind: "float_closed_pending_settlement",
       title: "Till closed — settlement needed",
-      body: `Branch ${session.branchId} closed with GHS ${actual.toFixed(2)} (variance ${session.variance?.toFixed(2) ?? "0"}).`
+      body: `${await branchDisplayLabel(context.tenantId, session.branchId)} closed with GHS ${actual.toFixed(2)} (variance ${session.variance?.toFixed(2) ?? "0"}).`
     });
   } catch {
     // Non-blocking
@@ -680,7 +765,7 @@ export function floatSessionSummary(session: BranchFloatSession | null): {
   const statusLabels: Record<FloatSessionStatus, string> = {
     requested: "Awaiting float release",
     approved: "Approved — not yet open",
-    open: "Till open",
+    open: (session.topUpRequested ?? 0) > 0 ? "Till open · top-up waiting" : "Till open",
     closed: "Closed — pending settlement",
     settled: "Settled",
     rejected: "Rejected"

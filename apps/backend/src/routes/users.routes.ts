@@ -36,6 +36,7 @@ import { getCoordinatorsBootstrap } from "../services/coordinatorsBootstrapServi
 import { listCoordinatorRoster } from "../services/coordinatorRosterService.js";
 
 import { listUsersByTenant } from "../services/authStore.js";
+import { listBranches } from "../services/branchService.js";
 import { fetchUserNameMap } from "../services/userNameResolver.js";
 
 
@@ -52,35 +53,35 @@ const createUserSchema = withBranchAssignmentRefine(
 
 
 
-function toUsersCsv(
-
+async function toUsersCsv(
+  tenantId: string,
   rows: Array<{
-
     userId: string;
-
     email: string;
-
     fullName?: string;
-
     role: string;
-
     scopeType: string;
-
     branchId?: string;
-
     status: string;
-
   }>
-
-): string {
-
-  const headers = ["user_id", "email", "full_name", "role", "scope_type", "branch_id", "status"];
+): Promise<string> {
+  const branches = await listBranches(tenantId).catch(() => []);
+  const branchLabels = new Map(branches.map((branch) => [branch.id, `${branch.name} (${branch.code})`]));
+  const headers = ["user_id", "email", "full_name", "role", "scope_type", "branch", "status"];
 
   const body = rows
 
     .map((row) =>
 
-      [row.userId, row.email, row.fullName ?? "", row.role, row.scopeType, row.branchId ?? "", row.status]
+      [
+        row.userId,
+        row.email,
+        row.fullName ?? "",
+        row.role,
+        row.scopeType,
+        row.branchId ? (branchLabels.get(row.branchId) ?? "") : "",
+        row.status
+      ]
 
         .map((value) => `"${String(value).replace(/"/g, '""')}"`)
 
@@ -604,7 +605,7 @@ usersRouter.get("/export.csv", requirePermission("users.read"), async (req, res)
 
 
 
-    const csv = toUsersCsv(
+    const csv = await toUsersCsv(tenantId, 
 
       (data ?? []).map((user) => ({
 
@@ -638,7 +639,7 @@ usersRouter.get("/export.csv", requirePermission("users.read"), async (req, res)
 
 
 
-  const csv = toUsersCsv(
+  const csv = await toUsersCsv(tenantId, 
 
     listUsersByTenant(tenantId).map((user) => ({
 

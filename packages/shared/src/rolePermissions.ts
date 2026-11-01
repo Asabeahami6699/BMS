@@ -27,6 +27,7 @@ export const permissionsByRole: Record<Role, Permission[]> = {
     "transactions.create.deposit",
     "transactions.create.withdrawal",
     "transactions.read",
+    "transactions.reverse.daily_susu",
     "branch_float.manage",
     "ledger.read",
     "reports.read",
@@ -66,6 +67,7 @@ export const permissionsByRole: Record<Role, Permission[]> = {
     "branches.read",
     "transactions.create.daily_susu",
     "transactions.read",
+    "transactions.reverse.daily_susu",
     "branch_float.manage",
     "ledger.read",
     "reports.read",
@@ -195,8 +197,13 @@ export function resolveRolePermissions(
   role: Role,
   overrideDuties: Permission[] | null | undefined
 ): Permission[] {
-  if (overrideDuties != null) {
-    return [...new Set(overrideDuties)];
+  const resolved =
+    overrideDuties != null ? [...new Set(overrideDuties)] : getPermissionsForRole(role);
+  if (
+    (role === "admin" || role === "coordinator") &&
+    !resolved.includes("transactions.reverse.daily_susu")
+  ) {
+    resolved.push("transactions.reverse.daily_susu");
   }
-  return getPermissionsForRole(role);
+  return resolved;
 }

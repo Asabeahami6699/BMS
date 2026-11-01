@@ -27,7 +27,7 @@ function branchLabel(branchId: string | undefined, branches: { id: string; name:
     return "Head office";
   }
   const match = branches.find((b) => b.id === branchId);
-  return match ? `${match.name} (${match.code})` : branchId;
+  return match ? `${match.name} (${match.code})` : "—";
 }
 
 function inCoordinatorScope(

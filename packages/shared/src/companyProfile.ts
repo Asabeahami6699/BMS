@@ -15,6 +15,9 @@ function emptyToNull(value: unknown): unknown {
   return trimmed.length === 0 ? null : trimmed;
 }
 
+/** Savings cash taken at account opening and locked on the account. */
+export const savingsOpeningFeeSchema = z.number().min(0).max(1_000_000);
+
 export const companyProfileSchema = z.object({
   tenantId: z.string().min(1),
   name: z.string().min(1).max(120),
@@ -24,7 +27,8 @@ export const companyProfileSchema = z.object({
   taxId: z.string().max(40).optional(),
   logoUrl: z.string().max(900_000).optional(),
   brandColor: hexColor.optional(),
-  fontSizeStep: fontSizeStepSchema.default(0)
+  fontSizeStep: fontSizeStepSchema.default(0),
+  savingsOpeningFeeGhs: savingsOpeningFeeSchema.default(20)
 });
 
 export type CompanyProfile = z.infer<typeof companyProfileSchema>;
@@ -37,7 +41,8 @@ export const updateCompanyProfileSchema = z.object({
   taxId: z.preprocess(emptyToNull, z.string().max(40).nullable().optional()),
   logoUrl: z.string().max(900_000).nullable().optional(),
   brandColor: z.preprocess(emptyToNull, hexColor.nullable().optional()),
-  fontSizeStep: fontSizeStepSchema.optional()
+  fontSizeStep: fontSizeStepSchema.optional(),
+  savingsOpeningFeeGhs: savingsOpeningFeeSchema.optional()
 });
 
 export type UpdateCompanyProfileInput = z.infer<typeof updateCompanyProfileSchema>;

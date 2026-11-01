@@ -286,7 +286,7 @@ async function collectionsForUserInPeriod(
     .filter(
       (tx) =>
         tx.fieldAgentId === userId &&
-        (tx.type === "daily_susu" || tx.type === "deposit") &&
+        ((tx.type === "daily_susu" && !tx.reversedAt) || tx.type === "deposit") &&
         tx.createdAt >= startIso &&
         tx.createdAt <= endIso
     )

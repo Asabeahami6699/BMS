@@ -91,7 +91,27 @@ type TransactionMeta = {
   recordedByUserId: string;
   fieldAgentId: string;
   type: string;
+  reversesTransactionId?: string;
+  reversedByTransactionId?: string;
+  reversalReason?: string;
+  reversedByUserId?: string;
+  reversedAt?: string;
 };
+
+function reversalMeta(row: Record<string, unknown>): Pick<
+  TransactionMeta,
+  "reversesTransactionId" | "reversedByTransactionId" | "reversalReason" | "reversedByUserId" | "reversedAt"
+> {
+  return {
+    reversesTransactionId: row.reverses_transaction_id ? String(row.reverses_transaction_id) : undefined,
+    reversedByTransactionId: row.reversed_by_transaction_id
+      ? String(row.reversed_by_transaction_id)
+      : undefined,
+    reversalReason: row.reversal_reason ? String(row.reversal_reason) : undefined,
+    reversedByUserId: row.reversed_by_user_id ? String(row.reversed_by_user_id) : undefined,
+    reversedAt: row.reversed_at ? String(row.reversed_at) : undefined
+  };
+}
 
 async function enrichLedgerEntries(
   tenantId: string,
@@ -116,32 +136,57 @@ async function enrichLedgerEntries(
 
   if (supabase) {
     const transactionIds = [...new Set(rows.map((row) => row.transaction_id))];
-    const { data: txRows, error: txError } = await supabase
+    const fullResult = await supabase
       .from("customer_transactions")
-      .select("id, recorded_by_user_id, field_agent_id, type")
+      .select(
+        "id, recorded_by_user_id, field_agent_id, type, reverses_transaction_id, reversed_by_transaction_id, reversal_reason, reversed_by_user_id, reversed_at"
+      )
       .eq("tenant_id", tenantId)
       .in("id", transactionIds);
 
-    if (txError) {
-      throw new Error(`Failed to load transaction metadata: ${txError.message}`);
+    let txRows: Record<string, unknown>[] = [];
+    if (
+      fullResult.error &&
+      /reverses_transaction_id|reversed_by_transaction_id|reversal_reason|reversed_at/i.test(fullResult.error.message)
+    ) {
+      const basicResult = await supabase
+        .from("customer_transactions")
+        .select("id, recorded_by_user_id, field_agent_id, type")
+        .eq("tenant_id", tenantId)
+        .in("id", transactionIds);
+      if (basicResult.error) {
+        throw new Error(`Failed to load transaction metadata: ${basicResult.error.message}`);
+      }
+      txRows = (basicResult.data ?? []) as Record<string, unknown>[];
+    } else if (fullResult.error) {
+      throw new Error(`Failed to load transaction metadata: ${fullResult.error.message}`);
+    } else {
+      txRows = (fullResult.data ?? []) as Record<string, unknown>[];
     }
 
-    for (const tx of txRows ?? []) {
-      txMap.set(String(tx.id), {
-        recordedByUserId: String(tx.recorded_by_user_id),
-        fieldAgentId: String(tx.field_agent_id),
-        type: String(tx.type)
+    for (const tx of txRows) {
+      const row = tx;
+      txMap.set(String(row.id), {
+        recordedByUserId: String(row.recorded_by_user_id),
+        fieldAgentId: String(row.field_agent_id),
+        type: String(row.type),
+        ...reversalMeta(row)
       });
     }
   }
 
-  const userIds = [...txMap.values()].flatMap((tx) => [tx.recordedByUserId, tx.fieldAgentId]);
-  const nameMap = await fetchUserNameMap(tenantId, userIds);
+  const userIds = [...txMap.values()].flatMap((tx) => [
+    tx.recordedByUserId,
+    tx.fieldAgentId,
+    tx.reversedByUserId
+  ]);
+  const nameMap = await fetchUserNameMap(tenantId, userIds.filter((id): id is string => Boolean(id)));
 
   return rows.map((row) => {
     const tx = txMap.get(row.transaction_id);
     const recordedByName = tx ? nameMap.get(tx.recordedByUserId) : undefined;
     const fieldAgentName = tx ? nameMap.get(tx.fieldAgentId) : undefined;
+    const reversalId = tx?.type === "susu_reversal" ? tx.reversesTransactionId : tx?.reversedByTransactionId;
 
     return ledgerEntrySchema.parse({
       id: row.id,
@@ -164,7 +209,12 @@ async function enrichLedgerEntries(
             fieldAgentId: tx.fieldAgentId,
             transactionType: tx.type
           })
-        : undefined
+        : undefined,
+      reversalStatus: tx?.type === "daily_susu" && tx.reversedAt ? "reversed" : tx?.type === "daily_susu" ? "posted" : undefined,
+      reversalReference: reversalId ? `REV-${reversalId.replace(/-/g, "").slice(0, 8).toUpperCase()}` : undefined,
+      reversalReason: tx?.reversalReason,
+      reversedByName: tx?.reversedByUserId ? nameMap.get(tx.reversedByUserId) : undefined,
+      reversedAt: tx?.reversedAt
     });
   });
 }

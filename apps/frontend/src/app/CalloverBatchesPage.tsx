@@ -12,6 +12,7 @@ import {
 import { useToast } from "../components/Toast";
 import { toUserFacingError } from "../lib/networkError";
 import { usePageLoading } from "./hooks/usePageLoading";
+import { formatBranchLabel } from "./branchDisplay";
 
 type Props = { role: AppRole };
 
@@ -81,17 +82,14 @@ export function CalloverBatchesPage({ role }: Props) {
 
   usePageLoading(loading || busyId !== null, "callover-batches");
 
-  const branchById = useMemo(() => new Map(branches.map((b) => [b.id, b])), [branches]);
-
   const branchLabel = useCallback(
     (id?: string) => {
       if (!id) {
         return "Unassigned branch";
       }
-      const branch = branchById.get(id);
-      return branch ? `${branch.name} (${branch.code})` : id.slice(0, 8) + "…";
+      return formatBranchLabel(id, branches);
     },
-    [branchById]
+    [branches]
   );
 
   const visibleAgents = useMemo(() => {

@@ -1,10 +1,12 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { hasTenantAddon, type TenantAddon } from "@bms/shared";
 import {
+  getMessageLog,
   getSmsPlatformStatus,
   getTenantSmsSettings,
   sendTenantTestSms,
   updateTenantSmsSettings,
+  type MessageLogItem,
   type TenantSmsSettings
 } from "../api";
 import { useToast } from "../../components/Toast";
@@ -12,6 +14,54 @@ import { useToast } from "../../components/Toast";
 type Props = {
   subscribedAddons: TenantAddon[] | undefined;
 };
+
+const EVENT_LABELS: Record<string, string> = {
+  deposit: "Deposit credited",
+  withdrawal: "Withdrawal debited",
+  daily_susu: "Daily susu",
+  account_opened: "Account opened",
+  test: "Test"
+};
+
+function eventLabel(eventType: string): string {
+  return EVENT_LABELS[eventType] ?? eventType;
+}
+
+function statusLabel(status: MessageLogItem["status"]): string {
+  if (status === "sent") {
+    return "Sent";
+  }
+  if (status === "failed") {
+    return "Failed";
+  }
+  if (status === "logged") {
+    return "Not delivered";
+  }
+  return "Waiting";
+}
+
+function statusClass(status: MessageLogItem["status"]): string {
+  if (status === "sent") {
+    return "status-pill status-pill--active";
+  }
+  if (status === "failed") {
+    return "status-pill status-pill--failed";
+  }
+  return "status-pill status-pill--pending";
+}
+
+function formatWhen(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return iso;
+  }
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  });
+}
 
 export function SettingsNotificationsPage({ subscribedAddons }: Props) {
   const hasSms = hasTenantAddon(subscribedAddons, "sms_notifications");
@@ -24,6 +74,26 @@ export function SettingsNotificationsPage({ subscribedAddons }: Props) {
   const [smsReady, setSmsReady] = useState<boolean | null>(null);
   const [settings, setSettings] = useState<TenantSmsSettings | null>(null);
   const [testPhone, setTestPhone] = useState("");
+  const [logLoading, setLogLoading] = useState(hasSms || hasEmail);
+  const [logItems, setLogItems] = useState<MessageLogItem[]>([]);
+  const [logReady, setLogReady] = useState(true);
+
+  const loadLog = useCallback(async () => {
+    if (!hasSms && !hasEmail) {
+      setLogLoading(false);
+      return;
+    }
+    setLogLoading(true);
+    try {
+      const log = await getMessageLog();
+      setLogItems(log.items);
+      setLogReady(log.storageReady);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Failed to load message log", "error");
+    } finally {
+      setLogLoading(false);
+    }
+  }, [hasEmail, hasSms, showToast]);
 
   useEffect(() => {
     if (!hasSms) {
@@ -54,6 +124,10 @@ export function SettingsNotificationsPage({ subscribedAddons }: Props) {
       cancelled = true;
     };
   }, [hasSms, showToast]);
+
+  useEffect(() => {
+    void loadLog();
+  }, [loadLog]);
 
   async function handleSave() {
     if (!settings) {
@@ -86,6 +160,7 @@ export function SettingsNotificationsPage({ subscribedAddons }: Props) {
     try {
       const result = await sendTenantTestSms({ phone: testPhone.trim() });
       showToast(`Test SMS sent to ${result.phone}`, "success");
+      await loadLog();
     } catch (error) {
       showToast(error instanceof Error ? error.message : "Test SMS failed", "error");
     } finally {
@@ -213,6 +288,65 @@ export function SettingsNotificationsPage({ subscribedAddons }: Props) {
           <p>{hasEmail ? "Email channel configuration coming soon." : "Contact platform support to add email notifications."}</p>
         </div>
       </div>
+
+      {hasSms || hasEmail ? (
+        <section className="message-log">
+          <div className="message-log__head">
+            <div>
+              <h3>Message log</h3>
+              <p className="muted">
+                Recent customer SMS and email. Sent means the provider accepted the message. It does not confirm the
+                phone received it. Failed shows why it did not go out.
+              </p>
+            </div>
+            <button type="button" className="button secondary" disabled={logLoading} onClick={() => void loadLog()}>
+              {logLoading ? "Refreshing…" : "Refresh"}
+            </button>
+          </div>
+
+          {logLoading && logItems.length === 0 ? (
+            <p className="muted">Loading message log…</p>
+          ) : !logReady ? (
+            <p className="muted">
+              Message history is not ready yet. Apply the SMS and email outbox migrations in Supabase, then refresh.
+            </p>
+          ) : logItems.length === 0 ? (
+            <p className="muted">No customer messages have been recorded yet.</p>
+          ) : (
+            <div className="admin-table-scroll">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>When</th>
+                    <th>Channel</th>
+                    <th>Event</th>
+                    <th>Customer</th>
+                    <th>Sent to</th>
+                    <th>Status</th>
+                    <th>Message</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {logItems.map((item) => (
+                    <tr key={item.id}>
+                      <td>{formatWhen(item.createdAt)}</td>
+                      <td>{item.channel === "sms" ? "SMS" : "Email"}</td>
+                      <td>{eventLabel(item.eventType)}</td>
+                      <td>{item.customerName || "—"}</td>
+                      <td>{item.recipient}</td>
+                      <td>
+                        <span className={statusClass(item.status)}>{statusLabel(item.status)}</span>
+                        {item.errorMessage ? <p className="message-log__error">{item.errorMessage}</p> : null}
+                      </td>
+                      <td className="message-log__preview">{item.preview || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      ) : null}
     </article>
   );
 }

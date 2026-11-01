@@ -24,7 +24,20 @@ export { SAVINGS_INITIAL_DEPOSIT_GHS } from "./savings.js";
 
 
 
-export const transactionTypeSchema = z.enum(["daily_susu", "deposit", "withdrawal"]);
+export const transactionTypeSchema = z.enum([
+  "daily_susu",
+  "deposit",
+  "withdrawal",
+  "susu_reversal"
+]);
+
+/** Posted susu credits that still count toward collection totals. */
+export function isActiveDailySusu(transaction: {
+  type: string;
+  reversedAt?: string | null;
+}): boolean {
+  return transaction.type === "daily_susu" && !transaction.reversedAt;
+}
 
 export const nextOfKinDetailsSchema = z.object({
   fullName: z.string().min(1),
@@ -111,7 +124,7 @@ export const customerRegistrationInputSchema = z.object({
 
   accountType: accountTypeSchema,
 
-  idCardNumber: z.string().min(1),
+  idCardNumber: z.string().optional(),
 
   photoUrl: z
     .string()
@@ -123,8 +136,8 @@ export const customerRegistrationInputSchema = z.object({
     .optional(),
   /** Savings only: agent collected GHS opening fee in cash at registration. */
   savingsOpeningFeeCollected: z.boolean().optional(),
-  houseNumber: z.string().min(1),
-  nextOfKin: nextOfKinDetailsSchema,
+  houseNumber: z.string().optional(),
+  nextOfKin: nextOfKinDetailsSchema.optional(),
   dailyContributionAmount: z.number().nonnegative().default(0),
 
   homeBranchId: z.string().optional(),
@@ -132,13 +145,6 @@ export const customerRegistrationInputSchema = z.object({
   assignedFieldAgentId: z.string().optional()
 
 }).superRefine((data, ctx) => {
-  if (!data.idCardPhotoUrl?.trim()) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "ID card photo is required",
-      path: ["idCardPhotoUrl"]
-    });
-  }
   if (data.accountType === "savings" && data.savingsOpeningFeeCollected === undefined) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
@@ -217,6 +223,18 @@ export const transactionSchema = z.object({
 
   notes: z.string().optional(),
 
+  /** Set on the reversal row. Points at the original susu credit. */
+  reversesTransactionId: z.string().min(1).optional(),
+
+  /** Set on the original susu credit after it is reversed. */
+  reversedByTransactionId: z.string().min(1).optional(),
+
+  reversalReason: z.string().optional(),
+
+  reversedByUserId: z.string().optional(),
+
+  reversedAt: z.string().optional(),
+
   executionStatus: agencyExecutionStatusSchema.optional().default("completed"),
 
   bankExecutedByUserId: z.string().optional(),
@@ -264,7 +282,18 @@ export const ledgerEntrySchema = z.object({
   /** Display label. Deposits show the poster only; field collections may also name the agent. */
   performedByName: z.string().optional(),
 
-  transactionType: z.string().optional()
+  transactionType: z.string().optional(),
+
+  /** posted = original susu credit still active. reversed = a reversal debit exists. */
+  reversalStatus: z.enum(["posted", "reversed"]).optional(),
+
+  reversalReference: z.string().optional(),
+
+  reversalReason: z.string().optional(),
+
+  reversedByName: z.string().optional(),
+
+  reversedAt: z.string().optional()
 
 });
 
@@ -406,6 +435,14 @@ export const approveWithdrawalWorkflowSchema = approveCustomerRequestSchema;
 
 export const rejectBalanceDisclosureSchema = z.object({
   reason: z.string().min(1).optional()
+});
+
+export const reverseSusuCollectionSchema = z.object({
+  reason: z
+    .string()
+    .trim()
+    .min(3, "Enter a reversal reason (at least 3 characters)")
+    .max(500)
 });
 
 

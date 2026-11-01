@@ -3,6 +3,7 @@ import type { AppRole, Customer } from "./api";
 import { AdminDataTable, filterRowsBySearch } from "../components/AdminDataTable";
 import { useGroupSavingsLiveSync } from "./hooks/useGroupSavingsLiveSync";
 import { useGroupSavingsStore } from "./stores/groupSavingsStore";
+import { formatBranchLabel } from "./branchDisplay";
 
 type Props = { role: AppRole };
 
@@ -23,8 +24,7 @@ const STATUS_PILL: Record<Customer["status"], string> = {
 };
 
 function branchLabel(branchId: string, branches: { id: string; name: string; code: string }[]): string {
-  const match = branches.find((b) => b.id === branchId);
-  return match ? `${match.name} (${match.code})` : branchId;
+  return formatBranchLabel(branchId, branches);
 }
 
 export function GroupSavingsPage({ role: _role }: Props) {

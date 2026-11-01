@@ -3,6 +3,8 @@ import {
   createTenantSchema,
   createTenantUserBaseSchema,
   withBranchAssignmentRefine,
+  isTenantSubdomain,
+  tenantSubdomainSchema,
   loginSchema,
   resetUserPasswordSchema,
   roleSchema,
@@ -18,7 +20,11 @@ import {
 import { z } from "zod";
 import { getSupabaseJwtSecret } from "../config/env.js";
 import { getPermissionsForRole } from "../config/permissions.js";
-import { resolvePermissionsForTenantUser, syncBuiltinRolePermissionsForModules } from "./builtinRolePermissionService.js";
+import {
+  loadTenantPermissionInputs,
+  permissionsForLoadedInputs,
+  resolvePermissionsForTenantUser
+} from "./builtinRolePermissionService.js";
 import { assertValidUserJobTitle, parseProfileJobTitle, tenantJobTitleExists } from "./tenantJobTitleService.js";
 import { isSupabaseAuthNetworkError } from "../lib/networkError.js";
 import {
@@ -27,6 +33,7 @@ import {
 } from "../lib/supabaseJwt.js";
 import { listBranches } from "./branchService.js";
 import { getSupabaseAdminClient, getSupabaseAuthClient } from "../config/supabaseClient.js";
+import { assertLoginMatchesHost } from "./tenantHostService.js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { UserContext } from "../types/express.js";
 import {
@@ -75,40 +82,61 @@ async function enrichTenantContext(
     };
   }
 
-  const modules = await reloadTenantModulesFromDb(context.tenantId);
-  await syncBuiltinRolePermissionsForModules(context.tenantId, modules);
-  const permissions = await resolvePermissionsForTenantUser(
+  const supabase = getSupabaseAdminClient();
+  const [modules, addons, tenantRow, permissionInputs] = await Promise.all([
+    reloadTenantModulesFromDb(context.tenantId),
+    loadTenantAddons(context.tenantId),
+    supabase
+      ? supabase
+          .from("tenants")
+          .select("name, subscription_status")
+          .eq("id", context.tenantId)
+          .maybeSingle()
+      : Promise.resolve(null),
+    loadTenantPermissionInputs(context.tenantId, context.role, context.userId)
+  ]);
+  const currentTenant = getTenantFromStore(context.tenantId);
+  if (currentTenant || tenantRow?.data) {
+    upsertTenantInStore({
+      id: context.tenantId,
+      name: tenantRow?.data?.name ?? currentTenant?.name ?? context.tenantId,
+      subscriptionStatus: tenantRow?.data
+        ? tenantRow.data.subscription_status === "inactive"
+          ? "inactive"
+          : "active"
+        : (currentTenant?.subscriptionStatus ?? "active"),
+      accountNumberPrefix: currentTenant?.accountNumberPrefix,
+      subscribedModules: modules,
+      subscribedAddons: addons,
+      createdAt: currentTenant?.createdAt ?? new Date().toISOString()
+    });
+  }
+  const permissions = await permissionsForLoadedInputs(
     context.tenantId,
     context.role,
-    context.userId
+    modules,
+    permissionInputs
   );
-  const addons = await loadTenantAddons(context.tenantId);
-  const tenant = getTenantFromStore(context.tenantId);
-  if (!tenant && getSupabaseAdminClient()) {
-    const supabase = getSupabaseAdminClient();
-    const { data: row } = await supabase!
-      .from("tenants")
-      .select("name, subscription_status")
-      .eq("id", context.tenantId)
-      .maybeSingle();
-    if (row) {
-      upsertTenantInStore({
-        id: context.tenantId,
-        name: row.name,
-        subscriptionStatus: row.subscription_status === "inactive" ? "inactive" : "active",
-        createdAt: new Date().toISOString()
-      });
-    }
-  }
   const resolvedTenant = getTenantFromStore(context.tenantId);
   return {
     ...context,
     permissions,
     tenantName: resolvedTenant?.name,
+    tenantSubdomain: subdomainForTenant(context.tenantId, resolvedTenant),
     subscribedModules: modules,
     subscribedAddons: addons,
     reportsAnalytics: resolvedTenant?.subscriptionStatus !== "inactive"
   };
+}
+
+function subdomainForTenant(tenantId: string | undefined, tenant: { subdomain?: string; id?: string } | undefined): string | undefined {
+  if (!tenantId || tenantId === "platform") {
+    return undefined;
+  }
+  if (tenant?.subdomain && isTenantSubdomain(tenant.subdomain)) {
+    return tenant.subdomain.toLowerCase();
+  }
+  return isTenantSubdomain(tenantId) ? tenantId.toLowerCase() : undefined;
 }
 
 function toUserContext(user: StoredAuthUser): UserContext & { email: string; fullName?: string } {
@@ -168,6 +196,7 @@ export async function loginWithCredentials(
       const localUser = findUserByEmail(email);
       if (localUser && verifyPassword(parsed.data.password, localUser.passwordHash)) {
         assertTenantActive(localUser.tenantId);
+        await assertLoginMatchesHost(localUser.tenantId, parsed.data.tenantSubdomain);
         const accessToken = createSession(localUser.id);
         const userContext = await enrichTenantContext(toUserContext(localUser));
         return { accessToken, user: userContext as UserContext & { email: string; fullName?: string } };
@@ -212,33 +241,27 @@ export async function loginWithCredentials(
       throw new Error("User profile has invalid role or scope");
     }
 
-    if (!roleSchema.safeParse(roleParsed).success && profile.tenant_id) {
-      await assertValidUserJobTitle(profile.tenant_id, roleParsed);
+    const [userContext] = await Promise.all([
+      enrichTenantContext({
+        userId: profile.id,
+        tenantId: profile.tenant_id ?? "platform",
+        role: roleParsed,
+        scopeType: scopeParsed.data,
+        branchId: profile.branch_id ?? undefined,
+        permissions: getPermissionsForRole(
+          roleSchema.safeParse(roleParsed).success ? (roleParsed as Role) : "admin"
+        ),
+        email: profile.email ?? parsed.data.email,
+        fullName: profile.full_name ?? undefined
+      }),
+      !roleSchema.safeParse(roleParsed).success && profile.tenant_id
+        ? assertValidUserJobTitle(profile.tenant_id, roleParsed)
+        : Promise.resolve()
+    ]);
+    if (profile.tenant_id && userContext.reportsAnalytics === false) {
+      throw new Error("Company subscription is inactive. Contact platform support.");
     }
-
-    if (profile.tenant_id) {
-      const { data: tenant } = await supabase
-        .from("tenants")
-        .select("subscription_status")
-        .eq("id", profile.tenant_id)
-        .maybeSingle();
-      if (tenant?.subscription_status === "inactive") {
-        throw new Error("Company subscription is inactive. Contact platform support.");
-      }
-    }
-
-    const userContext = await enrichTenantContext({
-      userId: profile.id,
-      tenantId: profile.tenant_id ?? "platform",
-      role: roleParsed,
-      scopeType: scopeParsed.data,
-      branchId: profile.branch_id ?? undefined,
-      permissions: getPermissionsForRole(
-        roleSchema.safeParse(roleParsed).success ? (roleParsed as Role) : "admin"
-      ),
-      email: profile.email ?? parsed.data.email,
-      fullName: profile.full_name ?? undefined
-    });
+    await assertLoginMatchesHost(profile.tenant_id ?? null, parsed.data.tenantSubdomain);
 
     return {
       accessToken: signInData.session.access_token,
@@ -257,6 +280,7 @@ export async function loginWithCredentials(
   }
 
   assertTenantActive(user.tenantId);
+  await assertLoginMatchesHost(user.tenantId, parsed.data.tenantSubdomain);
   const accessToken = createSession(user.id);
   const userContext = await enrichTenantContext(toUserContext(user));
   return { accessToken, user: userContext as UserContext & { email: string; fullName?: string } };
@@ -408,26 +432,50 @@ export async function listPlatformTenants() {
 
   const { data: rows, error } = await supabase
     .from("tenants")
-    .select("id, name, subscription_status, created_at")
+    .select("id, name, subscription_status, created_at, subdomain")
     .neq("id", "platform")
     .order("name");
+  let tenantRows = rows as Array<{
+    id: string;
+    name: string;
+    subscription_status: string;
+    created_at?: string;
+    subdomain?: string | null;
+  }> | null;
+  let listError = error;
+  if (listError && /subdomain/i.test(listError.message)) {
+    const retry = await supabase
+      .from("tenants")
+      .select("id, name, subscription_status, created_at")
+      .neq("id", "platform")
+      .order("name");
+    tenantRows = (retry.data ?? null) as typeof tenantRows;
+    listError = retry.error;
+  }
 
-  if (error || !rows) {
-    console.warn(`[tenants] Supabase list failed: ${error?.message ?? "unknown"}`);
+  if (listError || !tenantRows) {
+    console.warn(`[tenants] Supabase list failed: ${listError?.message ?? "unknown"}`);
     return listTenantsFromStore().filter((t) => t.id !== "platform");
   }
 
   const result = [];
-  for (const row of rows) {
+  for (const row of tenantRows) {
     const modules = await loadTenantModules(row.id);
     const addons = await loadTenantAddons(row.id);
+    const subdomain =
+      "subdomain" in row && typeof row.subdomain === "string" && isTenantSubdomain(row.subdomain)
+        ? row.subdomain.toLowerCase()
+        : isTenantSubdomain(row.id)
+          ? row.id.toLowerCase()
+          : undefined;
     const tenant: StoredTenant = {
       id: row.id,
       name: row.name,
       subscriptionStatus: row.subscription_status === "inactive" ? "inactive" : "active",
       subscribedModules: modules,
       subscribedAddons: addons,
-      createdAt: row.created_at ?? undefined
+      subdomain,
+      createdAt: row.created_at ?? new Date().toISOString()
     };
     upsertTenantInStore(tenant);
     result.push(toTenantRecord(tenant));
@@ -448,7 +496,7 @@ export async function listPlatformTenants() {
 export async function createPlatformTenant(raw: unknown): Promise<StoredTenant> {
   const parsed = createTenantSchema.safeParse(raw);
   if (!parsed.success) {
-    throw new Error("Invalid tenant payload");
+    throw new Error(parsed.error.issues[0]?.message ?? "Invalid tenant payload");
   }
 
   const supabase = getSupabaseAdminClient();
@@ -458,15 +506,26 @@ export async function createPlatformTenant(raw: unknown): Promise<StoredTenant> 
     subscriptionStatus: parsed.data.subscriptionStatus,
     subscribedModules: parsed.data.subscribedModules as TenantProductModule[],
     subscribedAddons: (parsed.data.subscribedAddons ?? []) as TenantAddon[],
+    subdomain: parsed.data.id,
     createdAt: new Date().toISOString()
   };
 
   if (supabase) {
-    const { error } = await supabase.from("tenants").insert({
+    const inserted = await supabase.from("tenants").insert({
       id: tenant.id,
       name: tenant.name,
-      subscription_status: tenant.subscriptionStatus
+      subscription_status: tenant.subscriptionStatus,
+      subdomain: tenant.subdomain
     });
+    let error = inserted.error;
+    if (error && /subdomain/i.test(error.message)) {
+      const retry = await supabase.from("tenants").insert({
+        id: tenant.id,
+        name: tenant.name,
+        subscription_status: tenant.subscriptionStatus
+      });
+      error = retry.error;
+    }
     if (error) {
       throw new Error(`Failed to create tenant: ${error.message}`);
     }
@@ -478,6 +537,58 @@ export async function createPlatformTenant(raw: unknown): Promise<StoredTenant> 
   await saveTenantModules(saved.id, parsed.data.subscribedModules as TenantProductModule[]);
   await saveTenantAddons(saved.id, (parsed.data.subscribedAddons ?? []) as TenantAddon[]);
   return toTenantRecord(getTenantFromStore(saved.id)!);
+}
+
+export async function updateTenantSubdomain(
+  tenantId: string,
+  subdomain: string
+): Promise<ReturnType<typeof toTenantRecord>> {
+  if (tenantId === "platform") {
+    throw new Error("The platform address cannot be changed.");
+  }
+  const parsed = tenantSubdomainSchema.safeParse(subdomain);
+  if (!parsed.success) {
+    throw new Error(parsed.error.issues[0]?.message ?? "Invalid web address");
+  }
+  const nextSubdomain = parsed.data;
+  const supabase = getSupabaseAdminClient();
+  if (!getTenantFromStore(tenantId)) {
+    if (!supabase) {
+      throw new Error("Tenant not found");
+    }
+    const { data, error } = await supabase.from("tenants").select("id, name, subscription_status").eq("id", tenantId).maybeSingle();
+    if (error || !data) {
+      throw new Error("Tenant not found");
+    }
+    upsertTenantInStore({
+      id: data.id,
+      name: data.name,
+      subscriptionStatus: data.subscription_status === "inactive" ? "inactive" : "active",
+      subdomain: nextSubdomain,
+      createdAt: new Date().toISOString()
+    });
+  }
+
+  if (supabase) {
+    const { error } = await supabase.from("tenants").update({ subdomain: nextSubdomain }).eq("id", tenantId);
+    if (error && /subdomain/i.test(error.message)) {
+      throw new Error(
+        "Company address storage is not ready. Apply migration 074_tenant_subdomain.sql in Supabase, then save again."
+      );
+    }
+    if (error && /duplicate|unique/i.test(error.message)) {
+      throw new Error("That web address is already used.");
+    }
+    if (error) {
+      throw new Error(`Failed to save web address: ${error.message}`);
+    }
+  }
+
+  const current = getTenantFromStore(tenantId);
+  if (!current) {
+    throw new Error("Tenant not found");
+  }
+  return toTenantRecord(upsertTenantInStore({ ...current, subdomain: nextSubdomain }));
 }
 
 export async function updateTenantAddons(

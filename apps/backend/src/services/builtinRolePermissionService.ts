@@ -117,18 +117,13 @@ export async function resolvePermissionsForTenantUser(
   role: string,
   userId?: string
 ): Promise<Permission[]> {
-  let base: Permission[];
-  if (isBuiltinRole(role)) {
-    const row = await loadOverrideRow(tenantId, role);
-    base = resolveRolePermissions(role, row?.duties ?? null);
-  } else {
-    base = await loadTenantJobTitleDuties(tenantId, role);
-  }
+  const [base, custom] = await Promise.all([
+    isBuiltinRole(role)
+      ? loadOverrideRow(tenantId, role).then((row) => resolveRolePermissions(role, row?.duties ?? null))
+      : loadTenantJobTitleDuties(tenantId, role),
+    userId ? loadCustomRoleDuties(tenantId, userId) : Promise.resolve([] as Permission[])
+  ]);
 
-  if (!userId) {
-    return base;
-  }
-  const custom = await loadCustomRoleDuties(tenantId, userId);
   if (!custom.length) {
     return base;
   }
@@ -156,8 +151,64 @@ export async function syncBuiltinRolePermissionsForModules(
     return;
   }
 
+  const overrides = await loadBuiltinRoleOverrides(tenantId);
+  await syncLoadedRoleOverrides(tenantId, modules, overrides);
+}
+
+/** Role rows, extra duties, and custom job-title duties, loaded together. */
+export async function loadTenantPermissionInputs(
+  tenantId: string,
+  role: string,
+  userId?: string
+): Promise<TenantPermissionInputs> {
+  const [overrides, custom, jobDuties] = await Promise.all([
+    loadBuiltinRoleOverrides(tenantId),
+    userId ? loadCustomRoleDuties(tenantId, userId) : Promise.resolve([] as Permission[]),
+    isBuiltinRole(role) ? Promise.resolve(null) : loadTenantJobTitleDuties(tenantId, role)
+  ]);
+  return { overrides, custom, jobDuties };
+}
+
+export async function permissionsForLoadedInputs(
+  tenantId: string,
+  role: string,
+  modules: TenantProductModule[],
+  inputs: TenantPermissionInputs
+): Promise<Permission[]> {
+  await syncLoadedRoleOverrides(tenantId, modules, inputs.overrides);
+  const base = isBuiltinRole(role)
+    ? resolveRolePermissions(role, inputs.overrides.get(role)?.duties ?? null)
+    : (inputs.jobDuties ?? []);
+  if (!inputs.custom.length) {
+    return base;
+  }
+  return [...new Set([...base, ...inputs.custom])];
+}
+
+type TenantPermissionInputs = {
+  overrides: Map<Role, { duties: Permission[] }>;
+  custom: Permission[];
+  jobDuties: Permission[] | null;
+};
+
+async function syncLoadedRoleOverrides(
+  tenantId: string,
+  modules: TenantProductModule[],
+  overrides: Map<Role, { duties: Permission[] }>
+): Promise<void> {
+  const modulePermissions = new Set<Permission>();
+  for (const module of modules) {
+    for (const permission of permissionsForProductModule(module)) {
+      modulePermissions.add(permission);
+    }
+  }
+  if (modulePermissions.size === 0) {
+    return;
+  }
+
+  const writes: Array<Promise<unknown>> = [];
   for (const role of TENANT_EDITABLE_BUILTIN_ROLES) {
-    const row = await loadOverrideRow(tenantId, role);
+    const row = overrides.get(role);
     if (!row) {
       continue;
     }
@@ -168,13 +219,54 @@ export async function syncBuiltinRolePermissionsForModules(
     if (toAdd.length === 0) {
       continue;
     }
-    await saveBuiltinRolePermissions(
-      tenantId,
-      role,
-      { duties: [...row.duties, ...toAdd] },
-      "system-module-sync"
+    row.duties = [...row.duties, ...toAdd];
+    writes.push(
+      saveBuiltinRolePermissions(tenantId, role, { duties: row.duties }, "system-module-sync")
     );
   }
+  if (writes.length > 0) {
+    await Promise.all(writes);
+  }
+}
+
+async function loadBuiltinRoleOverrides(
+  tenantId: string
+): Promise<Map<Role, { duties: Permission[] }>> {
+  const supabase = getSupabaseAdminClient();
+  const overrides = new Map<Role, { duties: Permission[] }>();
+  if (!supabase) {
+    await Promise.all(
+      TENANT_EDITABLE_BUILTIN_ROLES.map(async (role) => {
+        const row = await loadOverrideRow(tenantId, role);
+        if (row) {
+          overrides.set(role, row);
+        }
+      })
+    );
+    return overrides;
+  }
+
+  const { data, error } = await supabase
+    .from("tenant_builtin_role_overrides")
+    .select("role, duties")
+    .eq("tenant_id", tenantId)
+    .in("role", [...TENANT_EDITABLE_BUILTIN_ROLES]);
+
+  if (error) {
+    throw new Error(`Failed to load role permissions: ${error.message}`);
+  }
+
+  for (const row of data ?? []) {
+    if (!isTenantEditableBuiltinRole(row.role as Role)) {
+      continue;
+    }
+    const parsed = z.array(permissionSchema).safeParse(row.duties ?? []);
+    if (!parsed.success) {
+      throw new Error("Stored duties for role are invalid");
+    }
+    overrides.set(row.role as Role, { duties: parsed.data });
+  }
+  return overrides;
 }
 
 export async function listBuiltinRolePermissions(

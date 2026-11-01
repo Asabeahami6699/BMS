@@ -1,10 +1,13 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AuditLogRecord } from "./api";
 import { listAuditLogs, getTenantId } from "./api";
 import { subscribeToTenantRealtime } from "./realtime";
 import { AdminDataTable, filterRowsBySearch } from "../components/AdminDataTable";
 import { useToast } from "../components/Toast";
 import { usePageLoading } from "./hooks/usePageLoading";
+import { useBranchesLiveSync } from "./hooks/useBranchesLiveSync";
+import { useBranchesStore } from "./stores/branchesStore";
+import { formatBranchLabel } from "./branchDisplay";
 
 function formatWhen(iso: string): string {
   try {
@@ -29,6 +32,8 @@ export function AuditLogsPage() {
   const [rows, setRows] = useState<AuditLogRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  useBranchesLiveSync();
+  const branches = useBranchesStore((s) => s.branches);
 
   usePageLoading(loading, "audit-logs");
 
@@ -54,11 +59,20 @@ export function AuditLogsPage() {
     return unsub;
   }, [load]);
 
-  const filtered = filterRowsBySearch(rows, search, [
+  const labeled = useMemo(
+    () =>
+      rows.map((row) => ({
+        ...row,
+        branchLabel: formatBranchLabel(row.branchId, branches)
+      })),
+    [rows, branches]
+  );
+
+  const filtered = filterRowsBySearch(labeled, search, [
     "action",
     "actorRole",
     "actorUserId",
-    "branchId",
+    "branchLabel",
     "method",
     "path"
   ]);
@@ -124,7 +138,7 @@ export function AuditLogsPage() {
             {
               key: "branch",
               label: "Branch",
-              render: (row) => row.branchId ?? "—"
+              render: (row) => row.branchLabel
             }
           ]}
           rows={filtered}

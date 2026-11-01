@@ -128,6 +128,7 @@ export function ledgerPerformerLabel(input: {
   }
   if (
     input.transactionType === "deposit" ||
+    input.transactionType === "susu_reversal" ||
     !agent ||
     recorded === agent ||
     (input.recordedByUserId && input.fieldAgentId && input.recordedByUserId === input.fieldAgentId)

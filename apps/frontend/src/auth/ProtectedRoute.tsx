@@ -1,7 +1,8 @@
+import { useEffect } from "react";
 import { Navigate } from "react-router-dom";
-import { isBuiltinRole } from "@bms/shared";
-import type { AppRole } from "../app/api";
-import { getAuthSession } from "../app/api";
+import { isBuiltinRole, parseTenantSubdomain } from "@bms/shared";
+import type { AppRole, AuthMe } from "../app/api";
+import { getAuthSession, logout } from "../app/api";
 import { getHomePathForRole } from "./roleRedirect";
 import { useAuth } from "./AuthContext";
 
@@ -11,9 +12,23 @@ type Props = {
   forbiddenRoles?: AppRole[];
 };
 
+function userOwnsHost(user: AuthMe, host: string): boolean {
+  const address = (user.tenantSubdomain || user.tenantId || "").toLowerCase();
+  return address === host;
+}
+
 export function ProtectedRoute({ children, allowedRoles, forbiddenRoles }: Props) {
   const { user, loading } = useAuth();
   const session = getAuthSession();
+  const effectiveUser = user ?? session?.user ?? null;
+  const host = typeof window === "undefined" ? null : parseTenantSubdomain(window.location.hostname);
+  const hostMismatch = Boolean(host && effectiveUser && !userOwnsHost(effectiveUser, host));
+
+  useEffect(() => {
+    if (hostMismatch) {
+      void logout();
+    }
+  }, [hostMismatch]);
 
   if (loading) {
     return (
@@ -23,9 +38,7 @@ export function ProtectedRoute({ children, allowedRoles, forbiddenRoles }: Props
     );
   }
 
-  const effectiveUser = user ?? session?.user ?? null;
-
-  if (!session?.accessToken || !effectiveUser) {
+  if (!session?.accessToken || !effectiveUser || hostMismatch) {
     return <Navigate to="/login" replace />;
   }
 

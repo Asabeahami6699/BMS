@@ -1,6 +1,7 @@
 import { z } from "zod";
-import { normalizeTenantModule, tenantProductModuleSchema } from "./modules.js";
 import { tenantAddonSchema } from "./addons.js";
+import { normalizeTenantModule, tenantProductModuleSchema } from "./modules.js";
+import { tenantSubdomainSchema } from "./tenantHost.js";
 
 const subscribedModulesField = z.preprocess(
   (val) => {
@@ -124,7 +125,11 @@ function assertBranchAssignment(
 
 export const loginSchema = z.object({
   email: z.string().email(),
-  password: z.string().min(6)
+  password: z.string().min(6),
+  tenantSubdomain: z.preprocess(
+    (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+    z.string().trim().toLowerCase().optional()
+  )
 });
 
 export const createTenantAdminSchema = z.object({
@@ -204,7 +209,7 @@ export const updateBranchSchema = z.object({
 });
 
 export const createTenantSchema = z.object({
-  id: z.string().min(1),
+  id: tenantSubdomainSchema,
   name: z.string().min(1),
   subscriptionStatus: z.enum(["active", "inactive"]).default("active"),
   subscribedModules: subscribedModulesField,
@@ -232,6 +237,7 @@ export const permissionSchema = z.enum([
   "transactions.create.deposit",
   "transactions.create.withdrawal",
   "transactions.read",
+  "transactions.reverse.daily_susu",
   "ledger.read",
   "reports.read",
   "payroll.read",

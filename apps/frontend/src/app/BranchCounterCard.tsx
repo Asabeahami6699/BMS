@@ -6,6 +6,7 @@ import type { AppRole } from "./api";
 import { BranchCounterFloatPanel } from "./BranchCounterFloatPanel";
 import { BranchCounterCashCalculator } from "./BranchCounterCashCalculator";
 import { BranchCounterStatementPanel } from "./BranchCounterStatement";
+import { SusuReversalDialog } from "./SusuReversalDialog";
 import { filterRowsBySearch } from "../components/AdminDataTable";
 import { useToast } from "../components/Toast";
 import { useTransactionPin } from "../auth/TransactionPinProvider";
@@ -78,6 +79,7 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
   const [bankProductId, setBankProductId] = useState("");
   const [confirmWithdraw, setConfirmWithdraw] = useState(false);
   const [calculatorOpen, setCalculatorOpen] = useState(false);
+  const [susuTransactionId, setSusuTransactionId] = useState<string | null>(null);
 
   const {
     customers,
@@ -750,24 +752,60 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
                 <strong>Balance</strong>
               </span>
             </div>
-            {recentLedger.map((entry) => (
-              <div className="cif-ledger__row" role="row" key={entry.id}>
-                <span>{formatLedgerDate(entry.createdAt)}</span>
-                <span className={`cif-ledger__type--${entry.entryType}`}>
-                  {entry.entryType === "credit" ? "Credit" : "Debit"}
-                </span>
-                <span className="branch-counter__ledger-amt">GHS {entry.amount.toFixed(2)}</span>
-                <span className="cif-ledger__by" title={entry.performedByName ?? undefined}>
-                  {entry.performedByName ?? entry.recordedByName ?? "—"}
-                </span>
-                <span className="branch-counter__ledger-bal">GHS {entry.balanceAfter.toFixed(2)}</span>
-              </div>
-            ))}
+            {recentLedger.map((entry) => {
+              const susuDetail =
+                entry.transactionType === "daily_susu" || entry.transactionType === "susu_reversal";
+              const typeLabel =
+                entry.transactionType === "susu_reversal"
+                  ? "Reversal"
+                  : entry.entryType === "credit"
+                    ? "Credit"
+                    : "Debit";
+              const cells = (
+                <>
+                  <span>{formatLedgerDate(entry.createdAt)}</span>
+                  <span className={`cif-ledger__type--${entry.entryType}`}>
+                    {typeLabel}
+                    {entry.reversalStatus === "reversed" ? " · Reversed" : ""}
+                  </span>
+                  <span className="branch-counter__ledger-amt">GHS {entry.amount.toFixed(2)}</span>
+                  <span className="cif-ledger__by" title={entry.performedByName ?? undefined}>
+                    {entry.performedByName ?? entry.recordedByName ?? "—"}
+                  </span>
+                  <span className="branch-counter__ledger-bal">GHS {entry.balanceAfter.toFixed(2)}</span>
+                </>
+              );
+              return susuDetail ? (
+                <button
+                  type="button"
+                  className="cif-ledger__row"
+                  key={entry.id}
+                  aria-label={`Reverse collection, ${typeLabel} GHS ${entry.amount.toFixed(2)}`}
+                  onClick={() => setSusuTransactionId(entry.transactionId)}
+                >
+                  {cells}
+                </button>
+              ) : (
+                <div className="cif-ledger__row" role="row" key={entry.id}>
+                  {cells}
+                </div>
+              );
+            })}
           </div>
         )}
       </section>
 
       <BranchCounterStatementPanel />
+      <SusuReversalDialog
+        open={susuTransactionId != null}
+        transactionId={susuTransactionId}
+        onClose={() => setSusuTransactionId(null)}
+        onCompleted={() => {
+          if (selectedCustomer) {
+            void useBranchCounterStore.getState().loadLedger(selectedCustomer.id, { force: true });
+          }
+        }}
+      />
     </div>
   );
 }

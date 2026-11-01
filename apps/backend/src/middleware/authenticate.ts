@@ -5,6 +5,10 @@ import { resolveUserContextFromHeaders } from "../services/userContextService.js
 
 const PUBLIC_PATHS = new Set(["/api/v1/auth/login", "/api/v1/auth/refresh"]);
 
+function isPublicCompanyHost(path: string, method: string): boolean {
+  return path === "/api/v1/auth/company-host" && method === "GET";
+}
+
 function isPublicChatPath(path: string, method: string): boolean {
   if (path === "/api/v1/chat/threads" && method === "POST") {
     return true;
@@ -21,7 +25,7 @@ function isPublicAiPath(path: string, method: string): boolean {
 
 export async function authenticate(req: Request, res: Response, next: NextFunction): Promise<void> {
   const path = req.originalUrl.split("?")[0] ?? req.path;
-  if ((PUBLIC_PATHS.has(path) && req.method === "POST") || isPublicChatPath(path, req.method) || isPublicAiPath(path, req.method)) {
+  if ((PUBLIC_PATHS.has(path) && req.method === "POST") || isPublicCompanyHost(path, req.method) || isPublicChatPath(path, req.method) || isPublicAiPath(path, req.method)) {
     next();
     return;
   }

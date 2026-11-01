@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { SAVINGS_INITIAL_DEPOSIT_GHS } from "@bms/shared";
 import type { AccountType, Customer, LedgerEntry } from "../app/api";
 import { getCustomerLedger } from "../app/api";
+import { SusuReversalDialog } from "../app/SusuReversalDialog";
 import { downloadCustomerLedgerCsv } from "../lib/customerLedgerCsv";
 import { formatFieldAgent } from "../lib/formatFieldAgent";
 import { useToast } from "./Toast";
@@ -94,6 +95,8 @@ export function CustomerDetailsView({
   const { showToast } = useToast();
   const [idLightbox, setIdLightbox] = useState(false);
   const [ledger, setLedger] = useState<LedgerEntry[]>([]);
+  const [ledgerVersion, setLedgerVersion] = useState(0);
+  const [susuTransactionId, setSusuTransactionId] = useState<string | null>(null);
   const [ledgerLoading, setLedgerLoading] = useState(false);
   const [ledgerError, setLedgerError] = useState<string | null>(null);
   const [ledgerVisibleCount, setLedgerVisibleCount] = useState(LEDGER_PAGE_SIZE);
@@ -154,7 +157,7 @@ export function CustomerDetailsView({
     return () => {
       cancelled = true;
     };
-  }, [customer.id, showFinancials]);
+  }, [customer.id, showFinancials, ledgerVersion]);
 
   useEffect(() => {
     setLedgerVisibleCount(LEDGER_PAGE_SIZE);
@@ -204,7 +207,7 @@ export function CustomerDetailsView({
                 <span className="cif-account-card__dot" aria-hidden>
                   ·
                 </span>
-                <span>{branchLabel ?? customer.homeBranchId}</span>
+                <span>{branchLabel ?? "—"}</span>
               </p>
             </div>
             <span className={`status-pill status-pill--${STATUS_PILL[customer.status]} cif-account-card__status`}>
@@ -291,22 +294,48 @@ export function CustomerDetailsView({
                           <strong>Balance after</strong>
                         </span>
                       </div>
-                      {displayedLedger.map((entry) => (
-                        <div className="cif-ledger__row" role="row" key={entry.id}>
-                          <span>{formatLedgerDate(entry.createdAt)}</span>
-                          <span className={`cif-ledger__type--${entry.entryType}`}>
-                            {entry.entryType === "credit" ? "Credit" : "Debit"}
-                          </span>
-                          <span>GHS {entry.amount.toFixed(2)}</span>
-                          <span
-                            className="cif-ledger__by"
-                            title={entry.performedByName ?? entry.recordedByName ?? undefined}
+                      {displayedLedger.map((entry) => {
+                        const susuDetail =
+                          entry.transactionType === "daily_susu" || entry.transactionType === "susu_reversal";
+                        const typeLabel =
+                          entry.transactionType === "susu_reversal"
+                            ? "Reversal"
+                            : entry.entryType === "credit"
+                              ? "Credit"
+                              : "Debit";
+                        const cells = (
+                          <>
+                            <span>{formatLedgerDate(entry.createdAt)}</span>
+                            <span className={`cif-ledger__type--${entry.entryType}`}>
+                              {typeLabel}
+                              {entry.reversalStatus === "reversed" ? " · Reversed" : ""}
+                            </span>
+                            <span>GHS {entry.amount.toFixed(2)}</span>
+                            <span
+                              className="cif-ledger__by"
+                              title={entry.performedByName ?? entry.recordedByName ?? undefined}
+                            >
+                              {entry.performedByName ?? entry.recordedByName ?? "—"}
+                            </span>
+                            <span>GHS {entry.balanceAfter.toFixed(2)}</span>
+                          </>
+                        );
+                        return susuDetail ? (
+                          <button
+                            type="button"
+                            className="cif-ledger__row"
+                            key={entry.id}
+                            aria-label={`Reverse collection, ${typeLabel} GHS ${entry.amount.toFixed(2)}`}
+                            onClick={() => setSusuTransactionId(entry.transactionId)}
                           >
-                            {entry.performedByName ?? entry.recordedByName ?? "—"}
-                          </span>
-                          <span>GHS {entry.balanceAfter.toFixed(2)}</span>
-                        </div>
-                      ))}
+                            {cells}
+                          </button>
+                        ) : (
+                          <div className="cif-ledger__row" role="row" key={entry.id}>
+                            {cells}
+                          </div>
+                        );
+                      })}
                     </div>
                     {olderEntriesCount > 0 ? (
                       <button
@@ -464,7 +493,7 @@ export function CustomerDetailsView({
               title="Branch & servicing"
             >
               <div className="cif-grid">
-                <InfoRow label="Home branch" value={branchLabel ?? customer.homeBranchId} fullWidth />
+                <InfoRow label="Home branch" value={branchLabel ?? "—"} fullWidth />
                 <InfoRow label="Assigned agent" value={agentLabel ?? formatFieldAgent(customer)} fullWidth />
                 {customer.createdByFieldAgentName &&
                 customer.createdByFieldAgentName !== customer.assignedFieldAgentName ? (
@@ -546,6 +575,12 @@ export function CustomerDetailsView({
           </div>
         </div>
       ) : null}
+      <SusuReversalDialog
+        open={susuTransactionId != null}
+        transactionId={susuTransactionId}
+        onClose={() => setSusuTransactionId(null)}
+        onCompleted={() => setLedgerVersion((version) => version + 1)}
+      />
     </>
   );
 }

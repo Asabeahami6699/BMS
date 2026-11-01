@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { AgentReport, Branch, BranchReport, SummaryReport } from "../api";
 import { getPerformanceBootstrap, getTenantId } from "../api";
+import { formatBranchLabel } from "../branchDisplay";
 import { toUserFacingError } from "../../lib/networkError";
 import {
   createLiveSyncManager,
@@ -171,6 +172,5 @@ export function selectAgentDisplayName(
 }
 
 export function selectBranchDisplayName(branchId: string, branches: Branch[]): string {
-  const match = branches.find((b) => b.id === branchId);
-  return match ? `${match.name} (${match.code})` : branchId;
+  return formatBranchLabel(branchId, branches);
 }

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { MAX_PHOTO_BYTES } from "../lib/imageCompress";
 import { useToast } from "./Toast";
 
@@ -9,6 +10,8 @@ type Props = {
   open: boolean;
   onClose: () => void;
   onCapture: (dataUrl: string, fileName: string) => void;
+  guide?: string;
+  initialFacingMode?: "environment" | "user";
 };
 
 function stopStream(stream: MediaStream | null) {
@@ -44,14 +47,20 @@ function captureFrame(video: HTMLVideoElement): string | null {
   return dataUrl;
 }
 
-export function CameraCaptureModal({ open, onClose, onCapture }: Props) {
+export function CameraCaptureModal({
+  open,
+  onClose,
+  onCapture,
+  guide = "Center the subject in the frame",
+  initialFacingMode = "environment"
+}: Props) {
   const { showToast } = useToast();
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const onCloseRef = useRef(onClose);
   const [starting, setStarting] = useState(false);
   const [ready, setReady] = useState(false);
-  const [facingMode, setFacingMode] = useState<"environment" | "user">("environment");
+  const [facingMode, setFacingMode] = useState<"environment" | "user">(initialFacingMode);
 
   onCloseRef.current = onClose;
 
@@ -73,6 +82,7 @@ export function CameraCaptureModal({ open, onClose, onCapture }: Props) {
       stopStream(streamRef.current);
       streamRef.current = null;
       setReady(false);
+      setFacingMode(initialFacingMode);
       return;
     }
 
@@ -121,7 +131,7 @@ export function CameraCaptureModal({ open, onClose, onCapture }: Props) {
       stopStream(streamRef.current);
       streamRef.current = null;
     };
-  }, [open, facingMode, showToast]);
+  }, [open, facingMode, initialFacingMode, showToast]);
 
   function handleCapture() {
     const video = videoRef.current;
@@ -150,10 +160,10 @@ export function CameraCaptureModal({ open, onClose, onCapture }: Props) {
     return null;
   }
 
-  return (
-    <div className="modal-backdrop modal-backdrop--stacked" role="presentation" onClick={onClose}>
+  return createPortal(
+    <div className="modal-backdrop modal-backdrop--stacked camera-capture-backdrop" role="presentation" onClick={onClose}>
       <div
-        className="modal-panel"
+        className="modal-panel camera-capture-panel"
         role="dialog"
         aria-modal="true"
         aria-labelledby="camera-modal-title"
@@ -162,24 +172,26 @@ export function CameraCaptureModal({ open, onClose, onCapture }: Props) {
         <header className="modal-header">
           <div>
             <h2 id="camera-modal-title">Take photo</h2>
-            <p className="muted modal-subtitle">Live camera preview. Tap Capture when ready.</p>
+            <p className="muted modal-subtitle">{guide}. Tap Capture when it sits in the box.</p>
           </div>
           <button type="button" className="modal-close" onClick={onClose} aria-label="Close">
             ✕
           </button>
         </header>
         <div className="modal-body">
-          <div className="camera-capture-wrap">
+          <div className="camera-capture-stage">
             <video
               ref={videoRef}
-              className="camera-capture-video"
+              className={`camera-capture-video${facingMode === "user" ? " camera-capture-video--mirror" : ""}`}
               playsInline
               muted
               autoPlay
               aria-label="Camera preview"
             />
-            {starting ? <p className="muted camera-capture-status">Starting camera…</p> : null}
-            {!starting && ready ? <p className="muted camera-capture-status">Camera active</p> : null}
+            <div className="camera-capture-guide" aria-hidden>
+              <span>{guide}</span>
+            </div>
+            {starting ? <p className="camera-capture-status">Starting camera…</p> : null}
           </div>
         </div>
         <footer className="modal-footer">
@@ -194,6 +206,7 @@ export function CameraCaptureModal({ open, onClose, onCapture }: Props) {
           </button>
         </footer>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

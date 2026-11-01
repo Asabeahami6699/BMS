@@ -14,14 +14,12 @@ import { useRoutesStore } from "./stores/routesStore";
 import { RouteAssignAgentModal } from "./RouteAssignAgentModal";
 import { RouteFormModal } from "./RouteFormModal";
 import { RouteMembersModal } from "./RouteMembersModal";
+import { formatBranchLabel } from "./branchDisplay";
 
 type Props = { role: AppRole };
 
 function branchLabel(route: FieldRoute): string {
-  if (route.branchName && route.branchCode) {
-    return `${route.branchName} (${route.branchCode})`;
-  }
-  return route.branchName ?? route.branchId;
+  return formatBranchLabel(route.branchId, [], route.branchName, route.branchCode);
 }
 
 function RouteDetailModal({
