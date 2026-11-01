@@ -13,8 +13,9 @@ type Props = {
 };
 
 function userOwnsHost(user: AuthMe, host: string): boolean {
-  const address = (user.tenantSubdomain || user.tenantId || "").toLowerCase();
-  return address === host;
+  const subdomain = (user.tenantSubdomain || "").toLowerCase();
+  const tenantId = (user.tenantId || "").toLowerCase();
+  return host === subdomain || host === tenantId;
 }
 
 export function ProtectedRoute({ children, allowedRoles, forbiddenRoles }: Props) {

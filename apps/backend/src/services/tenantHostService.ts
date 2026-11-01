@@ -62,13 +62,24 @@ export async function findTenantBySubdomain(raw: string): Promise<TenantHostMatc
   if (!row) {
     const byId = await supabase
       .from("tenants")
-      .select("id, name, subscription_status")
+      .select("id, name, subscription_status, subdomain")
       .eq("id", subdomain)
       .maybeSingle();
-    if (byId.error && !/subdomain/i.test(byId.error.message)) {
+    if (byId.error && /subdomain/i.test(byId.error.message)) {
+      const retry = await supabase
+        .from("tenants")
+        .select("id, name, subscription_status")
+        .eq("id", subdomain)
+        .maybeSingle();
+      if (retry.error) {
+        throw new Error(`Failed to look up company address: ${retry.error.message}`);
+      }
+      row = retry.data;
+    } else if (byId.error) {
       throw new Error(`Failed to look up company address: ${byId.error.message}`);
+    } else {
+      row = byId.data;
     }
-    row = byId.data;
   }
   if (!row || row.id === "platform") {
     return local ? fromStored(local, local.subdomain ?? subdomain) : null;

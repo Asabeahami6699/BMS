@@ -44,7 +44,8 @@ export function LoginPage() {
 
   const ownsHost =
     !hostSubdomain ||
-    (user?.tenantSubdomain || user?.tenantId || "").toLowerCase() === hostSubdomain;
+    hostSubdomain === (user?.tenantSubdomain || "").toLowerCase() ||
+    hostSubdomain === (user?.tenantId || "").toLowerCase();
 
   useEffect(() => {
     if (!hostSubdomain) {

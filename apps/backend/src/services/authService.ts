@@ -83,31 +83,54 @@ async function enrichTenantContext(
   }
 
   const supabase = getSupabaseAdminClient();
-  const [modules, addons, tenantRow, permissionInputs] = await Promise.all([
+  const [modules, addons, tenantLookup, permissionInputs] = await Promise.all([
     reloadTenantModulesFromDb(context.tenantId),
     loadTenantAddons(context.tenantId),
     supabase
-      ? supabase
-          .from("tenants")
-          .select("name, subscription_status")
-          .eq("id", context.tenantId)
-          .maybeSingle()
+      ? (async () => {
+          const selected = await supabase
+            .from("tenants")
+            .select("name, subscription_status, subdomain")
+            .eq("id", context.tenantId)
+            .maybeSingle();
+          if (selected.error && /subdomain/i.test(selected.error.message)) {
+            return supabase
+              .from("tenants")
+              .select("name, subscription_status")
+              .eq("id", context.tenantId)
+              .maybeSingle();
+          }
+          return selected;
+        })()
       : Promise.resolve(null),
     loadTenantPermissionInputs(context.tenantId, context.role, context.userId)
   ]);
+  const tenantRow = tenantLookup?.data as
+    | { name: string; subscription_status: string; subdomain?: string | null }
+    | null
+    | undefined;
   const currentTenant = getTenantFromStore(context.tenantId);
-  if (currentTenant || tenantRow?.data) {
+  const resolvedSubdomain =
+    tenantRow?.subdomain && isTenantSubdomain(tenantRow.subdomain)
+      ? tenantRow.subdomain.toLowerCase()
+      : currentTenant?.subdomain && isTenantSubdomain(currentTenant.subdomain)
+        ? currentTenant.subdomain.toLowerCase()
+        : isTenantSubdomain(context.tenantId)
+          ? context.tenantId.toLowerCase()
+          : undefined;
+  if (currentTenant || tenantRow) {
     upsertTenantInStore({
       id: context.tenantId,
-      name: tenantRow?.data?.name ?? currentTenant?.name ?? context.tenantId,
-      subscriptionStatus: tenantRow?.data
-        ? tenantRow.data.subscription_status === "inactive"
+      name: tenantRow?.name ?? currentTenant?.name ?? context.tenantId,
+      subscriptionStatus: tenantRow
+        ? tenantRow.subscription_status === "inactive"
           ? "inactive"
           : "active"
         : (currentTenant?.subscriptionStatus ?? "active"),
       accountNumberPrefix: currentTenant?.accountNumberPrefix,
       subscribedModules: modules,
       subscribedAddons: addons,
+      subdomain: resolvedSubdomain,
       createdAt: currentTenant?.createdAt ?? new Date().toISOString()
     });
   }
