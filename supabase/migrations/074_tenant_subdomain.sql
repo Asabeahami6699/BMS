@@ -1,4 +1,4 @@
--- Public web address for each company: {subdomain}.aabanking.com
+-- Public web address for each company: {subdomain}.aabanker.com
 -- Existing company ids that are already valid addresses are copied across.
 
 alter table public.tenants

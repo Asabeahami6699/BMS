@@ -24,7 +24,7 @@ export type StoredTenant = {
   subscribedModules?: TenantProductModule[];
   subscribedAddons?: import("@bms/shared").TenantAddon[];
   createdAt: string;
-  /** Public address label: {subdomain}.aabanking.com */
+  /** Public address label: {subdomain}.aabanker.com */
   subdomain?: string;
 };
 

@@ -1,7 +1,7 @@
 import { z } from "zod";
 
-/** Company sites live at {name}.aabanking.com */
-export const TENANT_ROOT_DOMAIN = "aabanking.com";
+/** Company sites live at {name}.aabanker.com */
+export const TENANT_ROOT_DOMAIN = "aabanker.com";
 
 export const RESERVED_TENANT_SUBDOMAINS = [
   "www",
@@ -40,7 +40,7 @@ export function tenantSignInHost(subdomain: string): string {
 
 /**
  * Company label from the browser host.
- * evanssusu.aabanking.com and evanssusu.localhost return "evanssusu".
+ * evanssusu.aabanker.com and evanssusu.localhost return "evanssusu".
  * The apex, www, and localhost itself return null so platform sign-in still works.
  */
 export function parseTenantSubdomain(hostname: string | null | undefined): string | null {
