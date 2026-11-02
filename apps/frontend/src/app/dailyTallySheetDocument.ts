@@ -13,6 +13,7 @@ const DOCUMENT_STYLES = `
   html, body {
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
+    height: 100%;
   }
   @page {
     size: A4;
@@ -29,6 +30,9 @@ const DOCUMENT_STYLES = `
   }
   .tally {
     width: 100%;
+    min-height: calc(297mm - 14mm);
+    display: flex;
+    flex-direction: column;
   }
   .tally__company {
     text-align: center;
@@ -75,6 +79,8 @@ const DOCUMENT_STYLES = `
   }
   table.tally__table {
     width: 100%;
+    flex: 1 1 auto;
+    height: 100%;
     border-collapse: collapse;
     table-layout: fixed;
   }
@@ -89,10 +95,10 @@ const DOCUMENT_STYLES = `
     text-transform: uppercase;
     letter-spacing: 0.04em;
     background: #fff;
-    height: 16px;
+    height: 6mm;
   }
-  .tally__table td {
-    height: 16.5px;
+  .tally__table tbody td {
+    height: 6.1mm;
   }
   .tally__col-no { width: 7%; text-align: center; }
   .tally__col-name { width: 34%; }
@@ -106,7 +112,7 @@ const DOCUMENT_STYLES = `
   }
   .tally__footer td {
     font-weight: 700;
-    height: 18px;
+    height: 7mm;
   }
   .tally__grand-label {
     text-align: right;
@@ -115,9 +121,12 @@ const DOCUMENT_STYLES = `
     font-size: 0.72rem;
   }
   @media print {
-    html, body, .tally {
+    html, body {
       height: auto;
-      overflow: hidden;
+    }
+    .tally {
+      min-height: calc(297mm - 14mm);
+      page-break-inside: avoid;
     }
     .tally__table {
       page-break-inside: avoid;
