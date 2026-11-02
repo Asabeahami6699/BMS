@@ -121,7 +121,7 @@ export function LoginPage() {
 
       <p className="login-back">
 
-        <Link to="/">← Back to BMS home</Link>
+        <Link to="/">← Back to aabanker home</Link>
 
       </p>
 
@@ -133,7 +133,7 @@ export function LoginPage() {
 
           <div>
 
-            <p className="dash-brand-name">BMS</p>
+            <p className="dash-brand-name">aabanker</p>
 
             <p className="dash-brand-tag">Banking Management System</p>
 

@@ -182,7 +182,7 @@ export function DashboardShell({
             ) : (
               <BmsBrandIcon />
             )}
-            <p className="dash-brand-name">BMS</p>
+            <p className="dash-brand-name">aabanker</p>
           </div>
           <div className="dash-brand-text">
             {companyName ? <p className="dash-brand-company">{companyName}</p> : null}

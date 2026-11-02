@@ -171,7 +171,7 @@ export function InitiateAgencyWithdrawalPanel({ onInitiated }: Props) {
 
   async function handleSubmit() {
     if (captureMode === "bms" && !selectedCustomer) {
-      showToast("Select a customer or use non-BMS account entry", "error");
+      showToast("Select a customer or use Non-aabanker account entry", "error");
       return;
     }
 
@@ -252,8 +252,8 @@ export function InitiateAgencyWithdrawalPanel({ onInitiated }: Props) {
         <div>
           <h3>Initiate withdrawal</h3>
           <p className="muted">
-            Collect customer details and start the withdrawal — walk-in non-BMS requests go straight to
-            teller; BMS members are verified in the queue below.
+            Collect customer details and start the withdrawal — walk-in Non-aabanker requests go straight to
+            teller; aabanker members are verified in the queue below.
           </p>
         </div>
       </header>
@@ -270,17 +270,17 @@ export function InitiateAgencyWithdrawalPanel({ onInitiated }: Props) {
             className={`button agency-deposits-mode-btn${captureMode === "manual" ? " agency-deposits-mode-btn--active" : ""}`}
             onClick={enableManualMode}
           >
-            Non-BMS account holder
+            Non-aabanker account holder
           </button>
 
           {captureMode === "manual" ? (
             <div className="agency-deposits-manual-mode">
               <p className="muted agency-deposits-account-hint">
                 Manual entry — enter the partner bank account number and verification details on the form.
-                For customers without a Susu, savings, or linked BMS account.
+                For customers without a Susu, savings, or linked aabanker account.
               </p>
               <button type="button" className="button secondary" onClick={enableBmsMode}>
-                ← Back to BMS customer search
+                ← Back to aabanker customer search
               </button>
             </div>
           ) : (
@@ -367,7 +367,7 @@ export function InitiateAgencyWithdrawalPanel({ onInitiated }: Props) {
                     </p>
                     <h3 className="branch-counter__hero-name">
                       {captureMode === "manual"
-                        ? "Non-BMS account holder"
+                        ? "Non-aabanker account holder"
                         : selectedCustomer?.fullName ?? "Withdrawal"}
                     </h3>
                     <p className="muted">
@@ -493,8 +493,8 @@ export function InitiateAgencyWithdrawalPanel({ onInitiated }: Props) {
           ) : (
             <div className="branch-counter__hero branch-counter__hero--empty card">
               <p className="branch-counter__hero-placeholder">
-                Select <strong>Non-BMS account holder</strong> to enter partner bank details manually, or
-                search and select a BMS customer.
+                Select <strong>Non-aabanker account holder</strong> to enter partner bank details manually, or
+                search and select a aabanker customer.
               </p>
             </div>
           )}

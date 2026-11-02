@@ -68,7 +68,7 @@ export function LoanBlankFormPage({ role: _role, companyName }: Props) {
           </li>
         </ol>
         <p className="field-hint muted">
-          After a loan is approved in BMS, open the application record and use <strong>Print loan record</strong>{" "}
+          After a loan is approved in aabanker, open the application record and use <strong>Print loan record</strong>{" "}
           for the official outcome document with decision and dates filled in.
         </p>
       </section>

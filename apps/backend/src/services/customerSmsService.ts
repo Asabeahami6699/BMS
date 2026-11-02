@@ -259,7 +259,7 @@ export async function sendTestCustomerSms(input: {
   }
   const message =
     input.message?.trim() ||
-    `${brand}: This is a test SMS from your BMS notification settings.`;
+    `${brand}: This is a test SMS from your aabanker notification settings.`;
 
   const idempotencyKey = `test:${randomUUID()}`;
   await deliverSms({

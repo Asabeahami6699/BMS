@@ -65,7 +65,7 @@ export function RegisterCompanyModal({ open, onClose, onCreated }: Props) {
       title={step === "form" ? "Register company" : "Company registered"}
       subtitle={
         step === "form"
-          ? "Onboard a new cooperative or MFI tenant on BMS."
+          ? "Onboard a new cooperative or MFI tenant on aabanker."
           : "Copy and share these details with the company."
       }
       onClose={handleClose}
@@ -129,7 +129,7 @@ export function RegisterCompanyModal({ open, onClose, onCreated }: Props) {
       ) : created ? (
         <CredentialsSharePanel
           title="Company registration details"
-          shareTitle={`BMS — ${created.name} registered`}
+          shareTitle={`aabanker — ${created.name} registered`}
           fields={[
             { label: "Company name", value: created.name },
             { label: "Sign-in address", value: tenantSignInHost(created.subdomain || created.id) },

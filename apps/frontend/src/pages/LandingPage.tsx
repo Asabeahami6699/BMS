@@ -291,7 +291,7 @@ export function LandingPage() {
         <Link to="/" className="landing-nav-brand">
           <BmsBrandIcon />
           <span>
-            <strong>BMS</strong>
+            <strong>aabanker</strong>
             <small>Banking Management System</small>
           </span>
         </Link>
@@ -335,7 +335,7 @@ export function LandingPage() {
             <span className="landing-gradient-text">every desk from one system</span>
           </h1>
           <p className="landing-lead landing-animate-in landing-animate-in--3">
-            BMS is a modern Banking Management System for multi-branch cooperatives and MFIs—daily Susu collections,
+            aabanker is a modern Banking Management System for multi-branch cooperatives and MFIs—daily Susu collections,
             agency banking with teller and back-office desks, loans and investment management, accountant and auditor
             control centres, HR operations, and Universal Operations so every employee can manage attendance, leave,
             and workplace requests.
@@ -354,7 +354,7 @@ export function LandingPage() {
             </a>
           </div>
           <p className="landing-hero-note muted landing-animate-in landing-animate-in--6">
-            New to BMS? Chat with our team or email us—we help cooperatives register and go live quickly.
+            New to aabanker? Chat with our team or email us—we help cooperatives register and go live quickly.
           </p>
         </div>
 
@@ -578,7 +578,7 @@ export function LandingPage() {
           <p className="landing-eyebrow">Platform capabilities</p>
           <h2>Everything your cooperative needs in one place</h2>
           <p className="muted landing-section-sub">
-            From daily Susu in the field to accountant trial balance and staff incident reporting—BMS is designed for
+            From daily Susu in the field to accountant trial balance and staff incident reporting—aabanker is designed for
             many branches, one member ledger, and teams who work on mobile as well as at the desk.
           </p>
         </RevealOnScroll>
@@ -618,7 +618,7 @@ export function LandingPage() {
 
       <section className="landing-section" id="roles">
         <RevealOnScroll className="landing-section-head">
-          <p className="landing-eyebrow">Who uses BMS</p>
+          <p className="landing-eyebrow">Who uses aabanker</p>
           <h2>Built for every layer of your organization</h2>
           <p className="muted landing-section-sub">
             Role-based desks and permissions put the right tools in front of each team—without exposing internal
@@ -641,7 +641,7 @@ export function LandingPage() {
           <h2>Ready to modernize your cooperative?</h2>
           <p className="muted landing-section-sub">
             Tell us about your branches, Susu volume, agency banking partners, and lending plans. Use live chat
-            (bottom right) or email—we will help you evaluate BMS for your organization.
+            (bottom right) or email—we will help you evaluate aabanker for your organization.
           </p>
         </RevealOnScroll>
         <RevealOnScroll className="landing-contact-card card" delay={120}>
@@ -650,7 +650,7 @@ export function LandingPage() {
             <a href={`mailto:${BMS_CONTACT_EMAIL}`}>{BMS_CONTACT_EMAIL}</a>
           </p>
           <p className="muted">
-            BMS — Banking Management System for cooperatives and MFIs. Susu collections, agency banking desks,
+            aabanker — Banking Management System for cooperatives and MFIs. Susu collections, agency banking desks,
             loans, investment management, Universal Operations for staff, and finance control in one secure workspace.
           </p>
         </RevealOnScroll>
@@ -660,7 +660,7 @@ export function LandingPage() {
         <div>
           <h2>Start with savings. Scale into banking and staff operations.</h2>
           <p className="muted">
-            Sign in with credentials from your administrator, or contact us to register your cooperative on BMS.
+            Sign in with credentials from your administrator, or contact us to register your cooperative on aabanker.
           </p>
         </div>
         <Link to="/login" className="button landing-cta-primary">
@@ -670,7 +670,7 @@ export function LandingPage() {
 
       <footer className="landing-footer">
         <p>
-          <strong>BMS</strong> — Banking Management System for cooperative &amp; MFI operations.
+          <strong>aabanker</strong> — Banking Management System for cooperative &amp; MFI operations.
         </p>
         <p className="muted">
           Contact: <a href={`mailto:${BMS_CONTACT_EMAIL}`}>{BMS_CONTACT_EMAIL}</a>

@@ -25,7 +25,7 @@ export async function generateMomoReceiptDataUrl(input: MomoReceiptInput): Promi
   ctx.fillRect(0, 0, canvas.width, 120);
   ctx.fillStyle = "#ffffff";
   ctx.font = "bold 28px system-ui, sans-serif";
-  ctx.fillText("BMS MoMo Payout Receipt", 32, 52);
+  ctx.fillText("aabanker MoMo Payout Receipt", 32, 52);
   ctx.font = "16px system-ui, sans-serif";
   ctx.fillText(input.tenantName ?? "Susu payout", 32, 88);
 

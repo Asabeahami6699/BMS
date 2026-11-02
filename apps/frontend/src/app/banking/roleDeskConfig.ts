@@ -52,7 +52,7 @@ export const AGENCY_ROLE_DESKS: RoleDeskConfig[] = [
     workflow: [
       "Customer arrives — CS collects identity and account details",
       "Initiate withdrawal (walk-in goes straight to teller)",
-      "BMS verification happens on the withdrawal desk, not here"
+      "aabanker verification happens on the withdrawal desk, not here"
     ],
     quickLinks: [
       {

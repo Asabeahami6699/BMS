@@ -200,7 +200,7 @@ async function bootstrapSupabaseSeedRemote(
   const seedTenants: StoredTenant[] = [
     {
       id: "platform",
-      name: "BMS Platform",
+      name: "aabanker Platform",
       subscriptionStatus: "active",
       subscribedModules: [],
       createdAt: new Date().toISOString()
@@ -319,7 +319,7 @@ function seedLocalOnly(): void {
   }
   upsertTenantInStore({
     id: "platform",
-    name: "BMS Platform",
+    name: "aabanker Platform",
     subscriptionStatus: "active",
     subscribedModules: [],
     createdAt: new Date().toISOString()

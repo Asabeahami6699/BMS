@@ -7,7 +7,15 @@ import {
   type RegistrationFormSetup
 } from "@bms/shared";
 import { useToast } from "../../components/Toast";
-import { getRegistrationFormSetup, updateRegistrationFormSetup } from "../api";
+import { getCompanyProfile, getRegistrationFormSetup, updateRegistrationFormSetup } from "../api";
+import {
+  downloadDefaultRegistrationForm,
+  downloadRegistrationForm,
+  printDefaultRegistrationForm,
+  printRegistrationForm,
+  type RegistrationFormPrintContext
+} from "../registrationFormPrint";
+import { downloadDailyTallySheet, printDailyTallySheet } from "../dailyTallySheetPrint";
 
 const FIELD_ROWS: { key: keyof RegistrationFormFields; label: string; hint: string }[] = [
   { key: "email", label: "Email", hint: "Default is optional." },
@@ -46,6 +54,7 @@ export function SettingsFormSetupPage() {
   const [saving, setSaving] = useState(false);
   const [setup, setSetup] = useState<RegistrationFormSetup>(() => defaultRegistrationFormSetup());
   const [openingFee, setOpeningFee] = useState("20.00");
+  const [printContext, setPrintContext] = useState<RegistrationFormPrintContext>({});
   const [dailyAmounts, setDailyAmounts] = useState<Record<string, string>>(() =>
     Object.fromEntries(
       defaultRegistrationFormSetup().forms.map((form) => [form.id, form.defaultDailyContributionGhs.toFixed(2)])
@@ -56,7 +65,10 @@ export function SettingsFormSetupPage() {
     let cancelled = false;
     void (async () => {
       try {
-        const loaded = await getRegistrationFormSetup();
+        const [loaded, profile] = await Promise.all([
+          getRegistrationFormSetup(),
+          getCompanyProfile().catch(() => null)
+        ]);
         if (cancelled) {
           return;
         }
@@ -65,6 +77,13 @@ export function SettingsFormSetupPage() {
         setDailyAmounts(
           Object.fromEntries(loaded.forms.map((form) => [form.id, form.defaultDailyContributionGhs.toFixed(2)]))
         );
+        if (profile) {
+          setPrintContext({
+            companyName: profile.name,
+            companyPhone: profile.phone,
+            companyAddress: profile.address
+          });
+        }
       } catch (error) {
         if (!cancelled) {
           showToast(error instanceof Error ? error.message : "Failed to load form setup", "error");
@@ -79,6 +98,75 @@ export function SettingsFormSetupPage() {
       cancelled = true;
     };
   }, [showToast]);
+
+  function currentSetupForPrint(): RegistrationFormSetup {
+    const fee = Number(openingFee);
+    return {
+      ...setup,
+      savingsOpeningFeeGhs: Number.isFinite(fee) && fee >= 0 ? Math.round(fee * 100) / 100 : setup.savingsOpeningFeeGhs,
+      forms: setup.forms.map((form) => ({
+        ...form,
+        defaultDailyContributionGhs: Number(dailyAmounts[form.id] === "" ? 0 : dailyAmounts[form.id]) || 0
+      }))
+    };
+  }
+
+  function handlePrintCompanyForm() {
+    try {
+      printRegistrationForm(currentSetupForPrint(), printContext);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Could not open the print dialog", "error");
+    }
+  }
+
+  function handleDownloadCompanyForm() {
+    try {
+      downloadRegistrationForm(currentSetupForPrint(), printContext);
+      showToast("Registration form downloaded", "success");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Could not download the form", "error");
+    }
+  }
+
+  function handlePrintDefaultForm() {
+    try {
+      printDefaultRegistrationForm(printContext);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Could not open the print dialog", "error");
+    }
+  }
+
+  function handleDownloadDefaultForm() {
+    try {
+      downloadDefaultRegistrationForm(printContext);
+      showToast("Default registration form downloaded", "success");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Could not download the default form", "error");
+    }
+  }
+
+  function handlePrintTallySheet() {
+    try {
+      printDailyTallySheet({
+        companyName: printContext.companyName,
+        dateLabel: ""
+      });
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Could not open the print dialog", "error");
+    }
+  }
+
+  function handleDownloadTallySheet() {
+    try {
+      downloadDailyTallySheet({
+        companyName: printContext.companyName,
+        dateLabel: ""
+      });
+      showToast("Daily tally sheet downloaded", "success");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Could not download the tally sheet", "error");
+    }
+  }
 
   function patchForm(id: RegistrationAccountForm["id"], patch: Partial<RegistrationAccountForm>) {
     setSetup((current) => ({
@@ -171,12 +259,54 @@ export function SettingsFormSetupPage() {
           <p className="muted">
             Set the account registration forms for this company, or keep the defaults. Full name, phone, and
             location stay on every form. Accounts already opened keep the savings amount they were opened with.
+            After setup, download or print a blank paper form for field and branch registration.
           </p>
         </div>
         <button type="button" className="button secondary" onClick={restoreAll}>
           Restore defaults
         </button>
       </div>
+
+      <section className="form-setup-print" aria-label="Downloadable registration forms">
+        <div>
+          <h3>Paper registration form</h3>
+          <p className="muted">
+            Print or download a blank form that matches this setup, or use the built-in default layout.
+          </p>
+        </div>
+        <div className="form-setup-print__actions">
+          <button type="button" className="button" onClick={handlePrintCompanyForm}>
+            Print company form
+          </button>
+          <button type="button" className="button secondary" onClick={handleDownloadCompanyForm}>
+            Download company form
+          </button>
+          <button type="button" className="button secondary" onClick={handlePrintDefaultForm}>
+            Print default form
+          </button>
+          <button type="button" className="button secondary" onClick={handleDownloadDefaultForm}>
+            Download default form
+          </button>
+        </div>
+      </section>
+
+      <section className="form-setup-print" aria-label="Daily tally sheet">
+        <div>
+          <h3>Daily tally sheet</h3>
+          <p className="muted">
+            Blank backup sheet for mobilizers: company header, mobilizer name, date, 40 collection rows on one A4 page,
+            and a grand total.
+          </p>
+        </div>
+        <div className="form-setup-print__actions">
+          <button type="button" className="button" onClick={handlePrintTallySheet}>
+            Print tally sheet
+          </button>
+          <button type="button" className="button secondary" onClick={handleDownloadTallySheet}>
+            Download tally sheet
+          </button>
+        </div>
+      </section>
 
       <div className="form-setup-grid">
         {setup.forms.map((form) => (

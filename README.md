@@ -1,4 +1,4 @@
-# BMS SaaS Starter (TypeScript)
+# aabanker SaaS Starter (TypeScript)
 
 This repository is scaffolded for a multi-tenant Susu/MFI platform with:
 

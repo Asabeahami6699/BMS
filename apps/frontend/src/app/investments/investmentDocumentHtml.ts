@@ -364,7 +364,7 @@ export function buildInvestmentCustomerDetailsHtml(
   images: ImageUrls
 ): string {
   const header = `<header class="doc-header">
-    <p class="doc-header__eyebrow">BMS · Investment customer record</p>
+    <p class="doc-header__eyebrow">aabanker · Investment customer record</p>
     <p class="doc-header__number">${escapeHtml(investment.investmentNumber)}</p>
     <p class="doc-header__meta">${escapeHtml(investment.customerName)}${investment.customerPhone ? ` · ${escapeHtml(investment.customerPhone)}` : ""}</p>
   </header>`;
@@ -384,7 +384,7 @@ export function buildInvestmentApplicationHtml(
   images: ImageUrls
 ): string {
   const header = `<header class="doc-header">
-    <p class="doc-header__eyebrow">BMS · Investment application</p>
+    <p class="doc-header__eyebrow">aabanker · Investment application</p>
     <p class="doc-header__number">${escapeHtml(investment.investmentNumber)}</p>
     <p class="doc-header__meta">${escapeHtml(investment.customerName)} · ${escapeHtml(investment.productName)}</p>
   </header>`;

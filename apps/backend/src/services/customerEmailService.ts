@@ -242,7 +242,7 @@ export async function sendTestCustomerEmail(input: {
   const displayName = settings.fromName?.trim() || brand;
   const message =
     input.message?.trim() ||
-    `${displayName}: This is a test email from your BMS notification settings.`;
+    `${displayName}: This is a test email from your aabanker notification settings.`;
 
   const idempotencyKey = `email:test:${randomUUID()}`;
   const result = await sendPlatformEmail({

@@ -16,7 +16,7 @@ export type SendEmailResult = {
 
 export async function sendPlatformEmail(input: SendEmailInput): Promise<SendEmailResult> {
   const smtp = getSmtpConfig();
-  const fromName = input.fromName?.trim() || "BMS Notifications";
+  const fromName = input.fromName?.trim() || "aabanker Notifications";
   const from = hasSmtpConfig() ? `"${fromName}" <${smtp.from}>` : fromName;
 
   if (!hasSmtpConfig()) {

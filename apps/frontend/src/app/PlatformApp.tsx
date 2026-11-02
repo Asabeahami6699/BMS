@@ -41,7 +41,7 @@ export function PlatformApp() {
     <DashboardShell
       workspaceSubtitle="Register tenants and manage company subscriptions."
       navItems={PLATFORM_NAV}
-      companyName="BMS Platform"
+      companyName="aabanker Platform"
       userName={displayName}
       userRole="super admin"
       onLogout={handleLogout}

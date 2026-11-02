@@ -26,7 +26,7 @@ export function LiveChatWidget() {
   const [companyName, setCompanyName] = useState("");
   const [visitorEmail, setVisitorEmail] = useState("");
   const [introMessage, setIntroMessage] = useState(
-    "Hello, we are interested in registering our company on BMS."
+    "Hello, we are interested in registering our company on aabanker."
   );
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -150,7 +150,7 @@ export function LiveChatWidget() {
       </button>
 
       {open ? (
-        <section className="livechat-panel" aria-label="Live chat with BMS support">
+        <section className="livechat-panel" aria-label="Live chat with aabanker support">
           <header className="livechat-header">
             <div>
               <p className="livechat-title">
@@ -158,7 +158,7 @@ export function LiveChatWidget() {
               </p>
               <p className="livechat-sub">
                 {activeCompany
-                  ? "Your company's private thread with BMS support"
+                  ? "Your company's private thread with aabanker support"
                   : "Chat with our platform team in real time"}
               </p>
             </div>
@@ -221,8 +221,8 @@ export function LiveChatWidget() {
                       {msg.senderType === "visitor"
                         ? "You"
                         : isAiAssistantChatMessage(msg.id)
-                          ? "BMS AI Assistant"
-                          : "BMS Platform support"}
+                          ? "aabanker AI Assistant"
+                          : "aabanker Platform support"}
                     </p>
                     <p>{msg.body}</p>
                     <time>{new Date(msg.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>

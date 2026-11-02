@@ -82,7 +82,7 @@ const QUICK_AMOUNTS = [50, 100, 200, 500, 1000];
 const DEFAULT_DEPOSIT_PRODUCT = {
   code: "deposit",
   name: "Deposit",
-  bankLabel: "BMS",
+  bankLabel: "aabanker",
   direction: "deposit" as const,
   workflowFields: [] as import("@bms/shared").BankProductWorkflowField[]
 };
@@ -543,7 +543,7 @@ export function AgencyDepositsPage() {
     try {
       const result = await resolveDepositCustomerByAccountNumber(trimmed, activeCustomers);
       if (!result) {
-        showToast("No linked bank account found for that number in BMS", "error");
+        showToast("No linked bank account found for that number in aabanker", "error");
         return;
       }
 
@@ -660,10 +660,10 @@ export function AgencyDepositsPage() {
           ? AGENCY_BANKING_ACCOUNT_LABEL
           : selectedCustomer && hasSusu
             ? isSusuCustomer(selectedCustomer)
-              ? "BMS Susu account"
-              : "BMS Savings account"
+              ? "AABANKER SUSU account"
+              : "aabanker Savings account"
             : selectedCustomer
-              ? "BMS account"
+              ? "aabanker account"
               : undefined,
       amount: parsedAmount,
       amountInWords:
@@ -789,7 +789,7 @@ export function AgencyDepositsPage() {
           <p className="role-workspace__eyebrow">Agency banking · Teller</p>
           <h2>Record deposit</h2>
           <p className="muted branch-counter__subtitle">
-            BMS Susu &amp; Savings credit immediately · {AGENCY_BANKING_ACCOUNT_LABEL.toLowerCase()} deposits
+            AABANKER SUSU &amp; Savings credit immediately · {AGENCY_BANKING_ACCOUNT_LABEL.toLowerCase()} deposits
             queue for back-office bank execution · {updatedLabel}
           </p>
           {error ? <p className="error-text">{error}</p> : null}
@@ -838,7 +838,7 @@ export function AgencyDepositsPage() {
             <div className="agency-deposits-manual-mode">
               <p className="muted agency-deposits-account-hint">
                 {AGENCY_BANKING_ACCOUNT_LABEL} — enter all deposit slip details on the form for partner
-                bank deposits without a linked BMS Susu or savings profile.
+                bank deposits without a linked AABANKER SUSU or savings profile.
               </p>
               <button type="button" className="button secondary" onClick={enableBanksMode}>
                 ← Back to account search
@@ -925,7 +925,7 @@ export function AgencyDepositsPage() {
               <div className="agency-deposits-banks-lookup">
                 <h4 className="agency-deposits-lookup-title">Banks account lookup</h4>
                 <p className="muted agency-deposits-account-hint">
-                  Enter a linked partner bank account number to pull customer details from BMS records.
+                  Enter a linked partner bank account number to pull customer details from aabanker records.
                 </p>
                 <label className="field">
                   <span>Bank account number</span>

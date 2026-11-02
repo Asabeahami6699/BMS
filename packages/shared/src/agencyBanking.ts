@@ -47,14 +47,14 @@ export const initiateAgencyWithdrawalSchema = z
       if (!data.branchId) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: "Branch is required for non-BMS partner withdrawals",
+          message: "Branch is required for non-aabanker partner withdrawals",
           path: ["branchId"]
         });
       }
       if (!data.bankProductId) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: "Bank product is required for non-BMS partner withdrawals",
+          message: "Bank product is required for non-aabanker partner withdrawals",
           path: ["bankProductId"]
         });
       }
@@ -73,7 +73,7 @@ export type InitiateAgencyWithdrawalInput = z.infer<typeof initiateAgencyWithdra
 
 export const AGENCY_WALK_IN_CUSTOMER_NAME = "Agency banking (walk-in)";
 
-/** UI label for manual partner-bank deposits (no linked BMS Susu/savings profile). */
+/** UI label for manual partner-bank deposits (no linked aabanker Susu/savings profile). */
 export const AGENCY_BANKING_ACCOUNT_LABEL = "Agency banking account";
 
 /** Prefer account-holder name from workflow over the shared walk-in customer record. */

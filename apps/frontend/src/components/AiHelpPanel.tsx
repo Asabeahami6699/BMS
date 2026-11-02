@@ -13,7 +13,7 @@ export function AiHelpPanel() {
   const [lines, setLines] = useState<ChatLine[]>([
     {
       role: "assistant",
-      text: "Ask about your platform data or how to use BMS — Susu, Agency Banking, loans, treasury, and reports. Analysis uses live data from the last 30 days (scoped to your role and branch)."
+      text: "Ask about your platform data or how to use aabanker — Susu, Agency Banking, loans, treasury, and reports. Analysis uses live data from the last 30 days (scoped to your role and branch)."
     }
   ]);
   const listRef = useRef<HTMLDivElement>(null);
@@ -72,17 +72,17 @@ export function AiHelpPanel() {
         className="ai-help-fab"
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
-        aria-label={open ? "Close BMS assistant" : "Open BMS assistant"}
-        title="BMS AI help (local Ollama)"
+        aria-label={open ? "Close aabanker Assistant" : "Open aabanker Assistant"}
+        title="aabanker AI help (local Ollama)"
       >
         {open ? "✕" : "✨"}
       </button>
 
       {open ? (
-        <section className="ai-help-panel" aria-label="BMS workspace assistant">
+        <section className="ai-help-panel" aria-label="aabanker workspace assistant">
           <header className="ai-help-panel__header">
             <div>
-              <p className="ai-help-panel__title">BMS Assistant</p>
+              <p className="ai-help-panel__title">aabanker Assistant</p>
               <p className="ai-help-panel__sub">
                 {available
                   ? `Local AI · ${model || "Ollama"}`

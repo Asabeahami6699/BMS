@@ -175,7 +175,7 @@ export async function startVisitorThread(raw: unknown): Promise<{ thread: ChatTh
     id: newId("msg"),
     threadId,
     senderType: "admin",
-    body: `Hello! Thanks for your interest in BMS (Banking Management System). How can we help with your company registration? You can also reach us at asabeahami6699@gmail.com.`,
+    body: `Hello! Thanks for your interest in aabanker (Banking Management System). How can we help with your company registration? You can also reach us at asabeahami6699@gmail.com.`,
     createdAt: now
   };
 

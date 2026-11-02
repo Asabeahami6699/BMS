@@ -2531,6 +2531,34 @@ select:disabled {
   margin-top: 0.45rem;
 }
 
+.form-setup-print {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 0 0 1.25rem;
+  padding: 1rem;
+  border: 1px solid var(--border, #d7dde7);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface, #fff) 92%, var(--accent, #2563eb) 8%);
+}
+
+.form-setup-print h3 {
+  margin: 0 0 0.35rem;
+  font-size: 1rem;
+}
+
+.form-setup-print__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.form-setup-print__actions .button {
+  white-space: nowrap;
+}
+
 .form-setup__head {
   display: flex;
   justify-content: space-between;

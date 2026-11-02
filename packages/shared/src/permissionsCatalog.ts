@@ -418,7 +418,7 @@ export const PERMISSION_CATALOG: PermissionCatalogEntry[] = [
     id: "agency.withdrawals.approve",
     label: "Verify withdrawal requests",
     description:
-      "Customer Service initiates walk-in withdrawals (straight to teller) and verifies BMS member requests before teller payout.",
+      "Customer Service initiates walk-in withdrawals (straight to teller) and verifies aabanker member requests before teller payout.",
     group: "agency_banking",
     requires: ["customers.read"]
   },

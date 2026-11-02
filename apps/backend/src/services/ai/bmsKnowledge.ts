@@ -2,7 +2,7 @@
 
 export const BMS_PRODUCT_KNOWLEDGE = `
 
-BMS (Banking Management System) is a multi-tenant SaaS for cooperatives and MFIs in Ghana and similar markets.
+aabanker (Banking Management System) is a multi-tenant SaaS for cooperatives and MFIs in Ghana and similar markets.
 
 
 
@@ -28,7 +28,7 @@ PRODUCT MODULES:
 
 AGENCY DEPOSIT FLOW: Customer → Teller cash → Teller enters deposit (pending) → Back Officer credits account at bank → SUCCESS.
 
-AGENCY WITHDRAWAL FLOW: Walk-in non-BMS → CS initiates → Teller confirms & pays cash. BMS member → CS initiates → CS verifies → Teller pays cash (ledger debit at payout) → SUCCESS.
+AGENCY WITHDRAWAL FLOW: Walk-in Non-aabanker → CS initiates → Teller confirms & pays cash. aabanker member → CS initiates → CS verifies → Teller pays cash (ledger debit at payout) → SUCCESS.
 
 
 

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>BMS — Setting up a new tenant</title>
+  <title>aabanker — Setting up a new tenant</title>
   <style>
     @page { size: A4; margin: 16mm 16mm 18mm; }
     * { box-sizing: border-box; }
@@ -46,14 +46,14 @@
 </head>
 <body>
   <section class="cover">
-    <p class="kicker">BMS operator manual</p>
+    <p class="kicker">aabanker operator manual</p>
     <h1>Setting up a new tenant</h1>
     <p class="subtitle">How a platform administrator registers a company, and how that company’s admin finishes branches, staff, products, and customer SMS.</p>
     <p class="meta">Banking Management System<br>For cooperatives and microfinance institutions<br>October 2026</p>
   </section>
 
   <h2>1. Who does what</h2>
-  <p>A tenant is one company on BMS. Each company has its own customers, branches, staff, and settings. Two people set a company up.</p>
+  <p>A tenant is one company on aabanker. Each company has its own customers, branches, staff, and settings. Two people set a company up.</p>
   <table>
     <tr><th>Person</th><th>Signs in as</th><th>Does this</th></tr>
     <tr><td>Platform super admin</td><td>Platform workspace</td><td>Registers the company, chooses products and add-ons, and creates the company admin login.</td></tr>
@@ -123,7 +123,7 @@
   <div class="warn">The password is shown once on that success screen. Store it before you close the window.</div>
 
   <h2>5. Company admin: first sign-in</h2>
-  <p>The company admin signs in on the BMS sign-in page with the email and password you created. They land in their company workspace, not the platform Companies page.</p>
+  <p>The company admin signs in on the aabanker sign-in page with the email and password you created. They land in their company workspace, not the platform Companies page.</p>
   <p>Work through Settings in this order.</p>
 
   <h3>5.1 Company Profile</h3>
@@ -145,10 +145,10 @@
     <li>Leave the status <strong>active</strong>.</li>
     <li>Save, and repeat for each branch.</li>
   </ol>
-  <p>If the company has only one branch, BMS selects that branch automatically on deposit and withdrawal screens. Staff do not see an empty “Select branch” option.</p>
+  <p>If the company has only one branch, aabanker selects that branch automatically on deposit and withdrawal screens. Staff do not see an empty “Select branch” option.</p>
 
   <h3>5.3 Account numbers</h3>
-  <p>Open <strong>Settings → Account numbers</strong>. Customer account numbers are 12 digits. Type the company’s numeric prefix. BMS adds random digits when a registration is approved. The prefix must be shorter than 12 digits. Save the prefix before the first customer is approved.</p>
+  <p>Open <strong>Settings → Account numbers</strong>. Customer account numbers are 12 digits. Type the company’s numeric prefix. aabanker adds random digits when a registration is approved. The prefix must be shorter than 12 digits. Save the prefix before the first customer is approved.</p>
 
   <h3>5.4 Users and permissions</h3>
   <p>Open <strong>Settings → Users</strong> and create each staff member: tellers, field agents, coordinators, customer service, and back office. Assign the branch they work in.</p>
@@ -177,7 +177,7 @@
   </ol>
   <div class="warn">A bulk campaign is not part of setup. It spends SMS credits. Use it only if Arkesel support asks for a portal test.</div>
 
-  <h3>6.2 Turn SMS on in BMS</h3>
+  <h3>6.2 Turn SMS on in aabanker</h3>
   <p>Sign in as the company admin. Open <strong>Settings → Notification Settings</strong>.</p>
   <ol>
     <li>Turn on <strong>Enable customer SMS alerts</strong>.</li>
@@ -187,7 +187,7 @@
     <li>Enter your own mobile number and click <strong>Send test</strong>.</li>
   </ol>
   <p>The test is an API SMS. In the Arkesel log, wait until that row says <strong>DELIVERED</strong>. <strong>SUBMITTING</strong> or <strong>RECHECK</strong> means it is still in progress. <strong>FAILED</strong> means the phone did not get it. Do not keep sending tests. Each test uses a credit. Give Arkesel the message ID and ask why that API SMS failed.</p>
-  <p>Portal messages and API messages are different. A portal row can be <strong>DELIVERED</strong> while an API row to the same number is <strong>FAILED</strong>. BMS uses the API. The sender must work on API SMS before customers will receive alerts.</p>
+  <p>Portal messages and API messages are different. A portal row can be <strong>DELIVERED</strong> while an API row to the same number is <strong>FAILED</strong>. aabanker uses the API. The sender must work on API SMS before customers will receive alerts.</p>
 
   <h3>6.3 What the customer receives</h3>
   <p>After a deposit is posted to the ledger, the customer with a valid Ghana number receives a text like this:</p>
@@ -214,8 +214,8 @@
     <tr><th>What you see</th><th>What to do</th></tr>
     <tr><td>Product not enabled</td><td>The department is not on this company’s subscription. Edit products as super admin, then sign the company user in again.</td></tr>
     <tr><td>Open partner bank accounts requires banking.products.read</td><td>You opened the wrong duty. For a susu withdrawal, tick Record withdrawals.</td></tr>
-    <tr><td>You are not allowed to use this Sender ID</td><td>The name in BMS is not approved on Arkesel, or the spelling does not match. Approve that exact name, including spaces.</td></tr>
-    <tr><td>API SMS FAILED, and the credit was used</td><td>BMS handed the message to Arkesel. Ask Arkesel for the network reason and for the sender to be enabled on API SMS. Do not send another test until they reply.</td></tr>
+    <tr><td>You are not allowed to use this Sender ID</td><td>The name in aabanker is not approved on Arkesel, or the spelling does not match. Approve that exact name, including spaces.</td></tr>
+    <tr><td>API SMS FAILED, and the credit was used</td><td>aabanker handed the message to Arkesel. Ask Arkesel for the network reason and for the sender to be enabled on API SMS. Do not send another test until they reply.</td></tr>
     <tr><td>Company profile storage is not ready</td><td>Run migration <code>065_tenant_company_profile.sql</code> in the Supabase SQL editor, then save the profile again.</td></tr>
     <tr><td>SMS settings are missing</td><td>SMS Notifications is not on this company’s add-ons. Edit add-ons, then sign in again.</td></tr>
   </table>

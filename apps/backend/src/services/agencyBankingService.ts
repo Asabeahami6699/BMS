@@ -451,7 +451,7 @@ async function loadDisclosuresByStatus(
     const customerName =
       holderFromWorkflow ??
       (linkedCustomer?.fullName === AGENCY_WALK_IN_CUSTOMER_NAME
-        ? "Non-BMS account holder"
+        ? "Non-aabanker account holder"
         : linkedCustomer?.fullName);
 
     return balanceDisclosureSchema.parse({
@@ -526,7 +526,7 @@ async function postAgencyWithdrawalLedgerDebit(
     homeBranchId: string;
     bankProductId?: string | null;
     notesSuffix: string;
-    /** Partner-bank walk-in: record till movement only — do not debit BMS customer ledger. */
+    /** Partner-bank walk-in: record till movement only — do not debit aabanker customer ledger. */
     skipCustomerLedgerDebit?: boolean;
   }
 ): Promise<string> {
@@ -545,7 +545,7 @@ async function postAgencyWithdrawalLedgerDebit(
       home_branch_id: params.homeBranchId,
       recorded_by_user_id: context.userId,
       field_agent_id: params.fieldAgentId,
-      notes: `${notes} · partner bank (no BMS debit)`,
+      notes: `${notes} · partner bank (no aabanker debit)`,
       execution_status: "completed",
       bank_product_id: params.bankProductId ?? null
     });
@@ -753,7 +753,7 @@ export async function initiateAgencyWithdrawal(
   if (payload.manualPartnerAccount) {
     const branchKey = payload.branchId ?? context.branchId;
     if (!branchKey) {
-      throw new Error("Branch is required for non-BMS partner withdrawals");
+      throw new Error("Branch is required for Non-aabanker partner withdrawals");
     }
     const { ensureAgencyWalkInCustomer } = await import("./agencyWalkInCustomerService.js");
     const { resolveBranchId } = await import("./branchService.js");
@@ -808,7 +808,7 @@ export async function initiateAgencyWithdrawal(
     }
     workflowData = validation.data;
   } else if (payload.manualPartnerAccount) {
-    throw new Error("Bank product is required for non-BMS partner withdrawals");
+    throw new Error("Bank product is required for Non-aabanker partner withdrawals");
   }
 
   if (payload.manualPartnerAccount) {
@@ -859,7 +859,7 @@ export async function initiateAgencyWithdrawal(
   }
 
   const displayName = payload.manualPartnerAccount
-    ? String(workflowData.account_holder_name ?? "Non-BMS account holder")
+    ? String(workflowData.account_holder_name ?? "Non-aabanker account holder")
     : customer.fullName;
 
   if (releaseToTeller) {
@@ -926,7 +926,7 @@ export async function customerServiceApproveWithdrawal(
       ? (row.workflow_data as Record<string, unknown>)
       : undefined;
   if (isManualPartnerWithdrawal({ workflowData: rowWorkflow })) {
-    throw new Error("Non-BMS walk-in withdrawals are sent directly to the teller for payout");
+    throw new Error("Non-aabanker walk-in withdrawals are sent directly to the teller for payout");
   }
 
   const amount = Number(row.withdrawal_amount ?? 0);

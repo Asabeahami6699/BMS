@@ -190,7 +190,7 @@ export const createTransactionInputSchema = z.object({
 
   workflowData: z.record(z.string(), z.unknown()).optional(),
 
-  /** Non-BMS partner deposit — queues for back-office bank execution. BMS Susu/Savings credit immediately. */
+  /** Non-aabanker partner deposit — queues for back-office bank execution. aabanker Susu/Savings credit immediately. */
   manualPartnerAccount: z.boolean().optional()
 
 });

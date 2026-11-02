@@ -27,7 +27,7 @@ function fulfillmentLabel(mode?: BalanceDisclosure["fulfillmentMode"]): string {
 }
 
 function customerCategoryLabel(row: TellerPayoutRow): string {
-  return isManualPartnerWithdrawal(row) ? "Non-BMS walk-in" : "BMS member";
+  return isManualPartnerWithdrawal(row) ? "Non-aabanker walk-in" : "aabanker member";
 }
 
 function humanizeWorkflowKey(key: string): string {

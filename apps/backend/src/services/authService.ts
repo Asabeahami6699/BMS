@@ -75,7 +75,7 @@ async function enrichTenantContext(
       permissions: isBuiltinRole(context.role)
         ? getPermissionsForRole(context.role)
         : [],
-      tenantName: context.tenantId === "platform" ? "BMS Platform" : undefined,
+      tenantName: context.tenantId === "platform" ? "aabanker Platform" : undefined,
       subscribedModules: [],
       subscribedAddons: [],
       reportsAnalytics: true
@@ -183,7 +183,7 @@ function toUserContext(user: StoredAuthUser): UserContext & { email: string; ful
     reportsAnalytics: user.role === "super_admin" ? true : tenant?.subscriptionStatus === "active",
     tenantName:
       user.role === "super_admin"
-        ? "BMS Platform"
+        ? "aabanker Platform"
         : tenant?.name
   };
 }

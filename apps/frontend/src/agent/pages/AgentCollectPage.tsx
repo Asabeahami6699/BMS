@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 
 import type { Customer } from "../../app/api";
+import { getCompanyProfile } from "../../app/api";
+import { useAuth } from "../../auth/AuthContext";
+import { useToast } from "../../components/Toast";
+import { downloadDailyTallySheet, printDailyTallySheet } from "../../app/dailyTallySheetPrint";
 
 import { useNetworkStatus } from "../../lib/useNetworkStatus";
 
@@ -47,6 +51,41 @@ function formatTotal(amount: number): string {
 export function AgentCollectPage({ onQueueChange, onSync, syncing, pendingCount }: Props) {
 
   const { online } = useNetworkStatus();
+  const { user } = useAuth();
+  const { showToast } = useToast();
+  const [companyName, setCompanyName] = useState(user?.tenantName ?? "");
+
+  useEffect(() => {
+    let cancelled = false;
+    void getCompanyProfile()
+      .then((profile) => {
+        if (!cancelled && profile.name.trim()) {
+          setCompanyName(profile.name);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  function openTallySheet(kind: "print" | "download") {
+    const options = {
+      companyName: companyName || user?.tenantName,
+      mobilizerName: user?.fullName || user?.email || ""
+    };
+    try {
+      if (kind === "print") {
+        printDailyTallySheet(options);
+      } else {
+        downloadDailyTallySheet(options);
+        showToast("Daily tally sheet downloaded", "success");
+      }
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Could not open the tally sheet", "error");
+    }
+  }
+
 
   const customers = useAgentCustomerStore((s) => s.customers);
 
@@ -276,31 +315,39 @@ export function AgentCollectPage({ onQueueChange, onSync, syncing, pendingCount 
 
         </div>
 
-        <button
+        <div className="agent-page-head-actions">
+          <button type="button" className="button secondary" onClick={() => openTallySheet("print")}>
+            Print tally sheet
+          </button>
+          <button type="button" className="button secondary" onClick={() => openTallySheet("download")}>
+            Download tally sheet
+          </button>
+          <button
 
-          type="button"
+            type="button"
 
-          className="button secondary"
+            className="button secondary"
 
-          onClick={() => {
+            onClick={() => {
 
-            if (online) {
+              if (online) {
 
-              void refreshToday();
+                void refreshToday();
 
-            }
+              }
 
-          }}
+            }}
 
-          disabled={loadingCollections || !online}
+            disabled={loadingCollections || !online}
 
-          aria-label="Refresh collections"
+            aria-label="Refresh collections"
 
-        >
+          >
 
-          {loadingCollections ? "…" : "↻"}
+            {loadingCollections ? "…" : "↻"}
 
-        </button>
+          </button>
+        </div>
 
       </div>
 

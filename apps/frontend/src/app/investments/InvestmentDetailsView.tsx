@@ -86,7 +86,7 @@ export function InvestmentDetailsView({ investment, formConfig }: Props) {
         <article className="cif-account-card">
           <div className="cif-account-card__chip" aria-hidden />
           <div className="cif-account-card__content">
-            <p className="cif-account-card__eyebrow">BMS · Investment account</p>
+            <p className="cif-account-card__eyebrow">aabanker · Investment account</p>
             <p className="cif-account-card__number">{investment.investmentNumber}</p>
             <p className="cif-account-card__meta">
               <span>{investment.productName}</span>

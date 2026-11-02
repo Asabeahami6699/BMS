@@ -130,7 +130,7 @@ export function CreateAdminModal({ open, onClose, tenants, defaultTenantId, onCr
       ) : savedCredentials ? (
         <CredentialsSharePanel
           title="Login credentials for company admin"
-          shareTitle={`BMS — ${savedCredentials.companyName} admin access`}
+          shareTitle={`aabanker — ${savedCredentials.companyName} admin access`}
           fields={[
             { label: "Company", value: savedCredentials.companyName },
             { label: "Company ID", value: savedCredentials.companyId },

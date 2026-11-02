@@ -21,7 +21,7 @@ export function AgencyWithdrawalsPage({ role, permissions }: Props) {
           <div>
             <h2>Withdrawal desk</h2>
             <p className="muted role-workspace__subtitle">
-              Initiate walk-in withdrawals (sent straight to teller) or verify BMS member requests before
+              Initiate walk-in withdrawals (sent straight to teller) or verify aabanker member requests before
               teller cash payout.
             </p>
           </div>

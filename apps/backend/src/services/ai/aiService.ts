@@ -58,7 +58,7 @@ Signed-in user context (do not repeat verbatim unless helpful):
 - Subscribed modules: ${subscribedModulesSummary(context)}
 - Permissions: ${permissionsSummary(context)}
 
-Answer about BMS features and, when snapshot data is present, analyze the user's platform data. If they ask to perform an action they lack permission for, explain which permission or role is typically needed without being condescending.`;
+Answer about aabanker features and, when snapshot data is present, analyze the user's platform data. If they ask to perform an action they lack permission for, explain which permission or role is typically needed without being condescending.`;
 }
 
 async function logAiUse(input: {
@@ -220,7 +220,7 @@ export async function generatePublicChatReply(options: {
 
   const system = `${BMS_PRODUCT_KNOWLEDGE}
 
-You are the BMS website assistant helping cooperatives and MFIs learn about registration and features.
+You are the aabanker website assistant helping cooperatives and MFIs learn about registration and features.
 Keep replies under 120 words. Be welcoming and professional.
 If the visitor needs human follow-up (pricing, contracts, complaints, or uncertain answers), include [ESCALATE] at the very end.`;
 

@@ -88,7 +88,7 @@ function buildReceipt(input: {
   companyName: string;
 }): string {
   const lines = [
-    "BMS SUSU COLLECTION REVERSAL",
+    "AABANKER SUSU COLLECTION REVERSAL",
     `Company: ${input.companyName}`,
     `Branch: ${input.branchLabel}`,
     `Original reference: ${input.originalId}`,

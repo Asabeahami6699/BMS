@@ -22,7 +22,7 @@ export function CredentialsSharePanel({ title, fields, shareTitle }: Props) {
 
   function buildShareText(): string {
     const lines = [
-      shareTitle ?? "BMS — Banking Management System",
+      shareTitle ?? "aabanker — Banking Management System",
       "",
       ...fields.map((f) => `${f.label}: ${f.value}`),
       `Sign-in URL: ${loginUrl}`,
@@ -47,7 +47,7 @@ export function CredentialsSharePanel({ title, fields, shareTitle }: Props) {
     const text = buildShareText();
     if (navigator.share) {
       try {
-        await navigator.share({ title: shareTitle ?? "BMS login details", text });
+        await navigator.share({ title: shareTitle ?? "aabanker login details", text });
         showToast("Share dialog opened", "success");
         return;
       } catch {

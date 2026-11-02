@@ -149,7 +149,7 @@ export function TellerDeskPage({ displayName }: Props) {
 
             <p className="muted">
               Confirm withdrawal details and pay cash. Walk-in requests arrive here directly after CS
-              initiation; BMS members appear after CS verification.
+              initiation; aabanker members appear after CS verification.
             </p>
 
           </div>
@@ -176,8 +176,8 @@ export function TellerDeskPage({ displayName }: Props) {
               const partnerAccount =
                 typeof workflow?.account_number === "string" ? workflow.account_number : null;
               const customerCategory = isManualPartnerWithdrawal(row)
-                ? "Non-BMS walk-in"
-                : "BMS member";
+                ? "Non-aabanker walk-in"
+                : "aabanker member";
 
               return (
                 <article

@@ -64,7 +64,7 @@ export function CustomerServiceDeskPage({ displayName }: Props) {
         <h3>Enter a transaction</h3>
         <p className="muted">
           Customer Service is the first point of contact. Collect customer details and initiate
-          withdrawals — walk-in non-BMS requests go straight to the teller; BMS members are verified
+          withdrawals — walk-in Non-aabanker requests go straight to the teller; aabanker members are verified
           on the withdrawal desk before payout.
         </p>
         <div className="role-workspace__quick-actions">

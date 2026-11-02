@@ -1,6 +1,7 @@
 export * from "./accountNumber.js";
 export * from "./addons.js";
 export * from "./auth.js";
+export * from "./brand.js";
 export * from "./permissionsCatalog.js";
 export * from "./rolePermissions.js";
 export * from "./auditActivity.js";
