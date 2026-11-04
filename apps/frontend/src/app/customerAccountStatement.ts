@@ -261,7 +261,7 @@ export function buildCustomerAccountStatementHtml(options: {
     options.closingBalance ??
     (ledgerOldestFirst.length > 0
       ? ledgerOldestFirst[ledgerOldestFirst.length - 1]!.balanceAfter
-      : customer.balance ?? 0);
+      : customer.accountBalance ?? 0);
   const opening =
     options.openingBalance ??
     (ledgerOldestFirst.length > 0
