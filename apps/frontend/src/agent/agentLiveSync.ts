@@ -1,4 +1,4 @@
-import { subscribeToTenantRealtime } from "../app/realtime";
+import { isTenantRealtimeConfigured, subscribeToTenantRealtime } from "../app/realtime";
 import { useAgentBalanceStore } from "./stores/agentBalanceStore";
 import { useAgentCollectionStore } from "./stores/agentCollectionStore";
 import { useAgentCustomerStore } from "./stores/agentCustomerStore";
@@ -13,8 +13,12 @@ export const AGENT_LIVE_TABLES = [
 
 export const AGENT_LIVE_REFRESH_EVENT = "bms-agent-live-refresh";
 
-const POLL_MS = 10_000;
-const VISIBILITY_TICK_MS = 30_000;
+/** Backup poll when realtime is unavailable. */
+const POLL_WITHOUT_REALTIME_MS = 90_000;
+/** Slow safety poll when realtime is connected. */
+const POLL_WITH_REALTIME_MS = 300_000;
+const VISIBILITY_TICK_MS = 60_000;
+const DEBOUNCE_MS = 1_200;
 
 let consumers = 0;
 let tenantIdActive: string | undefined;
@@ -39,7 +43,7 @@ function scheduleRefresh(): void {
   debounceTimer = setTimeout(() => {
     debounceTimer = undefined;
     refreshAgentLiveData();
-  }, 500);
+  }, DEBOUNCE_MS);
 }
 
 function teardownChannels(): void {
@@ -63,17 +67,20 @@ function setupChannels(tenantId: string): void {
   teardownChannels();
   tenantIdActive = tenantId;
 
-  refreshAgentLiveData();
-
+  const realtimeOn = isTenantRealtimeConfigured();
   realtimeUnsubscribe = subscribeToTenantRealtime({
     tenantId,
     tables: [...AGENT_LIVE_TABLES],
     onChange: scheduleRefresh
   });
 
+  const pollMs = realtimeOn ? POLL_WITH_REALTIME_MS : POLL_WITHOUT_REALTIME_MS;
   pollTimer = setInterval(() => {
+    if (typeof document !== "undefined" && document.hidden) {
+      return;
+    }
     refreshAgentLiveData();
-  }, POLL_MS);
+  }, pollMs);
 
   visibilityTimer = setInterval(() => {
     useAgentBalanceStore.getState().bumpVisibilityClock();

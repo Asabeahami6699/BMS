@@ -39,6 +39,11 @@ export async function getBranchCounterBootstrap(
     includePending?: boolean;
     /** Skip statement, float session, and pending float requests (faster teller deposit desk). */
     minimal?: boolean;
+    /**
+     * Hot slice only: statement + float + pending requests.
+     * Skips customers, branches, and bank products (caller keeps cached catalog).
+     */
+    hot?: boolean;
   }
 ): Promise<BranchCounterBootstrap> {
   const date =
@@ -46,8 +51,60 @@ export async function getBranchCounterBootstrap(
       ? options.date
       : new Date().toISOString().slice(0, 10);
 
+  if (options.hot) {
+    const resolvedBranchId = options.branchId
+      ? await resolveBranchId(tenantId, options.branchId)
+      : undefined;
+
+    let statement: BranchCounterBootstrap["statement"] = null;
+    if (resolvedBranchId) {
+      try {
+        const lines = await listBranchCounterStatement(tenantId, resolvedBranchId, date);
+        statement = {
+          lines,
+          summary: summarizeBranchCounterStatement(lines, date, resolvedBranchId)
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const emptySummary = summarizeBranchCounterStatement([], date, resolvedBranchId);
+        if (
+          isMissingSupabaseResource(message) ||
+          /invalid input syntax for type uuid/i.test(message)
+        ) {
+          statement = { lines: [], summary: emptySummary };
+        } else {
+          throw error;
+        }
+      }
+    }
+
+    let floatSession: BranchFloatSession | null = null;
+    if (options.cashierUserId) {
+      floatSession = await getFloatSessionForCashier(
+        tenantId,
+        options.cashierUserId,
+        date,
+        resolvedBranchId ?? undefined
+      );
+    }
+
+    const pendingFloatRequests = options.includePending
+      ? await listPendingFloatRequests(tenantId)
+      : [];
+
+    return {
+      customers: [],
+      branches: [],
+      bankProducts: [],
+      statement,
+      floatSession,
+      floatSummary: floatSessionSummary(floatSession),
+      pendingFloatRequests
+    };
+  }
+
   const [customers, branchRows, bankProducts] = await Promise.all([
-    listCustomers(tenantId),
+    listCustomers(tenantId, { light: true }),
     listBranches(tenantId).catch(() => [] as BranchRow[]),
     (async () => {
       const branchKey = options.branchId

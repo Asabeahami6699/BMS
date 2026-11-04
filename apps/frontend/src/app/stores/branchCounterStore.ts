@@ -26,9 +26,13 @@ import {
   runHydrate
 } from "./storeSync";
 
-const LEDGER_STALE_MS = 45_000;
+const LEDGER_STALE_MS = 90_000;
+/** Full customer/branch/product catalog refresh interval. */
+const CATALOG_STALE_MS = 2 * 60_000;
 const silentScheduler = createSilentRefreshScheduler();
 const liveSyncMgr = createLiveSyncManager();
+
+let catalogFetchedAt: number | null = null;
 
 type PostPayload = {
   customerId: string;
@@ -214,6 +218,8 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
       try {
         const data = await getBranchCounterBootstrap(scopedBranchId, statementDate);
         const branchPatch = reconcileBranchScope(scopedBranchId, data.branches);
+        const now = Date.now();
+        catalogFetchedAt = now;
         set({
           customers: data.customers,
           branches: data.branches,
@@ -223,7 +229,7 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
           floatSummary: data.floatSummary,
           pendingFloatRequests: data.pendingFloatRequests,
           ...branchPatch,
-          lastFetchedAt: Date.now(),
+          lastFetchedAt: now,
           sessionExpired: false,
           error: null
         });
@@ -237,7 +243,7 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
           set({ selectedCustomerId: "" });
         }
         if (selectedCustomerId) {
-          await get().loadLedger(selectedCustomerId, { silent: true, force: true });
+          await get().loadLedger(selectedCustomerId, { silent: true });
         }
       } catch (error) {
         if (isUnauthorized(error)) {
@@ -268,28 +274,50 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
     }
     set({ refreshing: true });
 
+    const catalogStale =
+      get().customers.length === 0 ||
+      catalogFetchedAt == null ||
+      Date.now() - catalogFetchedAt >= CATALOG_STALE_MS;
+
     fetchInFlight = (async () => {
       try {
-        const data = await getBranchCounterBootstrap(scopedBranchId, statementDate);
-        const branchPatch = reconcileBranchScope(scopedBranchId, data.branches);
-        set({
-          customers: data.customers,
-          branches: data.branches,
-          bankProducts: data.bankProducts ?? [],
-          statement: data.statement,
-          floatSession: data.floatSession,
-          floatSummary: data.floatSummary,
-          pendingFloatRequests: data.pendingFloatRequests,
-          ...branchPatch,
-          lastFetchedAt: Date.now(),
-          sessionExpired: false,
-          error: null
-        });
-        if (branchPatch.statementBranchId) {
-          setRuntimeBranchId(branchPatch.statementBranchId);
+        if (catalogStale) {
+          const data = await getBranchCounterBootstrap(scopedBranchId, statementDate);
+          const branchPatch = reconcileBranchScope(scopedBranchId, data.branches);
+          const now = Date.now();
+          catalogFetchedAt = now;
+          set({
+            customers: data.customers,
+            branches: data.branches,
+            bankProducts: data.bankProducts ?? [],
+            statement: data.statement,
+            floatSession: data.floatSession,
+            floatSummary: data.floatSummary,
+            pendingFloatRequests: data.pendingFloatRequests,
+            ...branchPatch,
+            lastFetchedAt: now,
+            sessionExpired: false,
+            error: null
+          });
+          if (branchPatch.statementBranchId) {
+            setRuntimeBranchId(branchPatch.statementBranchId);
+          }
+        } else {
+          const data = await getBranchCounterBootstrap(scopedBranchId, statementDate, {
+            hot: true
+          });
+          set({
+            statement: data.statement,
+            floatSession: data.floatSession,
+            floatSummary: data.floatSummary,
+            pendingFloatRequests: data.pendingFloatRequests,
+            lastFetchedAt: Date.now(),
+            sessionExpired: false,
+            error: null
+          });
         }
         if (selectedCustomerId) {
-          await get().loadLedger(selectedCustomerId, { silent: true, force: true });
+          await get().loadLedger(selectedCustomerId, { silent: true });
         }
       } catch {
         /* keep cache */
@@ -307,7 +335,7 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
       getTenantId,
       tables: ["customer_transactions", "ledger_entries", "customers"],
       onRefresh: () => void get().refreshSilent(),
-      isStale: () => !isFresh(get().lastFetchedAt)
+      isStale: () => !isFresh(get().lastFetchedAt, LEDGER_STALE_MS)
     });
   },
 
@@ -403,10 +431,24 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
         const transaction = await createTransaction(payload, key);
         postRetry = null;
         const customerId = payload.customerId;
-        await Promise.all([
-          get().loadLedger(customerId, { silent: true, force: true }),
-          get().refreshSilent()
-        ]);
+        await get().loadLedger(customerId, { silent: true, force: true });
+        // Hot slice only — keep cached customer catalog.
+        const statementDate = get().statementDate;
+        const scopedBranchId = resolveStatementBranchId(get().statementBranchId);
+        try {
+          const data = await getBranchCounterBootstrap(scopedBranchId, statementDate, {
+            hot: true
+          });
+          set({
+            statement: data.statement,
+            floatSession: data.floatSession,
+            floatSummary: data.floatSummary,
+            pendingFloatRequests: data.pendingFloatRequests,
+            lastFetchedAt: Date.now()
+          });
+        } catch {
+          /* ledger already refreshed */
+        }
         return transaction;
       } finally {
         set({ posting: false });

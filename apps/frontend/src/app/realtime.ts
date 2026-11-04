@@ -66,6 +66,11 @@ function ensureChannelSubscribed(
   entry.subscribed = true;
 }
 
+/** True when Supabase realtime credentials are present in the frontend env. */
+export function isTenantRealtimeConfigured(): boolean {
+  return getClient() != null;
+}
+
 export function subscribeToTenantRealtime(input: SubscribeInput): () => void {
   const supabase = getClient();
   if (!supabase) {

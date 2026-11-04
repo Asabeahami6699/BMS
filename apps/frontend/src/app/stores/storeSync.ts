@@ -1,14 +1,18 @@
-import { subscribeToTenantRealtime } from "../realtime";
+import { isTenantRealtimeConfigured, subscribeToTenantRealtime } from "../realtime";
 
-export const STALE_MS = 90_000;
-export const LIVE_POLL_MS = 60_000;
-export const SILENT_DEBOUNCE_MS = 600;
+/** Catalog / list data is considered fresh for this long. */
+export const STALE_MS = 180_000;
+/** Backup poll when realtime is unavailable. */
+export const LIVE_POLL_MS = 120_000;
+/** Slower backup poll when realtime is connected (catch missed events only). */
+export const LIVE_POLL_WITH_REALTIME_MS = 300_000;
+export const SILENT_DEBOUNCE_MS = 1_200;
 
 export function isFresh(lastFetchedAt: number | null, staleMs = STALE_MS): boolean {
   return lastFetchedAt != null && Date.now() - lastFetchedAt < staleMs;
 }
 
-export function createSilentRefreshScheduler() {
+export function createSilentRefreshScheduler(debounceMs = SILENT_DEBOUNCE_MS) {
   let timer: ReturnType<typeof setTimeout> | null = null;
   return {
     schedule(run: () => void) {
@@ -18,7 +22,7 @@ export function createSilentRefreshScheduler() {
       timer = setTimeout(() => {
         timer = null;
         run();
-      }, SILENT_DEBOUNCE_MS);
+      }, debounceMs);
     },
     clear() {
       if (timer) {
@@ -34,6 +38,7 @@ export type LiveSyncConfig = {
   tables: string[];
   onRefresh: () => void;
   isStale?: () => boolean;
+  /** Override poll interval. Use 0 to disable polling. */
   pollMs?: number;
   debounceMs?: number;
 };
@@ -50,11 +55,18 @@ export function createLiveSyncManager() {
       if (consumers > 1) {
         return;
       }
-      const pollMs = config.pollMs ?? LIVE_POLL_MS;
+      const realtimeOn = isTenantRealtimeConfigured();
+      const pollMs =
+        config.pollMs ??
+        (realtimeOn ? LIVE_POLL_WITH_REALTIME_MS : LIVE_POLL_MS);
       const isStale = config.isStale ?? (() => true);
       const debounceMs = config.debounceMs ?? SILENT_DEBOUNCE_MS;
-      const debouncedRefresh = () => scheduler.schedule(config.onRefresh);
-      scheduler.schedule(config.onRefresh);
+      const localScheduler =
+        debounceMs === SILENT_DEBOUNCE_MS
+          ? scheduler
+          : createSilentRefreshScheduler(debounceMs);
+      const debouncedRefresh = () => localScheduler.schedule(config.onRefresh);
+      // Do not immediately refetch on start — hydrate already loaded data.
       unsubscribe = subscribeToTenantRealtime({
         tenantId: config.getTenantId(),
         tables: config.tables,

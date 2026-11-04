@@ -1956,10 +1956,18 @@ export async function exportUsersCsv(): Promise<string> {
   return response.text();
 }
 
-export async function listCustomers(): Promise<Customer[]> {
-  const response = await fetch(`${API_BASE_URL}/api/v1/customers`, {
-    headers: authHeaders()
-  });
+export async function listCustomers(options?: { light?: boolean }): Promise<Customer[]> {
+  const params = new URLSearchParams();
+  if (options?.light) {
+    params.set("light", "1");
+  }
+  const query = params.toString();
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/customers${query ? `?${query}` : ""}`,
+    {
+      headers: authHeaders()
+    }
+  );
   if (!response.ok) {
     throw new Error("Failed to load customers");
   }
@@ -2320,12 +2328,13 @@ export async function settleBranchFloat(sessionId: string): Promise<BranchFloatS
 export async function getBranchCounterBootstrap(
   branchId: string,
   date: string,
-  options?: { minimal?: boolean }
+  options?: { minimal?: boolean; hot?: boolean }
 ): Promise<BranchCounterBootstrapResponse> {
   const params = new URLSearchParams();
   if (branchId) params.set("branchId", branchId);
   if (date) params.set("date", date);
   if (options?.minimal) params.set("minimal", "true");
+  if (options?.hot) params.set("hot", "true");
   const query = params.toString();
   return fetchJson<BranchCounterBootstrapResponse>(
     `${API_BASE_URL}/api/v1/transactions/branch-counter-bootstrap${query ? `?${query}` : ""}`,

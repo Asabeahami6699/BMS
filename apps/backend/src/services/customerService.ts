@@ -768,6 +768,35 @@ async function enrichCustomersWithAccountBalances(
   });
 }
 
+/** List columns without heavy photo payloads — used by desks and live refresh. */
+const LIGHT_CUSTOMER_COLUMNS = [
+  "id",
+  "tenant_id",
+  "full_name",
+  "email",
+  "phone",
+  "location",
+  "house_number",
+  "account_type",
+  "id_card_number",
+  "savings_opening_fee_collected",
+  "savings_opening_fee_recovered",
+  "next_of_kin_name",
+  "next_of_kin_phone",
+  "next_of_kin_location",
+  "next_of_kin_house_number",
+  "account_number",
+  "rejection_reason",
+  "home_branch_id",
+  "assigned_field_agent_id",
+  "created_by_field_agent_id",
+  "daily_contribution_amount",
+  "locked_balance",
+  "route_id",
+  "status",
+  "created_at"
+].join(",");
+
 export async function listCustomers(
   tenantId: string,
   options?: { agentId?: string; status?: string; light?: boolean; branchId?: string }
@@ -793,7 +822,11 @@ export async function listCustomers(
     }
 
     if (options?.light) {
-      return rows;
+      return rows.map((row) => ({
+        ...row,
+        photoUrl: undefined,
+        idCardPhotoUrl: undefined
+      }));
     }
 
     const named = await enrichCustomersWithAgentNames(tenantId, rows);
@@ -803,7 +836,10 @@ export async function listCustomers(
     return enrichCustomersWithAccountBalances(tenantId, named);
   }
 
-  let query = supabase.from("customers").select("*").eq("tenant_id", tenantId);
+  let query = supabase
+    .from("customers")
+    .select(options?.light ? LIGHT_CUSTOMER_COLUMNS : "*")
+    .eq("tenant_id", tenantId);
 
   if (options?.agentId) {
 
@@ -835,7 +871,9 @@ export async function listCustomers(
 
 
 
-  const customers = (data ?? []).map((row) => mapCustomerRow(row as Record<string, unknown>));
+  const customers = (data ?? []).map((row) =>
+    mapCustomerRow(row as unknown as Record<string, unknown>)
+  );
   if (options?.light) {
     return customers;
   }

@@ -57,7 +57,8 @@ transactionsRouter.get("/branch-counter-bootstrap", requirePermission("transacti
       date: dateParam,
       cashierUserId: context.userId,
       includePending: context.role === "admin" || context.role === "coordinator",
-      minimal: req.query.minimal === "true" || req.query.minimal === "1"
+      minimal: req.query.minimal === "true" || req.query.minimal === "1",
+      hot: req.query.hot === "true" || req.query.hot === "1"
     });
     res.json(data);
   } catch (error) {

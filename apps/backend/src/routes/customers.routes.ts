@@ -187,6 +187,11 @@ customersRouter.get("/", requirePermission("customers.read"), async (req, res) =
     const status = typeof req.query.status === "string" ? req.query.status : undefined;
     const branchId = resolveRequestBranchFilter(req);
 
+    const light =
+      agentOnly ||
+      req.query.light === "true" ||
+      req.query.light === "1";
+
     res.json(
 
       await listCustomers(context.tenantId, {
@@ -194,7 +199,8 @@ customersRouter.get("/", requirePermission("customers.read"), async (req, res) =
         agentId: agentOnly ? context.userId : undefined,
 
         status,
-        branchId
+        branchId,
+        light
 
       })
 

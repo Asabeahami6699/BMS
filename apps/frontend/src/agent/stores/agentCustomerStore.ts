@@ -150,7 +150,7 @@ export const useAgentCustomerStore = create<AgentCustomerState>((set, get) => ({
     }
     refreshInFlight = (async () => {
       try {
-        const customers = await listCustomers();
+        const customers = await listCustomers({ light: true });
         get().setCustomers(customers);
       } catch {
         /* keep cached list */
@@ -175,7 +175,7 @@ export const useAgentCustomerStore = create<AgentCustomerState>((set, get) => ({
     set({ loading: true, error: null });
     refreshInFlight = (async () => {
       try {
-        const customers = await listCustomers();
+        const customers = await listCustomers({ light: true });
         get().setCustomers(customers);
       } catch (error) {
         const message = toUserFacingError(error, "Failed to load customers");
