@@ -43,7 +43,7 @@ export async function listTellerTillJournalEntries(
 
   const businessDate = options.businessDate?.trim() || new Date().toISOString().slice(0, 10);
   const tellerUserId =
-    context.role === "teller" ? context.userId : options.tellerUserId?.trim() || context.userId;
+    context.role === "teller" ? context.userId : options.tellerUserId?.trim() || undefined;
 
   const supabase = getSupabaseAdminClient();
   if (supabase) {

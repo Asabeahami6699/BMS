@@ -12,8 +12,7 @@ export function buildTransactionAlertMessage(input: {
 }): { text: string; subject: string } {
   const amt = formatSmsAmount(input.amount);
   const bal = formatSmsAmount(input.balance);
-  const acct = maskAccountNumber(input.accountNumber);
-  const accountMask = `**********${acct}`;
+  const accountMask = maskAccountNumber(input.accountNumber);
   const customerName = input.customerName?.trim() || "customer";
   const brand = input.brand.slice(0, 60);
 
@@ -31,7 +30,7 @@ export function buildTransactionAlertMessage(input: {
   }
   return {
     subject: `${brand} — daily collection received`,
-    text: `${brand}: Daily collection GHS ${amt} received on account ****${acct}. Balance GHS ${bal}.`
+    text: `${brand}: Daily collection GHS ${amt} received on account ${accountMask}. Balance GHS ${bal}.`
   };
 }
 

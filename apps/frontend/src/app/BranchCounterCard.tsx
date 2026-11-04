@@ -5,6 +5,7 @@ import { SAVINGS_INITIAL_DEPOSIT_GHS, bankProductDisplayLabel, bankProductsForSu
 import type { AppRole } from "./api";
 import { BranchCounterFloatPanel } from "./BranchCounterFloatPanel";
 import { BranchCounterCashCalculator } from "./BranchCounterCashCalculator";
+import { BranchCounterExpensesPanel } from "./BranchCounterExpensesPanel";
 import { BranchCounterStatementPanel } from "./BranchCounterStatement";
 import { SusuReversalDialog } from "./SusuReversalDialog";
 import { filterRowsBySearch } from "../components/AdminDataTable";
@@ -18,7 +19,26 @@ import {
   roleRequiresBranchFloat
 } from "../lib/branchFloatBalance";
 import { downloadCustomerLedgerCsv } from "../lib/customerLedgerCsv";
+import { printCustomerAccountStatement } from "./customerAccountStatement";
+
+function todayIsoDate(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function daysAgoIsoDate(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
 import { toUserFacingError } from "../lib/networkError";
+import { useAuth } from "../auth/AuthContext";
 import {
   selectActiveCustomers,
   selectLedgerForCustomer,
@@ -66,6 +86,7 @@ type Props = { role: AppRole; permissions?: Permission[]; modules?: TenantProduc
 
 export function BranchCounterCard({ role, permissions, modules }: Props) {
   const { showToast } = useToast();
+  const { user } = useAuth();
   const { requestStepUp } = useTransactionPin();
   const [searchParams, setSearchParams] = useSearchParams();
   const txTypes = allowedTransactionTypes(role, permissions);
@@ -73,6 +94,8 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
 
   const [search, setSearch] = useState("");
   const [type, setType] = useState<TxType>(txTypes[0] ?? "deposit");
+  const [statementFromDate, setStatementFromDate] = useState(() => daysAgoIsoDate(30));
+  const [statementToDate, setStatementToDate] = useState(() => todayIsoDate());
   const postLock = useRef(false);
   const [amount, setAmount] = useState("");
   const [notes, setNotes] = useState("");
@@ -345,6 +368,24 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
     }
   }
 
+  async function handlePrintStatement() {
+    if (!selectedCustomer || ledger.length === 0) {
+      return;
+    }
+    try {
+      showToast("Preparing statement PDF…", "info");
+      await printCustomerAccountStatement({
+        customer: selectedCustomer,
+        ledger,
+        companyName: user?.tenantName,
+        fromDate: statementFromDate,
+        toDate: statementToDate
+      });
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Could not print statement", "error");
+    }
+  }
+
   const showCatalogLoader = loading && customers.length === 0;
   const updatedLabel = lastFetchedAt
     ? `Updated ${new Date(lastFetchedAt).toLocaleTimeString()}${refreshing ? " · syncing" : ""}${liveSyncActive ? "" : ""}`
@@ -422,6 +463,14 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
           floatSummary={floatSummary}
           pendingFloatRequests={pendingFloatRequests}
           onUpdated={() => void refresh()}
+        />
+      ) : null}
+
+      {!sessionExpired ? (
+        <BranchCounterExpensesPanel
+          role={role}
+          branches={branches}
+          transactionBranchId={transactionBranchId}
         />
       ) : null}
 
@@ -709,18 +758,48 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
       <section className="card branch-counter__ledger-section">
         <div className="branch-counter__section-head branch-counter__ledger-section-head">
           <span className="branch-counter__step">3</span>
-          <h3>Ledger history</h3>
+          <h3>Account History</h3>
           <span className="muted branch-counter__ledger-meta">
             {selectedCustomer ? selectedCustomer.fullName : "No customer selected"}
           </span>
-          <button
-            type="button"
-            className="button secondary branch-counter__export-btn cif-ledger-toolbar__download"
-            disabled={!canDownloadLedger || ledgerLoading}
-            onClick={handleDownloadLedger}
-          >
-            Download CSV
-          </button>
+          <div className="branch-counter__statement-print-filters">
+            <label className="field">
+              <span>From</span>
+              <input
+                type="date"
+                value={statementFromDate}
+                max={statementToDate || undefined}
+                disabled={!selectedCustomer}
+                onChange={(e) => setStatementFromDate(e.target.value)}
+              />
+            </label>
+            <label className="field">
+              <span>To</span>
+              <input
+                type="date"
+                value={statementToDate}
+                min={statementFromDate || undefined}
+                disabled={!selectedCustomer}
+                onChange={(e) => setStatementToDate(e.target.value)}
+              />
+            </label>
+            <button
+              type="button"
+              className="button secondary branch-counter__export-btn cif-ledger-toolbar__download"
+              disabled={!canDownloadLedger || ledgerLoading}
+              onClick={() => void handlePrintStatement()}
+            >
+              Print statement
+            </button>
+            <button
+              type="button"
+              className="button secondary branch-counter__export-btn cif-ledger-toolbar__download"
+              disabled={!canDownloadLedger || ledgerLoading}
+              onClick={handleDownloadLedger}
+            >
+              Download CSV
+            </button>
+          </div>
         </div>
 
         {!selectedCustomer ? (

@@ -6,6 +6,8 @@ type RoleContext = {
   scopeType: "head_office" | "branch";
   branchId?: string;
   filterBranchId?: string;
+  fromDate?: string;
+  toDate?: string;
 };
 
 function scopedTransactions(transactions: Transaction[], context: RoleContext): Transaction[] {
@@ -16,6 +18,15 @@ function scopedTransactions(transactions: Transaction[], context: RoleContext): 
 
   if (context.filterBranchId) {
     scoped = scoped.filter((entry) => entry.transactionBranchId === context.filterBranchId);
+  }
+
+  if (context.fromDate) {
+    const from = context.fromDate.slice(0, 10);
+    scoped = scoped.filter((entry) => entry.createdAt.slice(0, 10) >= from);
+  }
+  if (context.toDate) {
+    const to = context.toDate.slice(0, 10);
+    scoped = scoped.filter((entry) => entry.createdAt.slice(0, 10) <= to);
   }
 
   return scoped;
@@ -174,13 +185,26 @@ export async function getDailyTransactionTrend(
 ): Promise<DailyTrendPoint[]> {
   const transactions = scopedTransactions(await listTransactions(tenantId), context);
   const end = new Date();
-  end.setHours(23, 59, 59, 999);
+  if (context.toDate && /^\d{4}-\d{2}-\d{2}$/.test(context.toDate)) {
+    end.setTime(new Date(`${context.toDate}T23:59:59.999`).getTime());
+  } else {
+    end.setHours(23, 59, 59, 999);
+  }
   const start = new Date(end);
-  start.setDate(start.getDate() - (days - 1));
-  start.setHours(0, 0, 0, 0);
+  if (context.fromDate && /^\d{4}-\d{2}-\d{2}$/.test(context.fromDate)) {
+    start.setTime(new Date(`${context.fromDate}T00:00:00.000`).getTime());
+  } else {
+    start.setDate(start.getDate() - (days - 1));
+    start.setHours(0, 0, 0, 0);
+  }
+
+  const dayCount = Math.max(
+    1,
+    Math.round((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)) + 1
+  );
 
   const buckets = new Map<string, DailyTrendPoint>();
-  for (let i = 0; i < days; i++) {
+  for (let i = 0; i < dayCount; i++) {
     const d = new Date(start);
     d.setDate(start.getDate() + i);
     const key = d.toISOString().slice(0, 10);

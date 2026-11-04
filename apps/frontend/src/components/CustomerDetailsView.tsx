@@ -3,8 +3,10 @@ import { SAVINGS_INITIAL_DEPOSIT_GHS } from "@bms/shared";
 import type { AccountType, Customer, LedgerEntry } from "../app/api";
 import { getCustomerLedger } from "../app/api";
 import { SusuReversalDialog } from "../app/SusuReversalDialog";
+import { printCustomerAccountStatement } from "../app/customerAccountStatement";
 import { downloadCustomerLedgerCsv } from "../lib/customerLedgerCsv";
 import { formatFieldAgent } from "../lib/formatFieldAgent";
+import { useAuth } from "../auth/AuthContext";
 import { useToast } from "./Toast";
 
 const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
@@ -72,6 +74,23 @@ type Props = {
 
 const LEDGER_PAGE_SIZE = 7;
 
+function todayIsoDate(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function daysAgoIsoDate(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 function formatLedgerDate(iso: string): string {
   try {
     return new Date(iso).toLocaleString(undefined, {
@@ -93,8 +112,11 @@ export function CustomerDetailsView({
   showFinancials = customer.status === "active"
 }: Props) {
   const { showToast } = useToast();
+  const { user } = useAuth();
   const [idLightbox, setIdLightbox] = useState(false);
   const [ledger, setLedger] = useState<LedgerEntry[]>([]);
+  const [statementFromDate, setStatementFromDate] = useState(() => daysAgoIsoDate(30));
+  const [statementToDate, setStatementToDate] = useState(() => todayIsoDate());
   const [ledgerVersion, setLedgerVersion] = useState(0);
   const [susuTransactionId, setSusuTransactionId] = useState<string | null>(null);
   const [ledgerLoading, setLedgerLoading] = useState(false);
@@ -185,6 +207,24 @@ export function CustomerDetailsView({
     }
   }
 
+  async function handlePrintStatement() {
+    if (ledger.length === 0) {
+      return;
+    }
+    try {
+      showToast("Preparing statement PDF…", "info");
+      await printCustomerAccountStatement({
+        customer,
+        ledger,
+        companyName: user?.tenantName,
+        fromDate: statementFromDate,
+        toDate: statementToDate
+      });
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Could not print statement", "error");
+    }
+  }
+
   function handleShowOlderLedger() {
     setLedgerVisibleCount((count) =>
       Math.min(count + LEDGER_PAGE_SIZE, ledgerNewestFirst.length)
@@ -265,14 +305,42 @@ export function CustomerDetailsView({
                           ? "No ledger entries yet"
                           : `Showing ${displayedLedger.length} of ${ledgerNewestFirst.length} entries (newest first)`}
                       </span>
-                      <button
-                        type="button"
-                        className="button secondary cif-ledger-toolbar__download"
-                        disabled={ledgerLoading || ledger.length === 0}
-                        onClick={handleDownloadLedger}
-                      >
-                        Download CSV
-                      </button>
+                      <div className="cif-ledger-toolbar__actions">
+                        <label className="field cif-ledger-toolbar__date">
+                          <span>From</span>
+                          <input
+                            type="date"
+                            value={statementFromDate}
+                            max={statementToDate || undefined}
+                            onChange={(e) => setStatementFromDate(e.target.value)}
+                          />
+                        </label>
+                        <label className="field cif-ledger-toolbar__date">
+                          <span>To</span>
+                          <input
+                            type="date"
+                            value={statementToDate}
+                            min={statementFromDate || undefined}
+                            onChange={(e) => setStatementToDate(e.target.value)}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          className="button secondary cif-ledger-toolbar__download"
+                          disabled={ledgerLoading || ledger.length === 0}
+                          onClick={() => void handlePrintStatement()}
+                        >
+                          Print statement
+                        </button>
+                        <button
+                          type="button"
+                          className="button secondary cif-ledger-toolbar__download"
+                          disabled={ledgerLoading || ledger.length === 0}
+                          onClick={handleDownloadLedger}
+                        >
+                          Download CSV
+                        </button>
+                      </div>
                     </div>
                     {ledgerNewestFirst.length === 0 ? null : (
                       <>

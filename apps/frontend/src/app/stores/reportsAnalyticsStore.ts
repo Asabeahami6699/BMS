@@ -9,15 +9,29 @@ import {
   runHydrate
 } from "./storeSync";
 
+function isoDaysAgo(days: number): string {
+  const date = new Date();
+  date.setHours(12, 0, 0, 0);
+  date.setDate(date.getDate() - days);
+  return date.toISOString().slice(0, 10);
+}
+
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 type ReportsAnalyticsState = {
   data: ReportsAnalyticsBootstrapResponse | null;
   loading: boolean;
   error: string | null;
   lastFetchedAt: number | null;
   branchFilter: string;
+  fromDate: string;
+  toDate: string;
   liveSyncActive: boolean;
   hydrate: (options?: { force?: boolean }) => void;
   setBranchFilter: (branchId: string) => void;
+  setDateRange: (range: { fromDate?: string; toDate?: string }) => void;
   refresh: () => Promise<void>;
   refreshSilent: () => Promise<void>;
   startLiveSync: () => void;
@@ -37,12 +51,21 @@ function snapshotKey(data: ReportsAnalyticsBootstrapResponse | null): string {
   return `${data.summary.totalTransactions}|${trend}|${data.pending.registrations}|${data.withdrawals.pending}`;
 }
 
+function dateRangeArgs(state: Pick<ReportsAnalyticsState, "fromDate" | "toDate">) {
+  return {
+    fromDate: state.fromDate || undefined,
+    toDate: state.toDate || undefined
+  };
+}
+
 export const useReportsAnalyticsStore = create<ReportsAnalyticsState>((set, get) => ({
   data: null,
   loading: false,
   error: null,
   lastFetchedAt: null,
   branchFilter: "",
+  fromDate: isoDaysAgo(13),
+  toDate: todayIso(),
   liveSyncActive: false,
 
   hydrate: (options) => {
@@ -63,6 +86,15 @@ export const useReportsAnalyticsStore = create<ReportsAnalyticsState>((set, get)
     void get().refresh();
   },
 
+  setDateRange: (range) => {
+    set({
+      fromDate: range.fromDate ?? get().fromDate,
+      toDate: range.toDate ?? get().toDate
+    });
+    lastSnapshotKey = "";
+    void get().refresh();
+  },
+
   refresh: async () => {
     if (fetchInFlight) {
       set({ loading: true });
@@ -73,7 +105,11 @@ export const useReportsAnalyticsStore = create<ReportsAnalyticsState>((set, get)
     set({ loading: true, error: null });
     fetchInFlight = (async () => {
       try {
-        const data = await getReportsAnalyticsBootstrap(get().branchFilter || undefined);
+        const state = get();
+        const data = await getReportsAnalyticsBootstrap(
+          state.branchFilter || undefined,
+          dateRangeArgs(state)
+        );
         const key = snapshotKey(data);
         if (key !== lastSnapshotKey) {
           lastSnapshotKey = key;
@@ -97,7 +133,11 @@ export const useReportsAnalyticsStore = create<ReportsAnalyticsState>((set, get)
     }
     fetchInFlight = (async () => {
       try {
-        const data = await getReportsAnalyticsBootstrap(get().branchFilter || undefined);
+        const state = get();
+        const data = await getReportsAnalyticsBootstrap(
+          state.branchFilter || undefined,
+          dateRangeArgs(state)
+        );
         const key = snapshotKey(data);
         if (key !== lastSnapshotKey) {
           lastSnapshotKey = key;

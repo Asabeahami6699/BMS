@@ -69,6 +69,9 @@ export function ReportsAnalyticsPage({ role, me }: Props) {
   const error = useReportsAnalyticsStore((s) => s.error);
   const branchFilter = useReportsAnalyticsStore((s) => s.branchFilter);
   const setBranchFilter = useReportsAnalyticsStore((s) => s.setBranchFilter);
+  const fromDate = useReportsAnalyticsStore((s) => s.fromDate);
+  const toDate = useReportsAnalyticsStore((s) => s.toDate);
+  const setDateRange = useReportsAnalyticsStore((s) => s.setDateRange);
   const refresh = useReportsAnalyticsStore((s) => s.refresh);
 
   const branches = data?.branches ?? [];
@@ -271,19 +274,39 @@ export function ReportsAnalyticsPage({ role, me }: Props) {
         ))}
       </div>
 
-      {canFilterBranch && branches.length > 0 ? (
-        <label className="field overview-branch-filter">
-          <span>Branch filter</span>
-          <select value={branchFilter} onChange={(e) => setBranchFilter(e.target.value)}>
-            <option value="">All branches</option>
-            {branches.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.name} ({b.code})
-              </option>
-            ))}
-          </select>
+      <div className="reports-filters">
+        {canFilterBranch && branches.length > 0 ? (
+          <label className="field overview-branch-filter">
+            <span>Branch filter</span>
+            <select value={branchFilter} onChange={(e) => setBranchFilter(e.target.value)}>
+              <option value="">All branches</option>
+              {branches.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name} ({b.code})
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+        <label className="field">
+          <span>From date</span>
+          <input
+            type="date"
+            value={fromDate}
+            max={toDate || undefined}
+            onChange={(e) => setDateRange({ fromDate: e.target.value })}
+          />
         </label>
-      ) : null}
+        <label className="field">
+          <span>To date</span>
+          <input
+            type="date"
+            value={toDate}
+            min={fromDate || undefined}
+            onChange={(e) => setDateRange({ toDate: e.target.value })}
+          />
+        </label>
+      </div>
 
       {error ? <p className="overview-error">{error}</p> : null}
 
@@ -318,7 +341,7 @@ export function ReportsAnalyticsPage({ role, me }: Props) {
         <>
           <section className="kpi-grid reports-kpis">
             <article className="kpi-card kpi-card--primary">
-              <p className="kpi-label">Transactions (all time)</p>
+              <p className="kpi-label">Transactions (selected dates)</p>
               <p className="kpi-value">{loading && !data ? "…" : summary?.totalTransactions ?? 0}</p>
             </article>
             <article className="kpi-card kpi-card--success">

@@ -70,11 +70,19 @@ export function normalizeGhanaPhone(raw: string): string | null {
   return null;
 }
 
+/** Mask for outbound SMS, e.g. 13******2577 (first 2 + stars + last 4). */
 export function maskAccountNumber(accountNumber?: string): string {
-  if (!accountNumber || accountNumber.length < 4) {
+  const digits = (accountNumber ?? "").replace(/\s+/g, "");
+  if (!digits) {
     return "****";
   }
-  return accountNumber.slice(-4);
+  if (digits.length <= 6) {
+    return `${digits.slice(0, 1)}${"*".repeat(Math.max(digits.length - 2, 2))}${digits.slice(-1)}`;
+  }
+  const head = digits.slice(0, 2);
+  const tail = digits.slice(-4);
+  const stars = "*".repeat(Math.max(digits.length - 6, 2));
+  return `${head}${stars}${tail}`;
 }
 
 export function formatSmsAmount(amount: number): string {

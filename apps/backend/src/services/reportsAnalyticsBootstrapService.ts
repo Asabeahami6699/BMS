@@ -39,14 +39,19 @@ export async function getReportsAnalyticsBootstrap(
     scopeType: "head_office" | "branch";
     branchId?: string;
   },
-  branchFilter?: string
+  branchFilter?: string,
+  dateRange?: { fromDate?: string; toDate?: string }
 ): Promise<ReportsAnalyticsBootstrap> {
   const filterBranchId = branchFilter?.trim() || undefined;
+  const fromDate = dateRange?.fromDate?.trim() || undefined;
+  const toDate = dateRange?.toDate?.trim() || undefined;
   const scope = {
     role: context.role,
     scopeType: context.scopeType,
     branchId: context.branchId,
-    filterBranchId
+    filterBranchId,
+    fromDate,
+    toDate
   };
 
   const perf = await getPerformanceBootstrap(tenantId, context, filterBranchId);

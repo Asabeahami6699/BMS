@@ -2128,9 +2128,20 @@ export type ReportsAnalyticsBootstrapResponse = {
 };
 
 export async function getReportsAnalyticsBootstrap(
-  branchId?: string
+  branchId?: string,
+  dateRange?: { fromDate?: string; toDate?: string }
 ): Promise<ReportsAnalyticsBootstrapResponse> {
-  const query = branchId?.trim() ? `?branchId=${encodeURIComponent(branchId)}` : "";
+  const params = new URLSearchParams();
+  if (branchId?.trim()) {
+    params.set("branchId", branchId.trim());
+  }
+  if (dateRange?.fromDate?.trim()) {
+    params.set("fromDate", dateRange.fromDate.trim());
+  }
+  if (dateRange?.toDate?.trim()) {
+    params.set("toDate", dateRange.toDate.trim());
+  }
+  const query = params.toString() ? `?${params.toString()}` : "";
   return fetchJson<ReportsAnalyticsBootstrapResponse>(
     `${API_BASE_URL}/api/v1/reports/analytics-bootstrap${query}`,
     { headers: authHeaders() }

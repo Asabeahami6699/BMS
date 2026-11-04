@@ -1,5 +1,5 @@
 import { Router, type Request } from "express";
-import { requirePermission } from "../middleware/requirePermission.js";
+import { requireAnyPermission, requirePermission } from "../middleware/requirePermission.js";
 import { requireTransactionStepUp } from "../middleware/requireTransactionStepUp.js";
 import { resolveRequestBranchFilter } from "../middleware/branchScope.js";
 import {
@@ -243,7 +243,7 @@ agencyRouter.get(
 
 agencyRouter.get(
   "/till-journal",
-  requirePermission("agency.deposits.record"),
+  requireAnyPermission("agency.deposits.record", "transactions.create.deposit"),
   async (req, res, next) => {
     try {
       const context = req.userContext!;
@@ -268,7 +268,7 @@ agencyRouter.get(
 
 agencyRouter.post(
   "/till-journal",
-  requirePermission("agency.deposits.record"),
+  requireAnyPermission("agency.deposits.record", "transactions.create.deposit"),
   async (req, res) => {
     const context = req.userContext;
     if (!context) {

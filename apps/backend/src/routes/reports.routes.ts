@@ -29,6 +29,8 @@ reportsRouter.get("/analytics-bootstrap", requirePermission("reports.read"), asy
   }
 
   const branchFilter = resolveRequestBranchFilter(req);
+  const fromDate = typeof req.query.fromDate === "string" ? req.query.fromDate : undefined;
+  const toDate = typeof req.query.toDate === "string" ? req.query.toDate : undefined;
   try {
     res.json(
       await getReportsAnalyticsBootstrap(
@@ -38,7 +40,8 @@ reportsRouter.get("/analytics-bootstrap", requirePermission("reports.read"), asy
           scopeType: context.scopeType as "head_office" | "branch",
           branchId: context.branchId
         },
-        branchFilter
+        branchFilter,
+        { fromDate, toDate }
       )
     );
   } catch (error) {

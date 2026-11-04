@@ -7888,6 +7888,61 @@ button.cif-ledger__row:hover {
   color: var(--text-muted);
 }
 
+.cif-ledger-toolbar__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.branch-counter__expenses {
+  margin-bottom: 1rem;
+}
+
+.branch-counter__expenses-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.75rem;
+  align-items: end;
+  margin: 0.75rem 0 1rem;
+}
+
+.branch-counter__expenses-list-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.branch-counter__expenses-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.branch-counter__expenses-list li {
+  display: grid;
+  grid-template-columns: 4.5rem 1fr auto;
+  gap: 0.75rem;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--border-soft, #e5e7eb);
+  font-size: 0.92rem;
+}
+
+.reports-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  align-items: end;
+  margin-bottom: 1rem;
+}
+
+.reports-filters .field {
+  min-width: 160px;
+}
+
 .cif-ledger-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -8649,8 +8704,13 @@ button.cif-ledger__row:hover {
   margin-bottom: 0.75rem;
 }
 
+.branch-counter__ledger-section-head {
+  flex-wrap: wrap;
+  row-gap: 0.65rem;
+}
+
 .branch-counter__ledger-section-head .branch-counter__ledger-meta {
-  margin-left: auto;
+  margin-right: auto;
 }
 
 .branch-counter__ledger-meta {
@@ -8662,6 +8722,42 @@ button.cif-ledger__row:hover {
   flex-shrink: 0;
   font-weight: 800;
   letter-spacing: 0.02em;
+}
+
+.branch-counter__statement-print-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+.branch-counter__statement-print-filters .field {
+  margin: 0;
+  min-width: 9.5rem;
+}
+
+.branch-counter__statement-print-filters .field span {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.branch-counter__statement-print-filters .branch-counter__export-btn {
+  margin-left: 0;
+}
+
+.cif-ledger-toolbar__date {
+  margin: 0;
+  min-width: 9.5rem;
+}
+
+.cif-ledger-toolbar__date span {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
 }
 
 .branch-counter__ledger {
