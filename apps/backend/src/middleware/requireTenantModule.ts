@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
 import { hasTenantModule, type TenantProductModule } from "@bms/shared";
-import { moduleForApiPath } from "../config/tenantModules.js";
+import { modulesForApiPath } from "../config/tenantModules.js";
 import { getTenantModulesFromStore } from "../services/tenantModuleService.js";
 
 export function requireTenantModuleForRequest(req: Request, res: Response, next: NextFunction): void {
@@ -16,8 +16,8 @@ export function requireTenantModuleForRequest(req: Request, res: Response, next:
   }
 
   const path = req.originalUrl.split("?")[0] ?? req.path;
-  const required = moduleForApiPath(path);
-  if (!required) {
+  const required = modulesForApiPath(path);
+  if (!required?.length) {
     next();
     return;
   }
@@ -27,10 +27,12 @@ export function requireTenantModuleForRequest(req: Request, res: Response, next:
     getTenantModulesFromStore(req.userContext.tenantId) ??
     [];
 
-  if (!hasTenantModule(modules, required)) {
+  if (!required.some((module) => hasTenantModule(modules, module))) {
+    const label = required.length === 1 ? required[0]! : required.join(" or ");
     res.status(403).json({
-      error: `Product module not enabled: ${required}`,
-      requiredModule: required
+      error: `Product module not enabled: ${label}`,
+      requiredModule: required[0],
+      requiredModules: required
     });
     return;
   }

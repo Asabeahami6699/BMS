@@ -471,6 +471,7 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
           role={role}
           branches={branches}
           transactionBranchId={transactionBranchId}
+          modules={modules}
         />
       ) : null}
 

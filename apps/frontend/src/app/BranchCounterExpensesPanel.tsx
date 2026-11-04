@@ -1,14 +1,15 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
+import { hasTenantModule, type TenantProductModule, type TellerTillJournalEntry } from "@bms/shared";
 import type { AppRole, Branch } from "./api";
 import { createTellerTillJournalEntry, listTellerTillJournalEntries } from "./api";
 import { useToast } from "../components/Toast";
 import { toUserFacingError } from "../lib/networkError";
-import type { TellerTillJournalEntry } from "@bms/shared";
 
 type Props = {
   role: AppRole;
   branches: Branch[];
   transactionBranchId: string;
+  modules?: TenantProductModule[];
 };
 
 function todayIso(): string {
@@ -29,7 +30,12 @@ function formatTime(iso: string): string {
 
 const CAN_LOG = new Set<AppRole>(["teller", "coordinator", "admin"]);
 
-export function BranchCounterExpensesPanel({ role, branches, transactionBranchId }: Props) {
+export function BranchCounterExpensesPanel({
+  role,
+  branches,
+  transactionBranchId,
+  modules
+}: Props) {
   const { showToast } = useToast();
   const [amount, setAmount] = useState("");
   const [notes, setNotes] = useState("");
@@ -38,7 +44,11 @@ export function BranchCounterExpensesPanel({ role, branches, transactionBranchId
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const canLog = CAN_LOG.has(role);
+  const moduleEnabled =
+    modules == null ||
+    hasTenantModule(modules, "susu_management") ||
+    hasTenantModule(modules, "banking");
+  const canLog = CAN_LOG.has(role) && moduleEnabled;
   const branchLabel = branches.find((b) => b.id === transactionBranchId)?.name ?? "Branch";
 
   const refresh = useCallback(async () => {
