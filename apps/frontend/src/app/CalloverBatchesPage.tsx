@@ -372,7 +372,7 @@ export function CalloverBatchesPage({ role }: Props) {
         </div>
         <div className="callover-batches-hero__actions">
           <Link to="/app/susu/overages-shortages" className="button secondary">
-            OS · Overages & shortages
+            Overages/Shortages
           </Link>
           <button
             type="button"
@@ -708,12 +708,12 @@ export function CalloverBatchesPage({ role }: Props) {
           <div className="callover-variance-section__title-row">
             <h2>Open cash variances</h2>
             <Link to="/app/susu/overages-shortages" className="button secondary">
-              Open OS page
+              Open Overages/Shortages
             </Link>
           </div>
           <p className="muted">
             Shortages are agent debt (pay office). Overages need missing collection entries reconciled. They are never
-            netted against each other. Use the OS page to filter by agent/date and credit customers from overages.
+            netted against each other. Use Overages/Shortages to filter by agent/date and credit customers from overages.
           </p>
         </div>
         {variances.length === 0 ? (

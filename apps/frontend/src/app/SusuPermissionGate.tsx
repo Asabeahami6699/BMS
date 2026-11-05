@@ -20,7 +20,7 @@ function normalizeRoute(route: string): string {
   return route.replace(/^\/+/, "").replace(/^app\//, "").split("?")[0] ?? "";
 }
 
-/** Admin/coordinator always get OS even if tenant nav config is stale. */
+/** Admin/coordinator always get Overages/Shortages even if tenant nav config is stale. */
 function canAccessOsFallback(role: Role | undefined, permissions: Permission[] | undefined): boolean {
   if (role !== "admin" && role !== "coordinator") {
     return false;

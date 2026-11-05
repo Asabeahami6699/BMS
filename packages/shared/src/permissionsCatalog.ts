@@ -624,8 +624,8 @@ export const SUSU_NAV_VISIBILITY: SusuNavVisibilityRow[] = [
   },
   {
     navPath: "susu/overages-shortages",
-    label: "OS · Overages & shortages",
-    description: "Agent OS cash variances — repay shortages or credit customers from overages.",
+    label: "Overages/Shortages",
+    description: "Agent cash variances — repay shortages or credit customers from overages.",
     anyPermissions: ["transactions.read", "transactions.create.daily_susu", "customers.read"],
     roles: ["admin", "coordinator"]
   },
@@ -791,7 +791,7 @@ function resolveSusuNavRow(
     };
   }
   // Prefer tenant/API visibility when present, but fall back to catalog defaults so
-  // newly added Susu pages (e.g. OS) are not blocked for admin/coordinator.
+  // newly added Susu pages (e.g. Overages/Shortages) are not blocked for admin/coordinator.
   if (susuNavVisibility?.length) {
     const fromApi = susuNavVisibility.find((row) => row.navPath === normalized);
     if (fromApi) {

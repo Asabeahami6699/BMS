@@ -587,7 +587,7 @@ export async function settleCashVariance(
 }
 
 /**
- * Credit a customer from an agent's open OS overage (card/account shortage complaint).
+ * Credit a customer from an agent's open overage (card/account shortage complaint).
  * Posts a daily_susu credit with notes "Settled shortage" and reduces the overage case.
  * Never uses shortage balances — shortages are agent debt to the office only.
  */
@@ -607,14 +607,14 @@ export async function creditCustomerFromOverage(
     throw new Error("Cash variance case not found");
   }
   if (current.varianceType !== "overage") {
-    throw new Error("Only overage OS balances can credit a customer. Shortages must be repaid by the agent.");
+    throw new Error("Only overage balances can credit a customer. Shortages must be repaid by the agent.");
   }
   if (current.status === "settled" || current.status === "written_off") {
     throw new Error("This overage is already closed");
   }
   if (amount - current.outstandingAmount > 0.005) {
     throw new Error(
-      `Credit cannot exceed open OS overage GHS ${current.outstandingAmount.toFixed(2)}`
+      `Credit cannot exceed open overage GHS ${current.outstandingAmount.toFixed(2)}`
     );
   }
 
@@ -633,8 +633,8 @@ export async function creditCustomerFromOverage(
 
   const extra = input.notes?.trim();
   const notes = extra
-    ? `Settled shortage · OS overage ${current.businessDate} · ${extra}`
-    : `Settled shortage · OS overage ${current.businessDate}`;
+    ? `Settled shortage · overage ${current.businessDate} · ${extra}`
+    : `Settled shortage · overage ${current.businessDate}`;
 
   const tx = await createTransaction(
     {

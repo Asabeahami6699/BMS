@@ -209,10 +209,10 @@ export function OveragesShortagesPage({ role }: Props) {
     <div className="callover-batches-page">
       <header className="callover-batches-hero">
         <div className="callover-batches-hero__copy">
-          <p className="callover-batches-hero__eyebrow">Susu · OS accounts</p>
-          <h1>OS · Overages & shortages</h1>
+          <p className="callover-batches-hero__eyebrow">Susu · Cash variances</p>
+          <h1>Overages/Shortages</h1>
           <p className="muted">
-            Filter agent OS balances by date. Shortages are agent debt. Overages can credit a customer who was
+            Filter agent balances by date. Shortages are agent debt. Overages can credit a customer who was
             under-posted — never offset against each other.
           </p>
         </div>
@@ -248,7 +248,7 @@ export function OveragesShortagesPage({ role }: Props) {
               <p className="kpi-value">{loading ? "—" : formatMoney(totals.overageOutstanding)}</p>
             </div>
           </div>
-          <p className="kpi-meta muted">{totals.overageCount} case(s) · OS to reconcile</p>
+          <p className="kpi-meta muted">{totals.overageCount} case(s) · to reconcile</p>
         </article>
       </div>
 
@@ -324,7 +324,7 @@ export function OveragesShortagesPage({ role }: Props) {
                     </p>
                   </div>
                   <div className="callover-variance-card__amount">
-                    <span className="callover-batch-card__stat-label">Outstanding OS</span>
+                    <span className="callover-batch-card__stat-label">Outstanding</span>
                     <strong
                       className={
                         v.varianceType === "shortage"
