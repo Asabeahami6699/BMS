@@ -11,7 +11,6 @@ export function notificationTargetPath(notification: AgentNotification): string 
       return "/app/banking/back-office#deposits";
     case "withdrawal_ready_for_teller":
     case "withdrawal_cs_approved":
-    case "float_allocated":
       return "/app/banking/teller";
     case "withdrawal_request_pending":
     case "balance_request_pending":
@@ -31,11 +30,16 @@ export function notificationTargetPath(notification: AgentNotification): string 
     case "withdrawal_request_rejected":
       return "/app/susu/withdrawals";
     case "float_requested":
+    case "float_allocated":
     case "float_closed_pending_settlement":
       return "/app/susu/till-float";
     case "collection_batch_pending":
     case "collection_batch_posted":
       return "/app/susu/callover-batches";
+    case "cash_shortage_opened":
+    case "cash_overage_opened":
+    case "cash_variance_settled":
+      return "/app/susu/overages-shortages";
     case "workspace_activity":
       break;
     default:

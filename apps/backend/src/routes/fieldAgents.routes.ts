@@ -12,6 +12,7 @@ import {
   addCollectionBatchLine,
   submitCollectionBatchForApproval
 } from "../services/collectionBatchService.js";
+import { listMyCashVariances } from "../services/cashVarianceService.js";
 import {
   getFieldAgentDashboard,
   getFieldAgentTodayCollections
@@ -69,6 +70,32 @@ fieldAgentsRouter.get("/me/collections/today", requirePermission("transactions.r
   } catch (error) {
     res.status(500).json({
       error: error instanceof Error ? error.message : "Failed to load today's collections"
+    });
+  }
+});
+
+fieldAgentsRouter.get("/me/cash-variances", requirePermission("transactions.read"), async (req, res) => {
+  const context = req.userContext;
+  if (!context) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  if (context.role !== "field_agent") {
+    res.status(403).json({ error: "Field agent access only" });
+    return;
+  }
+
+  const status = req.query.status === "all" ? "all" : "open";
+
+  try {
+    const summary = await listMyCashVariances(
+      { tenantId: context.tenantId, userId: context.userId },
+      { status }
+    );
+    res.json(summary);
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "Failed to load cash variances"
     });
   }
 });

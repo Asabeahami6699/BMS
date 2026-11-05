@@ -1,9 +1,13 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { SAVINGS_INITIAL_DEPOSIT_GHS } from "@bms/shared";
-import type { AccountType, Customer, LedgerEntry } from "../app/api";
-import { getCustomerLedger } from "../app/api";
+import type { AccountType, Customer } from "../app/api";
 import { SusuReversalDialog } from "../app/SusuReversalDialog";
 import { printCustomerAccountStatement } from "../app/customerAccountStatement";
+import {
+  selectCustomerDetail,
+  selectLedgerForCustomer,
+  useCustomerLedgerStore
+} from "../app/stores/customerLedgerStore";
 import { downloadCustomerLedgerCsv } from "../lib/customerLedgerCsv";
 import { formatFieldAgent } from "../lib/formatFieldAgent";
 import { useAuth } from "../auth/AuthContext";
@@ -105,23 +109,39 @@ function formatLedgerDate(iso: string): string {
 }
 
 export function CustomerDetailsView({
-  customer,
+  customer: customerProp,
   branchLabel,
   agentLabel,
   statusLabel,
-  showFinancials = customer.status === "active"
+  showFinancials = customerProp.status === "active"
 }: Props) {
   const { showToast } = useToast();
   const { user } = useAuth();
   const [idLightbox, setIdLightbox] = useState(false);
-  const [ledger, setLedger] = useState<LedgerEntry[]>([]);
   const [statementFromDate, setStatementFromDate] = useState(() => daysAgoIsoDate(30));
   const [statementToDate, setStatementToDate] = useState(() => todayIsoDate());
-  const [ledgerVersion, setLedgerVersion] = useState(0);
   const [susuTransactionId, setSusuTransactionId] = useState<string | null>(null);
-  const [ledgerLoading, setLedgerLoading] = useState(false);
-  const [ledgerError, setLedgerError] = useState<string | null>(null);
   const [ledgerVisibleCount, setLedgerVisibleCount] = useState(LEDGER_PAGE_SIZE);
+
+  const detail = useCustomerLedgerStore((s) => selectCustomerDetail(s, customerProp.id));
+  const customer = detail ?? customerProp;
+  const ledger = useCustomerLedgerStore((s) => selectLedgerForCustomer(s, customerProp.id));
+  const ledgerLoading = useCustomerLedgerStore((s) => Boolean(s.loadingByCustomer[customerProp.id]));
+  const ledgerError = useCustomerLedgerStore((s) => s.errorByCustomer[customerProp.id] ?? null);
+
+  useEffect(() => {
+    void useCustomerLedgerStore.getState().ensureDetail(customerProp.id);
+  }, [customerProp.id]);
+
+  useEffect(() => {
+    if (!showFinancials) {
+      return;
+    }
+    const store = useCustomerLedgerStore.getState();
+    void store.ensureLedger(customerProp.id);
+    store.startLiveSync();
+    return () => useCustomerLedgerStore.getState().stopLiveSync();
+  }, [customerProp.id, showFinancials]);
 
   const accountLabel = customer.accountType
     ? (ACCOUNT_TYPE_LABELS[customer.accountType] ?? customer.accountType)
@@ -151,39 +171,8 @@ export function CustomerDetailsView({
   }, [idLightbox]);
 
   useEffect(() => {
-    if (!showFinancials) {
-      setLedger([]);
-      setLedgerError(null);
-      return;
-    }
-    let cancelled = false;
-    setLedgerLoading(true);
-    setLedgerError(null);
-    void getCustomerLedger(customer.id)
-      .then((entries) => {
-        if (!cancelled) {
-          setLedger(entries);
-        }
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) {
-          setLedger([]);
-          setLedgerError(err instanceof Error ? err.message : "Could not load ledger");
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLedgerLoading(false);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [customer.id, showFinancials, ledgerVersion]);
-
-  useEffect(() => {
     setLedgerVisibleCount(LEDGER_PAGE_SIZE);
-  }, [customer.id]);
+  }, [customerProp.id]);
 
   const accountBalance =
     ledger.length > 0 ? ledger[ledger.length - 1]!.balanceAfter : 0;
@@ -365,16 +354,24 @@ export function CustomerDetailsView({
                       {displayedLedger.map((entry) => {
                         const susuDetail =
                           entry.transactionType === "daily_susu" || entry.transactionType === "susu_reversal";
+                        const settledShortage = Boolean(
+                          entry.notes?.toLowerCase().includes("settled shortage")
+                        );
                         const typeLabel =
                           entry.transactionType === "susu_reversal"
                             ? "Reversal"
-                            : entry.entryType === "credit"
-                              ? "Credit"
-                              : "Debit";
+                            : settledShortage
+                              ? "Settled shortage"
+                              : entry.entryType === "credit"
+                                ? "Credit"
+                                : "Debit";
                         const cells = (
                           <>
                             <span>{formatLedgerDate(entry.createdAt)}</span>
-                            <span className={`cif-ledger__type--${entry.entryType}`}>
+                            <span
+                              className={`cif-ledger__type--${entry.entryType}`}
+                              title={entry.notes ?? undefined}
+                            >
                               {typeLabel}
                               {entry.reversalStatus === "reversed" ? " · Reversed" : ""}
                             </span>
@@ -647,7 +644,11 @@ export function CustomerDetailsView({
         open={susuTransactionId != null}
         transactionId={susuTransactionId}
         onClose={() => setSusuTransactionId(null)}
-        onCompleted={() => setLedgerVersion((version) => version + 1)}
+        onCompleted={() => {
+          const store = useCustomerLedgerStore.getState();
+          store.invalidate(customerProp.id);
+          void store.ensureLedger(customerProp.id, { force: true });
+        }}
       />
     </>
   );

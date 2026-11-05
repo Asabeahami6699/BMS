@@ -6,6 +6,7 @@ import { getSupabaseAdminClient } from "../config/supabaseClient.js";
 import { beginIdempotency } from "../middleware/idempotency.js";
 import { createTransaction } from "./transactionService.js";
 import { createAgentNotification, notifyTenantStaff } from "./notificationService.js";
+import { openCashVarianceFromBatch } from "./cashVarianceService.js";
 import { listUsersByTenant } from "./authStore.js";
 import { z } from "zod";
 
@@ -21,6 +22,8 @@ export type CollectionBatchLine = {
   createdAt: string;
 };
 
+export type CashVarianceStatus = "balanced" | "shortage" | "overage";
+
 export type CollectionBatch = {
   id: string;
   tenantId: string;
@@ -34,8 +37,27 @@ export type CollectionBatch = {
   submittedAt?: string;
   postedAt?: string;
   postedBy?: string;
+  cashReceivedAmount?: number;
+  cashVariance?: number;
+  cashVarianceStatus?: CashVarianceStatus;
+  cashReceivedAt?: string;
+  cashReceivedBy?: string;
   lines: CollectionBatchLine[];
 };
+
+export function computeCashVariance(
+  batchTotal: number,
+  cashReceived: number
+): { variance: number; status: CashVarianceStatus } {
+  const variance = Math.round((cashReceived - batchTotal) * 100) / 100;
+  if (Math.abs(variance) < 0.005) {
+    return { variance: 0, status: "balanced" };
+  }
+  if (variance < 0) {
+    return { variance, status: "shortage" };
+  }
+  return { variance, status: "overage" };
+}
 
 export type FieldAgentTodayCollection = {
   customerId: string;
@@ -191,6 +213,12 @@ async function loadBatchRow(
       submittedAt: batchRow.submitted_at ?? undefined,
       postedAt: batchRow.posted_at ?? undefined,
       postedBy: batchRow.posted_by ?? undefined,
+      cashReceivedAmount:
+        batchRow.cash_received_amount != null ? Number(batchRow.cash_received_amount) : undefined,
+      cashVariance: batchRow.cash_variance != null ? Number(batchRow.cash_variance) : undefined,
+      cashVarianceStatus: (batchRow.cash_variance_status as CashVarianceStatus | null) ?? undefined,
+      cashReceivedAt: batchRow.cash_received_at ?? undefined,
+      cashReceivedBy: batchRow.cash_received_by ?? undefined,
       lines
     };
   }
@@ -306,6 +334,11 @@ async function persistBatch(batch: CollectionBatch): Promise<void> {
         submitted_at: batch.submittedAt ?? null,
         posted_at: batch.postedAt ?? null,
         posted_by: batch.postedBy ?? null,
+        cash_received_amount: batch.cashReceivedAmount ?? null,
+        cash_variance: batch.cashVariance ?? null,
+        cash_variance_status: batch.cashVarianceStatus ?? null,
+        cash_received_at: batch.cashReceivedAt ?? null,
+        cash_received_by: batch.cashReceivedBy ?? null,
         updated_at: new Date().toISOString()
       },
       { onConflict: "tenant_id,field_agent_id,business_date" }
@@ -609,13 +642,18 @@ function withBatchLock<T>(batchId: string, work: () => Promise<T>): Promise<T> {
   });
 }
 
-async function postSingleBatch(context: CoordinatorContext, batch: CollectionBatch): Promise<CollectionBatch> {
-  return withBatchLock(batch.id, () => postSingleBatchUnlocked(context, batch));
+async function postSingleBatch(
+  context: CoordinatorContext,
+  batch: CollectionBatch,
+  options?: { cashReceivedAmount?: number }
+): Promise<CollectionBatch> {
+  return withBatchLock(batch.id, () => postSingleBatchUnlocked(context, batch, options));
 }
 
 async function postSingleBatchUnlocked(
   context: CoordinatorContext,
-  batch: CollectionBatch
+  batch: CollectionBatch,
+  options?: { cashReceivedAmount?: number }
 ): Promise<CollectionBatch> {
   const fresh = await loadBatchRow(context.tenantId, batch.fieldAgentId, batch.businessDate);
   const current = fresh ?? batch;
@@ -625,6 +663,20 @@ async function postSingleBatchUnlocked(
   if (current.status !== "pending_approval") {
     throw new Error("Only pending batches can be posted");
   }
+
+  const cashReceived =
+    options?.cashReceivedAmount ??
+    current.cashReceivedAmount ??
+    undefined;
+  if (cashReceived == null || !Number.isFinite(cashReceived) || cashReceived < 0) {
+    throw new Error("Enter the cash amount the mobilizer brought to the office before posting");
+  }
+  const cashCheck = computeCashVariance(current.totalAmount, cashReceived);
+  current.cashReceivedAmount = Math.round(cashReceived * 100) / 100;
+  current.cashVariance = cashCheck.variance;
+  current.cashVarianceStatus = cashCheck.status;
+  current.cashReceivedAt = new Date().toISOString();
+  current.cashReceivedBy = context.userId;
 
   for (const line of current.lines) {
     if (line.transactionId) {
@@ -707,33 +759,67 @@ async function postSingleBatchUnlocked(
   }
 
   try {
+    const varianceNote =
+      batch.cashVarianceStatus === "shortage"
+        ? ` Shortage GHS ${Math.abs(batch.cashVariance ?? 0).toFixed(2)} is open — pay at the office.`
+        : batch.cashVarianceStatus === "overage"
+          ? ` Overage GHS ${(batch.cashVariance ?? 0).toFixed(2)} must be reconciled (missing entries) — it cannot clear a shortage.`
+          : "";
     await createAgentNotification({
       tenantId: context.tenantId,
       userId: batch.fieldAgentId,
       kind: "collection_batch_posted",
       title: "Collections posted",
-      body: `Your batch of GHS ${batch.totalAmount.toFixed(2)} for ${batch.businessDate} was posted to customer accounts.`
+      body: `Your batch of GHS ${batch.totalAmount.toFixed(2)} for ${batch.businessDate} was posted to customer accounts.${varianceNote}`
     });
-  } catch {
-    /* non-blocking */
+  } catch (error) {
+    console.warn(
+      "[collections] agent post notification failed:",
+      error instanceof Error ? error.message : error
+    );
+  }
+
+  try {
+    const agent = await resolveAgentName(batch.tenantId, batch.fieldAgentId);
+    await openCashVarianceFromBatch(
+      batch,
+      context.userId,
+      agent.branchId ?? context.branchId
+    );
+  } catch (error) {
+    console.warn(
+      "[collections] open cash variance failed:",
+      error instanceof Error ? error.message : error
+    );
   }
 
   return batch;
 }
 
-export async function postCollectionBatch(context: CoordinatorContext, batchId: string): Promise<CollectionBatch> {
+export async function postCollectionBatch(
+  context: CoordinatorContext,
+  batchId: string,
+  options?: { cashReceivedAmount?: number }
+): Promise<CollectionBatch> {
   const batchView = await getCollectionBatchById(context, batchId);
-  return postSingleBatch(context, batchView);
+  return postSingleBatch(context, batchView, options);
 }
 
 export async function postAllPendingCollectionBatches(
   context: CoordinatorContext,
-  options?: { businessDate?: string; fieldAgentId?: string; branchId?: string }
+  options?: {
+    businessDate?: string;
+    fieldAgentId?: string;
+    branchId?: string;
+    /** Map of batchId → cash brought. Required for each pending batch. */
+    cashByBatchId?: Record<string, number>;
+  }
 ): Promise<{ posted: number; batchIds: string[] }> {
   const pending = await listPendingCollectionBatches(context, options);
   const batchIds: string[] = [];
   for (const batch of pending) {
-    await postSingleBatch(context, batch);
+    const cash = options?.cashByBatchId?.[batch.id];
+    await postSingleBatch(context, batch, { cashReceivedAmount: cash });
     batchIds.push(batch.id);
   }
   return { posted: batchIds.length, batchIds };

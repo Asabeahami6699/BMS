@@ -1,12 +1,24 @@
 import type { Customer } from "../app/api";
 
-/** Display name for the field agent who submitted or owns the registration. */
+function isUsableAgentLabel(value: string | undefined): value is string {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return false;
+  }
+  // Reject raw user ids like user_d5d1918c when a real name was not resolved.
+  if (/^user[_-]/i.test(trimmed)) {
+    return false;
+  }
+  return true;
+}
+
+/** Display name for the assigned / registering field agent (never a raw user id). */
 export function formatFieldAgent(customer: Customer): string {
-  return (
-    customer.createdByFieldAgentName ??
-    customer.assignedFieldAgentName ??
-    customer.createdByFieldAgentId ??
-    customer.assignedFieldAgentId ??
-    "—"
-  );
+  if (isUsableAgentLabel(customer.assignedFieldAgentName)) {
+    return customer.assignedFieldAgentName.trim();
+  }
+  if (isUsableAgentLabel(customer.createdByFieldAgentName)) {
+    return customer.createdByFieldAgentName.trim();
+  }
+  return "—";
 }

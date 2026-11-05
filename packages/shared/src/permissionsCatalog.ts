@@ -623,6 +623,13 @@ export const SUSU_NAV_VISIBILITY: SusuNavVisibilityRow[] = [
     roles: ["admin", "coordinator"]
   },
   {
+    navPath: "susu/overages-shortages",
+    label: "OS · Overages & shortages",
+    description: "Agent OS cash variances — repay shortages or credit customers from overages.",
+    anyPermissions: ["transactions.read", "transactions.create.daily_susu", "customers.read"],
+    roles: ["admin", "coordinator"]
+  },
+  {
     navPath: "susu/till-float",
     label: "Till float",
     description: "Approve and settle branch counter cash sessions.",
@@ -783,8 +790,15 @@ function resolveSusuNavRow(
       ...SUSU_OVERVIEW_ACCESS
     };
   }
-  const rows = susuNavVisibility?.length ? susuNavVisibility : SUSU_NAV_VISIBILITY;
-  return rows.find((row) => row.navPath === normalized) ?? null;
+  // Prefer tenant/API visibility when present, but fall back to catalog defaults so
+  // newly added Susu pages (e.g. OS) are not blocked for admin/coordinator.
+  if (susuNavVisibility?.length) {
+    const fromApi = susuNavVisibility.find((row) => row.navPath === normalized);
+    if (fromApi) {
+      return fromApi;
+    }
+  }
+  return SUSU_NAV_VISIBILITY.find((row) => row.navPath === normalized) ?? null;
 }
 
 /** Minimum permissions for a tenant Susu route (aligns with sidebar matrix). */

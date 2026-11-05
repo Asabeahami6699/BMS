@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { useShallow } from "zustand/react/shallow";
+import { AgentCashVariancePanel } from "../components/AgentCashVariancePanel";
 import { useAgentCustomerStore, selectCustomerStats } from "../stores/agentCustomerStore";
 
 export function AgentHomePage() {
@@ -24,6 +25,8 @@ export function AgentHomePage() {
           </p>
         ) : null}
       </article>
+
+      <AgentCashVariancePanel />
 
       <div className="agent-action-grid">
         <Link to="customers" className="agent-action-card agent-action-card--primary">

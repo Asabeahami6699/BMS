@@ -16,6 +16,7 @@ import { AgentCallOverPage } from "./pages/AgentCallOverPage";
 import { AgentCollectPage } from "./pages/AgentCollectPage";
 import { AgentCustomersPage } from "./pages/AgentCustomersPage";
 import { AgentHomePage } from "./pages/AgentHomePage";
+import { useNotificationsStore } from "../app/stores/notificationsStore";
 import { useAgentBalanceStore } from "./stores/agentBalanceStore";
 import { useAgentCustomerStore } from "./stores/agentCustomerStore";
 
@@ -30,6 +31,12 @@ export function FieldAgentApp() {
 
   useAgentCustomerLiveSync(user?.tenantId);
   useAgentRequestToasts();
+
+  useEffect(() => {
+    useNotificationsStore.getState().hydrate();
+    useNotificationsStore.getState().startLiveSync();
+    return () => useNotificationsStore.getState().stopLiveSync();
+  }, []);
 
   const refreshPending = useCallback(() => setPendingCount(getPendingCount()), []);
 

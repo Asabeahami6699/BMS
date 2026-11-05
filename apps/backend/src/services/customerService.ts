@@ -821,16 +821,16 @@ export async function listCustomers(
       rows = rows.filter((c) => c.status === options.status);
     }
 
-    if (options?.light) {
-      return rows.map((row) => ({
-        ...row,
-        photoUrl: undefined,
-        idCardPhotoUrl: undefined
-      }));
-    }
+    const withoutPhotos = options?.light
+      ? rows.map((row) => ({
+          ...row,
+          photoUrl: undefined,
+          idCardPhotoUrl: undefined
+        }))
+      : rows;
 
-    const named = await enrichCustomersWithAgentNames(tenantId, rows);
-    if (options?.agentId) {
+    const named = await enrichCustomersWithAgentNames(tenantId, withoutPhotos);
+    if (options?.light || options?.agentId) {
       return named;
     }
     return enrichCustomersWithAccountBalances(tenantId, named);
@@ -874,11 +874,8 @@ export async function listCustomers(
   const customers = (data ?? []).map((row) =>
     mapCustomerRow(row as unknown as Record<string, unknown>)
   );
-  if (options?.light) {
-    return customers;
-  }
   const named = await enrichCustomersWithAgentNames(tenantId, customers);
-  if (options?.agentId) {
+  if (options?.light || options?.agentId) {
     return named;
   }
   return enrichCustomersWithAccountBalances(tenantId, named);
@@ -1062,6 +1059,115 @@ export async function assignCustomerFieldAgent(
   }
 
   return enrichCustomerWithAgentNames(tenantId, updated);
+}
+
+async function clearCustomerFinancialHistory(tenantId: string, customerId: string): Promise<void> {
+  const supabase = getSupabaseAdminClient();
+  if (!supabase) {
+    return;
+  }
+
+  const { error: ledgerError } = await supabase
+    .from("ledger_entries")
+    .delete()
+    .eq("tenant_id", tenantId)
+    .eq("customer_id", customerId);
+  if (ledgerError) {
+    throw new Error(`Failed to clear ledger: ${ledgerError.message}`);
+  }
+
+  const { error: txError } = await supabase
+    .from("customer_transactions")
+    .delete()
+    .eq("tenant_id", tenantId)
+    .eq("customer_id", customerId);
+  if (txError) {
+    throw new Error(`Failed to clear transactions: ${txError.message}`);
+  }
+
+  await supabase
+    .from("field_agent_collection_batch_lines")
+    .delete()
+    .eq("tenant_id", tenantId)
+    .eq("customer_id", customerId);
+
+  await supabase
+    .from("customer_balance_disclosures")
+    .delete()
+    .eq("tenant_id", tenantId)
+    .eq("customer_id", customerId);
+}
+
+/** Wipe balances/ledger for trial reuse while keeping the customer profile. */
+export async function resetCustomerAccount(tenantId: string, customerId: string): Promise<Customer> {
+  const existing = await getCustomerById(tenantId, customerId);
+  if (!existing) {
+    throw new Error("Customer not found");
+  }
+
+  await clearCustomerFinancialHistory(tenantId, customerId);
+
+  const supabase = getSupabaseAdminClient();
+  if (supabase) {
+    const { error } = await supabase
+      .from("customers")
+      .update({
+        locked_balance: 0,
+        savings_opening_fee_collected: false,
+        savings_opening_fee_recovered: 0
+      })
+      .eq("tenant_id", tenantId)
+      .eq("id", customerId);
+    if (error) {
+      throw new Error(`Failed to reset customer: ${error.message}`);
+    }
+  } else {
+    const customers = getTenantCustomers(tenantId);
+    const idx = customers.findIndex((c) => c.id === customerId);
+    if (idx >= 0) {
+      customers[idx] = {
+        ...customers[idx]!,
+        lockedBalance: 0,
+        savingsOpeningFeeCollected: false,
+        savingsOpeningFeeRecovered: 0
+      };
+      setTenantCustomers(tenantId, customers);
+    }
+  }
+
+  const refreshed = await getCustomerById(tenantId, customerId);
+  if (!refreshed) {
+    throw new Error("Customer not found after reset");
+  }
+  return refreshed;
+}
+
+/** Permanently delete a customer and related financial history (trial cleanup). */
+export async function deleteCustomer(tenantId: string, customerId: string): Promise<void> {
+  const existing = await getCustomerById(tenantId, customerId);
+  if (!existing) {
+    throw new Error("Customer not found");
+  }
+
+  await clearCustomerFinancialHistory(tenantId, customerId);
+
+  const supabase = getSupabaseAdminClient();
+  if (supabase) {
+    const { error } = await supabase
+      .from("customers")
+      .delete()
+      .eq("tenant_id", tenantId)
+      .eq("id", customerId);
+    if (error) {
+      throw new Error(`Failed to delete customer: ${error.message}`);
+    }
+    return;
+  }
+
+  setTenantCustomers(
+    tenantId,
+    getTenantCustomers(tenantId).filter((c) => c.id !== customerId)
+  );
 }
 
 

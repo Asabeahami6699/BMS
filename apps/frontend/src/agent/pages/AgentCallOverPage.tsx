@@ -4,6 +4,7 @@ import { submitCollectionBatchForApproval, type CalloverReportLine } from "../..
 import { useToast } from "../../components/Toast";
 import { toUserFacingError } from "../../lib/networkError";
 import { useNetworkStatus } from "../../lib/useNetworkStatus";
+import { AgentCashVariancePanel } from "../components/AgentCashVariancePanel";
 import { useAgentCollectionStore } from "../stores/agentCollectionStore";
 import { useAgentCustomerStore } from "../stores/agentCustomerStore";
 import {
@@ -46,6 +47,7 @@ export function AgentCallOverPage() {
   const [reportNotes, setReportNotes] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerQuery, setPickerQuery] = useState("");
+  const [varianceRefreshKey, setVarianceRefreshKey] = useState(0);
 
   useEffect(() => {
     load();
@@ -66,10 +68,14 @@ export function AgentCallOverPage() {
   const systemRows = useMemo(() => {
     return items.map((item) => {
       const customer = activeById.get(item.customerId);
+      const fullName = customer?.fullName ?? "Customer";
+      const accountNumber = customer?.accountNumber?.trim() || undefined;
       return {
         customerId: item.customerId,
-        displayName: customer?.fullName ?? "Customer",
-        accountHint: customer?.accountNumber ?? customer?.phone,
+        fullName,
+        accountNumber,
+        displayName: accountNumber ? `${fullName} · ${accountNumber}` : fullName,
+        accountHint: accountNumber ?? customer?.phone,
         item,
         count: item.entryCount ?? 1
       };
@@ -197,6 +203,7 @@ export function AgentCallOverPage() {
       }
       setReportNotes("");
       void useAgentCollectionStore.getState().refreshToday();
+      setVarianceRefreshKey((k) => k + 1);
     } catch (error) {
       showToast(toUserFacingError(error, "Failed to submit"), "error");
     } finally {
@@ -273,6 +280,8 @@ export function AgentCallOverPage() {
         When amounts match, send the batch for coordinator approval. Accounts are credited only after they post the
         batch.
       </p>
+
+      <AgentCashVariancePanel refreshKey={varianceRefreshKey} />
 
       {batchStatus === "pending_approval" ? (
         <article className="card">
@@ -361,10 +370,15 @@ export function AgentCallOverPage() {
               const systemAmount = items.find((i) => i.customerId === d.customerId)?.amount ?? 0;
               const given = parseAmount(d.givenAmount);
               const variance = computeVariance(given, systemAmount);
+              const accountNumber = activeById.get(d.customerId)?.accountNumber?.trim();
+              const label =
+                accountNumber && !d.customerName.includes(accountNumber)
+                  ? `${d.customerName} · ${accountNumber}`
+                  : d.customerName;
               return (
                 <article key={d.id} className="agent-list-item agent-callover-card">
                   <div className="agent-customer-card-head">
-                    <strong>{d.customerName}</strong>
+                    <strong>{label}</strong>
                     <button type="button" className="button secondary" onClick={() => removeDiscrepancy(d.id)}>
                       Remove
                     </button>
@@ -438,7 +452,7 @@ export function AgentCallOverPage() {
               className="agent-callover-picker-search"
               value={pickerQuery}
               onChange={(e) => setPickerQuery(e.target.value)}
-              placeholder="Search name or phone"
+              placeholder="Search name or account"
             />
             <div className="agent-list">
               {pickerResults.map((row) => (

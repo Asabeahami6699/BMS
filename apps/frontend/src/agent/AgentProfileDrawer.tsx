@@ -175,21 +175,18 @@ export function AgentProfileDrawer({ open, onClose, onLogout }: Props) {
             </>
           ) : null}
 
-          <details className="agent-drawer-panel">
-            <summary>Account</summary>
-            <div className="agent-drawer-panel-body">
-              <button
-                type="button"
-                className="button secondary agent-drawer-logout"
-                onClick={() => {
-                  onClose();
-                  onLogout();
-                }}
-              >
-                Sign out
-              </button>
-            </div>
-          </details>
+          <div className="agent-drawer-signout">
+            <button
+              type="button"
+              className="button agent-drawer-logout agent-drawer-logout--danger"
+              onClick={() => {
+                onClose();
+                onLogout();
+              }}
+            >
+              Sign out
+            </button>
+          </div>
         </div>
       </aside>
     </div>

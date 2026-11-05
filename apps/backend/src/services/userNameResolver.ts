@@ -10,14 +10,15 @@ export function userDisplayName(
   id: string
 ): string {
   const name = fullName?.trim();
-  if (name) {
+  // Avoid surfacing raw platform ids (e.g. user_d5d1918c) as display names.
+  if (name && !/^user[_-]/i.test(name)) {
     return name;
   }
   const mail = email?.trim();
   if (mail) {
-    return mail;
+    return mail.includes("@") ? mail.split("@")[0]! : mail;
   }
-  return id;
+  return id.startsWith("user_") ? "Field agent" : id;
 }
 
 /** One query — all staff names for a tenant (back office, statements, reconciliation). */

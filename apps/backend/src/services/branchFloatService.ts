@@ -281,13 +281,25 @@ export async function requestBranchFloat(
   };
 
   await persistSession(session);
+  const branchLabel = await branchDisplayLabel(context.tenantId, branchId);
   try {
     await notifyTenantStaff({
       tenantId: context.tenantId,
       roles: ["admin", "coordinator"],
       kind: "float_requested",
       title: "Till float requested",
-      body: `GHS ${session.openingFloat.toFixed(2)} requested for ${await branchDisplayLabel(context.tenantId, branchId)} on ${businessDate}.`
+      body: `GHS ${session.openingFloat.toFixed(2)} requested for ${branchLabel} on ${businessDate}.`
+    });
+  } catch {
+    // Non-blocking
+  }
+  try {
+    await createAgentNotification({
+      tenantId: context.tenantId,
+      userId: context.userId,
+      kind: "float_requested",
+      title: "Till float request sent",
+      body: `You requested GHS ${session.openingFloat.toFixed(2)} for ${branchLabel} on ${businessDate}. Waiting for release.`
     });
   } catch {
     // Non-blocking
@@ -313,13 +325,25 @@ async function requestFloatTopUp(
   session.topUpNote = note?.trim() || undefined;
   await persistSession(session);
 
+  const branchLabel = await branchDisplayLabel(context.tenantId, session.branchId);
   try {
     await notifyTenantStaff({
       tenantId: context.tenantId,
       roles: ["admin", "coordinator"],
       kind: "float_requested",
       title: "Till float top-up requested",
-      body: `GHS ${amount.toFixed(2)} top-up requested for ${await branchDisplayLabel(context.tenantId, session.branchId)} on ${session.businessDate}.`
+      body: `GHS ${amount.toFixed(2)} top-up requested for ${branchLabel} on ${session.businessDate}.`
+    });
+  } catch {
+    // Non-blocking
+  }
+  try {
+    await createAgentNotification({
+      tenantId: context.tenantId,
+      userId: context.userId,
+      kind: "float_requested",
+      title: "Till float top-up request sent",
+      body: `You requested a GHS ${amount.toFixed(2)} top-up for ${branchLabel} on ${session.businessDate}. Waiting for release.`
     });
   } catch {
     // Non-blocking

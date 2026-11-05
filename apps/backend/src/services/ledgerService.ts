@@ -91,6 +91,7 @@ type TransactionMeta = {
   recordedByUserId: string;
   fieldAgentId: string;
   type: string;
+  notes?: string;
   reversesTransactionId?: string;
   reversedByTransactionId?: string;
   reversalReason?: string;
@@ -139,7 +140,7 @@ async function enrichLedgerEntries(
     const fullResult = await supabase
       .from("customer_transactions")
       .select(
-        "id, recorded_by_user_id, field_agent_id, type, reverses_transaction_id, reversed_by_transaction_id, reversal_reason, reversed_by_user_id, reversed_at"
+        "id, recorded_by_user_id, field_agent_id, type, notes, reverses_transaction_id, reversed_by_transaction_id, reversal_reason, reversed_by_user_id, reversed_at"
       )
       .eq("tenant_id", tenantId)
       .in("id", transactionIds);
@@ -151,7 +152,7 @@ async function enrichLedgerEntries(
     ) {
       const basicResult = await supabase
         .from("customer_transactions")
-        .select("id, recorded_by_user_id, field_agent_id, type")
+        .select("id, recorded_by_user_id, field_agent_id, type, notes")
         .eq("tenant_id", tenantId)
         .in("id", transactionIds);
       if (basicResult.error) {
@@ -170,6 +171,7 @@ async function enrichLedgerEntries(
         recordedByUserId: String(row.recorded_by_user_id),
         fieldAgentId: String(row.field_agent_id),
         type: String(row.type),
+        notes: row.notes ? String(row.notes) : undefined,
         ...reversalMeta(row)
       });
     }
@@ -199,6 +201,7 @@ async function enrichLedgerEntries(
       transactionBranchId: row.transaction_branch_id,
       createdAt: row.created_at,
       transactionType: tx?.type,
+      notes: tx?.notes,
       recordedByName,
       fieldAgentName,
       performedByName: tx

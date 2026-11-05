@@ -16,6 +16,8 @@ type Props<T> = {
   searchPlaceholder?: string;
   emptyMessage?: string;
   actions?: (row: T) => ReactNode;
+  /** When set, body rows are clickable (actions cell still stops propagation). */
+  onRowClick?: (row: T) => void;
   toolbar?: ReactNode;
   variant?: "default" | "desk";
   title?: string;
@@ -45,6 +47,7 @@ export function AdminDataTable<T>({
   searchPlaceholder = "Search…",
   emptyMessage = "No records found.",
   actions,
+  onRowClick,
   toolbar,
   variant = "default",
   title,
@@ -86,13 +89,37 @@ export function AdminDataTable<T>({
               </tr>
             ) : (
               rows.map((row) => (
-                <tr key={rowKey(row)}>
+                <tr
+                  key={rowKey(row)}
+                  className={onRowClick ? "admin-table-row--clickable" : undefined}
+                  onClick={onRowClick ? () => onRowClick(row) : undefined}
+                  onKeyDown={
+                    onRowClick
+                      ? (e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            onRowClick(row);
+                          }
+                        }
+                      : undefined
+                  }
+                  tabIndex={onRowClick ? 0 : undefined}
+                  role={onRowClick ? "button" : undefined}
+                >
                   {columns.map((col) => (
                     <td key={col.key} className={col.className}>
                       {col.render ? col.render(row) : String((row as Record<string, unknown>)[col.key] ?? "—")}
                     </td>
                   ))}
-                  {actions ? <td className="admin-table-actions">{actions(row)}</td> : null}
+                  {actions ? (
+                    <td
+                      className="admin-table-actions"
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => e.stopPropagation()}
+                    >
+                      {actions(row)}
+                    </td>
+                  ) : null}
                 </tr>
               ))
             )}

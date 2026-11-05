@@ -70,18 +70,18 @@ export function normalizeGhanaPhone(raw: string): string | null {
   return null;
 }
 
-/** Mask for outbound SMS, e.g. 13******2577 (first 2 + stars + last 4). */
+/** Mask for outbound SMS, e.g. 130*****2577 (first 3 + stars + last 4). */
 export function maskAccountNumber(accountNumber?: string): string {
   const digits = (accountNumber ?? "").replace(/\s+/g, "");
   if (!digits) {
     return "****";
   }
-  if (digits.length <= 6) {
+  if (digits.length <= 7) {
     return `${digits.slice(0, 1)}${"*".repeat(Math.max(digits.length - 2, 2))}${digits.slice(-1)}`;
   }
-  const head = digits.slice(0, 2);
+  const head = digits.slice(0, 3);
   const tail = digits.slice(-4);
-  const stars = "*".repeat(Math.max(digits.length - 6, 2));
+  const stars = "*".repeat(Math.max(digits.length - 7, 2));
   return `${head}${stars}${tail}`;
 }
 

@@ -30,7 +30,7 @@ export function buildTransactionAlertMessage(input: {
   }
   return {
     subject: `${brand} — daily collection received`,
-    text: `${brand}: Daily collection GHS ${amt} received on account ${accountMask}. Balance GHS ${bal}.`
+    text: `A sum of GHS ${amt} has been credited to your Account # ${accountMask} being daily susu by ${customerName} - GHS ${amt}. current balance is: Ghs ${bal}`
   };
 }
 

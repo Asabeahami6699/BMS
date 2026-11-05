@@ -1,4 +1,5 @@
 import { isTenantRealtimeConfigured, subscribeToTenantRealtime } from "../app/realtime";
+import { useNotificationsStore } from "../app/stores/notificationsStore";
 import { useAgentBalanceStore } from "./stores/agentBalanceStore";
 import { useAgentCollectionStore } from "./stores/agentCollectionStore";
 import { useAgentCustomerStore } from "./stores/agentCustomerStore";
@@ -31,6 +32,7 @@ export function refreshAgentLiveData(): void {
   void useAgentCustomerStore.getState().refreshSilent();
   void useAgentBalanceStore.getState().refreshSilent();
   void useAgentCollectionStore.getState().refreshToday();
+  void useNotificationsStore.getState().refreshSilent();
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent(AGENT_LIVE_REFRESH_EVENT));
   }

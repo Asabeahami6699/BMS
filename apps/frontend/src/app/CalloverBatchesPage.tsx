@@ -1,13 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { AppRole, Branch, Customer, PendingCollectionBatch } from "./api";
+import { Link } from "react-router-dom";
+import type {
+  AppRole,
+  Branch,
+  CashVarianceCase,
+  CashVarianceSettlementMethod,
+  Customer,
+  PendingCollectionBatch
+} from "./api";
 import {
   getAuthMe,
   listBranches,
+  listCashVariances,
   listCustomers,
   listFieldAgents,
   listPendingCollectionBatches,
   postAllCollectionBatches,
-  postCollectionBatch
+  postCollectionBatch,
+  settleCashVariance
 } from "./api";
 import { useToast } from "../components/Toast";
 import { toUserFacingError } from "../lib/networkError";
@@ -64,6 +74,29 @@ function batchTotalsMatch(batch: PendingCollectionBatch): boolean {
   return Math.abs(batchLineSum(batch) - batch.totalAmount) < 0.01;
 }
 
+function cashFlag(batchTotal: number, cashText: string): {
+  amount: number | null;
+  label: string;
+  tone: "ok" | "warn" | "bad" | "muted";
+} {
+  const trimmed = cashText.trim();
+  if (!trimmed) {
+    return { amount: null, label: "Enter cash brought", tone: "muted" };
+  }
+  const amount = Number(trimmed);
+  if (!Number.isFinite(amount) || amount < 0) {
+    return { amount: null, label: "Invalid amount", tone: "bad" };
+  }
+  const variance = Math.round((amount - batchTotal) * 100) / 100;
+  if (Math.abs(variance) < 0.005) {
+    return { amount, label: "Balanced", tone: "ok" };
+  }
+  if (variance < 0) {
+    return { amount, label: `Shortage ${formatMoney(Math.abs(variance))}`, tone: "bad" };
+  }
+  return { amount, label: `Overage ${formatMoney(variance)}`, tone: "warn" };
+}
+
 export function CalloverBatchesPage({ role }: Props) {
   const { showToast } = useToast();
   const [businessDate, setBusinessDate] = useState(todayIso());
@@ -79,6 +112,12 @@ export function CalloverBatchesPage({ role }: Props) {
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [cashByBatchId, setCashByBatchId] = useState<Record<string, string>>({});
+  const [variances, setVariances] = useState<CashVarianceCase[]>([]);
+  const [settleId, setSettleId] = useState<string | null>(null);
+  const [settleAmount, setSettleAmount] = useState("");
+  const [settleMethod, setSettleMethod] = useState<CashVarianceSettlementMethod>("cash_repayment");
+  const [settleNotes, setSettleNotes] = useState("");
 
   usePageLoading(loading || busyId !== null, "callover-batches");
 
@@ -129,7 +168,7 @@ export function CalloverBatchesPage({ role }: Props) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [batchRows, customerRows, agentRows, branchRows] = await Promise.all([
+      const [batchRows, customerRows, agentRows, branchRows, varianceRows] = await Promise.all([
         listPendingCollectionBatches({
           businessDate,
           fieldAgentId: fieldAgentId || undefined,
@@ -137,7 +176,12 @@ export function CalloverBatchesPage({ role }: Props) {
         }),
         listCustomers(),
         listFieldAgents(),
-        listBranches()
+        listBranches(),
+        listCashVariances({
+          status: "open",
+          fieldAgentId: fieldAgentId || undefined,
+          branchId: branchId || undefined
+        })
       ]);
       setBatches(batchRows);
       setCustomers(customerRows);
@@ -150,6 +194,7 @@ export function CalloverBatchesPage({ role }: Props) {
           branchId: a.branchId
         }))
       );
+      setVariances(varianceRows);
       setExpandedId((prev) => {
         if (prev && batchRows.some((b) => b.id === prev)) {
           return prev;
@@ -187,19 +232,34 @@ export function CalloverBatchesPage({ role }: Props) {
     [batches]
   );
 
-  const allReady = batches.length > 0 && totals.ready === batches.length;
+  const allLineReady = batches.length > 0 && totals.ready === batches.length;
+  const allCashReady = batches.every((b) => cashFlag(b.totalAmount, cashByBatchId[b.id] ?? "").amount != null);
+  const allReady = allLineReady && allCashReady;
 
   const postingRef = useRef(false);
 
-  async function handlePostBatch(batchId: string) {
+  async function handlePostBatch(batch: PendingCollectionBatch) {
     if (postingRef.current) {
       return;
     }
+    const cash = cashFlag(batch.totalAmount, cashByBatchId[batch.id] ?? "");
+    if (cash.amount == null) {
+      showToast("Enter the cash amount the mobilizer brought before posting", "error");
+      return;
+    }
     postingRef.current = true;
-    setBusyId(batchId);
+    setBusyId(batch.id);
     try {
-      await postCollectionBatch(batchId);
-      showToast("Batch posted — customer accounts credited", "success");
+      const posted = await postCollectionBatch(batch.id, { cashReceivedAmount: cash.amount });
+      const flag =
+        posted.cashVarianceStatus === "balanced"
+          ? "Balanced"
+          : posted.cashVarianceStatus === "shortage"
+            ? `Shortage ${formatMoney(Math.abs(posted.cashVariance ?? 0))}`
+            : posted.cashVarianceStatus === "overage"
+              ? `Overage ${formatMoney(posted.cashVariance ?? 0)}`
+              : "Posted";
+      showToast(`Batch posted · ${flag}`, "success");
       await load();
     } catch (error) {
       showToast(toUserFacingError(error, "Failed to post batch"), "error");
@@ -209,13 +269,55 @@ export function CalloverBatchesPage({ role }: Props) {
     }
   }
 
+  function openSettle(v: CashVarianceCase) {
+    setSettleId(v.id);
+    setSettleAmount(v.outstandingAmount.toFixed(2));
+    setSettleMethod(v.varianceType === "shortage" ? "cash_repayment" : "customer_correction");
+    setSettleNotes("");
+  }
+
+  async function handleSettle() {
+    if (!settleId) {
+      return;
+    }
+    const amount = Number(settleAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      showToast("Enter a valid settlement amount", "error");
+      return;
+    }
+    setBusyId(`settle:${settleId}`);
+    try {
+      const updated = await settleCashVariance(settleId, {
+        amount,
+        method: settleMethod,
+        notes: settleNotes.trim() || undefined
+      });
+      showToast(
+        updated.status === "settled" || updated.status === "written_off"
+          ? "Variance closed"
+          : `Partial settlement recorded · outstanding ${formatMoney(updated.outstandingAmount)}`,
+        "success"
+      );
+      setSettleId(null);
+      await load();
+    } catch (error) {
+      showToast(toUserFacingError(error, "Failed to settle variance"), "error");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function handlePostAll() {
     if (batches.length === 0) {
       showToast("No pending batches to post", "info");
       return;
     }
-    if (!allReady) {
+    if (!allLineReady) {
       showToast("Fix mismatched batches before posting all", "error");
+      return;
+    }
+    if (!allCashReady) {
+      showToast("Enter cash brought for every batch before posting all", "error");
       return;
     }
     if (postingRef.current) {
@@ -224,10 +326,19 @@ export function CalloverBatchesPage({ role }: Props) {
     postingRef.current = true;
     setBusyId("all");
     try {
+      const cashMap: Record<string, number> = {};
+      for (const batch of batches) {
+        const cash = cashFlag(batch.totalAmount, cashByBatchId[batch.id] ?? "");
+        if (cash.amount == null) {
+          throw new Error("Missing cash amount");
+        }
+        cashMap[batch.id] = cash.amount;
+      }
       const result = await postAllCollectionBatches({
         businessDate,
         fieldAgentId: fieldAgentId || undefined,
-        branchId: branchId || undefined
+        branchId: branchId || undefined,
+        cashByBatchId: cashMap
       });
       showToast(`Posted ${result.posted} batch${result.posted === 1 ? "" : "es"}`, "success");
       await load();
@@ -255,10 +366,14 @@ export function CalloverBatchesPage({ role }: Props) {
           <p className="callover-batches-hero__eyebrow">Susu · Field collections</p>
           <h1>Callover batches</h1>
           <p className="muted">
-            Review agent call-over totals, confirm line amounts, then post to credit customer accounts and the ledger.
+            Enter the cash each mobilizer brought, compare it to the call-over total, then post to credit customer
+            accounts. Shortages and overages stay open separately — never offset against each other.
           </p>
         </div>
         <div className="callover-batches-hero__actions">
+          <Link to="/app/susu/overages-shortages" className="button secondary">
+            OS · Overages & shortages
+          </Link>
           <button
             type="button"
             className="button secondary"
@@ -336,7 +451,7 @@ export function CalloverBatchesPage({ role }: Props) {
               ✓
             </span>
           </div>
-          <p className="kpi-meta muted">Totals match line sums</p>
+          <p className="kpi-meta muted">Lines match + cash entered</p>
         </article>
       </div>
 
@@ -434,6 +549,8 @@ export function CalloverBatchesPage({ role }: Props) {
             const expanded = expandedId === batch.id;
             const lineTotals = batchLineSum(batch);
             const totalsMatch = batchTotalsMatch(batch);
+            const cash = cashFlag(batch.totalAmount, cashByBatchId[batch.id] ?? "");
+            const canPost = totalsMatch && cash.amount != null;
             return (
               <article
                 key={batch.id}
@@ -448,9 +565,21 @@ export function CalloverBatchesPage({ role }: Props) {
                       <div className="callover-batch-card__title-row">
                         <h2>{batch.fieldAgentName}</h2>
                         <span
-                          className={`callover-batch-card__badge${totalsMatch ? " callover-batch-card__badge--ready" : " callover-batch-card__badge--warn"}`}
+                          className={`callover-batch-card__badge${
+                            !totalsMatch || cash.tone === "muted"
+                              ? " callover-batch-card__badge--warn"
+                              : cash.tone === "ok"
+                                ? " callover-batch-card__badge--ready"
+                                : cash.tone === "bad"
+                                  ? " callover-batch-card__badge--shortage"
+                                  : " callover-batch-card__badge--overage"
+                          }`}
                         >
-                          {totalsMatch ? "Ready to post" : "Totals mismatch"}
+                          {canPost
+                            ? cash.label
+                            : !totalsMatch
+                              ? "Totals mismatch"
+                              : "Enter cash brought"}
                         </span>
                       </div>
                       <p className="muted callover-batch-card__meta">
@@ -474,8 +603,8 @@ export function CalloverBatchesPage({ role }: Props) {
                     <button
                       type="button"
                       className="button"
-                      disabled={busyId !== null || !totalsMatch}
-                      onClick={() => void handlePostBatch(batch.id)}
+                      disabled={busyId !== null || !canPost}
+                      onClick={() => void handlePostBatch(batch)}
                     >
                       {busyId === batch.id ? "Posting…" : "Post batch"}
                     </button>
@@ -498,14 +627,37 @@ export function CalloverBatchesPage({ role }: Props) {
                     <strong>{batch.lineCount}</strong>
                   </div>
                   <div className="callover-batch-card__stat">
-                    <span className="callover-batch-card__stat-label">Variance</span>
-                    <strong className={totalsMatch ? "callover-batch-card__stat--ok" : "callover-batch-card__stat--bad"}>
-                      {totalsMatch
-                        ? "Balanced"
-                        : formatMoney(Math.abs(lineTotals - batch.totalAmount))}
+                    <span className="callover-batch-card__stat-label">Cash vs batch</span>
+                    <strong
+                      className={
+                        cash.tone === "ok"
+                          ? "callover-batch-card__stat--ok"
+                          : cash.tone === "bad"
+                            ? "callover-batch-card__stat--shortage"
+                            : cash.tone === "warn"
+                              ? "callover-batch-card__stat--overage"
+                              : undefined
+                      }
+                    >
+                      {cash.label}
                     </strong>
                   </div>
                 </div>
+
+                <label className="field callover-batch-card__cash">
+                  <span>Cash brought to office (GHS)</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    inputMode="decimal"
+                    placeholder={batch.totalAmount.toFixed(2)}
+                    value={cashByBatchId[batch.id] ?? ""}
+                    onChange={(e) =>
+                      setCashByBatchId((prev) => ({ ...prev, [batch.id]: e.target.value }))
+                    }
+                  />
+                </label>
 
                 {!totalsMatch ? (
                   <p className="callover-batch-card__alert">
@@ -550,6 +702,148 @@ export function CalloverBatchesPage({ role }: Props) {
           })}
         </div>
       )}
+
+      <section className="callover-variance-section">
+        <div className="callover-variance-section__head">
+          <div className="callover-variance-section__title-row">
+            <h2>Open cash variances</h2>
+            <Link to="/app/susu/overages-shortages" className="button secondary">
+              Open OS page
+            </Link>
+          </div>
+          <p className="muted">
+            Shortages are agent debt (pay office). Overages need missing collection entries reconciled. They are never
+            netted against each other. Use the OS page to filter by agent/date and credit customers from overages.
+          </p>
+        </div>
+        {variances.length === 0 ? (
+          <article className="card callover-batches-empty">
+            <p className="muted">No open shortages or overages for this filter.</p>
+          </article>
+        ) : (
+          <div className="callover-variance-list">
+            {variances.map((v) => {
+              const settling = settleId === v.id;
+              return (
+                <article
+                  key={v.id}
+                  className={`card callover-variance-card callover-variance-card--${v.varianceType}`}
+                >
+                  <div className="callover-variance-card__head">
+                    <div>
+                      <div className="callover-variance-card__title-row">
+                        <h3>{v.fieldAgentName ?? v.fieldAgentId.slice(0, 8)}</h3>
+                        <span className={`callover-batch-card__badge callover-batch-card__badge--${v.varianceType}`}>
+                          {v.varianceType === "shortage" ? "Shortage" : "Overage"}
+                        </span>
+                      </div>
+                      <p className="muted callover-batch-card__meta">
+                        {v.businessDate}
+                        <span aria-hidden> · </span>
+                        Batch {formatMoney(v.batchTotal)} vs cash {formatMoney(v.cashReceived)}
+                        <span aria-hidden> · </span>
+                        {v.status.replace(/_/g, " ")}
+                      </p>
+                    </div>
+                    <div className="callover-variance-card__amount">
+                      <span className="callover-batch-card__stat-label">Outstanding</span>
+                      <strong
+                        className={
+                          v.varianceType === "shortage"
+                            ? "callover-batch-card__stat--shortage"
+                            : "callover-batch-card__stat--overage"
+                        }
+                      >
+                        {formatMoney(v.outstandingAmount)}
+                      </strong>
+                    </div>
+                  </div>
+
+                  {!settling ? (
+                    <div className="callover-variance-card__actions">
+                      <button
+                        type="button"
+                        className="button"
+                        disabled={busyId !== null}
+                        onClick={() => openSettle(v)}
+                      >
+                        {v.varianceType === "shortage" ? "Record repayment" : "Record reconciliation"}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="callover-variance-card__settle">
+                      <label className="field">
+                        <span>Amount (GHS)</span>
+                        <input
+                          type="number"
+                          min="0.01"
+                          step="0.01"
+                          value={settleAmount}
+                          onChange={(e) => setSettleAmount(e.target.value)}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Method</span>
+                        <select
+                          value={settleMethod}
+                          onChange={(e) =>
+                            setSettleMethod(e.target.value as CashVarianceSettlementMethod)
+                          }
+                        >
+                          {v.varianceType === "shortage" ? (
+                            <>
+                              <option value="cash_repayment">Cash repayment</option>
+                              <option value="salary_deduction">Salary deduction</option>
+                              <option value="write_off">Write-off</option>
+                              <option value="other">Other</option>
+                            </>
+                          ) : (
+                            <>
+                              <option value="customer_correction">Customer entry correction</option>
+                              <option value="write_off">Write-off</option>
+                              <option value="other">Other</option>
+                            </>
+                          )}
+                        </select>
+                      </label>
+                      <label className="field">
+                        <span>Notes</span>
+                        <input
+                          value={settleNotes}
+                          onChange={(e) => setSettleNotes(e.target.value)}
+                          placeholder={
+                            v.varianceType === "shortage"
+                              ? "e.g. Paid at office"
+                              : "e.g. Credited missing customer X"
+                          }
+                        />
+                      </label>
+                      <div className="callover-variance-card__actions">
+                        <button
+                          type="button"
+                          className="button"
+                          disabled={busyId !== null}
+                          onClick={() => void handleSettle()}
+                        >
+                          {busyId === `settle:${v.id}` ? "Saving…" : "Save settlement"}
+                        </button>
+                        <button
+                          type="button"
+                          className="button secondary"
+                          disabled={busyId !== null}
+                          onClick={() => setSettleId(null)}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </section>
     </div>
   );
 }

@@ -84,14 +84,51 @@ const SUSU_OVERVIEW_CHILD: NavChildDef = {
   anyPermissions: ["customers.read", "reports.read"]
 };
 
+const OS_NAV_CHILD: NavChildDef = {
+  to: "susu/overages-shortages",
+  label: "OS · Overages & shortages",
+  roleCheck: (r) => !isBuiltinRole(r) || r === "admin" || r === "coordinator",
+  anyPermissions: ["transactions.read", "transactions.create.daily_susu", "customers.read"]
+};
+
 function buildSusuChildren(susuNav?: SusuNavVisibilityRow[]): NavChildDef[] {
-  const rows = susuNav?.length ? susuNav : SUSU_NAV_VISIBILITY;
-  return rows.map((row) => ({
-    to: row.navPath,
-    label: row.label,
-    roleCheck: (r) => !isBuiltinRole(r) || row.roles.includes(r as AppRole),
-    anyPermissions: row.anyPermissions
-  }));
+  const fromApi = susuNav?.length ? susuNav : [];
+  const byPath = new Map(fromApi.map((row) => [row.navPath, row]));
+  // Always include catalog defaults so new Susu pages (e.g. OS) appear without a re-save of nav config.
+  for (const row of SUSU_NAV_VISIBILITY) {
+    if (!byPath.has(row.navPath)) {
+      byPath.set(row.navPath, row);
+    }
+  }
+  // Hard guarantee OS is present even if @bms/shared dist is stale.
+  if (!byPath.has(OS_NAV_CHILD.to)) {
+    byPath.set(OS_NAV_CHILD.to, {
+      navPath: OS_NAV_CHILD.to,
+      label: OS_NAV_CHILD.label,
+      description: "Agent OS cash variances.",
+      roles: ["admin", "coordinator"],
+      anyPermissions: OS_NAV_CHILD.anyPermissions ?? ["transactions.read"]
+    });
+  }
+  const order = [
+    ...SUSU_NAV_VISIBILITY.map((r) => r.navPath),
+    ...(byPath.has(OS_NAV_CHILD.to) && !SUSU_NAV_VISIBILITY.some((r) => r.navPath === OS_NAV_CHILD.to)
+      ? [OS_NAV_CHILD.to]
+      : [])
+  ];
+  const rows = [...new Set(order)]
+    .map((path) => byPath.get(path))
+    .filter((row): row is SusuNavVisibilityRow => Boolean(row));
+  return rows.map((row) =>
+    row.navPath === OS_NAV_CHILD.to
+      ? OS_NAV_CHILD
+      : {
+          to: row.navPath,
+          label: row.label,
+          roleCheck: (r) => !isBuiltinRole(r) || row.roles.includes(r as AppRole),
+          anyPermissions: row.anyPermissions
+        }
+  );
 }
 
 function buildSusuNavChildren(susuNav?: SusuNavVisibilityRow[]): NavChildDef[] {

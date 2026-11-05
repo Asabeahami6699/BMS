@@ -21,9 +21,15 @@ import {
 
   createCustomer,
 
+  deleteCustomer,
+
+  getCustomerById,
+
   listCustomers,
 
   rejectCustomerRegistration,
+
+  resetCustomerAccount,
 
   searchActiveCustomers,
 
@@ -245,8 +251,6 @@ customersRouter.get("/search", requirePermission("customers.read"), async (req, 
   }
 
 });
-
-
 
 customersRouter.patch("/:customerId/approve", requireAnyPermission("customers.create", "customers.read"), async (req, res) => {
 
@@ -525,4 +529,76 @@ customersRouter.patch(
 
 });
 
+/** Full customer record including KYC photos (list endpoints use light payloads). */
+customersRouter.get("/:customerId", requirePermission("customers.read"), async (req, res) => {
+  const context = req.userContext;
+  if (!context) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  try {
+    const customerId = String(req.params.customerId);
+    const customer = await getCustomerById(context.tenantId, customerId);
+    if (!customer) {
+      res.status(404).json({ error: "Customer not found" });
+      return;
+    }
+    if (
+      context.role === "field_agent" &&
+      customer.createdByFieldAgentId !== context.userId &&
+      customer.assignedFieldAgentId !== context.userId
+    ) {
+      res.status(403).json({ error: "Not allowed to view this customer" });
+      return;
+    }
+    res.json(customer);
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "Failed to fetch customer"
+    });
+  }
+});
+
+customersRouter.post(
+  "/:customerId/reset-account",
+  requirePermission("customers.create"),
+  async (req, res) => {
+    const context = req.userContext;
+    if (!context) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    if (context.role !== "admin" && context.role !== "super_admin") {
+      res.status(403).json({ error: "Only company admins can reset customer accounts" });
+      return;
+    }
+    try {
+      res.json(await resetCustomerAccount(context.tenantId, String(req.params.customerId)));
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Failed to reset customer account"
+      });
+    }
+  }
+);
+
+customersRouter.delete("/:customerId", requirePermission("customers.create"), async (req, res) => {
+  const context = req.userContext;
+  if (!context) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  if (context.role !== "admin" && context.role !== "super_admin") {
+    res.status(403).json({ error: "Only company admins can delete customers" });
+    return;
+  }
+  try {
+    await deleteCustomer(context.tenantId, String(req.params.customerId));
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(400).json({
+      error: error instanceof Error ? error.message : "Failed to delete customer"
+    });
+  }
+});
 

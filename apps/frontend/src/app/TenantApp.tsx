@@ -32,6 +32,7 @@ import { PerformancePage } from "./PerformancePage";
 import { BranchCounterCard } from "./BranchCounterCard";
 import { BranchFloatAdminPage } from "./BranchFloatAdminPage";
 import { CalloverBatchesPage } from "./CalloverBatchesPage";
+import { OveragesShortagesPage } from "./OveragesShortagesPage";
 import { LoansOverviewPage } from "./LoansOverviewPage";
 import { LoanProductsPage } from "./LoanProductsPage";
 import { LoanApplicationsPage } from "./LoanApplicationsPage";
@@ -335,6 +336,7 @@ export function TenantApp() {
           }
         />
         <Route path="/susu/callover-batches" element={<TenantSusuRoute route="susu/callover-batches" modules={modules} role={role} permissions={permissions} susuNavVisibility={user?.susuNavVisibility}><CalloverBatchesPage role={role} /></TenantSusuRoute>} />
+        <Route path="/susu/overages-shortages" element={<TenantSusuRoute route="susu/overages-shortages" modules={modules} role={role} permissions={permissions} susuNavVisibility={user?.susuNavVisibility}><OveragesShortagesPage role={role} /></TenantSusuRoute>} />
         <Route path="/susu/till-float" element={<TenantSusuRoute route="susu/till-float" modules={modules} role={role} permissions={permissions} susuNavVisibility={user?.susuNavVisibility}><BranchFloatAdminPage role={role} /></TenantSusuRoute>} />
         <Route path="/susu/collections" element={<TenantSusuRoute route="susu/collections" modules={modules} role={role} permissions={permissions} susuNavVisibility={user?.susuNavVisibility}><BranchCounterCard role={role} permissions={permissions} modules={modules} /></TenantSusuRoute>} />
         <Route path="/susu/commissions" element={<TenantSusuRoute route="susu/commissions" modules={modules} role={role} permissions={permissions} susuNavVisibility={user?.susuNavVisibility}><CommissionPolicyCard role={role} /></TenantSusuRoute>} />

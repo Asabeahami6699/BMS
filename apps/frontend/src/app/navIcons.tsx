@@ -57,6 +57,7 @@ const iconByPath: Record<string, string> = {
   "susu/customers": "◎",
   "susu/pending-approvals": "◷",
   "susu/callover-batches": "✓",
+  "susu/overages-shortages": "⚖",
   "susu/till-float": "💵",
   "susu/collections": "₵",
   "susu/agents": "🚶",

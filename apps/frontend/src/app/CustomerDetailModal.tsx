@@ -8,6 +8,7 @@ type Props = {
   open: boolean;
   customer: Customer | null;
   branchLabel?: string;
+  agentLabel?: string;
   onClose: () => void;
 };
 
@@ -15,7 +16,7 @@ function canRecordAtCounter(role: AppRole): boolean {
   return role === "admin" || role === "coordinator" || role === "teller" || role === "field_agent";
 }
 
-export function CustomerDetailModal({ open, customer, branchLabel, onClose }: Props) {
+export function CustomerDetailModal({ open, customer, branchLabel, agentLabel, onClose }: Props) {
   const navigate = useNavigate();
   const { user } = useAuth();
   const role = (user?.role ?? "admin") as AppRole;
@@ -61,7 +62,7 @@ export function CustomerDetailModal({ open, customer, branchLabel, onClose }: Pr
         </>
       }
     >
-      <CustomerDetailsView customer={customer} branchLabel={branchLabel} />
+      <CustomerDetailsView customer={customer} branchLabel={branchLabel} agentLabel={agentLabel} />
     </Modal>
   );
 }

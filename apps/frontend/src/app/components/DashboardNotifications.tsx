@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { AgentNotification } from "../api";
-import { listAgentNotifications, markAgentNotificationRead } from "../api";
 import { notificationTargetPath } from "../notificationRoutes";
-import { subscribeToTenantRealtime } from "../realtime";
-import { getTenantId } from "../api";
+import {
+  selectUnreadNotificationCount,
+  useNotificationsStore
+} from "../stores/notificationsStore";
 
 function formatWhen(iso: string): string {
   try {
@@ -26,40 +27,27 @@ type Props = {
 export function DashboardNotifications({ enabled }: Props) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
-  const [items, setItems] = useState<AgentNotification[]>([]);
-  const [loading, setLoading] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
 
-  const load = useCallback(async () => {
-    if (!enabled) {
-      return;
-    }
-    setLoading(true);
-    try {
-      setItems(await listAgentNotifications());
-    } catch {
-      setItems([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [enabled]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const items = useNotificationsStore((s) => s.items);
+  const loading = useNotificationsStore((s) => s.loading);
+  const hydrate = useNotificationsStore((s) => s.hydrate);
+  const refreshSilent = useNotificationsStore((s) => s.refreshSilent);
+  const startLiveSync = useNotificationsStore((s) => s.startLiveSync);
+  const stopLiveSync = useNotificationsStore((s) => s.stopLiveSync);
+  const markRead = useNotificationsStore((s) => s.markRead);
+  const markAllRead = useNotificationsStore((s) => s.markAllRead);
+  const unread = useNotificationsStore(selectUnreadNotificationCount);
 
   useEffect(() => {
     if (!enabled) {
+      stopLiveSync();
       return;
     }
-    const tenantId = getTenantId();
-    const unsub = subscribeToTenantRealtime({
-      tenantId,
-      tables: ["agent_notifications"],
-      onChange: () => void load()
-    });
-    return unsub;
-  }, [enabled, load]);
+    hydrate();
+    startLiveSync();
+    return () => stopLiveSync();
+  }, [enabled, hydrate, startLiveSync, stopLiveSync]);
 
   useEffect(() => {
     function onDocClick(e: MouseEvent) {
@@ -71,24 +59,8 @@ export function DashboardNotifications({ enabled }: Props) {
     return () => document.removeEventListener("mousedown", onDocClick);
   }, []);
 
-  const unread = items.filter((n) => !n.readAt).length;
-
-  async function markRead(notification: AgentNotification) {
-    if (notification.readAt) {
-      return;
-    }
-    try {
-      await markAgentNotificationRead(notification.id);
-      setItems((prev) =>
-        prev.map((n) => (n.id === notification.id ? { ...n, readAt: new Date().toISOString() } : n))
-      );
-    } catch {
-      /* ignore */
-    }
-  }
-
   async function handleNotificationClick(notification: AgentNotification) {
-    await markRead(notification);
+    await markRead(notification.id);
     const target = notificationTargetPath(notification);
     setOpen(false);
     if (target) {
@@ -110,7 +82,7 @@ export function DashboardNotifications({ enabled }: Props) {
         onClick={() => {
           setOpen((v) => !v);
           if (!open) {
-            void load();
+            void refreshSilent();
           }
         }}
       >
@@ -122,13 +94,7 @@ export function DashboardNotifications({ enabled }: Props) {
           <header className="dash-notifications__head">
             <h3>Notifications</h3>
             {unread > 0 ? (
-              <button
-                type="button"
-                className="button-link"
-                onClick={() => {
-                  void Promise.all(items.filter((n) => !n.readAt).map((n) => markRead(n)));
-                }}
-              >
+              <button type="button" className="button-link" onClick={() => void markAllRead()}>
                 Mark all read
               </button>
             ) : null}

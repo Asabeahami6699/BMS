@@ -284,6 +284,9 @@ export const ledgerEntrySchema = z.object({
 
   transactionType: z.string().optional(),
 
+  /** Transaction notes (e.g. Settled shortage). */
+  notes: z.string().optional(),
+
   /** posted = original susu credit still active. reversed = a reversal debit exists. */
   reversalStatus: z.enum(["posted", "reversed"]).optional(),
 

@@ -15,15 +15,39 @@ type Props = {
 };
 
 const MENU_MIN_WIDTH_PX = 168;
+const VIEWPORT_PAD_PX = 8;
 
-function clampMenuLeft(triggerRight: number): number {
-  const left = triggerRight - MENU_MIN_WIDTH_PX;
-  return Math.max(8, Math.min(left, window.innerWidth - MENU_MIN_WIDTH_PX - 8));
+type MenuPosition = {
+  top: number;
+  left: number;
+  maxHeight?: number;
+};
+
+function clampMenuLeft(triggerRight: number, menuWidth: number): number {
+  const left = triggerRight - menuWidth;
+  return Math.max(VIEWPORT_PAD_PX, Math.min(left, window.innerWidth - menuWidth - VIEWPORT_PAD_PX));
+}
+
+function placeMenu(trigger: DOMRect, menuWidth: number, menuHeight: number): MenuPosition {
+  const left = clampMenuLeft(trigger.right, menuWidth);
+  const spaceBelow = window.innerHeight - trigger.bottom - VIEWPORT_PAD_PX;
+  const spaceAbove = trigger.top - VIEWPORT_PAD_PX;
+  const openUp = spaceBelow < menuHeight && spaceAbove > spaceBelow;
+
+  if (openUp) {
+    const top = Math.max(VIEWPORT_PAD_PX, trigger.top - menuHeight - 4);
+    const maxHeight = Math.max(120, trigger.top - VIEWPORT_PAD_PX - 4);
+    return { top, left, maxHeight };
+  }
+
+  const top = trigger.bottom + 4;
+  const maxHeight = Math.max(120, window.innerHeight - top - VIEWPORT_PAD_PX);
+  return { top, left, maxHeight };
 }
 
 export function RowActionsMenu({ items, ariaLabel = "Row actions", triggerLabel }: Props) {
   const [open, setOpen] = useState(false);
-  const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
+  const [menuPosition, setMenuPosition] = useState<MenuPosition | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLUListElement>(null);
@@ -34,17 +58,32 @@ export function RowActionsMenu({ items, ariaLabel = "Row actions", triggerLabel 
       setMenuPosition(null);
       return;
     }
-    const rect = triggerRef.current.getBoundingClientRect();
-    setMenuPosition({
-      top: rect.bottom + 4,
-      left: clampMenuLeft(rect.right)
+
+    const trigger = triggerRef.current.getBoundingClientRect();
+    const estimatedHeight = Math.max(items.length * 40 + 12, 44);
+    let next = placeMenu(trigger, MENU_MIN_WIDTH_PX, estimatedHeight);
+    setMenuPosition(next);
+
+    // Second pass after paint so we can use the real menu height near the viewport edge.
+    const frame = window.requestAnimationFrame(() => {
+      if (!triggerRef.current || !menuRef.current) {
+        return;
+      }
+      const liveTrigger = triggerRef.current.getBoundingClientRect();
+      const liveWidth = Math.max(MENU_MIN_WIDTH_PX, menuRef.current.offsetWidth);
+      const liveHeight = menuRef.current.scrollHeight || estimatedHeight;
+      next = placeMenu(liveTrigger, liveWidth, liveHeight);
+      setMenuPosition(next);
     });
+
+    return () => window.cancelAnimationFrame(frame);
   }, [open, items.length]);
 
   useEffect(() => {
     if (!open) {
       return;
     }
+
     function onPointerDown(event: MouseEvent) {
       const target = event.target as Node;
       if (rootRef.current?.contains(target) || menuRef.current?.contains(target)) {
@@ -52,25 +91,35 @@ export function RowActionsMenu({ items, ariaLabel = "Row actions", triggerLabel 
       }
       setOpen(false);
     }
+
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         setOpen(false);
       }
     }
-    function onDismiss() {
-      setOpen(false);
+
+    function reposition() {
+      if (!triggerRef.current || !menuRef.current) {
+        return;
+      }
+      const trigger = triggerRef.current.getBoundingClientRect();
+      const width = Math.max(MENU_MIN_WIDTH_PX, menuRef.current.offsetWidth);
+      const height = menuRef.current.scrollHeight || items.length * 40 + 12;
+      setMenuPosition(placeMenu(trigger, width, height));
     }
+
     document.addEventListener("mousedown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
-    window.addEventListener("scroll", onDismiss, true);
-    window.addEventListener("resize", onDismiss);
+    // Reposition on scroll/resize instead of closing — keeps the menu visible on last rows.
+    window.addEventListener("scroll", reposition, true);
+    window.addEventListener("resize", reposition);
     return () => {
       document.removeEventListener("mousedown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("scroll", onDismiss, true);
-      window.removeEventListener("resize", onDismiss);
+      window.removeEventListener("scroll", reposition, true);
+      window.removeEventListener("resize", reposition);
     };
-  }, [open]);
+  }, [open, items.length]);
 
   function runAction(item: RowActionItem) {
     setOpen(false);
@@ -88,7 +137,12 @@ export function RowActionsMenu({ items, ariaLabel = "Row actions", triggerLabel 
         ref={menuRef}
         className="row-actions-menu row-actions-menu--overlay"
         role="menu"
-        style={{ top: menuPosition.top, left: menuPosition.left }}
+        style={{
+          top: menuPosition.top,
+          left: menuPosition.left,
+          maxHeight: menuPosition.maxHeight,
+          overflowY: "auto"
+        }}
       >
         {items.map((item) => (
           <li key={item.label} role="none">

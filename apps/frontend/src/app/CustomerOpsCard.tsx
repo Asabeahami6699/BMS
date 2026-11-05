@@ -2,13 +2,17 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useShallow } from "zustand/react/shallow";
 import type { AppRole, Branch, Customer } from "./api";
-import { getRuntimeBranchId } from "./api";
+import { deleteCustomer, getRuntimeBranchId, resetCustomerAccount } from "./api";
 import { AdminDataTable, filterRowsBySearch } from "../components/AdminDataTable";
 import { RowActionsMenu } from "../components/RowActionsMenu";
+import { useToast } from "../components/Toast";
 import { formatFieldAgent } from "../lib/formatFieldAgent";
+import { toUserFacingError } from "../lib/networkError";
 import { RegistrationModal } from "../agent/RegistrationModal";
+import { CustomerAccountStatementModal } from "./CustomerAccountStatementModal";
 import { CustomerDetailModal } from "./CustomerDetailModal";
 import { useCustomersLiveSync } from "./hooks/useCustomersLiveSync";
+import { useAgentsStore } from "./stores/agentsStore";
 import { useCustomersStore } from "./stores/customersStore";
 import { formatBranchLabel } from "./branchDisplay";
 
@@ -36,9 +40,12 @@ function branchLabel(branchId: string, branches: Branch[]): string {
 
 export function CustomerOpsCard({ role }: Props) {
   useCustomersLiveSync();
+  const { showToast } = useToast();
   const canCreate = role === "admin" || role === "coordinator" || role === "field_agent";
+  const canPurge = role === "admin" || role === "super_admin";
   const [searchParams] = useSearchParams();
   const [search, setSearch] = useState(() => searchParams.get("q") ?? "");
+  const [purgeBusyId, setPurgeBusyId] = useState<string | null>(null);
 
   useEffect(() => {
     const q = searchParams.get("q");
@@ -48,6 +55,7 @@ export function CustomerOpsCard({ role }: Props) {
   }, [searchParams]);
   const [createOpen, setCreateOpen] = useState(false);
   const [detailCustomerId, setDetailCustomerId] = useState<string | null>(null);
+  const [statementCustomerId, setStatementCustomerId] = useState<string | null>(null);
 
   const {
     customers,
@@ -71,9 +79,44 @@ export function CustomerOpsCard({ role }: Props) {
     }))
   );
 
+  const agentsRoster = useAgentsStore((s) => s.roster);
+
+  useEffect(() => {
+    useAgentsStore.getState().hydrate();
+  }, []);
+
+  const agentNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const agent of agentsRoster) {
+      const label = (agent.displayName || agent.fullName || agent.email || "").trim();
+      if (label && !/^user[_-]/i.test(label)) {
+        map.set(agent.userId, label);
+      }
+    }
+    return map;
+  }, [agentsRoster]);
+
+  function fieldAgentLabel(customer: Customer): string {
+    const fromApi = formatFieldAgent(customer);
+    if (fromApi !== "—") {
+      return fromApi;
+    }
+    const id = customer.assignedFieldAgentId ?? customer.createdByFieldAgentId;
+    if (id && agentNameById.has(id)) {
+      return agentNameById.get(id)!;
+    }
+    return "—";
+  }
+
   const detailCustomer = useMemo(
     () => (detailCustomerId ? (customers.find((c) => c.id === detailCustomerId) ?? null) : null),
     [customers, detailCustomerId]
+  );
+
+  const statementCustomer = useMemo(
+    () =>
+      statementCustomerId ? (customers.find((c) => c.id === statementCustomerId) ?? null) : null,
+    [customers, statementCustomerId]
   );
 
   const filtered = useMemo(
@@ -102,6 +145,49 @@ export function CustomerOpsCard({ role }: Props) {
 
   const initialLoad = loading && lastFetchedAt == null;
 
+  async function handleResetAccount(customer: Customer) {
+    if (
+      !window.confirm(
+        `Reset account for ${customer.fullName}?\n\nThis clears ledger history and balances but keeps the customer profile.`
+      )
+    ) {
+      return;
+    }
+    setPurgeBusyId(customer.id);
+    try {
+      await resetCustomerAccount(customer.id);
+      showToast("Customer account reset", "success");
+      await refreshSilent();
+    } catch (error) {
+      showToast(toUserFacingError(error, "Could not reset customer"), "error");
+    } finally {
+      setPurgeBusyId(null);
+    }
+  }
+
+  async function handleDeleteCustomer(customer: Customer) {
+    if (
+      !window.confirm(
+        `Permanently delete ${customer.fullName}?\n\nThis removes the customer and related transactions. This cannot be undone.`
+      )
+    ) {
+      return;
+    }
+    setPurgeBusyId(customer.id);
+    try {
+      await deleteCustomer(customer.id);
+      if (detailCustomerId === customer.id) {
+        setDetailCustomerId(null);
+      }
+      showToast("Customer deleted", "success");
+      await refreshSilent();
+    } catch (error) {
+      showToast(toUserFacingError(error, "Could not delete customer"), "error");
+    } finally {
+      setPurgeBusyId(null);
+    }
+  }
+
   return (
     <>
       <section className="card customers-card">
@@ -110,7 +196,11 @@ export function CustomerOpsCard({ role }: Props) {
             <h2>Customers</h2>
             <p className="muted">
               Browse and search customer records. Use Register customer for walk-in onboarding (full KYC, pending
-              approval). {statusLine}
+              approval).
+              {canPurge
+                ? " Admins can reset balances or delete trial customers from the row menu."
+                : ""}{" "}
+              {statusLine}
             </p>
           </div>
           <div className="customers-card-head-actions">
@@ -166,7 +256,7 @@ export function CustomerOpsCard({ role }: Props) {
               {
                 key: "agent",
                 label: "Field agent",
-                render: (row) => formatFieldAgent(row)
+                render: (row) => fieldAgentLabel(row)
               },
               {
                 key: "branch",
@@ -194,13 +284,41 @@ export function CustomerOpsCard({ role }: Props) {
             onSearchChange={setSearch}
             searchPlaceholder="Search name, phone, account, agent…"
             emptyMessage="No customers found."
+            onRowClick={(row) => setDetailCustomerId(row.id)}
             actions={(row) => (
               <RowActionsMenu
                 items={[
                   {
                     label: "View details",
                     onClick: () => setDetailCustomerId(row.id)
-                  }
+                  },
+                  {
+                    label: "Account statement",
+                    onClick: () => setStatementCustomerId(row.id)
+                  },
+                  ...(canPurge
+                    ? [
+                        {
+                          label: purgeBusyId === row.id ? "Working…" : "Reset account",
+                          onClick: () => {
+                            if (purgeBusyId != null) {
+                              return;
+                            }
+                            void handleResetAccount(row);
+                          }
+                        },
+                        {
+                          label: purgeBusyId === row.id ? "Working…" : "Delete customer",
+                          onClick: () => {
+                            if (purgeBusyId != null) {
+                              return;
+                            }
+                            void handleDeleteCustomer(row);
+                          },
+                          danger: true
+                        }
+                      ]
+                    : [])
                 ]}
               />
             )}
@@ -221,7 +339,14 @@ export function CustomerOpsCard({ role }: Props) {
         open={detailCustomerId !== null && detailCustomer !== null}
         customer={detailCustomer}
         branchLabel={detailCustomer ? branchLabel(detailCustomer.homeBranchId, branches) : undefined}
+        agentLabel={detailCustomer ? fieldAgentLabel(detailCustomer) : undefined}
         onClose={() => setDetailCustomerId(null)}
+      />
+
+      <CustomerAccountStatementModal
+        open={statementCustomerId !== null && statementCustomer !== null}
+        customer={statementCustomer}
+        onClose={() => setStatementCustomerId(null)}
       />
     </>
   );

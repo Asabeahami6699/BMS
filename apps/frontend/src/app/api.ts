@@ -325,6 +325,9 @@ export type AgentNotification = {
     | "workspace_activity"
     | "collection_batch_pending"
     | "collection_batch_posted"
+    | "cash_shortage_opened"
+    | "cash_overage_opened"
+    | "cash_variance_settled"
     | "deposit_pending_bank"
     | "deposit_pending_accountant"
     | "deposit_completed"
@@ -484,6 +487,7 @@ export type LedgerEntry = {
   fieldAgentName?: string;
   performedByName?: string;
   transactionType?: string;
+  notes?: string;
   reversalStatus?: "posted" | "reversed";
   reversalReference?: string;
   reversalReason?: string;
@@ -1329,6 +1333,46 @@ export type CollectionBatchLine = {
   createdAt: string;
 };
 
+export type CashVarianceStatus = "balanced" | "shortage" | "overage";
+
+export type CashVarianceType = "shortage" | "overage";
+export type CashVarianceCaseStatus = "open" | "partially_settled" | "settled" | "written_off";
+export type CashVarianceSettlementMethod =
+  | "cash_repayment"
+  | "salary_deduction"
+  | "customer_correction"
+  | "write_off"
+  | "other";
+
+export type CashVarianceCase = {
+  id: string;
+  tenantId: string;
+  fieldAgentId: string;
+  batchId: string;
+  businessDate: string;
+  branchId?: string;
+  varianceType: CashVarianceType;
+  batchTotal: number;
+  cashReceived: number;
+  varianceAmount: number;
+  outstandingAmount: number;
+  status: CashVarianceCaseStatus;
+  notes?: string;
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
+  settledAt?: string;
+  fieldAgentName?: string;
+  fieldAgentEmail?: string;
+};
+
+export type AgentCashVarianceSummary = {
+  shortages: CashVarianceCase[];
+  overages: CashVarianceCase[];
+  totalShortageOutstanding: number;
+  totalOverageOutstanding: number;
+};
+
 export type PendingCollectionBatch = {
   id: string;
   tenantId: string;
@@ -1342,6 +1386,11 @@ export type PendingCollectionBatch = {
   submittedAt?: string;
   postedAt?: string;
   postedBy?: string;
+  cashReceivedAmount?: number;
+  cashVariance?: number;
+  cashVarianceStatus?: CashVarianceStatus;
+  cashReceivedAt?: string;
+  cashReceivedBy?: string;
   lines: CollectionBatchLine[];
   fieldAgentName: string;
   fieldAgentEmail?: string;
@@ -1376,12 +1425,16 @@ export async function getCollectionBatch(batchId: string): Promise<PendingCollec
   });
 }
 
-export async function postCollectionBatch(batchId: string): Promise<PendingCollectionBatch> {
+export async function postCollectionBatch(
+  batchId: string,
+  body?: { cashReceivedAmount: number }
+): Promise<PendingCollectionBatch> {
   return fetchJson<PendingCollectionBatch>(
     `${API_BASE_URL}/api/v1/collection-batches/${batchId}/post`,
     {
       method: "POST",
-      headers: authHeaders()
+      headers: authHeaders(),
+      body: JSON.stringify(body ?? {})
     }
   );
 }
@@ -1390,6 +1443,7 @@ export async function postAllCollectionBatches(body?: {
   businessDate?: string;
   fieldAgentId?: string;
   branchId?: string;
+  cashByBatchId?: Record<string, number>;
 }): Promise<{ posted: number; batchIds: string[] }> {
   return fetchJson<{ posted: number; batchIds: string[] }>(
     `${API_BASE_URL}/api/v1/collection-batches/post-all`,
@@ -1398,6 +1452,86 @@ export async function postAllCollectionBatches(body?: {
       headers: authHeaders(),
       body: JSON.stringify(body ?? {})
     }
+  );
+}
+
+export async function listCashVariances(params?: {
+  status?: "open" | "all";
+  fieldAgentId?: string;
+  branchId?: string;
+  varianceType?: CashVarianceType;
+  businessDate?: string;
+  fromDate?: string;
+  toDate?: string;
+}): Promise<CashVarianceCase[]> {
+  const query = new URLSearchParams();
+  if (params?.status) {
+    query.set("status", params.status);
+  }
+  if (params?.fieldAgentId) {
+    query.set("fieldAgentId", params.fieldAgentId);
+  }
+  if (params?.branchId) {
+    query.set("branchId", params.branchId);
+  }
+  if (params?.varianceType) {
+    query.set("varianceType", params.varianceType);
+  }
+  if (params?.businessDate) {
+    query.set("businessDate", params.businessDate);
+  }
+  if (params?.fromDate) {
+    query.set("fromDate", params.fromDate);
+  }
+  if (params?.toDate) {
+    query.set("toDate", params.toDate);
+  }
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  return fetchJson<CashVarianceCase[]>(
+    `${API_BASE_URL}/api/v1/collection-batches/cash-variances${suffix}`,
+    { headers: authHeaders() }
+  );
+}
+
+export async function settleCashVariance(
+  varianceId: string,
+  body: { amount: number; method: CashVarianceSettlementMethod; notes?: string }
+): Promise<CashVarianceCase> {
+  return fetchJson<CashVarianceCase>(
+    `${API_BASE_URL}/api/v1/collection-batches/cash-variances/${varianceId}/settle`,
+    {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify(body)
+    }
+  );
+}
+
+export async function creditCustomerFromOverage(
+  varianceId: string,
+  body: { customerId: string; amount: number; notes?: string }
+): Promise<{ variance: CashVarianceCase; transactionId: string }> {
+  return fetchJson<{ variance: CashVarianceCase; transactionId: string }>(
+    `${API_BASE_URL}/api/v1/collection-batches/cash-variances/${varianceId}/credit-customer`,
+    {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify(body)
+    }
+  );
+}
+
+export async function getMyCashVariances(params?: {
+  status?: "open" | "all";
+}): Promise<AgentCashVarianceSummary> {
+  const query = new URLSearchParams();
+  if (params?.status) {
+    query.set("status", params.status);
+  }
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  return fetchJson<AgentCashVarianceSummary>(
+    `${API_BASE_URL}/api/v1/field-agents/me/cash-variances${suffix}`,
+    { headers: authHeaders() }
   );
 }
 
@@ -1972,6 +2106,27 @@ export async function listCustomers(options?: { light?: boolean }): Promise<Cust
     throw new Error("Failed to load customers");
   }
   return response.json() as Promise<Customer[]>;
+}
+
+/** Full customer including profile / ID photos (not returned by light list endpoints). */
+export async function getCustomer(customerId: string): Promise<Customer> {
+  return fetchJson<Customer>(`${API_BASE_URL}/api/v1/customers/${encodeURIComponent(customerId)}`, {
+    headers: authHeaders()
+  });
+}
+
+export async function resetCustomerAccount(customerId: string): Promise<Customer> {
+  return fetchJson<Customer>(
+    `${API_BASE_URL}/api/v1/customers/${encodeURIComponent(customerId)}/reset-account`,
+    { method: "POST", headers: authHeaders(), body: JSON.stringify({}) }
+  );
+}
+
+export async function deleteCustomer(customerId: string): Promise<void> {
+  await fetchJson(`${API_BASE_URL}/api/v1/customers/${encodeURIComponent(customerId)}`, {
+    method: "DELETE",
+    headers: authHeaders()
+  });
 }
 
 export type CustomerBootstrapResponse = {
