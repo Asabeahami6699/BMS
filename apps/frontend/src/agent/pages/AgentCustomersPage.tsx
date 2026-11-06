@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
+import { RowActionsMenu } from "../../components/RowActionsMenu";
 import { CustomerRequestsRow } from "../components/CustomerRequestsRow";
 import { RegistrationModal } from "../RegistrationModal";
 import {
@@ -19,6 +20,8 @@ const FILTERS: { id: AgentCustomerFilter; label: string }[] = [
 
 type Props = {
   onQueueChange: () => void;
+  registerOpen?: boolean;
+  onRegisterOpenChange?: (open: boolean) => void;
 };
 
 function statusLabel(status: string): string {
@@ -44,7 +47,11 @@ function statusClass(status: string): string {
   return "inactive";
 }
 
-export function AgentCustomersPage({ onQueueChange }: Props) {
+export function AgentCustomersPage({
+  onQueueChange,
+  registerOpen: registerOpenProp,
+  onRegisterOpenChange
+}: Props) {
   const customers = useAgentCustomerStore(useShallow(selectFilteredCustomers));
   const allCustomers = useAgentCustomerStore((s) => s.customers);
   const stats = useAgentCustomerStore(useShallow(selectCustomerStats));
@@ -60,8 +67,15 @@ export function AgentCustomersPage({ onQueueChange }: Props) {
   const refreshSilent = useAgentCustomerStore((s) => s.refreshSilent);
   const requestsUpdatedAt = useAgentBalanceStore((s) => s.lastFetchedAt);
 
-  const [registerOpen, setRegisterOpen] = useState(false);
-  const [showPending, setShowPending] = useState(false);
+  const [registerOpenLocal, setRegisterOpenLocal] = useState(false);
+
+  const registerOpen = registerOpenProp ?? registerOpenLocal;
+  function setRegisterOpen(open: boolean) {
+    onRegisterOpenChange?.(open);
+    if (registerOpenProp === undefined) {
+      setRegisterOpenLocal(open);
+    }
+  }
 
   const pendingRegistrations = useMemo(
     () =>
@@ -77,41 +91,39 @@ export function AgentCustomersPage({ onQueueChange }: Props) {
     return new Date(stamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   }, [lastFetchedAt, requestsUpdatedAt]);
 
+  const moreActions = [
+    {
+      label: loading ? "Refreshing…" : "Refresh list",
+      onClick: () => {
+        if (!loading) {
+          void refresh();
+        }
+      }
+    }
+  ];
+
   return (
     <div className="agent-page">
-      <div className="agent-page-head">
+      <div className="agent-page-head agent-page-head--clean">
         <div>
           <h2>Customers</h2>
-          <p className="muted agent-customers-sub">
-            {stats.active || "—"} active · {stats.pending || "—"} pending
-            {lastUpdatedLabel ? ` · Updated ${lastUpdatedLabel}` : ""}
+          <p className="muted agent-page-sub">
+            {stats.active || "—"} active
+            {stats.pending ? ` · ${stats.pending} pending` : ""}
+            {lastUpdatedLabel ? ` · ${lastUpdatedLabel}` : ""}
           </p>
         </div>
-        <div className="agent-page-head-actions">
-          <button type="button" className="button" onClick={() => setRegisterOpen(true)}>
-            Create new account
-          </button>
-          <button
-            type="button"
-            className="button secondary"
-            onClick={() => void refresh()}
-            disabled={loading}
-            aria-label="Refresh customer list"
-          >
-            {loading ? "…" : "↻"}
-          </button>
-        </div>
+        <RowActionsMenu items={moreActions} ariaLabel="Customer actions" />
       </div>
 
       {error ? <p className="agent-inline-error">{error}</p> : null}
 
       {pendingRegistrations.length > 0 ? (
-        <details
-          className="agent-pending-registrations"
-          open={showPending}
-          onToggle={(e) => setShowPending((e.target as HTMLDetailsElement).open)}
-        >
-          <summary>Submitted accounts ({pendingRegistrations.length})</summary>
+        <details className="agent-pending-panel">
+          <summary>
+            Submitted accounts
+            <span className="agent-pending-panel__count">{pendingRegistrations.length}</span>
+          </summary>
           <div className="agent-list">
             {pendingRegistrations.map((c) => (
               <article className="agent-list-item" key={c.id}>
@@ -131,49 +143,35 @@ export function AgentCustomersPage({ onQueueChange }: Props) {
         </details>
       ) : null}
 
-      <div className="agent-stats-row" role="group" aria-label="Customer counts">
-        <div className="agent-stat-chip">
-          <span className="agent-stat-value">{stats.total || "—"}</span>
-          <span className="agent-stat-label">Total</span>
-        </div>
-        <div className="agent-stat-chip agent-stat-chip--active">
-          <span className="agent-stat-value">{stats.active || "—"}</span>
-          <span className="agent-stat-label">Active</span>
-        </div>
-        <div className="agent-stat-chip agent-stat-chip--pending">
-          <span className="agent-stat-value">{stats.pending || "—"}</span>
-          <span className="agent-stat-label">Pending</span>
-        </div>
-      </div>
-
       <label className="field agent-search-field">
-        <span>Search</span>
+        <span className="sr-only">Search</span>
         <input
           type="search"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Name, phone, location, account #"
+          placeholder="Search name, phone, account…"
         />
       </label>
 
       <div className="agent-filter-tabs" role="tablist" aria-label="Filter customers">
-        {FILTERS.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            role="tab"
-            aria-selected={filter === tab.id}
-            className={`agent-filter-tab${filter === tab.id ? " active" : ""}`}
-            onClick={() => setFilter(tab.id)}
-          >
-            {tab.label}
-          </button>
-        ))}
+        {FILTERS.map((tab) => {
+          const count =
+            tab.id === "all" ? stats.total : tab.id === "active" ? stats.active : stats.pending;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={filter === tab.id}
+              className={`agent-filter-tab${filter === tab.id ? " active" : ""}`}
+              onClick={() => setFilter(tab.id)}
+            >
+              {tab.label}
+              {count ? <span className="agent-filter-tab__count">{count}</span> : null}
+            </button>
+          );
+        })}
       </div>
-
-      <p className="muted agent-customers-hint">
-        Use Request for balance or withdrawal. Record collections from the Collect tab.
-      </p>
 
       <div className="agent-list">
         {customers.length === 0 ? (
@@ -182,7 +180,7 @@ export function AgentCustomersPage({ onQueueChange }: Props) {
               ? "Loading customers…"
               : search.trim()
                 ? "No customers match your search."
-                : "No customers in this view yet."}
+                : "No customers in this view yet. Tap + in the top bar to create one."}
           </p>
         ) : (
           customers.map((customer) => (
@@ -223,7 +221,7 @@ export function AgentCustomersPage({ onQueueChange }: Props) {
           } else {
             void refreshSilent();
           }
-          setShowPending(true);
+          setRegisterOpen(false);
         }}
       />
     </div>

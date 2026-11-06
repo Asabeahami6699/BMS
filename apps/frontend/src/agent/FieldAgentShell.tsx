@@ -9,10 +9,23 @@ import { AgentProfileDrawer } from "./AgentProfileDrawer";
 
 type Props = {
   onLogout: () => void;
+  onSync: () => void;
+  syncing: boolean;
+  pendingCount: number;
+  online: boolean;
+  onCreateAccount: () => void;
   children: ReactNode;
 };
 
-export function FieldAgentShell({ onLogout, children }: Props) {
+export function FieldAgentShell({
+  onLogout,
+  onSync,
+  syncing,
+  pendingCount,
+  online,
+  onCreateAccount,
+  children
+}: Props) {
   const [profileOpen, setProfileOpen] = useState(false);
   const unread = useNotificationsStore(selectUnreadFieldAgentNotificationCount);
   const hydrate = useNotificationsStore((s) => s.hydrate);
@@ -21,26 +34,69 @@ export function FieldAgentShell({ onLogout, children }: Props) {
     hydrate();
   }, [hydrate]);
 
+  const syncDisabled = syncing || (!online && pendingCount === 0);
+  const syncLabel = syncing
+    ? "Syncing offline items"
+    : pendingCount > 0
+      ? `Sync ${pendingCount} pending item${pendingCount === 1 ? "" : "s"}`
+      : online
+        ? "Sync now"
+        : "Offline — nothing to sync";
+
   return (
     <div className="agent-root">
-      <header className="agent-header agent-header--compact">
+      <header className="agent-topbar">
         <button
           type="button"
-          className={`agent-menu-btn${unread > 0 ? " agent-menu-btn--unread" : ""}`}
+          className={`agent-topbar__icon-btn${unread > 0 ? " agent-topbar__icon-btn--badge" : ""}`}
           onClick={() => setProfileOpen(true)}
           aria-label={
             unread > 0 ? `Open profile menu, ${unread} unread alerts` : "Open profile menu"
           }
         >
-          <span className="agent-menu-icon" aria-hidden>
-            ☰
-          </span>
+          <span aria-hidden>☰</span>
           {unread > 0 ? (
-            <span className="agent-menu-badge" aria-hidden>
+            <span className="agent-topbar__badge" aria-hidden>
               {unread > 9 ? "9+" : unread}
             </span>
           ) : null}
         </button>
+
+        <div className="agent-topbar__brand">
+          <span className="agent-topbar__brand-title">Field agent</span>
+          <span
+            className={`agent-topbar__live${online ? " agent-topbar__live--on" : " agent-topbar__live--off"}`}
+          >
+            {online ? "Online" : "Offline"}
+          </span>
+        </div>
+
+        <div className="agent-topbar__actions">
+          <button
+            type="button"
+            className="agent-topbar__icon-btn agent-topbar__icon-btn--accent"
+            onClick={onCreateAccount}
+            aria-label="Create new account"
+            title="Create new account"
+          >
+            <span aria-hidden>+</span>
+          </button>
+          <button
+            type="button"
+            className={`agent-topbar__icon-btn${pendingCount > 0 ? " agent-topbar__icon-btn--badge" : ""}${syncing ? " agent-topbar__icon-btn--busy" : ""}`}
+            onClick={() => void onSync()}
+            disabled={syncDisabled}
+            aria-label={syncLabel}
+            title={syncLabel}
+          >
+            <span aria-hidden>{syncing ? "…" : "↻"}</span>
+            {pendingCount > 0 && !syncing ? (
+              <span className="agent-topbar__badge" aria-hidden>
+                {pendingCount > 9 ? "9+" : pendingCount}
+              </span>
+            ) : null}
+          </button>
+        </div>
       </header>
 
       <AgentNetworkStatusBar />

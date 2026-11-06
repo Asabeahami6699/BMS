@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Customer } from "../../app/api";
 import { getCompanyProfile } from "../../app/api";
 import { useAuth } from "../../auth/AuthContext";
+import { RowActionsMenu } from "../../components/RowActionsMenu";
 import { useToast } from "../../components/Toast";
 import { downloadDailyTallySheet, printDailyTallySheet } from "../../app/dailyTallySheetPrint";
 
@@ -251,104 +252,48 @@ export function AgentCollectPage({ onQueueChange, onSync, syncing, pendingCount 
 
 
 
+  const moreActions = [
+    {
+      label: "Print tally sheet",
+      onClick: () => openTallySheet("print")
+    },
+    {
+      label: "Download tally sheet",
+      onClick: () => openTallySheet("download")
+    },
+    {
+      label: loadingCollections ? "Refreshing…" : "Refresh collections",
+      onClick: () => {
+        if (online && !loadingCollections) {
+          void refreshToday();
+        }
+      }
+    }
+  ];
+
+  const pendingHint =
+    pendingCount > 0
+      ? `${pendingCount} waiting to sync`
+      : online
+        ? "Up to date"
+        : "Saved on this device";
+
   return (
-
     <div className="agent-page">
-
-      <article className={`agent-sync-bar${online ? "" : " agent-sync-bar--offline"}`}>
-
+      <div className="agent-page-head agent-page-head--clean">
         <div>
-
-          <p className="agent-sync-bar-title">
-
-            {online ? "Online" : "Offline"} · Sync & push
-
-          </p>
-
-          <p className="muted">
-
-            {online
-
-              ? pendingCount > 0
-
-                ? `${pendingCount} item(s) waiting to upload`
-
-                : "Data is up to date"
-
-              : "Collections save on this device until you sync"}
-
-          </p>
-
-        </div>
-
-        <button
-
-          type="button"
-
-          className="button"
-
-          onClick={() => void onSync()}
-
-          disabled={syncing || (!online && pendingCount === 0)}
-
-        >
-
-          {syncing ? "Syncing…" : pendingCount > 0 ? `Sync (${pendingCount})` : "Sync"}
-
-        </button>
-
-      </article>
-
-
-
-      <div className="agent-page-head">
-
-        <div>
-
           <h2>Daily collection</h2>
-
-          <p className="muted agent-collect-total">
-
+          <p className="muted agent-page-sub">
             Today&apos;s total: <strong>{formatTotal(totalAmount)}</strong>
-
+            <span className="agent-page-sub__sep" aria-hidden>
+              ·
+            </span>
+            <span className={online ? undefined : "agent-page-sub--warn"}>
+              {syncing ? "Syncing…" : pendingHint}
+            </span>
           </p>
-
         </div>
-
-        <div className="agent-page-head-actions">
-          <button type="button" className="button secondary" onClick={() => openTallySheet("print")}>
-            Print tally sheet
-          </button>
-          <button type="button" className="button secondary" onClick={() => openTallySheet("download")}>
-            Download tally sheet
-          </button>
-          <button
-
-            type="button"
-
-            className="button secondary"
-
-            onClick={() => {
-
-              if (online) {
-
-                void refreshToday();
-
-              }
-
-            }}
-
-            disabled={loadingCollections || !online}
-
-            aria-label="Refresh collections"
-
-          >
-
-            {loadingCollections ? "…" : "↻"}
-
-          </button>
-        </div>
-
+        <RowActionsMenu items={moreActions} ariaLabel="Collection actions" />
       </div>
 
 

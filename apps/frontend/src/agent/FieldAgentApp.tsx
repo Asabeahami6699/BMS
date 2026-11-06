@@ -26,6 +26,7 @@ export function FieldAgentApp() {
   const { showToast } = useToast();
   const [pendingCount, setPendingCount] = useState(getPendingCount());
   const [syncing, setSyncing] = useState(false);
+  const [registerOpen, setRegisterOpen] = useState(false);
 
   const { online } = useNetworkStatus();
 
@@ -96,12 +97,33 @@ export function FieldAgentApp() {
     navigate("/login", { replace: true });
   }
 
+  function handleCreateAccount() {
+    setRegisterOpen(true);
+    navigate("/app/agent/customers");
+  }
+
   return (
-    <FieldAgentShell onLogout={handleLogout}>
+    <FieldAgentShell
+      onLogout={handleLogout}
+      onSync={handleSync}
+      syncing={syncing}
+      pendingCount={pendingCount}
+      online={online}
+      onCreateAccount={handleCreateAccount}
+    >
       <Routes>
         <Route index element={<Navigate to="home" replace />} />
         <Route path="home" element={<AgentHomePage />} />
-        <Route path="customers" element={<AgentCustomersPage onQueueChange={refreshPending} />} />
+        <Route
+          path="customers"
+          element={
+            <AgentCustomersPage
+              onQueueChange={refreshPending}
+              registerOpen={registerOpen}
+              onRegisterOpenChange={setRegisterOpen}
+            />
+          }
+        />
         <Route path="register" element={<Navigate to="/app/agent/customers" replace />} />
         <Route
           path="collect"
