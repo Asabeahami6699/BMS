@@ -540,7 +540,7 @@ html {
 
 .dash-header-shell {
   position: sticky;
-  top: 0.75rem;
+  top: 0.53rem;
   z-index: 35;
   margin: 0 0 1.35rem;
 }
@@ -5726,7 +5726,7 @@ select:disabled {
   }
 
   .dash-header-shell {
-    top: 0.5rem;
+    top: 0.35rem;
   }
 
   .dash-header-start,
@@ -6172,7 +6172,7 @@ select:disabled {
 
 .agent-topbar {
   position: fixed;
-  top: max(0.75rem, env(safe-area-inset-top, 0px));
+  top: max(0.53rem, calc(env(safe-area-inset-top, 0px) * 0.7));
   left: 50%;
   transform: translateX(-50%);
   width: min(100% - 1.25rem, 480px);
@@ -6721,7 +6721,7 @@ select:disabled {
 
 .agent-offline-bar {
   position: fixed;
-  top: calc(max(0.75rem, env(safe-area-inset-top, 0px)) + 3.65rem);
+  top: calc(max(0.53rem, calc(env(safe-area-inset-top, 0px) * 0.7)) + 3.65rem);
   left: 50%;
   transform: translateX(-50%);
   width: min(100% - 1.25rem, 480px);
@@ -6891,7 +6891,7 @@ select:disabled {
 
 .agent-bottom-nav {
   position: fixed;
-  bottom: max(0.85rem, env(safe-area-inset-bottom, 0px));
+  bottom: max(0.6rem, calc(env(safe-area-inset-bottom, 0px) * 0.7));
   left: 50%;
   transform: translateX(-50%);
   width: min(100% - 1.25rem, 480px);
