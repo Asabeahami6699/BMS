@@ -1,3 +1,4 @@
+import { formatAccountAmount } from "@bms/shared";
 import { useEffect, useState } from "react";
 import { useAuth } from "../auth/AuthContext";
 import { getFieldAgentDashboard, type FieldAgentDashboard } from "../app/api";
@@ -11,7 +12,7 @@ type Props = {
 };
 
 function formatMoney(value: number): string {
-  return `GHS ${value.toFixed(2)}`;
+  return `GHS ${formatAccountAmount(value)}`;
 }
 
 function statDisplay(value: number, asMoney = false): string {

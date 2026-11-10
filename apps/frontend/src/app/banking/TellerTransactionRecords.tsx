@@ -1,3 +1,4 @@
+import { formatAccountAmount } from "@bms/shared";
 import type { TellerTransactionRecord } from "@bms/shared";
 import { tellerDepositStatusLabel, tellerDepositStatusTone } from "./tellerDepositStatus";
 
@@ -89,7 +90,7 @@ export function TellerTransactionRecords({ transactions, loading, title = "Trans
                   <tr key={tx.id}>
                     <td>{new Date(tx.createdAt).toLocaleString()}</td>
                     <td>{tx.type.replace(/_/g, " ")}</td>
-                    <td>GHS {tx.amount.toFixed(2)}</td>
+                    <td>GHS {formatAccountAmount(tx.amount)}</td>
                     <td>{tx.partnerAccountNumber ?? tx.customerAccountNumber ?? "—"}</td>
                     <td>{tx.bankLabel ?? "—"}</td>
                     <td>{tx.customerName}</td>

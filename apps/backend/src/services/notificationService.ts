@@ -30,7 +30,10 @@ export type AgentNotificationKind =
   | "back_office_ecash_approved"
   | "withdrawal_cs_approved"
   | "withdrawal_ready_for_teller"
-  | "susu_collection_reversed";
+  | "susu_collection_reversed"
+  | "loan_repayment_reserved"
+  | "loan_auto_repayment"
+  | "loan_auto_repayment_failed";
 
 export type AgentNotification = {
   id: string;

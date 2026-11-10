@@ -20,6 +20,8 @@ import { downloadDailyTallySheet, printDailyTallySheet } from "../dailyTallyShee
 const FIELD_ROWS: { key: keyof RegistrationFormFields; label: string; hint: string }[] = [
   { key: "email", label: "Email", hint: "Default is optional." },
   { key: "houseNumber", label: "House number", hint: "Default is required." },
+  { key: "dateOfBirth", label: "Date of birth", hint: "Default is required." },
+  { key: "occupation", label: "Occupation", hint: "Default is required." },
   { key: "idCardNumber", label: "ID card number", hint: "Default is required." },
   { key: "idCardPhoto", label: "ID card photo", hint: "Default is required." },
   { key: "customerPhoto", label: "Customer photo", hint: "Default is optional." },

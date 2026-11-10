@@ -8,6 +8,7 @@ import {
   getLoanDetail,
   getLoansBootstrap,
   listLoanApplications,
+  listLoanBorrowers,
   listLoanProducts,
   recordLoanRepayment,
   rejectLoanApplication,
@@ -46,6 +47,25 @@ loansRouter.get("/bootstrap", requirePermission("loans.read"), async (req, res) 
     res.json(await getLoansBootstrap(tenantId, resolveRequestBranchFilter(req)));
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : "Failed to load loans" });
+  }
+});
+
+loansRouter.get("/customers", requirePermission("loans.read"), async (req, res) => {
+  try {
+    const tenantId = req.userContext?.tenantId;
+    if (!tenantId) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    res.json({
+      customers: await listLoanBorrowers(tenantId, {
+        branchId: resolveRequestBranchFilter(req)
+      })
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "Failed to list loan customers"
+    });
   }
 });
 

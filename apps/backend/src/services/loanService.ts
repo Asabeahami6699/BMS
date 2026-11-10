@@ -1,6 +1,5 @@
 import type { LoanApplication, LoanProduct, LoanRepayment, LoanScheduleInstallment } from "@bms/shared";
-import {
-  computeLoanFigures,
+import { computeLoanFigures,
   createLoanApplicationSchema,
   createLoanProductSchema,
   generateScheduleDueDates,
@@ -12,13 +11,18 @@ import {
   recordLoanRepaymentSchema,
   rejectLoanApplicationSchema,
   scheduleStatusFromAmounts,
-  updateLoanProductSchema
-} from "@bms/shared";
+  susuCreditSnapshotSchema,
+  updateLoanProductSchema, formatAccountAmount } from "@bms/shared";
 import { getSupabaseAdminClient } from "../config/supabaseClient.js";
 import { isMissingSupabaseResource } from "../lib/supabaseSchema.js";
 import { resolveBranchId } from "./branchService.js";
 import { getCustomerById, patchCustomerKycPhotos, registerLoanBorrower } from "./customerService.js";
 import { getLoanGroupNameMap, listLoanGroups, validateGroupForLoanApplication } from "./loanGroupService.js";
+import {
+  buildSusuCreditSnapshot,
+  isSusuLoanBridgeActive,
+  postSusuDebitForLoanRepayment
+} from "./susuLoanBridgeService.js";
 
 type ActorContext = {
   tenantId: string;
@@ -106,6 +110,10 @@ function rowToApplication(row: Record<string, unknown>): LoanApplication {
       row.guarantor != null
         ? loanGuarantorSchema.parse(row.guarantor as Record<string, unknown>)
         : undefined,
+    susuCreditSnapshot:
+      row.susu_credit_snapshot != null
+        ? susuCreditSnapshotSchema.parse(row.susu_credit_snapshot as Record<string, unknown>)
+        : undefined,
     rejectionReason: row.rejection_reason != null ? String(row.rejection_reason) : undefined,
     appliedAt: String(row.applied_at),
     approvedAt: row.approved_at != null ? String(row.approved_at) : undefined,
@@ -141,6 +149,9 @@ function rowToRepayment(row: Record<string, unknown>): LoanRepayment {
     installmentNumber:
       row.installment_number != null ? Number(row.installment_number) : undefined,
     notes: row.notes != null ? String(row.notes) : undefined,
+    paymentSource: row.payment_source === "susu_account" ? "susu_account" : "cash",
+    susuTransactionId:
+      row.susu_transaction_id != null ? String(row.susu_transaction_id) : undefined,
     recordedBy: String(row.recorded_by),
     createdAt: String(row.created_at)
   });
@@ -493,7 +504,7 @@ export async function createLoanApplication(
   }
   if (payload.principalAmount < product.minAmount || payload.principalAmount > product.maxAmount) {
     throw new Error(
-      `Amount must be between GHS ${product.minAmount.toFixed(2)} and GHS ${product.maxAmount.toFixed(2)}`
+      `Amount must be between GHS ${formatAccountAmount(product.minAmount)} and GHS ${formatAccountAmount(product.maxAmount)}`
     );
   }
 
@@ -547,6 +558,15 @@ export async function createLoanApplication(
     product.repaymentFrequency
   );
 
+  let susuCreditSnapshot: LoanApplication["susuCreditSnapshot"];
+  if (await isSusuLoanBridgeActive(context.tenantId)) {
+    try {
+      susuCreditSnapshot = await buildSusuCreditSnapshot(context.tenantId, customerId!);
+    } catch {
+      susuCreditSnapshot = undefined;
+    }
+  }
+
   const application: LoanApplication = loanApplicationSchema.parse({
     id: crypto.randomUUID(),
     tenantId: context.tenantId,
@@ -582,50 +602,56 @@ export async function createLoanApplication(
     existingLoanBalance: payload.existingLoanBalance,
     yearsAtCurrentJob: payload.yearsAtCurrentJob,
     guarantor: payload.guarantor,
+    susuCreditSnapshot,
     appliedAt: new Date().toISOString(),
     createdBy: context.userId
   });
 
   const supabase = getSupabaseAdminClient();
   if (supabase) {
-    const { data, error } = await supabase
-      .from("loan_applications")
-      .insert({
-        id: application.id,
-        tenant_id: context.tenantId,
-        customer_id: application.customerId,
-        product_id: application.productId,
-        branch_id: application.branchId,
-        principal_amount: application.principalAmount,
-        interest_rate_percent: application.interestRatePercent,
-        term_months: application.termMonths,
-        repayment_frequency: application.repaymentFrequency,
-        installment_amount: application.installmentAmount,
-        total_interest: application.totalInterest,
-        total_repayable: application.totalRepayable,
-        installments_total: application.installmentsTotal,
-        installments_paid: 0,
-        status: application.status,
-        outstanding_principal: 0,
-        total_repaid: 0,
-        application_notes: application.applicationNotes ?? null,
-        loan_purpose: application.loanPurpose ?? null,
-        loan_purpose_other: application.loanPurposeOther ?? null,
-        source_of_income: application.sourceOfIncome ?? null,
-        source_of_income_other: application.sourceOfIncomeOther ?? null,
-        occupation: application.occupation ?? null,
-        employer_or_business: application.employerOrBusiness ?? null,
-        monthly_income: application.monthlyIncome ?? null,
-        monthly_expenses: application.monthlyExpenses ?? null,
-        existing_loan_balance: application.existingLoanBalance ?? null,
-        years_at_current_job: application.yearsAtCurrentJob ?? null,
-        guarantor: application.guarantor ?? null,
-        loan_type: application.loanType,
-        group_id: application.groupId ?? null,
-        created_by: context.userId
-      })
-      .select("*")
-      .single();
+    const insertRow: Record<string, unknown> = {
+      id: application.id,
+      tenant_id: context.tenantId,
+      customer_id: application.customerId,
+      product_id: application.productId,
+      branch_id: application.branchId,
+      principal_amount: application.principalAmount,
+      interest_rate_percent: application.interestRatePercent,
+      term_months: application.termMonths,
+      repayment_frequency: application.repaymentFrequency,
+      installment_amount: application.installmentAmount,
+      total_interest: application.totalInterest,
+      total_repayable: application.totalRepayable,
+      installments_total: application.installmentsTotal,
+      installments_paid: 0,
+      status: application.status,
+      outstanding_principal: 0,
+      total_repaid: 0,
+      application_notes: application.applicationNotes ?? null,
+      loan_purpose: application.loanPurpose ?? null,
+      loan_purpose_other: application.loanPurposeOther ?? null,
+      source_of_income: application.sourceOfIncome ?? null,
+      source_of_income_other: application.sourceOfIncomeOther ?? null,
+      occupation: application.occupation ?? null,
+      employer_or_business: application.employerOrBusiness ?? null,
+      monthly_income: application.monthlyIncome ?? null,
+      monthly_expenses: application.monthlyExpenses ?? null,
+      existing_loan_balance: application.existingLoanBalance ?? null,
+      years_at_current_job: application.yearsAtCurrentJob ?? null,
+      guarantor: application.guarantor ?? null,
+      susu_credit_snapshot: application.susuCreditSnapshot ?? null,
+      loan_type: application.loanType,
+      group_id: application.groupId ?? null,
+      created_by: context.userId
+    };
+    let { data, error } = await supabase.from("loan_applications").insert(insertRow).select("*").single();
+    if (error && /susu_credit_snapshot/i.test(error.message)) {
+      const { susu_credit_snapshot: _snap, ...withoutSnap } = insertRow;
+      void _snap;
+      const retry = await supabase.from("loan_applications").insert(withoutSnap).select("*").single();
+      data = retry.data;
+      error = retry.error;
+    }
     if (error) {
       if (isMissingSupabaseResource(error.message)) {
         ensureMemory(context.tenantId).applications.unshift(application);
@@ -634,7 +660,12 @@ export async function createLoanApplication(
       throw new Error(`Failed to create loan application: ${error.message}`);
     }
     const saved = rowToApplication(data as Record<string, unknown>);
-    return { ...saved, customerName, productName: product.name };
+    return {
+      ...saved,
+      customerName,
+      productName: product.name,
+      susuCreditSnapshot: saved.susuCreditSnapshot ?? susuCreditSnapshot
+    };
   }
 
   ensureMemory(context.tenantId).applications.unshift(application);
@@ -791,6 +822,43 @@ export async function disburseLoan(context: ActorContext, loanId: string): Promi
     nextDueDate
   };
   await persistApplication(updated);
+
+  if (await isSusuLoanBridgeActive(context.tenantId)) {
+    try {
+      const { getCustomerLoanInstallmentReserve } = await import("./loanReserveService.js");
+      const { createAgentNotification, notifyTenantStaff } = await import("./notificationService.js");
+      const reserve = await getCustomerLoanInstallmentReserve(context.tenantId, app.customerId);
+      if (reserve > 0) {
+        const body = `GHS ${formatAccountAmount(reserve)} is reserved on the Susu/savings account for the next loan installment and is not withdrawable until paid or the loan is closed.`;
+        await notifyTenantStaff({
+          tenantId: context.tenantId,
+          roles: ["admin", "coordinator", "accountant"],
+          kind: "loan_repayment_reserved",
+          title: "Loan repayment reserved on Susu account",
+          body: `${app.customerName ?? "Borrower"}: ${body}`,
+          customerId: app.customerId
+        });
+        const customer = await getCustomerById(context.tenantId, app.customerId);
+        const agentId = customer?.assignedFieldAgentId;
+        if (agentId) {
+          await createAgentNotification({
+            tenantId: context.tenantId,
+            userId: agentId,
+            customerId: app.customerId,
+            kind: "loan_repayment_reserved",
+            title: "Loan repayment reserved",
+            body
+          });
+        }
+      }
+    } catch (error) {
+      console.warn(
+        "[loans] reserve notification skipped:",
+        error instanceof Error ? error.message : error
+      );
+    }
+  }
+
   return updated;
 }
 
@@ -859,7 +927,7 @@ async function applyRepaymentToSchedule(
 
   if (remaining > 0.009 && !settleAll) {
     throw new Error(
-      "Repayment exceeds the current installment due. Pay the next installment in order or use Settle all."
+      "Repayment exceeds the open installment balance. Pay in schedule order, use overdue bulk catch-up, or Settle all."
     );
   }
 
@@ -872,6 +940,7 @@ export async function recordLoanRepayment(
   input: unknown
 ): Promise<{ application: LoanApplication; repayment: LoanRepayment; schedule: LoanScheduleInstallment[] }> {
   const payload = recordLoanRepaymentSchema.parse(input);
+  const paymentSource = payload.paymentSource ?? "cash";
   const app = await getApplicationById(context.tenantId, loanId);
   if (!app) {
     throw new Error("Loan not found");
@@ -883,32 +952,75 @@ export async function recordLoanRepayment(
   let payAmount = payload.settleAll ? app.outstandingPrincipal : payload.amount;
   if (payAmount > app.outstandingPrincipal + 1e-9) {
     throw new Error(
-      `Repayment exceeds outstanding balance (GHS ${app.outstandingPrincipal.toFixed(2)})`
+      `Repayment exceeds outstanding balance (GHS ${formatAccountAmount(app.outstandingPrincipal)})`
     );
   }
   if (payAmount <= 0) {
     throw new Error("Repayment amount must be greater than zero");
   }
 
+  if (paymentSource === "susu_account" && !(await isSusuLoanBridgeActive(context.tenantId))) {
+    throw new Error(
+      "Pay from Susu is unavailable. Enable the Susu↔Loans bridge in Company Profile (both products required)."
+    );
+  }
+
   const schedulePreview = await listScheduleForLoan(context.tenantId, loanId);
   if (schedulePreview.length > 0 && !payload.settleAll) {
-    const nextUnpaid = schedulePreview
+    const unpaid = schedulePreview
       .filter((s) => s.status !== "paid")
-      .sort((a, b) => a.installmentNumber - b.installmentNumber)[0];
-    if (nextUnpaid) {
-      const dueRemaining =
-        Math.round((nextUnpaid.amountDue - nextUnpaid.amountPaid) * 100) / 100;
-      if (payAmount > dueRemaining + 1e-9) {
+      .sort((a, b) => a.installmentNumber - b.installmentNumber);
+    const now = new Date();
+    const isPastDue = (dueDate: string) => new Date(`${dueDate}T23:59:59`) < now;
+    const overdueBulkTargets = unpaid.filter(
+      (s) => s.status === "overdue" || (s.status === "partial" && isPastDue(s.dueDate))
+    );
+    const hasOverdue = overdueBulkTargets.length > 0;
+    if (hasOverdue) {
+      const bulkCap =
+        Math.round(
+          overdueBulkTargets.reduce(
+            (sum, s) => sum + Math.max(0, s.amountDue - s.amountPaid),
+            0
+          ) * 100
+        ) / 100;
+      if (payAmount > bulkCap + 1e-9) {
         throw new Error(
-          `Installment #${nextUnpaid.installmentNumber} due is GHS ${dueRemaining.toFixed(2)}. ` +
-            "Weekly/monthly installments must be paid in order — use Settle all for full payoff."
+          `Overdue bulk payment max is GHS ${bulkCap.toFixed(2)} across ${overdueBulkTargets.length} due installment(s). ` +
+            "Use Settle all for full payoff."
         );
+      }
+    } else {
+      const nextUnpaid = unpaid[0];
+      if (nextUnpaid) {
+        const dueRemaining =
+          Math.round((nextUnpaid.amountDue - nextUnpaid.amountPaid) * 100) / 100;
+        if (payAmount > dueRemaining + 1e-9) {
+          throw new Error(
+            `Installment #${nextUnpaid.installmentNumber} due is GHS ${formatAccountAmount(dueRemaining)}. ` +
+              "Weekly/monthly installments must be paid in order — use Settle all for full payoff, or wait until installments are overdue for bulk catch-up."
+          );
+        }
       }
     }
   }
   const branchId = await resolveBranchId(context.tenantId, payload.branchId);
   if (!branchId) {
     throw new Error("Invalid branch");
+  }
+
+  const repaymentId = crypto.randomUUID();
+  let susuTransactionId: string | undefined;
+  if (paymentSource === "susu_account") {
+    susuTransactionId = await postSusuDebitForLoanRepayment({
+      tenantId: context.tenantId,
+      customerId: app.customerId,
+      branchId,
+      amount: payAmount,
+      repaymentId,
+      loanId,
+      recordedByUserId: context.userId
+    });
   }
 
   const { installmentNumber, schedule } = await applyRepaymentToSchedule(
@@ -919,13 +1031,15 @@ export async function recordLoanRepayment(
   );
 
   const repayment: LoanRepayment = {
-    id: crypto.randomUUID(),
+    id: repaymentId,
     tenantId: context.tenantId,
     loanId,
     amount: payAmount,
     branchId,
     installmentNumber,
     notes: payload.notes,
+    paymentSource,
+    susuTransactionId,
     recordedBy: context.userId,
     createdAt: new Date().toISOString()
   };
@@ -946,7 +1060,7 @@ export async function recordLoanRepayment(
 
   const supabase = getSupabaseAdminClient();
   if (supabase) {
-    const { error: repayError } = await supabase.from("loan_repayments").insert({
+    const insertRow: Record<string, unknown> = {
       id: repayment.id,
       tenant_id: context.tenantId,
       loan_id: loanId,
@@ -954,8 +1068,22 @@ export async function recordLoanRepayment(
       branch_id: branchId,
       installment_number: installmentNumber ?? null,
       notes: repayment.notes ?? null,
+      payment_source: paymentSource,
+      susu_transaction_id: susuTransactionId ?? null,
       recorded_by: context.userId
-    });
+    };
+    let { error: repayError } = await supabase.from("loan_repayments").insert(insertRow);
+    if (repayError && /payment_source|susu_transaction_id/i.test(repayError.message)) {
+      const {
+        payment_source: _ps,
+        susu_transaction_id: _stx,
+        ...legacyRow
+      } = insertRow;
+      void _ps;
+      void _stx;
+      const retry = await supabase.from("loan_repayments").insert(legacyRow);
+      repayError = retry.error;
+    }
     if (repayError && !isMissingSupabaseResource(repayError.message)) {
       throw new Error(`Failed to record repayment: ${repayError.message}`);
     }
@@ -965,6 +1093,70 @@ export async function recordLoanRepayment(
 
   await persistApplication(updated);
   return { application: updated, repayment, schedule };
+}
+
+export type LoanBorrowerRow = {
+  customerId: string;
+  fullName: string;
+  phone: string;
+  accountNumber?: string;
+  accountStatus: string;
+  location?: string;
+  loanCount: number;
+  activeLoanCount: number;
+  totalOutstanding: number;
+  latestLoanId: string;
+  latestLoanStatus: LoanApplication["status"];
+  latestAppliedAt?: string;
+};
+
+/** Customers who have at least one loan application (not the full Susu customer book). */
+export async function listLoanBorrowers(
+  tenantId: string,
+  options?: { branchId?: string }
+): Promise<LoanBorrowerRow[]> {
+  const applications = await listLoanApplications(tenantId, options);
+  const byCustomer = new Map<
+    string,
+    {
+      apps: LoanApplication[];
+    }
+  >();
+  for (const app of applications) {
+    const bucket = byCustomer.get(app.customerId) ?? { apps: [] };
+    bucket.apps.push(app);
+    byCustomer.set(app.customerId, bucket);
+  }
+
+  const rows: LoanBorrowerRow[] = [];
+  for (const [customerId, { apps }] of byCustomer) {
+    const sorted = [...apps].sort((a, b) =>
+      String(b.appliedAt ?? "").localeCompare(String(a.appliedAt ?? ""))
+    );
+    const latest = sorted[0]!;
+    const customer = await getCustomerById(tenantId, customerId);
+    rows.push({
+      customerId,
+      fullName: customer?.fullName ?? latest.customerName ?? "Borrower",
+      phone: customer?.phone ?? "",
+      accountNumber: customer?.accountNumber,
+      accountStatus: customer?.status ?? "active",
+      location: customer?.location,
+      loanCount: apps.length,
+      activeLoanCount: apps.filter((a) => a.status === "disbursed" || a.status === "approved")
+        .length,
+      totalOutstanding: Math.round(
+        apps
+          .filter((a) => a.status === "disbursed")
+          .reduce((sum, a) => sum + (a.outstandingPrincipal ?? 0), 0) * 100
+      ) / 100,
+      latestLoanId: latest.id,
+      latestLoanStatus: latest.status,
+      latestAppliedAt: latest.appliedAt
+    });
+  }
+
+  return rows.sort((a, b) => a.fullName.localeCompare(b.fullName));
 }
 
 export async function getLoansBootstrap(

@@ -205,6 +205,8 @@ export type Customer = {
   phone: string;
   location?: string;
   houseNumber?: string;
+  dateOfBirth?: string;
+  occupation?: string;
   accountType?: AccountType;
   idCardNumber?: string;
   photoUrl?: string;
@@ -223,8 +225,17 @@ export type Customer = {
   lockedBalance?: number;
   accountBalance?: number;
   withdrawableBalance?: number;
+  /** Next loan installment(s) reserved when Susu↔Loans bridge is active. */
+  loanReserveAmount?: number;
   routeId?: string;
-  status: "pending_activation" | "active" | "rejected" | "suspended" | "closed";
+  status:
+    | "pending_activation"
+    | "active"
+    | "rejected"
+    | "suspended"
+    | "inactive"
+    | "dormant"
+    | "closed";
 };
 
 export type FieldRoute = {
@@ -334,7 +345,10 @@ export type AgentNotification = {
     | "back_office_ecash_requested"
     | "back_office_ecash_approved"
     | "withdrawal_cs_approved"
-    | "withdrawal_ready_for_teller";
+    | "withdrawal_ready_for_teller"
+    | "loan_repayment_reserved"
+    | "loan_auto_repayment"
+    | "loan_auto_repayment_failed";
   title: string;
   body: string;
   customerId?: string;
@@ -488,6 +502,7 @@ export type LedgerEntry = {
   performedByName?: string;
   transactionType?: string;
   notes?: string;
+  reason?: string;
   reversalStatus?: "posted" | "reversed";
   reversalReference?: string;
   reversalReason?: string;
@@ -613,6 +628,8 @@ export type AuthMe = {
   subscribedModules?: TenantProductModule[];
   subscribedAddons?: TenantAddon[];
   reportsAnalytics?: boolean;
+  /** Tenant opt-in; combine with modules via canUseSusuLoanBridge(). */
+  susuLoanBridgeEnabled?: boolean;
   susuNavVisibility?: SusuNavVisibilityRow[];
   approvalWorkflow?: import("@bms/shared").ApprovalWorkflow;
   transactionPin?: {
@@ -639,6 +656,7 @@ export function authMeSignature(me: AuthMe | null | undefined): string {
     subscribedModules: me.subscribedModules ?? [],
     subscribedAddons: me.subscribedAddons ?? [],
     reportsAnalytics: me.reportsAnalytics ?? true,
+    susuLoanBridgeEnabled: me.susuLoanBridgeEnabled ?? false,
     fullName: me.fullName ?? "",
     email: me.email ?? "",
     tenantName: me.tenantName ?? "",
@@ -1129,6 +1147,7 @@ export type CompanyProfile = {
   brandColor?: string;
   fontSizeStep?: number;
   savingsOpeningFeeGhs?: number;
+  susuLoanBridgeEnabled?: boolean;
 };
 
 export async function getApprovalWorkflow(): Promise<import("@bms/shared").ApprovalWorkflow> {
@@ -1163,6 +1182,7 @@ export async function updateCompanyProfile(body: {
   brandColor?: string | null;
   fontSizeStep?: number;
   savingsOpeningFeeGhs?: number;
+  susuLoanBridgeEnabled?: boolean;
 }): Promise<CompanyProfile> {
   return fetchJson<CompanyProfile>(`${API_BASE_URL}/api/v1/tenant/profile`, {
     method: "PUT",
@@ -2129,6 +2149,21 @@ export async function deleteCustomer(customerId: string): Promise<void> {
   });
 }
 
+export async function updateCustomerStatus(
+  customerId: string,
+  status: "active" | "inactive" | "dormant" | "closed",
+  reason?: string
+): Promise<Customer> {
+  return fetchJson<Customer>(
+    `${API_BASE_URL}/api/v1/customers/${encodeURIComponent(customerId)}/status`,
+    {
+      method: "PATCH",
+      headers: authHeaders(),
+      body: JSON.stringify({ status, ...(reason ? { reason } : {}) })
+    }
+  );
+}
+
 export type CustomerBootstrapResponse = {
   customers: Customer[];
   branches: Branch[];
@@ -2716,6 +2751,66 @@ export async function listPlatformTenants(): Promise<TenantRecord[]> {
   return response.json() as Promise<TenantRecord[]>;
 }
 
+export async function terminatePlatformTenant(
+  tenantId: string,
+  confirmName: string
+): Promise<{ tenantId: string; name: string; deletedAuthUsers: number; deletedRows?: number }> {
+  return fetchJson(
+    `${API_BASE_URL}/api/v1/platform/tenants/${encodeURIComponent(tenantId)}`,
+    {
+      method: "DELETE",
+      headers: authHeaders(),
+      body: JSON.stringify({ confirmName })
+    }
+  );
+}
+
+export async function listPlatformTenantCustomers(
+  tenantId: string,
+  q?: string
+): Promise<Customer[]> {
+  const query = q?.trim() ? `?q=${encodeURIComponent(q.trim())}` : "";
+  return fetchJson<{ customers: Customer[] }>(
+    `${API_BASE_URL}/api/v1/platform/tenants/${encodeURIComponent(tenantId)}/customers${query}`,
+    { headers: authHeaders() }
+  ).then((body) => body.customers);
+}
+
+export async function platformResetCustomerAccount(
+  tenantId: string,
+  customerId: string
+): Promise<Customer> {
+  return fetchJson<Customer>(
+    `${API_BASE_URL}/api/v1/platform/tenants/${encodeURIComponent(tenantId)}/customers/${encodeURIComponent(customerId)}/reset-account`,
+    { method: "POST", headers: authHeaders(), body: JSON.stringify({}) }
+  );
+}
+
+export async function platformDeleteCustomer(tenantId: string, customerId: string): Promise<void> {
+  await fetchJson(
+    `${API_BASE_URL}/api/v1/platform/tenants/${encodeURIComponent(tenantId)}/customers/${encodeURIComponent(customerId)}`,
+    { method: "DELETE", headers: authHeaders() }
+  );
+}
+
+export async function platformResetAllCustomers(
+  tenantId: string
+): Promise<{ ok: true; total: number; reset: number; errors: string[] }> {
+  return fetchJson(
+    `${API_BASE_URL}/api/v1/platform/tenants/${encodeURIComponent(tenantId)}/customers/reset-all`,
+    { method: "POST", headers: authHeaders(), body: JSON.stringify({}) }
+  );
+}
+
+export async function platformDeleteAllCustomers(
+  tenantId: string
+): Promise<{ ok: true; total: number; deleted: number; errors: string[] }> {
+  return fetchJson(
+    `${API_BASE_URL}/api/v1/platform/tenants/${encodeURIComponent(tenantId)}/customers`,
+    { method: "DELETE", headers: authHeaders() }
+  );
+}
+
 export async function updateTenantSubdomain(
   tenantId: string,
   subdomain: string
@@ -2951,6 +3046,29 @@ export async function getLoansBootstrap(): Promise<LoansBootstrap> {
   });
 }
 
+export type LoanBorrowerRow = {
+  customerId: string;
+  fullName: string;
+  phone: string;
+  accountNumber?: string;
+  accountStatus: string;
+  location?: string;
+  loanCount: number;
+  activeLoanCount: number;
+  totalOutstanding: number;
+  latestLoanId: string;
+  latestLoanStatus: LoanApplication["status"];
+  latestAppliedAt?: string;
+};
+
+export async function listLoanBorrowers(): Promise<LoanBorrowerRow[]> {
+  const payload = await fetchJson<{ customers: LoanBorrowerRow[] }>(
+    `${API_BASE_URL}/api/v1/loans/customers`,
+    { headers: authHeaders() }
+  );
+  return payload.customers;
+}
+
 export async function listLoanProducts(): Promise<LoanProduct[]> {
   const payload = await fetchJson<{ products: LoanProduct[] }>(`${API_BASE_URL}/api/v1/loans/products`, {
     headers: authHeaders()
@@ -3086,7 +3204,13 @@ export async function disburseLoan(loanId: string): Promise<LoanApplication> {
 
 export async function recordLoanRepayment(
   loanId: string,
-  payload: { amount: number; branchId: string; notes?: string; settleAll?: boolean }
+  payload: {
+    amount: number;
+    branchId: string;
+    notes?: string;
+    settleAll?: boolean;
+    paymentSource?: "cash" | "susu_account";
+  }
 ): Promise<{ application: LoanApplication; repayment: LoanRepayment; schedule: LoanScheduleInstallment[] }> {
   return fetchJson<{ application: LoanApplication; repayment: LoanRepayment; schedule: LoanScheduleInstallment[] }>(
     `${API_BASE_URL}/api/v1/loans/applications/${loanId}/repayments`,

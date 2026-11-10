@@ -8,13 +8,11 @@ import {
   listFieldWithdrawalFulfillment,
   rejectBalanceDisclosure
 } from "./api";
-import {
-  bankProductDisplayLabel,
+import { bankProductDisplayLabel,
   DEFAULT_APPROVAL_WORKFLOW,
   isManualPartnerWithdrawal,
   roleMayApprove,
-  workflowFieldsForStage
-} from "@bms/shared";
+  workflowFieldsForStage, formatAccountAmount } from "@bms/shared";
 import { useAuth } from "../auth/AuthContext";
 import { DynamicWorkflowForm } from "./banking/DynamicWorkflowForm";
 import { prefillWithdrawalVerificationData } from "./banking/workflowPrefill";
@@ -310,7 +308,7 @@ export function WithdrawalsPage({ role, variant = "susu" }: Props) {
           <span className="kpi-label">Rejected</span>
         </article>
         <article className="kpi-card kpi-card--primary">
-          <p className="kpi-value">GHS {kpis.pendingAmount.toFixed(2)}</p>
+          <p className="kpi-value">GHS {formatAccountAmount(kpis.pendingAmount)}</p>
           <span className="kpi-label">Pending amount</span>
         </article>
       </div>
@@ -414,7 +412,7 @@ export function WithdrawalsPage({ role, variant = "susu" }: Props) {
               key: "amount",
               label: "Amount",
               render: (row) => (
-                <strong>GHS {(row.withdrawalAmount ?? 0).toFixed(2)}</strong>
+                <strong>GHS {formatAccountAmount((row.withdrawalAmount ?? 0))}</strong>
               )
             },
             {
@@ -607,10 +605,10 @@ export function WithdrawalsPage({ role, variant = "susu" }: Props) {
                         <strong>{row.fieldAgentName}</strong>
                       </td>
                       <td>{row.businessDate}</td>
-                      <td>GHS {row.totalRequested.toFixed(2)}</td>
-                      <td>GHS {row.totalApproved.toFixed(2)}</td>
+                      <td>GHS {formatAccountAmount(row.totalRequested)}</td>
+                      <td>GHS {formatAccountAmount(row.totalApproved)}</td>
                       <td>
-                        <strong>GHS {row.totalFulfilled.toFixed(2)}</strong>
+                        <strong>GHS {formatAccountAmount(row.totalFulfilled)}</strong>
                       </td>
                       <td>{row.customerCount}</td>
                     </tr>
@@ -637,7 +635,7 @@ export function WithdrawalsPage({ role, variant = "susu" }: Props) {
                           <tr key={`${row.fieldAgentId}-${line.disclosureId ?? line.transactionId}`}>
                             <td>{row.fieldAgentName}</td>
                             <td>{line.customerName ?? line.customerId}</td>
-                            <td>GHS {line.amount.toFixed(2)}</td>
+                            <td>GHS {formatAccountAmount(line.amount)}</td>
                             <td>{line.status.replace(/_/g, " ")}</td>
                             <td>{formatDate(line.fulfilledAt)}</td>
                           </tr>

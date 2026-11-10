@@ -1,12 +1,10 @@
-import {
-  approveCustomerRequestSchema,
+import { approveCustomerRequestSchema,
   balanceDisclosureSchema,
   rejectBalanceDisclosureSchema,
   requestCustomerApprovalSchema,
   roleMayApprove,
   type BalanceDisclosure,
-  type CustomerRequestType
-} from "@bms/shared";
+  type CustomerRequestType, formatAccountAmount } from "@bms/shared";
 import { randomUUID } from "node:crypto";
 import { getSupabaseAdminClient } from "../config/supabaseClient.js";
 import { getApprovalWorkflow } from "./approvalWorkflowService.js";
@@ -367,7 +365,7 @@ export async function requestCustomerApproval(
     const withdrawable = await getCustomerWithdrawableBalance(tenantId, customerId);
     if (payload.amount > withdrawable) {
       throw new Error(
-        `Withdrawal exceeds available funds. Withdrawable: GHS ${withdrawable.toFixed(2)} (opening deposit cannot be withdrawn).`
+        `Withdrawal exceeds available funds. Withdrawable: GHS ${formatAccountAmount(withdrawable)} (opening deposit cannot be withdrawn).`
       );
     }
   }
@@ -430,7 +428,7 @@ export async function requestCustomerApproval(
     payload.type === "withdrawal" ? "Withdrawal pending approval" : "Balance request pending";
   const amountLine =
     payload.type === "withdrawal" && payload.amount != null
-      ? ` GHS ${payload.amount.toFixed(2)}`
+      ? ` GHS ${formatAccountAmount(payload.amount)}`
       : "";
   try {
     const staffRoles =
@@ -650,7 +648,7 @@ export async function approveBalanceDisclosure(
     const withdrawable = await getCustomerWithdrawableBalance(tenantId, row.customer_id);
     if (withdrawable < amount) {
       throw new Error(
-        `Insufficient withdrawable balance. Available: GHS ${withdrawable.toFixed(2)} (ledger GHS ${ledgerBalance.toFixed(2)}); withdrawal is GHS ${amount.toFixed(2)}.`
+        `Insufficient withdrawable balance. Available: GHS ${formatAccountAmount(withdrawable)} (ledger GHS ${formatAccountAmount(ledgerBalance)}); withdrawal is GHS ${formatAccountAmount(amount)}.`
       );
     }
 
@@ -715,7 +713,7 @@ export async function approveBalanceDisclosure(
         customerId: row.customer_id,
         kind: "withdrawal_momo_sent",
         title: "MoMo withdrawal sent",
-        body: `${customer.fullName}: GHS ${amount.toFixed(2)} sent to ${row.momo_account_name} (${row.momo_number}).${ref} Receipt attached.`,
+        body: `${customer.fullName}: GHS ${formatAccountAmount(amount)} sent to ${row.momo_account_name} (${row.momo_number}).${ref} Receipt attached.`,
         imageUrl: patch.generated_receipt_image ?? undefined
       });
 
@@ -765,7 +763,7 @@ export async function approveBalanceDisclosure(
         customerId: row.customer_id,
         kind: "withdrawal_request_approved",
         title: "Withdrawal approved",
-        body: `${customer.fullName}: GHS ${amount.toFixed(2)} approved by coordinator.`
+        body: `${customer.fullName}: GHS ${formatAccountAmount(amount)} approved by coordinator.`
       });
 
       return mapRow(updated, { customerName: customer.fullName });
@@ -830,7 +828,7 @@ export async function approveBalanceDisclosure(
     customerId: row.customer_id,
     kind: "balance_disclosure_approved",
     title: "Balance approved",
-    body: `${customer.fullName}: GHS ${ledgerBalance.toFixed(2)} — visible for ${formatVisibleDuration(visibleHours)}`
+    body: `${customer.fullName}: GHS ${formatAccountAmount(ledgerBalance)} — visible for ${formatVisibleDuration(visibleHours)}`
   });
 
   return mapRow(updated, { customerName: customer.fullName });

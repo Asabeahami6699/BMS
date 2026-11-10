@@ -5,6 +5,7 @@ import {
 } from "./customerEmailService.js";
 import {
   notifyCustomerAccountOpenedSms,
+  notifyCustomerLoanRepaymentFromSusuSms,
   notifyCustomerTransactionSms
 } from "./customerSmsService.js";
 
@@ -22,6 +23,28 @@ export async function notifyCustomerTransaction(input: NotifyInput): Promise<voi
   await Promise.allSettled([
     notifyCustomerTransactionSms(input),
     notifyCustomerTransactionEmail(input)
+  ]);
+}
+
+/** Notify customer that a loan repayment was debited from their Susu account. */
+export async function notifyCustomerLoanRepaymentFromSusu(input: {
+  tenantId: string;
+  customerId: string;
+  transactionId: string;
+  amount: number;
+  loanReference?: string;
+  subscribedAddons?: TenantAddon[];
+}): Promise<void> {
+  await Promise.allSettled([
+    notifyCustomerLoanRepaymentFromSusuSms(input),
+    notifyCustomerTransactionEmail({
+      tenantId: input.tenantId,
+      customerId: input.customerId,
+      transactionId: input.transactionId,
+      type: "withdrawal",
+      amount: input.amount,
+      subscribedAddons: input.subscribedAddons
+    })
   ]);
 }
 

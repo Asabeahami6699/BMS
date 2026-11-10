@@ -1,3 +1,4 @@
+import { formatAccountAmount } from "@bms/shared";
 export type MomoReceiptInput = {
   customerName: string;
   amount: number;
@@ -32,7 +33,7 @@ export async function generateMomoReceiptDataUrl(input: MomoReceiptInput): Promi
   let y = 160;
   const lines: [string, string][] = [
     ["Customer", input.customerName],
-    ["Amount", `GHS ${input.amount.toFixed(2)}`],
+    ["Amount", `GHS ${formatAccountAmount(input.amount)}`],
     ["MoMo name", input.momoAccountName],
     ["MoMo number", input.momoNumber],
     ["Paid at", paidLabel]

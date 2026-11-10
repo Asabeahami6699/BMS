@@ -19,7 +19,10 @@ export const FIELD_AGENT_ALERT_KINDS = new Set<AgentNotification["kind"]>([
   "cash_variance_settled",
   "float_requested",
   "float_allocated",
-  "float_closed_pending_settlement"
+  "float_closed_pending_settlement",
+  "loan_repayment_reserved",
+  "loan_auto_repayment",
+  "loan_auto_repayment_failed"
 ]);
 
 export function isFieldAgentAlert(kind: AgentNotification["kind"]): boolean {

@@ -1,3 +1,4 @@
+import { formatAccountAmount } from "@bms/shared";
 import { randomUUID } from "node:crypto";
 import type { SubmitCalloverInput } from "./calloverReportService.js";
 import { submitCalloverReport } from "./calloverReportService.js";
@@ -467,7 +468,7 @@ export async function submitCollectionBatchForApproval(
     roles: ["admin", "coordinator"],
     kind: "collection_batch_pending",
     title: "Collection batch awaiting approval",
-    body: `Field agent submitted GHS ${batch.totalAmount.toFixed(2)} for ${businessDate} (${batch.lineCount} lines).`
+    body: `Field agent submitted GHS ${formatAccountAmount(batch.totalAmount)} for ${businessDate} (${batch.lineCount} lines).`
   }).catch(() => {
     /* non-blocking */
   });
@@ -761,16 +762,16 @@ async function postSingleBatchUnlocked(
   try {
     const varianceNote =
       batch.cashVarianceStatus === "shortage"
-        ? ` Shortage GHS ${Math.abs(batch.cashVariance ?? 0).toFixed(2)} is open — pay at the office.`
+        ? ` Shortage GHS ${formatAccountAmount(Math.abs(batch.cashVariance ?? 0))} is open — pay at the office.`
         : batch.cashVarianceStatus === "overage"
-          ? ` Overage GHS ${(batch.cashVariance ?? 0).toFixed(2)} must be reconciled (missing entries) — it cannot clear a shortage.`
+          ? ` Overage GHS ${formatAccountAmount((batch.cashVariance ?? 0))} must be reconciled (missing entries) — it cannot clear a shortage.`
           : "";
     await createAgentNotification({
       tenantId: context.tenantId,
       userId: batch.fieldAgentId,
       kind: "collection_batch_posted",
       title: "Collections posted",
-      body: `Your batch of GHS ${batch.totalAmount.toFixed(2)} for ${batch.businessDate} was posted to customer accounts.${varianceNote}`
+      body: `Your batch of GHS ${formatAccountAmount(batch.totalAmount)} for ${batch.businessDate} was posted to customer accounts.${varianceNote}`
     });
   } catch (error) {
     console.warn(

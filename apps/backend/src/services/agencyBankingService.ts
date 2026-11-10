@@ -1,5 +1,4 @@
-import {
-  agencyBootstrapSchema,
+import { agencyBootstrapSchema,
   AGENCY_BANKING_ACCOUNT_LABEL,
   AGENCY_WALK_IN_CUSTOMER_NAME,
   balanceDisclosureSchema,
@@ -15,8 +14,7 @@ import {
   type AgencyBootstrap,
   type BalanceDisclosure,
   type TellerAgencyDeposits,
-  type Transaction
-} from "@bms/shared";
+  type Transaction, formatAccountAmount } from "@bms/shared";
 import { randomUUID } from "node:crypto";
 import { getSupabaseAdminClient } from "../config/supabaseClient.js";
 import { assertBranchAccess } from "../middleware/branchScope.js";
@@ -115,7 +113,7 @@ export async function createAgencyPendingDeposit(
         kind: "deposit_pending_accountant",
         customerId: pending.customerId,
         title: "Deposit over agency account cap",
-        body: `GHS ${pending.amount.toFixed(2)} exceeds the company account daily cap (GHS 1,000,000) or available headroom — accountant must approve or arrange agent-to-agent transfer.`
+        body: `GHS ${formatAccountAmount(pending.amount)} exceeds the company account daily cap (GHS 1,000,000) or available headroom — accountant must approve or arrange agent-to-agent transfer.`
       });
     } else {
       await notifyTenantStaff({
@@ -124,7 +122,7 @@ export async function createAgencyPendingDeposit(
         kind: "deposit_pending_bank",
         customerId: pending.customerId,
         title: "Deposit awaiting bank execution",
-        body: `GHS ${pending.amount.toFixed(2)} collected at till — Back Officer must credit customer account.`
+        body: `GHS ${formatAccountAmount(pending.amount)} collected at till — Back Officer must credit customer account.`
       });
     }
   } catch {
@@ -786,7 +784,7 @@ export async function initiateAgencyWithdrawal(
     const withdrawable = await getCustomerWithdrawableBalance(context.tenantId, customerId);
     if (payload.amount > withdrawable) {
       throw new Error(
-        `Withdrawal exceeds available funds. Withdrawable: GHS ${withdrawable.toFixed(2)}`
+        `Withdrawal exceeds available funds. Withdrawable: GHS ${formatAccountAmount(withdrawable)}`
       );
     }
   }
@@ -870,7 +868,7 @@ export async function initiateAgencyWithdrawal(
         kind: "withdrawal_ready_for_teller",
         customerId,
         title: "Walk-in withdrawal — pay customer",
-        body: `${displayName} GHS ${payload.amount.toFixed(2)} — CS initiated; teller may confirm and pay cash.`
+        body: `${displayName} GHS ${formatAccountAmount(payload.amount)} — CS initiated; teller may confirm and pay cash.`
       });
     } catch {
       /* non-blocking */
@@ -932,7 +930,7 @@ export async function customerServiceApproveWithdrawal(
   const amount = Number(row.withdrawal_amount ?? 0);
   const withdrawable = await getCustomerWithdrawableBalance(context.tenantId, row.customer_id);
   if (withdrawable < amount) {
-    throw new Error(`Insufficient withdrawable balance. Available: GHS ${withdrawable.toFixed(2)}`);
+    throw new Error(`Insufficient withdrawable balance. Available: GHS ${formatAccountAmount(withdrawable)}`);
   }
 
   const customer = await getCustomerById(context.tenantId, row.customer_id);
@@ -982,7 +980,7 @@ export async function customerServiceApproveWithdrawal(
       kind: "withdrawal_ready_for_teller",
       customerId: row.customer_id,
       title: "Withdrawal verified — pay customer",
-      body: `${customer?.fullName ?? "Customer"} GHS ${amount.toFixed(2)} — Teller may pay cash after CS verification.`
+      body: `${customer?.fullName ?? "Customer"} GHS ${formatAccountAmount(amount)} — Teller may pay cash after CS verification.`
     });
   } catch {
     // Non-blocking
@@ -1040,7 +1038,7 @@ export async function executeBankWithdrawal(
   const amount = Number(row.withdrawal_amount ?? 0);
   const withdrawable = await getCustomerWithdrawableBalance(context.tenantId, row.customer_id);
   if (withdrawable < amount) {
-    throw new Error(`Insufficient withdrawable balance. Available: GHS ${withdrawable.toFixed(2)}`);
+    throw new Error(`Insufficient withdrawable balance. Available: GHS ${formatAccountAmount(withdrawable)}`);
   }
 
   const resolvedProductId = await resolveBankProductForWithdrawalApproval(
@@ -1127,7 +1125,7 @@ export async function executeBankWithdrawal(
       kind: "withdrawal_ready_for_teller",
       customerId: row.customer_id,
       title: "Withdrawal ready for cash payout",
-      body: `${customer.fullName} GHS ${amount.toFixed(2)} — Teller may pay customer after account debit.`
+      body: `${customer.fullName} GHS ${formatAccountAmount(amount)} — Teller may pay customer after account debit.`
     });
   } catch {
     // Non-blocking
@@ -1193,7 +1191,7 @@ export async function tellerPayWithdrawal(
       const withdrawable = await getCustomerWithdrawableBalance(context.tenantId, row.customer_id);
       if (withdrawable < amount) {
         throw new Error(
-          `Insufficient withdrawable balance. Available: GHS ${withdrawable.toFixed(2)}`
+          `Insufficient withdrawable balance. Available: GHS ${formatAccountAmount(withdrawable)}`
         );
       }
     }

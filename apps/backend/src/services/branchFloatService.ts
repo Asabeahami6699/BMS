@@ -1,3 +1,4 @@
+import { formatAccountAmount } from "@bms/shared";
 import { randomUUID } from "node:crypto";
 import { getSupabaseAdminClient } from "../config/supabaseClient.js";
 import { isMissingSupabaseResource } from "../lib/supabaseSchema.js";
@@ -288,7 +289,7 @@ export async function requestBranchFloat(
       roles: ["admin", "coordinator"],
       kind: "float_requested",
       title: "Till float requested",
-      body: `GHS ${session.openingFloat.toFixed(2)} requested for ${branchLabel} on ${businessDate}.`
+      body: `GHS ${formatAccountAmount(session.openingFloat)} requested for ${branchLabel} on ${businessDate}.`
     });
   } catch {
     // Non-blocking
@@ -299,7 +300,7 @@ export async function requestBranchFloat(
       userId: context.userId,
       kind: "float_requested",
       title: "Till float request sent",
-      body: `You requested GHS ${session.openingFloat.toFixed(2)} for ${branchLabel} on ${businessDate}. Waiting for release.`
+      body: `You requested GHS ${formatAccountAmount(session.openingFloat)} for ${branchLabel} on ${businessDate}. Waiting for release.`
     });
   } catch {
     // Non-blocking
@@ -332,7 +333,7 @@ async function requestFloatTopUp(
       roles: ["admin", "coordinator"],
       kind: "float_requested",
       title: "Till float top-up requested",
-      body: `GHS ${amount.toFixed(2)} top-up requested for ${branchLabel} on ${session.businessDate}.`
+      body: `GHS ${formatAccountAmount(amount)} top-up requested for ${branchLabel} on ${session.businessDate}.`
     });
   } catch {
     // Non-blocking
@@ -343,7 +344,7 @@ async function requestFloatTopUp(
       userId: context.userId,
       kind: "float_requested",
       title: "Till float top-up request sent",
-      body: `You requested a GHS ${amount.toFixed(2)} top-up for ${branchLabel} on ${session.businessDate}. Waiting for release.`
+      body: `You requested a GHS ${formatAccountAmount(amount)} top-up for ${branchLabel} on ${session.businessDate}. Waiting for release.`
     });
   } catch {
     // Non-blocking
@@ -498,7 +499,7 @@ export async function pushBranchFloat(
       userId: session.cashierUserId,
       kind: "float_allocated",
       title: "Till float pushed",
-      body: `Admin opened GHS ${session.openingFloat.toFixed(2)} for ${session.businessDate}.`
+      body: `Admin opened GHS ${formatAccountAmount(session.openingFloat)} for ${session.businessDate}.`
     });
   } catch {
     // Non-blocking
@@ -677,7 +678,7 @@ export async function applyTransactionToFloat(
     const availableFloat = remainingFloatBalance(session);
     if (transaction.amount > availableFloat + 1e-9) {
       throw new Error(
-        `Insufficient till float balance. Available float: GHS ${availableFloat.toFixed(2)}. Request more float from admin.`
+        `Insufficient till float balance. Available float: GHS ${formatAccountAmount(availableFloat)}. Request more float from admin.`
       );
     }
   }
@@ -686,7 +687,7 @@ export async function applyTransactionToFloat(
     const cashInTill = expectedCash(session);
     if (transaction.amount > cashInTill + 1e-9) {
       throw new Error(
-        `Insufficient cash in till for this withdrawal. Available: GHS ${cashInTill.toFixed(2)}.`
+        `Insufficient cash in till for this withdrawal. Available: GHS ${formatAccountAmount(cashInTill)}.`
       );
     }
   }
@@ -758,7 +759,7 @@ export async function adjustDepositAmountOnFloat(
     const availableFloat = remainingFloatBalance(session);
     if (delta > availableFloat + 1e-9) {
       throw new Error(
-        `Insufficient till float balance for the updated amount. Available float: GHS ${availableFloat.toFixed(2)}.`
+        `Insufficient till float balance for the updated amount. Available float: GHS ${formatAccountAmount(availableFloat)}.`
       );
     }
   }

@@ -8,7 +8,7 @@ export function notificationTargetPath(notification: AgentNotification): string 
     case "deposit_completed":
     case "back_office_ecash_requested":
     case "back_office_ecash_approved":
-      return "/app/banking/back-office#deposits";
+      return "/app/banking/back-office/deposits";
     case "withdrawal_ready_for_teller":
     case "withdrawal_cs_approved":
       return "/app/banking/teller";
@@ -40,6 +40,10 @@ export function notificationTargetPath(notification: AgentNotification): string 
     case "cash_overage_opened":
     case "cash_variance_settled":
       return "/app/susu/overages-shortages";
+    case "loan_repayment_reserved":
+    case "loan_auto_repayment":
+    case "loan_auto_repayment_failed":
+      return "/app/loans/customers";
     case "workspace_activity":
       break;
     default:
@@ -51,7 +55,7 @@ export function notificationTargetPath(notification: AgentNotification): string 
     return "/app/banking/teller";
   }
   if (haystack.includes("back office") || haystack.includes("bank execution") || haystack.includes("deposit")) {
-    return "/app/banking/back-office#deposits";
+    return "/app/banking/back-office/deposits";
   }
   if (haystack.includes("withdrawal") || haystack.includes("customer service")) {
     return "/app/banking/withdrawals";

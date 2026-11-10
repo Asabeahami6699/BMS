@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { formatAccountAmount } from "./money.js";
 
 export const smsEventTypeSchema = z.enum([
   "deposit",
@@ -86,5 +87,5 @@ export function maskAccountNumber(accountNumber?: string): string {
 }
 
 export function formatSmsAmount(amount: number): string {
-  return amount.toLocaleString("en-GH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return formatAccountAmount(amount);
 }

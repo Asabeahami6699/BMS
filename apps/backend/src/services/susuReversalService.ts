@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { reverseSusuCollectionSchema, type Transaction } from "@bms/shared";
+import { reverseSusuCollectionSchema, type Transaction, formatAccountAmount } from "@bms/shared";
 import { assertBranchAccess } from "../middleware/branchScope.js";
 import { getSupabaseAdminClient } from "../config/supabaseClient.js";
 import { listBranches } from "./branchService.js";
@@ -95,7 +95,7 @@ function buildReceipt(input: {
     `Reversal reference: ${input.reversalReference ?? "Pending"}`,
     `Customer: ${input.customerName}`,
     `Account: ${input.accountNumber ?? "Pending assignment"}`,
-    `Amount: GHS ${input.amount.toFixed(2)}`,
+    `Amount: GHS ${formatAccountAmount(input.amount)}`,
     `Collection date: ${formatWhen(input.collectedAt)}`,
     `Posted by: ${input.postedByName}`,
     `Status: ${input.reversalReference ? "Reversed" : "Posted"}`,
@@ -273,7 +273,7 @@ export async function reverseSusuCollection(
       roles: ["admin", "coordinator"],
       kind: "susu_collection_reversed",
       title: "Susu collection reversed",
-      body: `${detail.customerName} · GHS ${detail.amount.toFixed(2)} · ${detail.reversalReference ?? "reversal"} · ${reason}`,
+      body: `${detail.customerName} · GHS ${formatAccountAmount(detail.amount)} · ${detail.reversalReference ?? "reversal"} · ${reason}`,
       customerId: detail.customerId
     });
   } catch {

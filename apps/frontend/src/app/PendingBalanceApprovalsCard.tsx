@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { DEFAULT_APPROVAL_WORKFLOW, roleMayApprove } from "@bms/shared";
+import { DEFAULT_APPROVAL_WORKFLOW, formatAccountAmount, formatGhs, roleMayApprove } from "@bms/shared";
 import { useAuth } from "../auth/AuthContext";
 import type { BalanceDisclosure } from "./api";
 import { approveBalanceDisclosure, rejectBalanceDisclosure } from "./api";
@@ -58,12 +58,12 @@ export function PendingBalanceApprovalsCard() {
       removePendingRequest(row.id);
       if (approved.requestType === "withdrawal") {
         showToast(
-          `Withdrawal approved — ${approved.customerName ?? "Customer"}: GHS ${approved.withdrawalAmount?.toFixed(2) ?? "—"} (${fulfillmentLabel(approved.fulfillmentMode)})`,
+          `Withdrawal approved — ${approved.customerName ?? "Customer"}: ${approved.withdrawalAmount != null ? formatGhs(approved.withdrawalAmount) : "—"} (${fulfillmentLabel(approved.fulfillmentMode)})`,
           "success"
         );
       } else {
         showToast(
-          `Balance approved — ${approved.customerName ?? "Customer"}: GHS ${approved.balanceAmount?.toFixed(2) ?? "—"}`,
+          `Balance approved — ${approved.customerName ?? "Customer"}: ${approved.balanceAmount != null ? formatGhs(approved.balanceAmount) : "—"}`,
           "success"
         );
       }
@@ -139,8 +139,10 @@ export function PendingBalanceApprovalsCard() {
                   {row.requestType === "withdrawal" ? (
                     <>
                       <small>
-                        GHS {row.withdrawalAmount?.toFixed(2) ?? "—"} ·{" "}
-                        {fulfillmentLabel(row.fulfillmentMode)}
+                        {row.withdrawalAmount != null
+                          ? `GHS ${formatAccountAmount(row.withdrawalAmount)}`
+                          : "—"}{" "}
+                        · {fulfillmentLabel(row.fulfillmentMode)}
                       </small>
                       {row.fulfillmentMode === "momo" ? (
                         <small>

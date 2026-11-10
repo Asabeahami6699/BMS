@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { SAVINGS_INITIAL_DEPOSIT_GHS } from "@bms/shared";
+import { SAVINGS_INITIAL_DEPOSIT_GHS, formatAccountAmount } from "@bms/shared";
 import type { AccountType, Customer } from "../app/api";
 import { SusuReversalDialog } from "../app/SusuReversalDialog";
 import { printCustomerAccountStatement } from "../app/customerAccountStatement";
@@ -25,6 +25,8 @@ const STATUS_LABELS: Record<Customer["status"], string> = {
   active: "Active",
   rejected: "Rejected",
   suspended: "Suspended",
+  inactive: "Inactive",
+  dormant: "Dormant",
   closed: "Closed"
 };
 
@@ -33,7 +35,9 @@ const STATUS_PILL: Record<Customer["status"], string> = {
   active: "active",
   rejected: "inactive",
   suspended: "inactive",
-  closed: "inactive"
+  inactive: "inactive",
+  dormant: "dormant",
+  closed: "failed"
 };
 
 function InfoRow({ label, value, fullWidth }: { label: string; value: ReactNode; fullWidth?: boolean }) {
@@ -177,9 +181,9 @@ export function CustomerDetailsView({
   const accountBalance =
     ledger.length > 0 ? ledger[ledger.length - 1]!.balanceAfter : 0;
   const lockedAmount = isSavings ? (customer.lockedBalance ?? SAVINGS_INITIAL_DEPOSIT_GHS) : 0;
-  const withdrawableBalance = isSavings
-    ? Math.max(0, accountBalance - lockedAmount)
-    : accountBalance;
+  const loanReserveAmount = Math.max(0, customer.loanReserveAmount ?? 0);
+  const withdrawableBalance = Math.max(0, accountBalance - lockedAmount - loanReserveAmount);
+  const hasLoanReserve = loanReserveAmount > 0;
   const ledgerNewestFirst = [...ledger].reverse();
   const displayedLedger = ledgerNewestFirst.slice(0, ledgerVisibleCount);
   const olderEntriesCount = Math.max(0, ledgerNewestFirst.length - ledgerVisibleCount);
@@ -259,26 +263,40 @@ export function CustomerDetailsView({
                   <div className="cif-financial__balance cif-financial__balance--primary">
                     <span className="cif-financial__balance-label">Account balance</span>
                     <strong className="cif-financial__balance-value">
-                      {ledgerLoading ? "…" : `GHS ${accountBalance.toFixed(2)}`}
+                      {ledgerLoading ? "…" : `GHS ${formatAccountAmount(accountBalance)}`}
                     </strong>
                   </div>
+                  {(isSavings || hasLoanReserve) ? (
+                    <div className="cif-financial__balance">
+                      <span className="cif-financial__balance-label">Withdrawable</span>
+                      <strong className="cif-financial__balance-value">
+                        {ledgerLoading ? "…" : `GHS ${formatAccountAmount(withdrawableBalance)}`}
+                      </strong>
+                    </div>
+                  ) : null}
                   {isSavings ? (
-                    <>
-                      <div className="cif-financial__balance">
-                        <span className="cif-financial__balance-label">Withdrawable</span>
-                        <strong className="cif-financial__balance-value">
-                          {ledgerLoading ? "…" : `GHS ${withdrawableBalance.toFixed(2)}`}
-                        </strong>
-                      </div>
-                      <div className="cif-financial__balance">
-                        <span className="cif-financial__balance-label">Locked</span>
-                        <strong className="cif-financial__balance-value">
-                          GHS {lockedAmount.toFixed(2)}
-                        </strong>
-                      </div>
-                    </>
+                    <div className="cif-financial__balance">
+                      <span className="cif-financial__balance-label">Locked (savings min)</span>
+                      <strong className="cif-financial__balance-value">
+                        GHS {formatAccountAmount(lockedAmount)}
+                      </strong>
+                    </div>
+                  ) : null}
+                  {hasLoanReserve ? (
+                    <div className="cif-financial__balance">
+                      <span className="cif-financial__balance-label">Loan repayment reserve</span>
+                      <strong className="cif-financial__balance-value">
+                        GHS {formatAccountAmount(loanReserveAmount)}
+                      </strong>
+                    </div>
                   ) : null}
                 </div>
+                {hasLoanReserve ? (
+                  <p className="muted" role="status">
+                    GHS {formatAccountAmount(loanReserveAmount)} is held for the next loan installment and
+                    cannot be withdrawn while the loan is open (Susu↔Loans bridge).
+                  </p>
+                ) : null}
 
                 {ledgerError ? (
                   <p className="cif-empty muted" role="status">
@@ -375,14 +393,14 @@ export function CustomerDetailsView({
                               {typeLabel}
                               {entry.reversalStatus === "reversed" ? " · Reversed" : ""}
                             </span>
-                            <span>GHS {entry.amount.toFixed(2)}</span>
+                            <span>GHS {formatAccountAmount(entry.amount)}</span>
                             <span
                               className="cif-ledger__by"
                               title={entry.performedByName ?? entry.recordedByName ?? undefined}
                             >
                               {entry.performedByName ?? entry.recordedByName ?? "—"}
                             </span>
-                            <span>GHS {entry.balanceAfter.toFixed(2)}</span>
+                            <span>GHS {formatAccountAmount(entry.balanceAfter)}</span>
                           </>
                         );
                         return susuDetail ? (
@@ -390,7 +408,7 @@ export function CustomerDetailsView({
                             type="button"
                             className="cif-ledger__row"
                             key={entry.id}
-                            aria-label={`Reverse collection, ${typeLabel} GHS ${entry.amount.toFixed(2)}`}
+                            aria-label={`Reverse collection, ${typeLabel} GHS ${formatAccountAmount(entry.amount)}`}
                             onClick={() => setSusuTransactionId(entry.transactionId)}
                           >
                             {cells}
@@ -427,7 +445,7 @@ export function CustomerDetailsView({
               <span className="cif-metric__label">Daily plan</span>
               <strong className="cif-metric__value">
                 {customer.dailyContributionAmount > 0
-                  ? `GHS ${Number(customer.dailyContributionAmount).toFixed(2)}`
+                  ? `GHS ${formatAccountAmount(customer.dailyContributionAmount)}`
                   : "—"}
               </strong>
             </div>
@@ -471,6 +489,15 @@ export function CustomerDetailsView({
                 <InfoRow label="Full legal name" value={customer.fullName} fullWidth />
                 <InfoRow label="Mobile" value={customer.phone} />
                 <InfoRow label="Email" value={customer.email || "—"} />
+                <InfoRow
+                  label="Date of birth"
+                  value={
+                    customer.dateOfBirth
+                      ? new Date(`${customer.dateOfBirth}T00:00:00`).toLocaleDateString("en-GB")
+                      : "—"
+                  }
+                />
+                <InfoRow label="Occupation" value={customer.occupation || "—"} />
                 <InfoRow label="Ghana Card / ID" value={customer.idCardNumber} />
                 <InfoRow label="Address" value={address} fullWidth />
               </div>
@@ -491,7 +518,7 @@ export function CustomerDetailsView({
                   label="Contribution"
                   value={
                     customer.dailyContributionAmount > 0
-                      ? `GHS ${Number(customer.dailyContributionAmount).toFixed(2)} / day`
+                      ? `GHS ${formatAccountAmount(customer.dailyContributionAmount)} / day`
                       : "Not configured"
                   }
                 />
@@ -499,7 +526,7 @@ export function CustomerDetailsView({
                   <>
                     <InfoRow
                       label="Locked balance"
-                      value={`GHS ${(customer.lockedBalance ?? SAVINGS_INITIAL_DEPOSIT_GHS).toFixed(2)}`}
+                      value={`GHS ${formatAccountAmount((customer.lockedBalance ?? SAVINGS_INITIAL_DEPOSIT_GHS))}`}
                     />
                     <InfoRow
                       label="Opening fee"

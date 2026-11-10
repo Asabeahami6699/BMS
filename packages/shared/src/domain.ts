@@ -3,18 +3,39 @@ import { z } from "zod";
 
 
 export const customerStatusSchema = z.enum([
-
   "pending_activation",
-
   "active",
-
   "rejected",
-
   "suspended",
-
+  "inactive",
+  "dormant",
   "closed"
-
 ]);
+
+export type CustomerStatus = z.infer<typeof customerStatusSchema>;
+
+/** Statuses a tenant admin may set manually (not pending/rejected registration flow). */
+export const adminManagedCustomerStatusSchema = z.enum([
+  "active",
+  "inactive",
+  "dormant",
+  "closed"
+]);
+
+export type AdminManagedCustomerStatus = z.infer<typeof adminManagedCustomerStatusSchema>;
+
+export const updateCustomerStatusSchema = z.object({
+  status: adminManagedCustomerStatusSchema,
+  reason: z.string().max(500).optional()
+});
+
+export type UpdateCustomerStatusInput = z.infer<typeof updateCustomerStatusSchema>;
+
+/** Months without qualifying activity before auto-status applies. */
+export const CUSTOMER_INACTIVE_AFTER_MONTHS = 12;
+export const CUSTOMER_DORMANT_AFTER_MONTHS = 24;
+/** Months before inactive/dormant threshold to send an SMS warning. */
+export const CUSTOMER_LIFECYCLE_WARN_MONTHS_BEFORE = 1;
 
 
 
@@ -54,6 +75,9 @@ export const customerSchema = z.object({
   phone: z.string().min(1),
   location: z.string().optional(),
   houseNumber: z.string().optional(),
+  /** ISO date YYYY-MM-DD */
+  dateOfBirth: z.string().optional(),
+  occupation: z.string().optional(),
   accountType: accountTypeSchema.optional(),
   idCardNumber: z.string().optional(),
   photoUrl: z.string().optional(),
@@ -82,8 +106,14 @@ export const customerSchema = z.object({
   /** Ledger balance (sum of credits − debits). Populated on list/detail when requested. */
   accountBalance: z.number().optional(),
 
-  /** accountBalance minus lockedBalance. Populated with accountBalance. */
+  /** accountBalance minus lockedBalance (and loan reserve when bridge is on). */
   withdrawableBalance: z.number().optional(),
+
+  /**
+   * Amount reserved for the next unpaid loan installment(s) when Susu↔Loans bridge is active.
+   * Not withdrawable until the loan is settled or the installment is paid.
+   */
+  loanReserveAmount: z.number().nonnegative().optional(),
 
   routeId: z.string().uuid().optional(),
 
@@ -121,6 +151,10 @@ export const customerRegistrationInputSchema = z.object({
   phone: z.string().min(1),
 
   location: z.string().min(1),
+
+  dateOfBirth: z.string().optional(),
+
+  occupation: z.string().optional(),
 
   accountType: accountTypeSchema,
 
@@ -286,6 +320,9 @@ export const ledgerEntrySchema = z.object({
 
   /** Transaction notes (e.g. Settled shortage). */
   notes: z.string().optional(),
+
+  /** Human-readable reason shown on account statements (derived from notes when set). */
+  reason: z.string().optional(),
 
   /** posted = original susu credit still active. reversed = a reversal debit exists. */
   reversalStatus: z.enum(["posted", "reversed"]).optional(),

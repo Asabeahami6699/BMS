@@ -7,6 +7,8 @@ import { CreateAdminModal } from "./CreateAdminModal";
 import { EditTenantAddonsModal } from "./EditTenantAddonsModal";
 import { EditTenantModulesModal } from "./EditTenantModulesModal";
 import { RegisterCompanyModal } from "./RegisterCompanyModal";
+import { TenantCustomerSupportModal } from "./TenantCustomerSupportModal";
+import { TerminateCompanyModal } from "./TerminateCompanyModal";
 
 function CompanyAddressField({
   tenant,
@@ -67,6 +69,10 @@ export function CompaniesPage() {
   const [editModulesTenant, setEditModulesTenant] = useState<TenantRecord | null>(null);
   const [editAddonsOpen, setEditAddonsOpen] = useState(false);
   const [editAddonsTenant, setEditAddonsTenant] = useState<TenantRecord | null>(null);
+  const [customerSupportOpen, setCustomerSupportOpen] = useState(false);
+  const [customerSupportTenant, setCustomerSupportTenant] = useState<TenantRecord | null>(null);
+  const [terminateOpen, setTerminateOpen] = useState(false);
+  const [terminateTenant, setTerminateTenant] = useState<TenantRecord | null>(null);
 
   async function loadTenants() {
     try {
@@ -229,8 +235,28 @@ export function CompaniesPage() {
                 <button type="button" className="button secondary" onClick={() => openCreateAdmin(tenant.id)}>
                   Add admin
                 </button>
+                <button
+                  type="button"
+                  className="button secondary"
+                  onClick={() => {
+                    setCustomerSupportTenant(tenant);
+                    setCustomerSupportOpen(true);
+                  }}
+                >
+                  Customer support
+                </button>
                 <button type="button" className="button secondary" onClick={() => toggleSubscription(tenant)}>
                   Set {tenant.subscriptionStatus === "active" ? "inactive" : "active"}
+                </button>
+                <button
+                  type="button"
+                  className="button button--danger"
+                  onClick={() => {
+                    setTerminateTenant(tenant);
+                    setTerminateOpen(true);
+                  }}
+                >
+                  Terminate
                 </button>
               </div>
             </div>
@@ -273,6 +299,25 @@ export function CompaniesPage() {
           setEditAddonsTenant(null);
         }}
         onUpdated={() => void loadTenants()}
+      />
+
+      <TenantCustomerSupportModal
+        open={customerSupportOpen}
+        tenant={customerSupportTenant}
+        onClose={() => {
+          setCustomerSupportOpen(false);
+          setCustomerSupportTenant(null);
+        }}
+      />
+
+      <TerminateCompanyModal
+        open={terminateOpen}
+        tenant={terminateTenant}
+        onClose={() => {
+          setTerminateOpen(false);
+          setTerminateTenant(null);
+        }}
+        onTerminated={() => void loadTenants()}
       />
     </>
   );

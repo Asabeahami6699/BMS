@@ -4,9 +4,7 @@ import { Link, useSearchParams } from "react-router-dom";
 
 import { useShallow } from "zustand/react/shallow";
 
-import {
-
-  adaptDepositCaptureFields,
+import { adaptDepositCaptureFields,
 
   AGENCY_BANKING_ACCOUNT_LABEL,
 
@@ -30,9 +28,7 @@ import {
 
   validateDepositCaptureWorkflow,
 
-  workflowFieldsForStage
-
-} from "@bms/shared";
+  workflowFieldsForStage, formatAccountAmount } from "@bms/shared";
 
 import { useAuth } from "../../auth/AuthContext";
 import { useTransactionPin } from "../../auth/TransactionPinProvider";
@@ -746,14 +742,14 @@ export function AgencyDepositsPage() {
       }
       clearTellerDepositDraft();
 
-      showToast(`Recording deposit GHS ${postedAmount.toFixed(2)}…`, "info");
+      showToast(`Recording deposit GHS ${formatAccountAmount(postedAmount)}…`, "info");
 
       void postDeposit(payload)
         .then(() => {
           showToast(
             queued
-              ? `Deposit GHS ${postedAmount.toFixed(2)} recorded — pending back-office bank execution`
-              : `Deposit GHS ${postedAmount.toFixed(2)} credited to customer account`,
+              ? `Deposit GHS ${formatAccountAmount(postedAmount)} recorded — pending back-office bank execution`
+              : `Deposit GHS ${formatAccountAmount(postedAmount)} credited to customer account`,
             "success"
           );
         })
@@ -1011,11 +1007,11 @@ export function AgencyDepositsPage() {
               <div className="branch-counter__hero-balances">
                 <div className="branch-counter__hero-balance branch-counter__hero-balance--primary">
                   <span>Account balance</span>
-                  <strong>GHS {balances.accountBalance.toFixed(2)}</strong>
+                  <strong>GHS {formatAccountAmount(balances.accountBalance)}</strong>
                 </div>
                 <div className="branch-counter__hero-balance">
                   <span>Withdrawable</span>
-                  <strong>GHS {balances.withdrawableBalance.toFixed(2)}</strong>
+                  <strong>GHS {formatAccountAmount(balances.withdrawableBalance)}</strong>
                 </div>
               </div>
             ) : null}

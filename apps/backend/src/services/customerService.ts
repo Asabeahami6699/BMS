@@ -3,10 +3,14 @@ import {
   createCustomerInputSchema,
   customerRegistrationInputSchema,
   customerSchema,
+  CUSTOMER_DORMANT_AFTER_MONTHS,
+  CUSTOMER_INACTIVE_AFTER_MONTHS,
   registrationFormIssue,
   registrationPayloadForSetup,
   loanBorrowerRegistrationSchema,
   rejectCustomerSchema,
+  updateCustomerStatusSchema,
+  type AdminManagedCustomerStatus,
   type Customer,
   type CustomerRegistrationInput,
   type NextOfKinDetails
@@ -144,6 +148,8 @@ function mapCustomerRow(row: Record<string, unknown>): Customer {
     phone: String(row.phone),
     location: row.location ? String(row.location) : undefined,
     houseNumber: row.house_number ? String(row.house_number) : undefined,
+    dateOfBirth: row.date_of_birth ? String(row.date_of_birth).slice(0, 10) : undefined,
+    occupation: row.occupation ? String(row.occupation) : undefined,
     accountType: row.account_type ?? undefined,
     idCardNumber: row.id_card_number ? String(row.id_card_number) : undefined,
     photoUrl: row.photo_url ? String(row.photo_url) : undefined,
@@ -198,6 +204,8 @@ function insertRowFromCustomer(customer: Customer): Record<string, unknown> {
 
     location: customer.location ?? null,
     house_number: customer.houseNumber ?? null,
+    date_of_birth: customer.dateOfBirth ?? null,
+    occupation: customer.occupation ?? null,
     account_type: customer.accountType ?? null,
     id_card_number: customer.idCardNumber ?? null,
     photo_url: customer.photoUrl ?? null,
@@ -231,7 +239,8 @@ function insertRowFromCustomer(customer: Customer): Record<string, unknown> {
 
 export async function getCustomerWithdrawableBalance(
   tenantId: string,
-  customerId: string
+  customerId: string,
+  options?: { /** When true, next installment reserve may be used (loan repayment debit). */ allowLoanReserve?: boolean }
 ): Promise<number> {
   const customer = await getCustomerById(tenantId, customerId);
   if (!customer) {
@@ -239,7 +248,16 @@ export async function getCustomerWithdrawableBalance(
   }
   const total = await computeCustomerBalance(tenantId, customerId);
   const locked = customer.lockedBalance ?? 0;
-  return Math.max(0, total - locked);
+  let loanReserve = 0;
+  if (!options?.allowLoanReserve) {
+    try {
+      const { getCustomerLoanInstallmentReserve } = await import("./loanReserveService.js");
+      loanReserve = await getCustomerLoanInstallmentReserve(tenantId, customerId);
+    } catch {
+      loanReserve = 0;
+    }
+  }
+  return Math.max(0, total - locked - loanReserve);
 }
 
 export async function createCustomer(
@@ -393,6 +411,8 @@ export async function submitCustomerRegistration(
 
     location: payload.location,
     houseNumber: normalized.houseNumber,
+    dateOfBirth: normalized.dateOfBirth,
+    occupation: normalized.occupation,
     accountType: payload.accountType,
     idCardNumber: normalized.idCardNumber,
     photoUrl: normalized.photoUrl,
@@ -504,7 +524,9 @@ export async function approveCustomerRegistration(
 
         account_number: accountNumber,
 
-        rejection_reason: null
+        rejection_reason: null,
+
+        last_qualifying_activity_at: new Date().toISOString()
 
       })
 
@@ -754,18 +776,29 @@ async function enrichCustomersWithAccountBalances(
     }
   }
 
-  return customers.map((customer) => {
-    if (customer.status !== "active") {
-      return customer;
-    }
-    const accountBalance = totals.get(customer.id) ?? 0;
-    const locked = customer.lockedBalance ?? 0;
-    return customerSchema.parse({
-      ...customer,
-      accountBalance,
-      withdrawableBalance: Math.max(0, accountBalance - locked)
-    });
-  });
+  const withBalances = await Promise.all(
+    customers.map(async (customer) => {
+      if (customer.status !== "active") {
+        return customer;
+      }
+      const accountBalance = totals.get(customer.id) ?? 0;
+      const locked = customer.lockedBalance ?? 0;
+      let loanReserveAmount = 0;
+      try {
+        const { getCustomerLoanInstallmentReserve } = await import("./loanReserveService.js");
+        loanReserveAmount = await getCustomerLoanInstallmentReserve(tenantId, customer.id);
+      } catch {
+        loanReserveAmount = 0;
+      }
+      return customerSchema.parse({
+        ...customer,
+        accountBalance,
+        loanReserveAmount: loanReserveAmount > 0 ? loanReserveAmount : undefined,
+        withdrawableBalance: Math.max(0, accountBalance - locked - loanReserveAmount)
+      });
+    })
+  );
+  return withBalances;
 }
 
 /** List columns without heavy photo payloads — used by desks and live refresh. */
@@ -777,6 +810,8 @@ const LIGHT_CUSTOMER_COLUMNS = [
   "phone",
   "location",
   "house_number",
+  "date_of_birth",
+  "occupation",
   "account_type",
   "id_card_number",
   "savings_opening_fee_collected",
@@ -925,9 +960,12 @@ export async function getCustomerById(tenantId: string, customerId: string): Pro
   const supabase = getSupabaseAdminClient();
 
   if (!supabase) {
-
-    return getTenantCustomers(tenantId).find((customer) => customer.id === customerId);
-
+    const found = getTenantCustomers(tenantId).find((customer) => customer.id === customerId);
+    if (!found) {
+      return undefined;
+    }
+    const [withBalances] = await enrichCustomersWithAccountBalances(tenantId, [found]);
+    return withBalances ?? found;
   }
 
 
@@ -962,10 +1000,12 @@ export async function getCustomerById(tenantId: string, customerId: string): Pro
 
 
 
-  return enrichCustomerWithAgentNames(
+  const named = await enrichCustomerWithAgentNames(
     tenantId,
     mapCustomerRow(data as Record<string, unknown>)
   );
+  const [withBalances] = await enrichCustomersWithAccountBalances(tenantId, [named]);
+  return withBalances ?? named;
 
 }
 
@@ -1098,6 +1138,142 @@ async function clearCustomerFinancialHistory(tenantId: string, customerId: strin
     .eq("customer_id", customerId);
 }
 
+const QUALIFYING_TX_TYPES = new Set(["daily_susu", "deposit", "withdrawal"]);
+
+/** Record last qualifying financial activity for inactivity automation. */
+export async function touchCustomerQualifyingActivity(
+  tenantId: string,
+  customerId: string,
+  at: Date = new Date()
+): Promise<void> {
+  const iso = at.toISOString();
+  const supabase = getSupabaseAdminClient();
+  if (supabase) {
+    const { error } = await supabase
+      .from("customers")
+      .update({ last_qualifying_activity_at: iso })
+      .eq("tenant_id", tenantId)
+      .eq("id", customerId);
+    if (error && !isMissingSupabaseResource(error.message)) {
+      console.warn("[customers] failed to touch last activity:", error.message);
+    }
+    return;
+  }
+  // In-memory store keeps status only; inactivity job reads transactions there.
+}
+
+export async function updateCustomerStatus(
+  tenantId: string,
+  customerId: string,
+  input: unknown
+): Promise<Customer> {
+  const payload = updateCustomerStatusSchema.parse(input);
+  const existing = await getCustomerById(tenantId, customerId);
+  if (!existing) {
+    throw new Error("Customer not found");
+  }
+  if (
+    existing.status === "pending_activation" ||
+    existing.status === "rejected"
+  ) {
+    throw new Error("Use approve/reject for registration status. Status management applies to activated accounts.");
+  }
+
+  const nextStatus: AdminManagedCustomerStatus = payload.status;
+  const supabase = getSupabaseAdminClient();
+  if (supabase) {
+    const patch: Record<string, unknown> = { status: nextStatus };
+    if (nextStatus === "active") {
+      patch.last_qualifying_activity_at = new Date().toISOString();
+      patch.rejection_reason = null;
+    } else if (payload.reason) {
+      patch.rejection_reason = payload.reason;
+    }
+    const { data, error } = await supabase
+      .from("customers")
+      .update(patch)
+      .eq("tenant_id", tenantId)
+      .eq("id", customerId)
+      .select("*")
+      .single();
+    if (error || !data) {
+      throw new Error(`Failed to update customer status: ${error?.message ?? "unknown"}`);
+    }
+    return mapCustomerRow(data as Record<string, unknown>);
+  }
+
+  const customers = getTenantCustomers(tenantId);
+  const idx = customers.findIndex((c) => c.id === customerId);
+  if (idx < 0) {
+    throw new Error("Customer not found");
+  }
+  customers[idx] = { ...customers[idx]!, status: nextStatus };
+  setTenantCustomers(tenantId, customers);
+  return customers[idx]!;
+}
+
+function monthsAgoIso(months: number): string {
+  const d = new Date();
+  d.setMonth(d.getMonth() - months);
+  return d.toISOString();
+}
+
+/**
+ * Apply 12-month INACTIVE / 24-month DORMANT rules from last qualifying activity.
+ * Does not override closed, rejected, pending, or suspended accounts.
+ * 24-month dormant overrides inactive.
+ */
+export async function applyCustomerInactivityRules(): Promise<{
+  markedInactive: number;
+  markedDormant: number;
+}> {
+  const dormantCutoff = monthsAgoIso(CUSTOMER_DORMANT_AFTER_MONTHS);
+  const inactiveCutoff = monthsAgoIso(CUSTOMER_INACTIVE_AFTER_MONTHS);
+  const supabase = getSupabaseAdminClient();
+
+  if (!supabase) {
+    return { markedInactive: 0, markedDormant: 0 };
+  }
+
+  let markedDormant = 0;
+  let markedInactive = 0;
+
+  const { data: dormantRows, error: dormantError } = await supabase
+    .from("customers")
+    .update({ status: "dormant" })
+    .in("status", ["active", "inactive"])
+    .lt("last_qualifying_activity_at", dormantCutoff)
+    .not("last_qualifying_activity_at", "is", null)
+    .select("id");
+
+  if (dormantError) {
+    if (!isMissingSupabaseResource(dormantError.message)) {
+      console.warn("[customers] dormant rule failed:", dormantError.message);
+    }
+  } else {
+    markedDormant = dormantRows?.length ?? 0;
+  }
+
+  const { data: inactiveRows, error: inactiveError } = await supabase
+    .from("customers")
+    .update({ status: "inactive" })
+    .eq("status", "active")
+    .lt("last_qualifying_activity_at", inactiveCutoff)
+    .gte("last_qualifying_activity_at", dormantCutoff)
+    .not("last_qualifying_activity_at", "is", null)
+    .select("id");
+
+  if (inactiveError) {
+    if (!isMissingSupabaseResource(inactiveError.message)) {
+      console.warn("[customers] inactive rule failed:", inactiveError.message);
+    }
+  } else {
+    markedInactive = inactiveRows?.length ?? 0;
+  }
+
+  return { markedInactive, markedDormant };
+}
+
 /** Wipe balances/ledger for trial reuse while keeping the customer profile. */
 export async function resetCustomerAccount(tenantId: string, customerId: string): Promise<Customer> {
   const existing = await getCustomerById(tenantId, customerId);
@@ -1114,7 +1290,8 @@ export async function resetCustomerAccount(tenantId: string, customerId: string)
       .update({
         locked_balance: 0,
         savings_opening_fee_collected: false,
-        savings_opening_fee_recovered: 0
+        savings_opening_fee_recovered: 0,
+        last_qualifying_activity_at: new Date().toISOString()
       })
       .eq("tenant_id", tenantId)
       .eq("id", customerId);
@@ -1169,5 +1346,7 @@ export async function deleteCustomer(tenantId: string, customerId: string): Prom
     getTenantCustomers(tenantId).filter((c) => c.id !== customerId)
   );
 }
+
+export { QUALIFYING_TX_TYPES };
 
 

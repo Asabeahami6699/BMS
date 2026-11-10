@@ -5,11 +5,17 @@ import {
   createPlatformTenant,
   createTenantCompanyAdmin,
   listPlatformTenants,
+  terminateTenantCompany,
   updateTenantProductModules,
   updateTenantAddons,
   updateTenantSubscription,
   updateTenantSubdomain
 } from "../services/authService.js";
+import {
+  deleteCustomer,
+  listCustomers,
+  resetCustomerAccount
+} from "../services/customerService.js";
 import { requirePermission } from "../middleware/requirePermission.js";
 
 const subscriptionUpdateSchema = z.object({
@@ -125,3 +131,152 @@ platformRouter.post("/tenants/:tenantId/admins", requirePermission("users.create
     res.status(400).json({ error: error instanceof Error ? error.message : "Failed to create company admin" });
   }
 });
+
+/** Permanently terminate a company and purge all related tenant data. */
+platformRouter.delete(
+  "/tenants/:tenantId",
+  requirePermission("platform.tenants.update"),
+  async (req, res) => {
+    try {
+      const tenantId = String(req.params.tenantId);
+      const confirmName =
+        typeof req.body?.confirmName === "string" ? req.body.confirmName.trim() : "";
+      const tenants = await listPlatformTenants();
+      const tenant = tenants.find((t) => t.id === tenantId);
+      if (!tenant) {
+        res.status(404).json({ error: "Company not found" });
+        return;
+      }
+      if (!confirmName || confirmName.toLowerCase() !== tenant.name.trim().toLowerCase()) {
+        res.status(400).json({
+          error: `Type the exact company name "${tenant.name}" to confirm termination`
+        });
+        return;
+      }
+      const result = await terminateTenantCompany(tenantId);
+      res.json(result);
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Failed to terminate company"
+      });
+    }
+  }
+);
+
+/** Super-admin support: list a tenant's customers (for ledger reset / delete). */
+platformRouter.get(
+  "/tenants/:tenantId/customers",
+  requirePermission("platform.tenants.read"),
+  async (req, res) => {
+    try {
+      const tenantId = String(req.params.tenantId);
+      const q = typeof req.query.q === "string" ? req.query.q.trim().toLowerCase() : "";
+      const customers = await listCustomers(tenantId, { light: true });
+      const filtered = q
+        ? customers.filter((c) =>
+            [c.fullName, c.phone, c.accountNumber, c.id]
+              .filter(Boolean)
+              .some((v) => String(v).toLowerCase().includes(q))
+          )
+        : customers;
+      res.json({ customers: filtered });
+    } catch (error) {
+      res.status(500).json({
+        error: error instanceof Error ? error.message : "Failed to list tenant customers"
+      });
+    }
+  }
+);
+
+/** Clear ledger/balances; keep the customer profile. */
+platformRouter.post(
+  "/tenants/:tenantId/customers/:customerId/reset-account",
+  requirePermission("platform.tenants.update"),
+  async (req, res) => {
+    try {
+      const tenantId = String(req.params.tenantId);
+      const customerId = String(req.params.customerId);
+      res.json(await resetCustomerAccount(tenantId, customerId));
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Failed to reset customer account"
+      });
+    }
+  }
+);
+
+/** Permanently delete customer + related financial history. */
+platformRouter.delete(
+  "/tenants/:tenantId/customers/:customerId",
+  requirePermission("platform.tenants.update"),
+  async (req, res) => {
+    try {
+      const tenantId = String(req.params.tenantId);
+      const customerId = String(req.params.customerId);
+      await deleteCustomer(tenantId, customerId);
+      res.json({ ok: true });
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Failed to delete customer"
+      });
+    }
+  }
+);
+
+/** Clear ledgers for every customer in the tenant (profiles kept). */
+platformRouter.post(
+  "/tenants/:tenantId/customers/reset-all",
+  requirePermission("platform.tenants.update"),
+  async (req, res) => {
+    try {
+      const tenantId = String(req.params.tenantId);
+      const customers = await listCustomers(tenantId, { light: true });
+      let reset = 0;
+      const errors: string[] = [];
+      for (const customer of customers) {
+        try {
+          await resetCustomerAccount(tenantId, customer.id);
+          reset += 1;
+        } catch (error) {
+          errors.push(
+            `${customer.fullName}: ${error instanceof Error ? error.message : "reset failed"}`
+          );
+        }
+      }
+      res.json({ ok: true, total: customers.length, reset, errors });
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Failed to reset all customers"
+      });
+    }
+  }
+);
+
+/** Permanently delete every customer in the tenant. */
+platformRouter.delete(
+  "/tenants/:tenantId/customers",
+  requirePermission("platform.tenants.update"),
+  async (req, res) => {
+    try {
+      const tenantId = String(req.params.tenantId);
+      const customers = await listCustomers(tenantId, { light: true });
+      let deleted = 0;
+      const errors: string[] = [];
+      for (const customer of customers) {
+        try {
+          await deleteCustomer(tenantId, customer.id);
+          deleted += 1;
+        } catch (error) {
+          errors.push(
+            `${customer.fullName}: ${error instanceof Error ? error.message : "delete failed"}`
+          );
+        }
+      }
+      res.json({ ok: true, total: customers.length, deleted, errors });
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Failed to delete all customers"
+      });
+    }
+  }
+);

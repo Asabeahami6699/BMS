@@ -1,3 +1,4 @@
+import { formatAccountAmount } from "@bms/shared";
 import { useMemo } from "react";
 import type { AppRole } from "./api";
 import { usePerformanceLiveSync } from "./hooks/usePerformanceLiveSync";
@@ -11,7 +12,7 @@ import { useToast } from "../components/Toast";
 type Props = { role: AppRole };
 
 function formatMoney(amount: number): string {
-  return `GHS ${amount.toFixed(2)}`;
+  return `GHS ${formatAccountAmount(amount)}`;
 }
 
 export function PerformancePage({ role: _role }: Props) {

@@ -1,3 +1,4 @@
+import { formatAccountAmount } from "@bms/shared";
 import type { BranchFloatSummary } from "../app/api";
 
 const ROLES_REQUIRING_FLOAT = new Set(["teller", "coordinator"]);
@@ -37,14 +38,14 @@ export function checkTillFloatForTransaction(input: {
   ) {
     return {
       ok: false,
-      message: `Insufficient float balance (GHS ${input.floatSummary.floatBalance.toFixed(2)} available). Deposits reduce float — request more from admin.`
+      message: `Insufficient float balance (GHS ${formatAccountAmount(input.floatSummary.floatBalance)} available). Deposits reduce float — request more from admin.`
     };
   }
 
   if (input.type === "withdrawal" && input.amount > input.floatSummary.expectedCash + 1e-9) {
     return {
       ok: false,
-      message: `Insufficient cash in till for this withdrawal (GHS ${input.floatSummary.expectedCash.toFixed(2)} available).`
+      message: `Insufficient cash in till for this withdrawal (GHS ${formatAccountAmount(input.floatSummary.expectedCash)} available).`
     };
   }
 

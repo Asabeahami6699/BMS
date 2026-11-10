@@ -1,12 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
-import {
-  bankProductDisplayLabel,
+import { bankProductDisplayLabel,
   bankProductsForSubscription,
   hasTenantModule,
   workflowFieldsForStage,
-  type TenantBankProduct
-} from "@bms/shared";
+  type TenantBankProduct, formatAccountAmount } from "@bms/shared";
 import { useAuth } from "../../auth/AuthContext";
 import { filterRowsBySearch } from "../../components/AdminDataTable";
 import { useToast } from "../../components/Toast";
@@ -188,7 +186,7 @@ export function InitiateAgencyWithdrawalPanel({ onInitiated }: Props) {
       parsedAmount > balances.withdrawableBalance
     ) {
       showToast(
-        `Amount exceeds withdrawable balance (GHS ${balances.withdrawableBalance.toFixed(2)})`,
+        `Amount exceeds withdrawable balance (GHS ${formatAccountAmount(balances.withdrawableBalance)})`,
         "error"
       );
       return;
@@ -393,7 +391,7 @@ export function InitiateAgencyWithdrawalPanel({ onInitiated }: Props) {
                   <div className="branch-counter__hero-balances">
                     <div className="branch-counter__hero-balance branch-counter__hero-balance--primary">
                       <span>Withdrawable</span>
-                      <strong>GHS {balances.withdrawableBalance.toFixed(2)}</strong>
+                      <strong>GHS {formatAccountAmount(balances.withdrawableBalance)}</strong>
                     </div>
                   </div>
                 ) : null}

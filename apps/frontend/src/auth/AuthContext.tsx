@@ -94,10 +94,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (email: string, password: string) => {
       const session = await apiLogin(email, password);
       applyUser(session.user);
-      void refreshMe();
+      // Login payload already includes permissions/modules — skip a blocking /me round-trip.
       return getHomePathForRole(session.user.role as AppRole, session.user.subscribedModules);
     },
-    [applyUser, refreshMe]
+    [applyUser]
   );
 
   const logout = useCallback(async () => {

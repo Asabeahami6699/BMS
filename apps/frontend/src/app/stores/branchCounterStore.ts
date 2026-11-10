@@ -333,7 +333,16 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
     set({ liveSyncActive: true });
     liveSyncMgr.start({
       getTenantId,
-      tables: ["customer_transactions", "ledger_entries", "customers"],
+      tables: [
+        "customer_transactions",
+        "ledger_entries",
+        "customers",
+        "branch_float_sessions",
+        "branch_float_movements",
+        "agent_notifications"
+      ],
+      // Float approvals must show on the till immediately — short debounce.
+      debounceMs: 400,
       onRefresh: () => void get().refreshSilent(),
       isStale: () => !isFresh(get().lastFetchedAt, LEDGER_STALE_MS)
     });

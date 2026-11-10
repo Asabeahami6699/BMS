@@ -1,6 +1,8 @@
 import type { AccountType, CustomerRegistrationInput, RegistrationFormSetup } from "@bms/shared";
 import {
   defaultRegistrationFormSetup,
+  formatAccountAmount,
+  formatGhs,
   registrationFormIssue,
   registrationPayloadForSetup
 } from "@bms/shared";
@@ -15,7 +17,7 @@ import { compressImageDataUrl, isDataUrlWithinLimit } from "../lib/imageCompress
 import { toUserFacingError } from "../lib/networkError";
 
 function money(amount: number): string {
-  return `GHS ${amount.toFixed(2)}`;
+  return formatGhs(amount);
 }
 
 const EMPTY_FORM = {
@@ -24,6 +26,8 @@ const EMPTY_FORM = {
   phone: "",
   location: "",
   houseNumber: "",
+  dateOfBirth: "",
+  occupation: "",
   accountType: "susu" as AccountType,
   idCardNumber: "",
   kinName: "",
@@ -119,6 +123,18 @@ function RegistrationPreview({
             <dd>{form.email}</dd>
           </>
         ) : null}
+        {fields.dateOfBirth !== "hidden" ? (
+          <>
+            <dt>Date of birth</dt>
+            <dd>{form.dateOfBirth || "—"}</dd>
+          </>
+        ) : null}
+        {fields.occupation !== "hidden" ? (
+          <>
+            <dt>Occupation</dt>
+            <dd>{form.occupation || "—"}</dd>
+          </>
+        ) : null}
         <dt>Address</dt>
         <dd>
           {[form.location, fields.houseNumber === "hidden" ? "" : form.houseNumber].filter(Boolean).join(", ") || "—"}
@@ -152,7 +168,7 @@ function RegistrationPreview({
         {fields.dailyContribution !== "hidden" ? (
           <>
             <dt>Daily contribution</dt>
-            <dd>GHS {parseDailyContribution(form.dailyContributionAmount).toFixed(2)}</dd>
+            <dd>GHS {formatAccountAmount(parseDailyContribution(form.dailyContributionAmount))}</dd>
           </>
         ) : null}
       </dl>
@@ -328,6 +344,8 @@ export function RegistrationModal({
       accountType: form.accountType,
       email: form.email,
       houseNumber: form.houseNumber,
+      dateOfBirth: form.dateOfBirth,
+      occupation: form.occupation,
       idCardNumber: form.idCardNumber,
       idCardPhotoUrl,
       photoUrl,
@@ -414,6 +432,8 @@ export function RegistrationModal({
         phone: form.phone,
         location: form.location,
         houseNumber: cleaned.houseNumber,
+        dateOfBirth: cleaned.dateOfBirth,
+        occupation: cleaned.occupation,
         accountType: form.accountType,
         idCardNumber: cleaned.idCardNumber,
         photoUrl: cleaned.photoUrl,
@@ -581,6 +601,37 @@ export function RegistrationModal({
                 required
               />
             </label>
+
+            {formSetup.fields.dateOfBirth !== "hidden" ? (
+              <label className="field">
+                <span>
+                  Date of birth
+                  {formSetup.fields.dateOfBirth === "optional" ? " (optional)" : ""}
+                </span>
+                <input
+                  type="date"
+                  value={form.dateOfBirth}
+                  onChange={(e) => updateField("dateOfBirth", e.target.value)}
+                  max={new Date().toISOString().slice(0, 10)}
+                  required={formSetup.fields.dateOfBirth === "required"}
+                />
+              </label>
+            ) : null}
+
+            {formSetup.fields.occupation !== "hidden" ? (
+              <label className="field">
+                <span>
+                  Occupation
+                  {formSetup.fields.occupation === "optional" ? " (optional)" : ""}
+                </span>
+                <input
+                  value={form.occupation}
+                  onChange={(e) => updateField("occupation", e.target.value)}
+                  placeholder="e.g. Trader, Teacher"
+                  required={formSetup.fields.occupation === "required"}
+                />
+              </label>
+            ) : null}
 
             <label className="field">
               <span>Location / area</span>
@@ -820,7 +871,7 @@ export function RegistrationModal({
                     updateField("dailyContributionAmount", next);
                   }
                 }}
-                placeholder={(activeForm?.defaultDailyContributionGhs ?? 0).toFixed(2)}
+                placeholder={formatAccountAmount((activeForm?.defaultDailyContributionGhs ?? 0))}
                 required={formSetup.fields.dailyContribution === "required"}
               />
               <FieldHint>

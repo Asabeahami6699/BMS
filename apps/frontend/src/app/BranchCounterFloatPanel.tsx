@@ -1,3 +1,4 @@
+import { formatAccountAmount } from "@bms/shared";
 import { FormEvent, useState } from "react";
 import { Link } from "react-router-dom";
 import type { AppRole, Branch, BranchFloatSession, BranchFloatSummary } from "./api";
@@ -84,6 +85,8 @@ export function BranchCounterFloatPanel({
         isFloatTopUpRequest(session) ? "Top-up released onto the open till" : "Float released — till is open",
         "success"
       );
+      // Immediate till refresh for the approver and any open counter session.
+      await useBranchCounterStore.getState().refreshSilent();
       onUpdated();
     } catch (error) {
       showToast(toUserFacingError(error, "Could not release float"), "error");
@@ -207,7 +210,7 @@ export function BranchCounterFloatPanel({
                 <p className="branch-float__balance-warn" role="status">
                   {floatSummary.floatBalance <= 0
                     ? "This till float is used up. Request a top-up below before taking more deposits."
-                    : `Float is running low (below GHS ${floatSummary.lowFloatThreshold.toFixed(2)}). Request a top-up below before large deposits.`}
+                    : `Float is running low (below GHS ${formatAccountAmount(floatSummary.lowFloatThreshold)}). Request a top-up below before large deposits.`}
                 </p>
               ) : null}
             </div>

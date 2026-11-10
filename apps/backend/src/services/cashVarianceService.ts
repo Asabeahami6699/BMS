@@ -1,3 +1,4 @@
+import { formatAccountAmount } from "@bms/shared";
 import { randomUUID } from "node:crypto";
 import { getSupabaseAdminClient } from "../config/supabaseClient.js";
 import { listUsersByTenant } from "./authStore.js";
@@ -258,7 +259,7 @@ export async function openCashVarianceFromBatch(
           userId: batch.fieldAgentId,
           kind: "cash_shortage_opened",
           title: "Cash shortage recorded",
-          body: `Callover ${batch.businessDate}: you owe GHS ${opened.varianceAmount.toFixed(2)}. Pay at the office — this is not cleared by later overages.`
+          body: `Callover ${batch.businessDate}: you owe GHS ${formatAccountAmount(opened.varianceAmount)}. Pay at the office — this is not cleared by later overages.`
         });
       } else {
         await createAgentNotification({
@@ -266,7 +267,7 @@ export async function openCashVarianceFromBatch(
           userId: batch.fieldAgentId,
           kind: "cash_overage_opened",
           title: "Cash overage to reconcile",
-          body: `Callover ${batch.businessDate}: GHS ${opened.varianceAmount.toFixed(2)} above system total. Find unposted customer contributions — this cannot settle a shortage.`
+          body: `Callover ${batch.businessDate}: GHS ${formatAccountAmount(opened.varianceAmount)} above system total. Find unposted customer contributions — this cannot settle a shortage.`
         });
       }
     } catch {
@@ -291,7 +292,7 @@ export async function openCashVarianceFromBatch(
         userId: batch.fieldAgentId,
         kind: "cash_shortage_opened",
         title: "Cash shortage recorded",
-        body: `Callover ${batch.businessDate}: you owe GHS ${record.varianceAmount.toFixed(2)}. Pay at the office — this is not cleared by later overages.`
+        body: `Callover ${batch.businessDate}: you owe GHS ${formatAccountAmount(record.varianceAmount)}. Pay at the office — this is not cleared by later overages.`
       });
     } else {
       await createAgentNotification({
@@ -299,7 +300,7 @@ export async function openCashVarianceFromBatch(
         userId: batch.fieldAgentId,
         kind: "cash_overage_opened",
         title: "Cash overage to reconcile",
-        body: `Callover ${batch.businessDate}: GHS ${record.varianceAmount.toFixed(2)} above system total. Find unposted customer contributions — this cannot settle a shortage.`
+        body: `Callover ${batch.businessDate}: GHS ${formatAccountAmount(record.varianceAmount)} above system total. Find unposted customer contributions — this cannot settle a shortage.`
       });
     }
   } catch {
@@ -476,7 +477,7 @@ export async function settleCashVariance(
   }
   if (amount - current.outstandingAmount > 0.005) {
     throw new Error(
-      `Settlement cannot exceed outstanding GHS ${current.outstandingAmount.toFixed(2)}`
+      `Settlement cannot exceed outstanding GHS ${formatAccountAmount(current.outstandingAmount)}`
     );
   }
 
@@ -574,8 +575,8 @@ export async function settleCashVariance(
             : "Overage reconciled",
         body:
           current.varianceType === "shortage"
-            ? `Your GHS ${current.varianceAmount.toFixed(2)} shortage for ${current.businessDate} is cleared.`
-            : `Your GHS ${current.varianceAmount.toFixed(2)} overage for ${current.businessDate} is reconciled.`
+            ? `Your GHS ${formatAccountAmount(current.varianceAmount)} shortage for ${current.businessDate} is cleared.`
+            : `Your GHS ${formatAccountAmount(current.varianceAmount)} overage for ${current.businessDate} is reconciled.`
       });
     }
   } catch {
@@ -614,7 +615,7 @@ export async function creditCustomerFromOverage(
   }
   if (amount - current.outstandingAmount > 0.005) {
     throw new Error(
-      `Credit cannot exceed open overage GHS ${current.outstandingAmount.toFixed(2)}`
+      `Credit cannot exceed open overage GHS ${formatAccountAmount(current.outstandingAmount)}`
     );
   }
 

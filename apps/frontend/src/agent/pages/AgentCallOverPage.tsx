@@ -1,3 +1,4 @@
+import { formatAccountAmount } from "@bms/shared";
 import { useEffect, useMemo, useState } from "react";
 import type { Customer } from "../../app/api";
 import { submitCollectionBatchForApproval, type CalloverReportLine } from "../../app/api";
@@ -18,7 +19,7 @@ function parseAmount(text: string): number {
 }
 
 function formatMoney(amount: number): string {
-  return amount > 0 ? `GHS ${amount.toFixed(2)}` : "—";
+  return amount > 0 ? `GHS ${formatAccountAmount(amount)}` : "—";
 }
 
 export function AgentCallOverPage() {
@@ -398,9 +399,9 @@ export function AgentCallOverPage() {
                   {given > 0 ? (
                     <p className={`agent-callover-variance agent-callover-variance--${variance.type}`}>
                       {variance.type === "shortage"
-                        ? `Shortage: GHS ${variance.delta.toFixed(2)}`
+                        ? `Shortage: GHS ${formatAccountAmount(variance.delta)}`
                         : variance.type === "overage"
-                          ? `Overage: GHS ${variance.delta.toFixed(2)}`
+                          ? `Overage: GHS ${formatAccountAmount(variance.delta)}`
                           : "Amounts match"}
                     </p>
                   ) : null}

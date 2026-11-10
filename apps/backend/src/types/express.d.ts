@@ -13,6 +13,8 @@ export interface UserContext {
   subscribedModules?: TenantProductModule[];
   subscribedAddons?: TenantAddon[];
   reportsAnalytics?: boolean;
+  /** Raw tenant setting; use canUseSusuLoanBridge(modules, flag) for the effective capability. */
+  susuLoanBridgeEnabled?: boolean;
   tenantSubdomain?: string;
 }
 

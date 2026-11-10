@@ -1,3 +1,4 @@
+import { formatAccountAmount } from "@bms/shared";
 import { useEffect, useState } from "react";
 import type { Customer, LedgerEntry } from "./api";
 import { printCustomerAccountStatement } from "./customerAccountStatement";
@@ -52,10 +53,24 @@ function entryTypeLabel(entry: LedgerEntry): string {
   if (entry.transactionType === "susu_reversal") {
     return "Reversal";
   }
-  if (entry.notes?.toLowerCase().includes("settled shortage")) {
+  const reasonOrNotes = `${entry.reason ?? ""} ${entry.notes ?? ""}`.toLowerCase();
+  if (reasonOrNotes.includes("loan repayment")) {
+    return "Loan repayment";
+  }
+  if (reasonOrNotes.includes("settled shortage")) {
     return "Settled shortage";
   }
   return entry.entryType === "credit" ? "Credit" : "Debit";
+}
+
+function entryReason(entry: LedgerEntry): string {
+  if (entry.reason?.trim()) {
+    return entry.reason.trim();
+  }
+  if (entry.notes?.toLowerCase().includes("loan repayment")) {
+    return entry.notes.replace(/\s*·\s*loan_repay:[0-9a-f-]+/gi, "").trim();
+  }
+  return "—";
 }
 
 export function CustomerAccountStatementModal({ open, customer, onClose }: Props) {
@@ -158,7 +173,7 @@ export function CustomerAccountStatementModal({ open, customer, onClose }: Props
             <div className="cif-financial__balance cif-financial__balance--primary">
               <span className="cif-financial__balance-label">Account balance</span>
               <strong className="cif-financial__balance-value">
-                {ledgerLoading && ledger.length === 0 ? "…" : `GHS ${accountBalance.toFixed(2)}`}
+                {ledgerLoading && ledger.length === 0 ? "…" : `GHS ${formatAccountAmount(accountBalance)}`}
               </strong>
             </div>
           </div>
@@ -229,6 +244,9 @@ export function CustomerAccountStatementModal({ open, customer, onClose }: Props
                         <strong>Amount</strong>
                       </span>
                       <span role="columnheader">
+                        <strong>Reason</strong>
+                      </span>
+                      <span role="columnheader">
                         <strong>Recorded by</strong>
                       </span>
                       <span role="columnheader">
@@ -237,8 +255,9 @@ export function CustomerAccountStatementModal({ open, customer, onClose }: Props
                     </div>
                     {displayedLedger.map((entry) => {
                       const typeLabel = entryTypeLabel(entry);
+                      const reason = entryReason(entry);
                       return (
-                        <div className="cif-ledger__row" role="row" key={entry.id}>
+                        <div className="cif-ledger__row cif-ledger__row--with-reason" role="row" key={entry.id}>
                           <span>{formatLedgerDate(entry.createdAt)}</span>
                           <span
                             className={`cif-ledger__type--${entry.entryType}`}
@@ -247,14 +266,17 @@ export function CustomerAccountStatementModal({ open, customer, onClose }: Props
                             {typeLabel}
                             {entry.reversalStatus === "reversed" ? " · Reversed" : ""}
                           </span>
-                          <span>GHS {entry.amount.toFixed(2)}</span>
+                          <span>GHS {formatAccountAmount(entry.amount)}</span>
+                          <span className="cif-ledger__reason" title={reason !== "—" ? reason : undefined}>
+                            {reason}
+                          </span>
                           <span
                             className="cif-ledger__by"
                             title={entry.performedByName ?? entry.recordedByName ?? undefined}
                           >
                             {entry.performedByName ?? entry.recordedByName ?? "—"}
                           </span>
-                          <span>GHS {entry.balanceAfter.toFixed(2)}</span>
+                          <span>GHS {formatAccountAmount(entry.balanceAfter)}</span>
                         </div>
                       );
                     })}

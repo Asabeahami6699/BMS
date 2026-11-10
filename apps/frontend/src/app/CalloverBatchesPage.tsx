@@ -1,3 +1,4 @@
+import { formatAccountAmount } from "@bms/shared";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type {
@@ -651,7 +652,7 @@ export function CalloverBatchesPage({ role }: Props) {
                     min="0"
                     step="0.01"
                     inputMode="decimal"
-                    placeholder={batch.totalAmount.toFixed(2)}
+                    placeholder={formatAccountAmount(batch.totalAmount)}
                     value={cashByBatchId[batch.id] ?? ""}
                     onChange={(e) =>
                       setCashByBatchId((prev) => ({ ...prev, [batch.id]: e.target.value }))

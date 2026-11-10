@@ -28,6 +28,8 @@ export type RegistrationAccountForm = z.infer<typeof registrationAccountFormSche
 export const registrationFormFieldsSchema = z.object({
   email: registrationFieldRequirementSchema,
   houseNumber: registrationFieldRequirementSchema,
+  dateOfBirth: registrationFieldRequirementSchema.default("required"),
+  occupation: registrationFieldRequirementSchema.default("required"),
   idCardNumber: registrationFieldRequirementSchema,
   idCardPhoto: registrationFieldRequirementSchema,
   customerPhoto: registrationFieldRequirementSchema,
@@ -97,6 +99,8 @@ const DEFAULT_FORM_COPY: Record<
 const DEFAULT_FIELDS: RegistrationFormFields = {
   email: "optional",
   houseNumber: "required",
+  dateOfBirth: "required",
+  occupation: "required",
   idCardNumber: "required",
   idCardPhoto: "required",
   customerPhoto: "optional",
@@ -153,6 +157,8 @@ export type RegistrationDraft = {
   accountType: AccountType;
   email?: string;
   houseNumber?: string;
+  dateOfBirth?: string;
+  occupation?: string;
   idCardNumber?: string;
   idCardPhotoUrl?: string;
   photoUrl?: string;
@@ -185,6 +191,12 @@ export function registrationFormIssue(draft: RegistrationDraft, setup: Registrat
   }
   if (fields.houseNumber === "required" && !filled(draft.houseNumber)) {
     return "Enter the house number.";
+  }
+  if (fields.dateOfBirth === "required" && !filled(draft.dateOfBirth)) {
+    return "Enter the date of birth.";
+  }
+  if (fields.occupation === "required" && !filled(draft.occupation)) {
+    return "Enter the occupation.";
   }
   if (fields.idCardNumber === "required" && !filled(draft.idCardNumber)) {
     return "Enter the ID card number.";
@@ -223,6 +235,8 @@ export function registrationPayloadForSetup<T extends RegistrationDraft>(draft: 
     next.email = filled(draft.email);
   }
   next.houseNumber = fields.houseNumber === "hidden" ? undefined : filled(draft.houseNumber);
+  next.dateOfBirth = fields.dateOfBirth === "hidden" ? undefined : filled(draft.dateOfBirth);
+  next.occupation = fields.occupation === "hidden" ? undefined : filled(draft.occupation);
   next.idCardNumber = fields.idCardNumber === "hidden" ? undefined : filled(draft.idCardNumber);
   if (fields.idCardPhoto === "hidden") {
     next.idCardPhotoUrl = undefined;

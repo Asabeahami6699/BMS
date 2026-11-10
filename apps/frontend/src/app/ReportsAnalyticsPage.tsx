@@ -5,10 +5,11 @@ import {
   hasAnyPermission,
   hasTenantModule,
   listSubscribedProductModules,
-  MODULE_LABELS
+  MODULE_LABELS,
+  type TenantProductModule
 } from "@bms/shared";
 import type { AppRole, AuthMe, BranchReport, SusuReversalHistoryItem } from "./api";
-import { exportReportsCsv, listSusuReversals } from "./api";
+import { exportReportsCsv, getLoansBootstrap, listSusuReversals } from "./api";
 import { useReportsAnalyticsLiveSync } from "./hooks/useReportsAnalyticsLiveSync";
 import { useInvestmentsLiveSync } from "./hooks/useInvestmentsLiveSync";
 import { selectAgentDisplayName, selectBranchDisplayName } from "./stores/performanceStore";
@@ -21,6 +22,17 @@ import { formatInvestmentMoney } from "./investments/investmentUi";
 type Props = {
   role: AppRole;
   me: AuthMe | null;
+};
+
+type PeriodKey = "daily" | "weekly" | "monthly" | "yearly";
+
+type QuickAction = {
+  key: string;
+  label: string;
+  hint: string;
+  to: string;
+  tone: "green" | "purple" | "blue" | "orange" | "red" | "teal";
+  module: TenantProductModule | "core";
 };
 
 function formatMoney(amount: number): string {
@@ -44,17 +56,139 @@ function formatWhen(iso: string): string {
 
 function formatShortDate(iso: string): string {
   try {
-    return new Date(iso + "T12:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    return new Date(iso + "T12:00:00").toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric"
+    });
   } catch {
     return iso;
   }
 }
 
+function isoDaysAgo(days: number): string {
+  const date = new Date();
+  date.setHours(12, 0, 0, 0);
+  date.setDate(date.getDate() - days);
+  return date.toISOString().slice(0, 10);
+}
+
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function periodRange(period: PeriodKey): { fromDate: string; toDate: string } {
+  const toDate = todayIso();
+  if (period === "daily") {
+    return { fromDate: toDate, toDate };
+  }
+  if (period === "weekly") {
+    return { fromDate: isoDaysAgo(6), toDate };
+  }
+  if (period === "monthly") {
+    return { fromDate: isoDaysAgo(29), toDate };
+  }
+  return { fromDate: isoDaysAgo(364), toDate };
+}
+
+function trendDelta(current: number, previous: number): { label: string; up: boolean } | null {
+  if (previous === 0 && current === 0) {
+    return null;
+  }
+  if (previous === 0) {
+    return { label: "+100%", up: true };
+  }
+  const pct = ((current - previous) / Math.abs(previous)) * 100;
+  const rounded = Math.round(pct * 10) / 10;
+  return {
+    label: `${rounded >= 0 ? "+" : ""}${rounded}%`,
+    up: rounded >= 0
+  };
+}
+
+const QUICK_ACTIONS: QuickAction[] = [
+  {
+    key: "customers",
+    label: "Customers",
+    hint: "Browse accounts",
+    to: "/app/susu/customers",
+    tone: "green",
+    module: "susu_management"
+  },
+  {
+    key: "callover",
+    label: "Callover",
+    hint: "Post collections",
+    to: "/app/susu/callover-batches",
+    tone: "green",
+    module: "susu_management"
+  },
+  {
+    key: "os",
+    label: "Overages/Shortages",
+    hint: "Cash variances",
+    to: "/app/susu/overages-shortages",
+    tone: "orange",
+    module: "susu_management"
+  },
+  {
+    key: "branch-counter",
+    label: "Branch counter",
+    hint: "Till & cash",
+    to: "/app/susu/collections",
+    tone: "blue",
+    module: "susu_management"
+  },
+  {
+    key: "teller",
+    label: "Teller",
+    hint: "Agency desk",
+    to: "/app/banking/teller",
+    tone: "purple",
+    module: "banking"
+  },
+  {
+    key: "withdrawals",
+    label: "Withdrawals",
+    hint: "Payout queue",
+    to: "/app/banking/withdrawals",
+    tone: "teal",
+    module: "banking"
+  },
+  {
+    key: "loans",
+    label: "Loans",
+    hint: "Portfolio",
+    to: "/app/loans",
+    tone: "blue",
+    module: "loans_credit"
+  },
+  {
+    key: "treasury",
+    label: "Treasury",
+    hint: "Liquidity",
+    to: "/app/treasury",
+    tone: "purple",
+    module: "treasury"
+  },
+  {
+    key: "investments",
+    label: "Investments",
+    hint: "Portfolio",
+    to: "/app/investments/reports",
+    tone: "orange",
+    module: "investment_management"
+  }
+];
+
 export function ReportsAnalyticsPage({ role, me }: Props) {
   const modules = me?.subscribedModules;
   const hasSusu = hasTenantModule(modules, "susu_management");
+  const hasBanking = hasTenantModule(modules, "banking");
+  const hasLoans = hasTenantModule(modules, "loans_credit");
+  const hasTreasury = hasTenantModule(modules, "treasury");
   const hasInvestments = hasTenantModule(modules, "investment_management");
   const canInvestmentsRead = hasAnyPermission(me?.permissions, ["investments.read"]);
+  const canLoansRead = hasAnyPermission(me?.permissions, ["loans.read"]);
   const canReportsRead = hasAnyPermission(me?.permissions, ["reports.read"]);
   const canLoad = me?.reportsAnalytics !== false && canReportsRead;
 
@@ -62,7 +196,6 @@ export function ReportsAnalyticsPage({ role, me }: Props) {
   useInvestmentsLiveSync(hasInvestments && canInvestmentsRead && canLoad);
 
   const investmentKpis = useInvestmentStore(useShallow(selectInvestmentKpis));
-
   const { showToast } = useToast();
   const data = useReportsAnalyticsStore((s) => s.data);
   const loading = useReportsAnalyticsStore((s) => s.loading);
@@ -74,87 +207,43 @@ export function ReportsAnalyticsPage({ role, me }: Props) {
   const setDateRange = useReportsAnalyticsStore((s) => s.setDateRange);
   const refresh = useReportsAnalyticsStore((s) => s.refresh);
 
+  const [period, setPeriod] = useState<PeriodKey>("weekly");
+  const [productFilter, setProductFilter] = useState<"all" | TenantProductModule>("all");
+  const [loanSummary, setLoanSummary] = useState<{
+    pendingApproval: number;
+    disbursed: number;
+    totalOutstanding: number;
+    overdueInstallments: number;
+  } | null>(null);
+  const [reversalQuery, setReversalQuery] = useState("");
+  const [reversals, setReversals] = useState<SusuReversalHistoryItem[]>([]);
+  const [reversalsError, setReversalsError] = useState<string | null>(null);
+
   const branches = data?.branches ?? [];
   const summary = data?.summary;
   const agentNames = data?.agentNames ?? {};
 
-  const netCollections = useMemo(() => {
-    if (!summary) {
-      return 0;
+  useEffect(() => {
+    if (!hasLoans || !canLoansRead || !canLoad) {
+      setLoanSummary(null);
+      return;
     }
-    return Math.max(0, summary.totalDeposits + summary.totalDailySusu - summary.totalWithdrawals);
-  }, [summary]);
-
-  const collectionBars = useMemo(() => {
-    if (!summary) {
-      return [];
-    }
-    const items = [
-      { key: "susu", label: "Daily Susu", value: summary.totalDailySusu, tone: "primary" as const },
-      { key: "dep", label: "Deposits", value: summary.totalDeposits, tone: "success" as const },
-      { key: "wd", label: "Withdrawals", value: summary.totalWithdrawals, tone: "warn" as const }
-    ];
-    const max = Math.max(...items.map((i) => i.value), 1);
-    return items.map((i) => ({ ...i, pct: barPct(i.value, max) }));
-  }, [summary]);
-
-  const trendChart = useMemo(() => {
-    const trend = data?.dailyTrend ?? [];
-    const maxNet = Math.max(...trend.map((d) => Math.abs(d.net)), 1);
-    return trend.map((d) => ({
-      ...d,
-      label: formatShortDate(d.date),
-      heightPct: barPct(Math.abs(d.net), maxNet),
-      positive: d.net >= 0
-    }));
-  }, [data?.dailyTrend]);
-
-  const accountSegments = useMemo(() => {
-    const mix = data?.accountMix;
-    if (!mix) {
-      return [];
-    }
-    const total = mix.totalActive || 1;
-    return [
-      { key: "susu", label: "Daily Susu", count: mix.susu, pct: Math.round((mix.susu / total) * 100), tone: "primary" },
-      { key: "savings", label: "Savings", count: mix.savings, pct: Math.round((mix.savings / total) * 100), tone: "success" },
-      { key: "group", label: "Group", count: mix.group, pct: Math.round((mix.group / total) * 100), tone: "purple" },
-      { key: "meba", label: "Meba Daakye", count: mix.meba_daakye, pct: Math.round((mix.meba_daakye / total) * 100), tone: "warn" }
-    ].filter((s) => s.count > 0);
-  }, [data?.accountMix]);
-
-  const agentChart = useMemo(() => {
-    const agents = data?.agents.slice(0, 8) ?? [];
-    const max = Math.max(...agents.map((a) => a.totalCollections), 1);
-    return agents.map((a) => ({
-      id: a.fieldAgentId,
-      name: selectAgentDisplayName(a.fieldAgentId, agentNames),
-      value: a.totalCollections,
-      susu: a.dailySusuCount,
-      deposits: a.depositCount,
-      withdrawals: a.withdrawalCount,
-      pct: barPct(a.totalCollections, max)
-    }));
-  }, [data?.agents, agentNames]);
-
-  const branchChart = useMemo(() => {
-    const rows = data?.branchReports ?? [];
-    const max = Math.max(...rows.map((b) => b.totalAmount), 1);
-    return rows.map((b: BranchReport) => ({
-      id: b.branchId,
-      name: selectBranchDisplayName(b.branchId, branches),
-      total: b.totalAmount,
-      deposits: b.depositAmount ?? 0,
-      withdrawals: b.withdrawalAmount ?? 0,
-      susu: b.dailySusuAmount ?? 0,
-      tx: b.transactionCount,
-      pct: barPct(b.totalAmount, max)
-    }));
-  }, [data?.branchReports, branches]);
-
-  const [reversalQuery, setReversalQuery] = useState("");
-  const [reversals, setReversals] = useState<SusuReversalHistoryItem[]>([]);
-  const [reversalsError, setReversalsError] = useState<string | null>(null);
+    let cancelled = false;
+    void getLoansBootstrap()
+      .then((boot) => {
+        if (!cancelled) {
+          setLoanSummary(boot.summary);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setLoanSummary(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [hasLoans, canLoansRead, canLoad]);
 
   useEffect(() => {
     if (!hasSusu || !canReportsRead) {
@@ -179,34 +268,115 @@ export function ReportsAnalyticsPage({ role, me }: Props) {
     };
   }, [hasSusu, canReportsRead, branchFilter]);
 
+  const netCollections = useMemo(() => {
+    if (!summary) {
+      return 0;
+    }
+    return Math.max(0, summary.totalDeposits + summary.totalDailySusu - summary.totalWithdrawals);
+  }, [summary]);
+
+  const trendChart = useMemo(() => {
+    const trend = data?.dailyTrend ?? [];
+    const maxNet = Math.max(...trend.map((d) => Math.abs(d.net)), 1);
+    return trend.map((d) => ({
+      ...d,
+      label: formatShortDate(d.date),
+      heightPct: barPct(Math.abs(d.net), maxNet),
+      positive: d.net >= 0
+    }));
+  }, [data?.dailyTrend]);
+
+  const periodDelta = useMemo(() => {
+    const trend = data?.dailyTrend ?? [];
+    if (trend.length < 4) {
+      return null;
+    }
+    const mid = Math.floor(trend.length / 2);
+    const first = trend.slice(0, mid).reduce((s, d) => s + d.net, 0);
+    const second = trend.slice(mid).reduce((s, d) => s + d.net, 0);
+    return trendDelta(second, first);
+  }, [data?.dailyTrend]);
+
+  const agentChart = useMemo(() => {
+    const agents = data?.agents.slice(0, 5) ?? [];
+    return agents.map((a) => ({
+      id: a.fieldAgentId,
+      name: selectAgentDisplayName(a.fieldAgentId, agentNames),
+      value: a.totalCollections,
+      susu: a.dailySusuCount,
+      deposits: a.depositCount,
+      withdrawals: a.withdrawalCount
+    }));
+  }, [data?.agents, agentNames]);
+
+  const branchChart = useMemo(() => {
+    const rows = data?.branchReports ?? [];
+    return rows.map((b: BranchReport) => ({
+      id: b.branchId,
+      name: selectBranchDisplayName(b.branchId, branches),
+      total: b.totalAmount,
+      deposits: b.depositAmount ?? 0,
+      withdrawals: b.withdrawalAmount ?? 0,
+      susu: b.dailySusuAmount ?? 0,
+      tx: b.transactionCount
+    }));
+  }, [data?.branchReports, branches]);
+
   const filteredReversals = useMemo(() => {
     const query = reversalQuery.trim().toLowerCase();
     if (!query) {
-      return reversals;
+      return reversals.slice(0, 8);
     }
-    return reversals.filter((row) =>
-      [
-        row.customerName,
-        row.accountNumber,
-        row.reversalReference,
-        row.originalTransactionId,
-        row.reason,
-        row.postedByName,
-        row.reversedByName
-      ]
-        .filter(Boolean)
-        .some((value) => String(value).toLowerCase().includes(query))
-    );
+    return reversals
+      .filter((row) =>
+        [
+          row.customerName,
+          row.accountNumber,
+          row.reversalReference,
+          row.originalTransactionId,
+          row.reason,
+          row.postedByName,
+          row.reversedByName
+        ]
+          .filter(Boolean)
+          .some((value) => String(value).toLowerCase().includes(query))
+      )
+      .slice(0, 8);
   }, [reversals, reversalQuery]);
 
   const canExport = role === "admin" || role === "accountant" || role === "auditor";
   const canFilterBranch =
     role === "admin" || role === "accountant" || role === "auditor" || role === "coordinator";
 
-  const subscribed = useMemo(
-    () => listSubscribedProductModules(modules),
-    [modules]
+  const subscribed = useMemo(() => listSubscribedProductModules(modules), [modules]);
+
+  const showSusu = hasSusu && (productFilter === "all" || productFilter === "susu_management");
+  const showBanking = hasBanking && (productFilter === "all" || productFilter === "banking");
+  const showLoans = hasLoans && (productFilter === "all" || productFilter === "loans_credit");
+  const showTreasury = hasTreasury && (productFilter === "all" || productFilter === "treasury");
+  const showInvestments =
+    hasInvestments &&
+    canInvestmentsRead &&
+    (productFilter === "all" || productFilter === "investment_management");
+
+  const quickActions = useMemo(
+    () =>
+      QUICK_ACTIONS.filter((action) => {
+        if (action.module === "core") {
+          return productFilter === "all";
+        }
+        if (!hasTenantModule(modules, action.module)) {
+          return false;
+        }
+        return productFilter === "all" || productFilter === action.module;
+      }),
+    [modules, productFilter]
   );
+
+  function applyPeriod(next: PeriodKey) {
+    setPeriod(next);
+    setDateRange(periodRange(next));
+  }
 
   async function handleExportCsv() {
     try {
@@ -239,17 +409,36 @@ export function ReportsAnalyticsPage({ role, me }: Props) {
   }
 
   return (
-    <div className="reports-page">
-      <header className="overview-hero">
+    <div className="analytics-dash">
+      <header className="analytics-dash__hero">
         <div>
-          <p className="overview-hero__eyebrow">Insights</p>
-          <h1 className="overview-hero__title">Reports &amp; Analytics</h1>
-          <p className="overview-hero__sub muted">
-            14-day trends, collections, branches, agents, and operational pipeline
+          <p className="analytics-dash__eyebrow">Analysis</p>
+          <h1>Reports &amp; Analytics</h1>
+          <p className="muted">
+            Live insights for your subscribed products
             {me?.tenantName ? ` · ${me.tenantName}` : ""}.
           </p>
         </div>
-        <div className="reports-hero-actions">
+        <div className="analytics-dash__hero-actions">
+          <div className="analytics-period" role="group" aria-label="Report period">
+            {(
+              [
+                ["daily", "Daily"],
+                ["weekly", "Weekly"],
+                ["monthly", "Monthly"],
+                ["yearly", "Yearly"]
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                className={`analytics-period__btn${period === key ? " is-active" : ""}`}
+                onClick={() => applyPeriod(key)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <button
             type="button"
             className="button secondary"
@@ -266,18 +455,50 @@ export function ReportsAnalyticsPage({ role, me }: Props) {
         </div>
       </header>
 
-      <div className="reports-modules" aria-label="Subscribed products">
+      <div className="analytics-dash__modules" role="group" aria-label="Filter by product">
+        <button
+          type="button"
+          className={`analytics-dash__module-chip${productFilter === "all" ? " is-active" : ""}`}
+          onClick={() => setProductFilter("all")}
+        >
+          All products
+        </button>
         {subscribed.map((m) => (
-          <span key={m} className="reports-module-chip">
+          <button
+            key={m}
+            type="button"
+            className={`analytics-dash__module-chip${productFilter === m ? " is-active" : ""}`}
+            onClick={() => setProductFilter(m)}
+          >
             {MODULE_LABELS[m]}
-          </span>
+          </button>
         ))}
       </div>
 
-      <div className="reports-filters">
+      {quickActions.length > 0 ? (
+        <section className="analytics-actions" aria-label="Quick actions">
+          {quickActions.map((action) => (
+            <Link
+              key={action.key}
+              to={action.to}
+              className={`analytics-action analytics-action--${action.tone}`}
+            >
+              <span className="analytics-action__icon" aria-hidden>
+                ◆
+              </span>
+              <span className="analytics-action__copy">
+                <strong>{action.label}</strong>
+                <small>{action.hint}</small>
+              </span>
+            </Link>
+          ))}
+        </section>
+      ) : null}
+
+      <div className="analytics-dash__filters">
         {canFilterBranch && branches.length > 0 ? (
-          <label className="field overview-branch-filter">
-            <span>Branch filter</span>
+          <label className="field">
+            <span>Branch</span>
             <select value={branchFilter} onChange={(e) => setBranchFilter(e.target.value)}>
               <option value="">All branches</option>
               {branches.map((b) => (
@@ -289,7 +510,7 @@ export function ReportsAnalyticsPage({ role, me }: Props) {
           </label>
         ) : null}
         <label className="field">
-          <span>From date</span>
+          <span>From</span>
           <input
             type="date"
             value={fromDate}
@@ -298,7 +519,7 @@ export function ReportsAnalyticsPage({ role, me }: Props) {
           />
         </label>
         <label className="field">
-          <span>To date</span>
+          <span>To</span>
           <input
             type="date"
             value={toDate}
@@ -310,265 +531,303 @@ export function ReportsAnalyticsPage({ role, me }: Props) {
 
       {error ? <p className="overview-error">{error}</p> : null}
 
-      {hasInvestments && canInvestmentsRead ? (
-        <section className="overview-panel reports-product-panel" aria-label="Investment management summary">
-          <div className="reports-product-panel__head">
-            <h2 className="overview-panel__title">{MODULE_LABELS.investment_management}</h2>
-            <Link to="/app/investments/reports">Open investment reports →</Link>
-          </div>
-          <div className="kpi-grid overview-kpis">
-            <article className="kpi-card kpi-card--primary">
-              <p className="kpi-label">Active investments</p>
-              <p className="kpi-value">{investmentKpis.active}</p>
+      <section className="analytics-kpis" aria-label="Key metrics">
+        {showSusu ? (
+          <>
+            <article className="analytics-kpi">
+              <p className="analytics-kpi__label">Net collections</p>
+              <p className="analytics-kpi__value">
+                {loading && !data ? "…" : formatMoney(netCollections)}
+              </p>
+              {periodDelta ? (
+                <p className={`analytics-kpi__trend${periodDelta.up ? " is-up" : " is-down"}`}>
+                  {periodDelta.label} vs prior half of range
+                </p>
+              ) : (
+                <p className="analytics-kpi__meta">Deposits + Susu − withdrawals</p>
+              )}
             </article>
-            <article className="kpi-card kpi-card--purple">
-              <p className="kpi-label">Matured</p>
-              <p className="kpi-value">{investmentKpis.matured}</p>
+            <article className="analytics-kpi">
+              <p className="analytics-kpi__label">Active customers</p>
+              <p className="analytics-kpi__value">
+                {loading && !data ? "…" : data?.accountMix.totalActive ?? 0}
+              </p>
+              <p className="analytics-kpi__meta">
+                {data?.accountMix.pending ?? 0} pending activation
+              </p>
             </article>
-            <article className="kpi-card">
-              <p className="kpi-label">Portfolio principal</p>
-              <p className="kpi-value">{formatInvestmentMoney(investmentKpis.totalPrincipal)}</p>
+            <article className="analytics-kpi">
+              <p className="analytics-kpi__label">Transactions</p>
+              <p className="analytics-kpi__value">
+                {loading && !data ? "…" : summary?.totalTransactions ?? 0}
+              </p>
+              <p className="analytics-kpi__meta">In selected dates</p>
             </article>
-            <article className="kpi-card kpi-card--success">
-              <p className="kpi-label">Expected interest</p>
-              <p className="kpi-value">{formatInvestmentMoney(investmentKpis.totalExpectedInterest)}</p>
-            </article>
-          </div>
-        </section>
-      ) : null}
-
-      {hasSusu ? (
-        <>
-          <section className="kpi-grid reports-kpis">
-            <article className="kpi-card kpi-card--primary">
-              <p className="kpi-label">Transactions (selected dates)</p>
-              <p className="kpi-value">{loading && !data ? "…" : summary?.totalTransactions ?? 0}</p>
-            </article>
-            <article className="kpi-card kpi-card--success">
-              <p className="kpi-label">Net collections</p>
-              <p className="kpi-value">{loading && !data ? "…" : formatMoney(netCollections)}</p>
-            </article>
-            <article className="kpi-card">
-              <p className="kpi-label">Active customers</p>
-              <p className="kpi-value">{loading && !data ? "…" : data?.accountMix.totalActive ?? 0}</p>
-            </article>
-            <article className="kpi-card kpi-card--warn">
-              <p className="kpi-label">Pending registrations</p>
-              <p className="kpi-value">{data?.pending.registrations ?? 0}</p>
-              <Link className="kpi-link" to="/app/susu/pending-approvals">
+            <article className="analytics-kpi">
+              <p className="analytics-kpi__label">Pending registrations</p>
+              <p className="analytics-kpi__value">{data?.pending.registrations ?? 0}</p>
+              <Link className="analytics-kpi__link" to="/app/susu/pending-approvals">
                 Review →
               </Link>
             </article>
-            <article className="kpi-card kpi-card--purple">
-              <p className="kpi-label">Withdrawals pending</p>
-              <p className="kpi-value">{data?.withdrawals.pending ?? 0}</p>
-              <p className="kpi-meta muted">{formatMoney(data?.withdrawals.pendingAmount ?? 0)}</p>
-            </article>
-            <article className="kpi-card">
-              <p className="kpi-label">Agent requests</p>
-              <p className="kpi-value">{data?.pending.agentRequests ?? 0}</p>
-              <p className="kpi-meta muted">
-                {data?.pending.withdrawals ?? 0} withdrawal · {data?.pending.balanceInquiries ?? 0} balance
+            <article className="analytics-kpi">
+              <p className="analytics-kpi__label">Withdrawals pending</p>
+              <p className="analytics-kpi__value">{data?.withdrawals.pending ?? 0}</p>
+              <p className="analytics-kpi__meta">
+                {formatMoney(data?.withdrawals.pendingAmount ?? 0)}
               </p>
             </article>
-          </section>
+            <article className="analytics-kpi">
+              <p className="analytics-kpi__label">Agent requests</p>
+              <p className="analytics-kpi__value">{data?.pending.agentRequests ?? 0}</p>
+              <p className="analytics-kpi__meta">
+                {data?.pending.withdrawals ?? 0} w/d · {data?.pending.balanceInquiries ?? 0} balance
+              </p>
+            </article>
+          </>
+        ) : null}
 
-          <section className="overview-panel reports-panel--wide">
-            <h2 className="overview-panel__title">14-day net collections trend</h2>
-            <p className="overview-panel__lead muted">Daily net (deposits + Susu − withdrawals) by calendar day.</p>
-            {trendChart.length === 0 ? (
-              <p className="muted">{loading ? "Loading…" : "No trend data yet."}</p>
-            ) : (
-              <div className="reports-trend-chart" role="img" aria-label="14 day net collections trend">
-                {trendChart.map((day) => (
-                  <div className="reports-trend-col" key={day.date}>
-                    <div className="reports-trend-col__bar-wrap">
-                      <div
-                        className={`reports-trend-col__bar${day.positive ? "" : " reports-trend-col__bar--neg"}`}
-                        style={{ height: `${Math.max(day.heightPct, 4)}%` }}
-                        title={`${day.label}: ${formatMoney(day.net)}`}
-                      />
+        {showBanking ? (
+          <article className="analytics-kpi">
+            <p className="analytics-kpi__label">Agency banking</p>
+            <p className="analytics-kpi__value">Active</p>
+            <Link className="analytics-kpi__link" to="/app/banking/teller">
+              Open teller →
+            </Link>
+          </article>
+        ) : null}
+
+        {showLoans && loanSummary ? (
+          <>
+            <article className="analytics-kpi">
+              <p className="analytics-kpi__label">Loan outstanding</p>
+              <p className="analytics-kpi__value">{formatMoney(loanSummary.totalOutstanding)}</p>
+              <p className="analytics-kpi__meta">{loanSummary.disbursed} disbursed</p>
+            </article>
+            <article className="analytics-kpi">
+              <p className="analytics-kpi__label">Loan approvals</p>
+              <p className="analytics-kpi__value">{loanSummary.pendingApproval}</p>
+              <p className="analytics-kpi__meta">{loanSummary.overdueInstallments} overdue</p>
+            </article>
+          </>
+        ) : null}
+
+        {showInvestments ? (
+          <>
+            <article className="analytics-kpi">
+              <p className="analytics-kpi__label">Active investments</p>
+              <p className="analytics-kpi__value">{investmentKpis.active}</p>
+              <p className="analytics-kpi__meta">{investmentKpis.matured} matured</p>
+            </article>
+            <article className="analytics-kpi">
+              <p className="analytics-kpi__label">Portfolio principal</p>
+              <p className="analytics-kpi__value">
+                {formatInvestmentMoney(investmentKpis.totalPrincipal)}
+              </p>
+              <Link className="analytics-kpi__link" to="/app/investments/reports">
+                Investment reports →
+              </Link>
+            </article>
+          </>
+        ) : null}
+
+        {showTreasury ? (
+          <article className="analytics-kpi">
+            <p className="analytics-kpi__label">Treasury</p>
+            <p className="analytics-kpi__value">Subscribed</p>
+            <Link className="analytics-kpi__link" to="/app/treasury">
+              Open treasury →
+            </Link>
+          </article>
+        ) : null}
+      </section>
+
+      {showSusu ? (
+        <>
+          <div className="analytics-mid">
+            <section className="analytics-panel analytics-panel--chart">
+              <div className="analytics-panel__head">
+                <div>
+                  <h2>Collections overview</h2>
+                  <p className="muted">Net collections by day in the selected range</p>
+                </div>
+              </div>
+              {trendChart.length === 0 ? (
+                <p className="muted">{loading ? "Loading…" : "No trend data yet."}</p>
+              ) : (
+                <div className="analytics-trend" role="img" aria-label="Collections trend">
+                  {trendChart.map((day) => (
+                    <div className="analytics-trend__col" key={day.date}>
+                      <div className="analytics-trend__bar-wrap">
+                        <div
+                          className={`analytics-trend__bar${day.positive ? "" : " is-neg"}`}
+                          style={{ height: `${Math.max(day.heightPct, 4)}%` }}
+                          title={`${day.label}: ${formatMoney(day.net)}`}
+                        />
+                      </div>
+                      <span>{day.label}</span>
                     </div>
-                    <span className="reports-trend-col__label">{day.label}</span>
-                  </div>
-                ))}
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section className="analytics-panel">
+              <div className="analytics-panel__head">
+                <h2>Top agents</h2>
+                <p className="muted">Last 5 by collections</p>
+              </div>
+              {agentChart.length === 0 ? (
+                <p className="muted">No agent activity in this range.</p>
+              ) : (
+                <ul className="analytics-list">
+                  {agentChart.map((row) => (
+                    <li key={row.id}>
+                      <div>
+                        <strong>{row.name}</strong>
+                        <small className="muted">
+                          {row.susu} Susu · {row.deposits} dep · {row.withdrawals} w/d
+                        </small>
+                      </div>
+                      <span className="analytics-list__amt">{formatMoney(row.value)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+
+            <section className="analytics-panel">
+              <div className="analytics-panel__head">
+                <h2>Pipeline</h2>
+                <p className="muted">Approvals & payouts</p>
+              </div>
+              <div className="analytics-pipeline">
+                <div>
+                  <span className="muted">Registrations</span>
+                  <strong>{data?.pending.registrations ?? 0}</strong>
+                </div>
+                <div>
+                  <span className="muted">W/D pending</span>
+                  <strong>{data?.withdrawals.pending ?? 0}</strong>
+                </div>
+                <div>
+                  <span className="muted">W/D approved</span>
+                  <strong>{data?.withdrawals.approved ?? 0}</strong>
+                </div>
+                <div>
+                  <span className="muted">Balance asks</span>
+                  <strong>{data?.pending.balanceInquiries ?? 0}</strong>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <section className="analytics-panel analytics-panel--wide">
+            <div className="analytics-panel__head">
+              <div>
+                <h2>Branch performance</h2>
+                <p className="muted">Deposits, Susu, and withdrawals by branch</p>
+              </div>
+            </div>
+            {branchChart.length === 0 ? (
+              <p className="muted">No branch activity yet.</p>
+            ) : (
+              <div className="admin-table-scroll">
+                <table className="analytics-table">
+                  <thead>
+                    <tr>
+                      <th>Branch</th>
+                      <th>Transactions</th>
+                      <th>Deposits</th>
+                      <th>Susu</th>
+                      <th>Withdrawals</th>
+                      <th>Total</th>
+                      <th>Mix</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {branchChart.map((row) => {
+                      const mixTotal = row.deposits + row.susu + row.withdrawals || 1;
+                      return (
+                        <tr key={row.id}>
+                          <td>
+                            <strong>{row.name}</strong>
+                          </td>
+                          <td>{row.tx}</td>
+                          <td>{formatMoney(row.deposits)}</td>
+                          <td>{formatMoney(row.susu)}</td>
+                          <td>{formatMoney(row.withdrawals)}</td>
+                          <td>
+                            <strong>{formatMoney(row.total)}</strong>
+                          </td>
+                          <td className="analytics-table__mix">
+                            <div className="analytics-mix-bar">
+                              <span
+                                className="is-dep"
+                                style={{ width: `${barPct(row.deposits, mixTotal)}%` }}
+                              />
+                              <span
+                                className="is-susu"
+                                style={{ width: `${barPct(row.susu, mixTotal)}%` }}
+                              />
+                              <span
+                                className="is-wd"
+                                style={{ width: `${barPct(row.withdrawals, mixTotal)}%` }}
+                              />
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             )}
           </section>
 
-          <div className="overview-grid reports-charts-grid">
-            <section className="overview-panel">
-              <h2 className="overview-panel__title">Collection mix</h2>
-              <div className="overview-bars">
-                {collectionBars.map((bar) => (
-                  <div className="overview-bar-row" key={bar.key}>
-                    <div className="overview-bar-row__head">
-                      <span>{bar.label}</span>
-                      <strong>{formatMoney(bar.value)}</strong>
-                    </div>
-                    <div className="overview-bar-track">
-                      <div
-                        className={`overview-bar-fill overview-bar-fill--${bar.tone}`}
-                        style={{ width: `${bar.pct}%` }}
-                      />
-                    </div>
-                  </div>
-                ))}
+          <section className="analytics-panel analytics-panel--wide">
+            <div className="analytics-panel__head">
+              <div>
+                <h2>Susu reversal history</h2>
+                <p className="muted">Recent reversed collections</p>
               </div>
-            </section>
-
-            <section className="overview-panel">
-              <h2 className="overview-panel__title">Customer mix</h2>
-              <p className="overview-panel__lead muted">
-                {data?.accountMix.pending ?? 0} pending activation
-              </p>
-              {accountSegments.length === 0 ? (
-                <p className="muted">No active customers.</p>
-              ) : (
-                <>
-                  <div className="reports-donut" aria-hidden>
-                    {accountSegments.map((seg) => (
-                      <div
-                        key={seg.key}
-                        className={`reports-donut__seg reports-donut__seg--${seg.tone}`}
-                        style={{ flexGrow: seg.count }}
-                      />
-                    ))}
-                  </div>
-                  <ul className="overview-mix-list">
-                    {accountSegments.map((seg) => (
-                      <li className="overview-mix-item" key={seg.key}>
-                        <span>{seg.label}</span>
-                        <span className="overview-mix-item__stat">
-                          <strong>{seg.count}</strong>
-                          <small className="muted">{seg.pct}%</small>
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                </>
-              )}
-            </section>
-
-            <section className="overview-panel">
-              <h2 className="overview-panel__title">Withdrawal pipeline</h2>
-              <div className="reports-stat-grid">
-                <div>
-                  <span className="muted">Pending</span>
-                  <strong>{data?.withdrawals.pending ?? 0}</strong>
-                </div>
-                <div>
-                  <span className="muted">Approved</span>
-                  <strong>{data?.withdrawals.approved ?? 0}</strong>
-                </div>
-                <div>
-                  <span className="muted">Rejected</span>
-                  <strong>{data?.withdrawals.rejected ?? 0}</strong>
-                </div>
-                <div>
-                  <span className="muted">Pending amount</span>
-                  <strong>{formatMoney(data?.withdrawals.pendingAmount ?? 0)}</strong>
-                </div>
-              </div>
-            </section>
-
-            <section className="overview-panel">
-              <h2 className="overview-panel__title">Top field agents</h2>
-              {agentChart.map((row) => (
-                <div className="overview-bar-row" key={row.id}>
-                  <div className="overview-bar-row__head">
-                    <span>{row.name}</span>
-                    <strong>{formatMoney(row.value)}</strong>
-                  </div>
-                  <div className="overview-bar-track">
-                    <div className="overview-bar-fill overview-bar-fill--primary" style={{ width: `${row.pct}%` }} />
-                  </div>
-                  <p className="reports-agent-meta muted">
-                    {row.susu} Susu · {row.deposits} dep · {row.withdrawals} w/d
-                  </p>
-                </div>
-              ))}
-            </section>
-
-            <section className="overview-panel reports-panel--wide">
-              <h2 className="overview-panel__title">Branch performance (deposits vs withdrawals)</h2>
-              {branchChart.map((row) => (
-                <div className="reports-branch-row" key={row.id}>
-                  <div className="reports-branch-row__head">
-                    <span>{row.name}</span>
-                    <strong>{formatMoney(row.total)}</strong>
-                    <small className="muted">{row.tx} transactions</small>
-                  </div>
-                  <div className="reports-branch-stack">
-                    <div
-                      className="reports-branch-stack__dep"
-                      style={{
-                        width: `${barPct(row.deposits, row.deposits + row.withdrawals + row.susu)}%`
-                      }}
-                      title={`Deposits ${formatMoney(row.deposits)}`}
-                    />
-                    <div
-                      className="reports-branch-stack__susu"
-                      style={{ width: `${barPct(row.susu, row.deposits + row.withdrawals + row.susu)}%` }}
-                      title={`Susu ${formatMoney(row.susu)}`}
-                    />
-                    <div
-                      className="reports-branch-stack__wd"
-                      style={{
-                        width: `${barPct(row.withdrawals, row.deposits + row.withdrawals + row.susu)}%`
-                      }}
-                      title={`Withdrawals ${formatMoney(row.withdrawals)}`}
-                    />
-                  </div>
-                </div>
-              ))}
-            </section>
-          </div>
-
-          <section className="overview-panel reports-panel--wide" aria-label="Susu reversal history">
-            <h2 className="overview-panel__title">Susu reversal history</h2>
-            <p className="muted">
-              Reversed susu credits stay on the customer record and are left out of the collection totals above.
-            </p>
-            <label className="field">
-              <span>Reversal history filter</span>
-              <input
-                value={reversalQuery}
-                onChange={(event) => setReversalQuery(event.target.value)}
-                placeholder="Customer, account, reference, or reason"
-              />
-            </label>
+              <label className="field analytics-panel__search">
+                <span className="sr-only">Filter reversals</span>
+                <input
+                  value={reversalQuery}
+                  onChange={(event) => setReversalQuery(event.target.value)}
+                  placeholder="Search customer, account, reason…"
+                />
+              </label>
+            </div>
             {reversalsError ? <p className="overview-error">{reversalsError}</p> : null}
             {filteredReversals.length === 0 ? (
               <p className="muted">No reversed susu collections match this filter.</p>
             ) : (
               <div className="admin-table-scroll">
-                <table className="susu-reversal__table">
+                <table className="analytics-table">
                   <thead>
                     <tr>
                       <th>Reversed</th>
                       <th>Customer</th>
-                      <th>Account</th>
                       <th>Amount</th>
-                      <th>Original reference</th>
-                      <th>Reversal reference</th>
                       <th>Reason</th>
-                      <th>Posted by</th>
-                      <th>Reversed by</th>
+                      <th>Status</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filteredReversals.map((row) => (
                       <tr key={row.reversalTransactionId}>
                         <td>{formatWhen(row.reversedAt)}</td>
-                        <td>{row.customerName}</td>
-                        <td>{row.accountNumber ?? "—"}</td>
+                        <td>
+                          <strong>{row.customerName}</strong>
+                          <div className="muted">{row.accountNumber ?? "—"}</div>
+                        </td>
                         <td>{formatMoney(row.amount)}</td>
-                        <td>{row.originalTransactionId}</td>
-                        <td>{row.reversalReference}</td>
                         <td>{row.reason}</td>
-                        <td>{row.postedByName}</td>
-                        <td>{row.reversedByName}</td>
+                        <td>
+                          <span className="analytics-badge analytics-badge--ok">Reversed</span>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -576,17 +835,11 @@ export function ReportsAnalyticsPage({ role, me }: Props) {
               </div>
             )}
           </section>
-
-          <p className="muted reports-footnote">
-            Branch counter till float and EOD balancing live under{" "}
-            <Link to="/app/susu/collections">Susu → Branch counter</Link>. Field agents collect in the
-            field without a branch till float.
-          </p>
         </>
-      ) : subscribed.length > 0 && !hasSusu ? (
+      ) : subscribed.length > 0 ? (
         <p className="muted">
-          Susu analytics charts require Susu Management. Other subscribed products appear above when data is
-          available.
+          Product summaries above reflect your subscription. Susu charts appear when Susu Management is
+          enabled.
         </p>
       ) : (
         <p className="muted">Subscribe to a product module to unlock analytics.</p>

@@ -14,7 +14,8 @@ function isApprovedKind(kind: AgentNotification["kind"]): boolean {
     kind === "withdrawal_momo_sent" ||
     kind === "collection_batch_posted" ||
     kind === "cash_variance_settled" ||
-    kind === "float_allocated"
+    kind === "float_allocated" ||
+    kind === "loan_auto_repayment"
   );
 }
 
@@ -22,7 +23,8 @@ function isDeclinedKind(kind: AgentNotification["kind"]): boolean {
   return (
     kind === "registration_rejected" ||
     kind === "balance_disclosure_rejected" ||
-    kind === "withdrawal_request_rejected"
+    kind === "withdrawal_request_rejected" ||
+    kind === "loan_auto_repayment_failed"
   );
 }
 
@@ -46,6 +48,12 @@ function pillLabel(kind: AgentNotification["kind"]): string {
       return "Float request";
     case "float_closed_pending_settlement":
       return "Float closed";
+    case "loan_repayment_reserved":
+      return "Loan reserve";
+    case "loan_auto_repayment":
+      return "Auto-repaid";
+    case "loan_auto_repayment_failed":
+      return "Auto-repay failed";
     case "registration_pending":
     case "balance_request_pending":
     case "withdrawal_request_pending":

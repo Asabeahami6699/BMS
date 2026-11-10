@@ -1,3 +1,4 @@
+import { formatAccountAmount } from "@bms/shared";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useShallow } from "zustand/react/shallow";
@@ -12,7 +13,7 @@ import { selectAgentsKpis, useAgentsStore } from "./stores/agentsStore";
 type Props = { role: AppRole };
 
 function formatMoney(amount: number): string {
-  return `GHS ${amount.toFixed(2)}`;
+  return `GHS ${formatAccountAmount(amount)}`;
 }
 
 function AgentDetailModal({

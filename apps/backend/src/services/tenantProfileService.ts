@@ -10,7 +10,8 @@ import { getTenantFromStore, upsertTenantInStore } from "./authStore.js";
 
 const PROFILE_COLUMNS_BASE = "id, name, phone, email, address, tax_id, logo_url, brand_color";
 const PROFILE_COLUMNS = `${PROFILE_COLUMNS_BASE}, font_size_step`;
-const PROFILE_COLUMNS_FULL = `${PROFILE_COLUMNS}, savings_opening_fee_ghs`;
+const PROFILE_COLUMNS_WITH_FEE = `${PROFILE_COLUMNS}, savings_opening_fee_ghs`;
+const PROFILE_COLUMNS_FULL = `${PROFILE_COLUMNS_WITH_FEE}, susu_loan_bridge_enabled`;
 
 const memoryProfiles = new Map<string, CompanyProfile>();
 
@@ -38,6 +39,10 @@ function savingsOpeningFeeFrom(value: unknown): number {
   return Math.round(amount * 100) / 100;
 }
 
+function susuLoanBridgeFrom(value: unknown): boolean {
+  return value === true || value === "true" || value === 1;
+}
+
 function mapRow(tenantId: string, row: Record<string, unknown>, fallbackName?: string): CompanyProfile {
   const email = optionalText(row.email);
   const brandColor = optionalText(row.brand_color);
@@ -52,7 +57,8 @@ function mapRow(tenantId: string, row: Record<string, unknown>, fallbackName?: s
     logoUrl: logoUrl && logoUrl.startsWith("data:image/") ? logoUrl : undefined,
     brandColor: brandColor && /^#[0-9A-Fa-f]{6}$/.test(brandColor) ? brandColor : undefined,
     fontSizeStep: fontSizeStepFrom(row.font_size_step),
-    savingsOpeningFeeGhs: savingsOpeningFeeFrom(row.savings_opening_fee_ghs)
+    savingsOpeningFeeGhs: savingsOpeningFeeFrom(row.savings_opening_fee_ghs),
+    susuLoanBridgeEnabled: susuLoanBridgeFrom(row.susu_loan_bridge_enabled)
   });
 }
 
@@ -82,6 +88,11 @@ export async function getCompanyProfile(tenantId: string): Promise<CompanyProfil
   const selected = await supabase.from("tenants").select(PROFILE_COLUMNS_FULL).eq("id", tenantId).maybeSingle();
   let data = selected.data as Record<string, unknown> | null;
   let error = selected.error;
+  if (error && /susu_loan_bridge_enabled/i.test(error.message)) {
+    const retry = await supabase.from("tenants").select(PROFILE_COLUMNS_WITH_FEE).eq("id", tenantId).maybeSingle();
+    data = retry.data;
+    error = retry.error;
+  }
   if (error && /savings_opening_fee_ghs/i.test(error.message)) {
     const retry = await supabase.from("tenants").select(PROFILE_COLUMNS).eq("id", tenantId).maybeSingle();
     data = retry.data;
@@ -125,7 +136,8 @@ export async function updateCompanyProfile(
     logoUrl: parsed.logoUrl === null ? undefined : (parsed.logoUrl ?? current.logoUrl),
     brandColor: parsed.brandColor === null ? undefined : (parsed.brandColor ?? current.brandColor),
     fontSizeStep: parsed.fontSizeStep ?? current.fontSizeStep,
-    savingsOpeningFeeGhs: parsed.savingsOpeningFeeGhs ?? current.savingsOpeningFeeGhs
+    savingsOpeningFeeGhs: parsed.savingsOpeningFeeGhs ?? current.savingsOpeningFeeGhs,
+    susuLoanBridgeEnabled: parsed.susuLoanBridgeEnabled ?? current.susuLoanBridgeEnabled
   });
 
   const supabase = getSupabaseAdminClient();
@@ -139,10 +151,23 @@ export async function updateCompanyProfile(
       logo_url: next.logoUrl ?? null,
       brand_color: next.brandColor ?? null,
       font_size_step: next.fontSizeStep,
-      savings_opening_fee_ghs: next.savingsOpeningFeeGhs
+      savings_opening_fee_ghs: next.savingsOpeningFeeGhs,
+      susu_loan_bridge_enabled: next.susuLoanBridgeEnabled
     };
     let payload: Record<string, unknown> = { ...profileUpdate };
     let { error } = await supabase.from("tenants").update(payload).eq("id", tenantId);
+    if (error && /susu_loan_bridge_enabled/i.test(error.message)) {
+      if (next.susuLoanBridgeEnabled) {
+        throw new Error(
+          "Susu–Loans bridge storage is not ready. Apply migration 078_susu_loan_bridge.sql in Supabase, then save again."
+        );
+      }
+      const { susu_loan_bridge_enabled: _bridge, ...withoutBridge } = payload;
+      void _bridge;
+      payload = withoutBridge;
+      const retry = await supabase.from("tenants").update(payload).eq("id", tenantId);
+      error = retry.error;
+    }
     if (error && /savings_opening_fee_ghs/i.test(error.message)) {
       if (next.savingsOpeningFeeGhs !== 20) {
         throw new Error(
@@ -199,4 +224,28 @@ export function cacheSavingsOpeningFee(tenantId: string, amount: number): void {
 export async function getSavingsOpeningFeeGhs(tenantId: string): Promise<number> {
   const profile = await getCompanyProfile(tenantId);
   return savingsOpeningFeeFrom(profile.savingsOpeningFeeGhs);
+}
+
+/** Fast read of the Susu↔Loans bridge opt-in (default false). */
+export async function getSusuLoanBridgeEnabled(tenantId: string): Promise<boolean> {
+  const cached = memoryProfiles.get(tenantId);
+  if (cached) {
+    return Boolean(cached.susuLoanBridgeEnabled);
+  }
+  const supabase = getSupabaseAdminClient();
+  if (!supabase) {
+    return false;
+  }
+  const { data, error } = await supabase
+    .from("tenants")
+    .select("susu_loan_bridge_enabled")
+    .eq("id", tenantId)
+    .maybeSingle();
+  if (error) {
+    if (/susu_loan_bridge_enabled/i.test(error.message)) {
+      return false;
+    }
+    throw new Error(`Failed to load Susu–Loans bridge setting: ${error.message}`);
+  }
+  return susuLoanBridgeFrom((data as { susu_loan_bridge_enabled?: unknown } | null)?.susu_loan_bridge_enabled);
 }

@@ -1,3 +1,4 @@
+import { formatAccountAmount } from "@bms/shared";
 import { useEffect, useMemo, useState } from "react";
 import type { TellerReconciliationTab, TenantBankProduct } from "@bms/shared";
 import { useShallow } from "zustand/react/shallow";
@@ -22,7 +23,7 @@ const TABS: Array<{ id: TellerReconciliationTab; label: string }> = [
 
 function money(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return "—";
-  return `GHS ${value.toFixed(2)}`;
+  return `GHS ${formatAccountAmount(value)}`;
 }
 
 function compactMoney(value: number): string {

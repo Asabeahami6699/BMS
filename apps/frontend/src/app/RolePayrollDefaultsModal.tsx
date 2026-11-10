@@ -1,4 +1,4 @@
-import { computeStaffPayrollPreview, type TenantPayrollRole } from "@bms/shared";
+import { computeStaffPayrollPreview, formatAccountAmount, type TenantPayrollRole } from "@bms/shared";
 import { useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { Modal } from "../components/Modal";
@@ -225,7 +225,7 @@ function RolePayrollCard({ draft, policy, staffCount, onChange, onSave }: CardPr
       </div>
 
       <footer className="role-payroll-card__foot">
-        <span className="muted">Est. deductions −{preview.projectedDeductions.toFixed(2)}</span>
+        <span className="muted">Est. deductions −{formatAccountAmount(preview.projectedDeductions)}</span>
         <button type="button" className="secondary small" disabled={draft.saving} onClick={onSave}>
           {draft.saving ? "Saving…" : "Save & apply"}
         </button>

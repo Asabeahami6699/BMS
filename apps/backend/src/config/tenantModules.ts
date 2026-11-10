@@ -2,7 +2,7 @@ import type { TenantProductModule } from "@bms/shared";
 
 /** API path prefixes that require a product module (org settings and reports are universal). */
 export const API_PATH_MODULE: Array<{ prefix: string; modules: TenantProductModule[] }> = [
-  { prefix: "/api/v1/customers", modules: ["susu_management"] },
+  { prefix: "/api/v1/customers", modules: ["susu_management", "loans_credit"] },
   { prefix: "/api/v1/transactions", modules: ["susu_management"] },
   { prefix: "/api/v1/ledger", modules: ["susu_management"] },
   { prefix: "/api/v1/tenant/commission-policy", modules: ["susu_management"] },

@@ -1,3 +1,4 @@
+import { formatAccountAmount } from "@bms/shared";
 import { useState } from "react";
 import type { BalanceDisclosure, RequestCustomerApprovalInput } from "../../app/api";
 import { useNetworkStatus } from "../../lib/useNetworkStatus";
@@ -45,7 +46,7 @@ function canRequestType(
 }
 
 function formatMoney(amount: number): string {
-  return `GHS ${amount.toFixed(2)}`;
+  return `GHS ${formatAccountAmount(amount)}`;
 }
 
 export function CustomerRequestsRow({ customerId, customerName, compact }: Props) {

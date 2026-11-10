@@ -19,6 +19,7 @@ export * from "./tellerOps.js";
 export * from "./treasury.js";
 export * from "./agencyBanking.js";
 export * from "./amountInWords.js";
+export * from "./money.js";
 export * from "./bankProducts.js";
 export * from "./agencyAccounts.js";
 export * from "./backOffice.js";

@@ -103,6 +103,10 @@ export function upsertTenantInStore(tenant: StoredTenant): StoredTenant {
   return tenant;
 }
 
+export function removeTenantFromStore(tenantId: string): boolean {
+  return tenants.delete(tenantId);
+}
+
 export function findUserByEmail(email: string): StoredAuthUser | undefined {
   return usersByEmail.get(email.toLowerCase());
 }

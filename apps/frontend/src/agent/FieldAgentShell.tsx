@@ -45,57 +45,59 @@ export function FieldAgentShell({
 
   return (
     <div className="agent-root">
-      <header className="agent-topbar">
-        <button
-          type="button"
-          className={`agent-topbar__icon-btn${unread > 0 ? " agent-topbar__icon-btn--badge" : ""}`}
-          onClick={() => setProfileOpen(true)}
-          aria-label={
-            unread > 0 ? `Open profile menu, ${unread} unread alerts` : "Open profile menu"
-          }
-        >
-          <span aria-hidden>☰</span>
-          {unread > 0 ? (
-            <span className="agent-topbar__badge" aria-hidden>
-              {unread > 9 ? "9+" : unread}
-            </span>
-          ) : null}
-        </button>
-
-        <div className="agent-topbar__brand">
-          <span className="agent-topbar__brand-title">Field agent</span>
-          <span
-            className={`agent-topbar__live${online ? " agent-topbar__live--on" : " agent-topbar__live--off"}`}
-          >
-            {online ? "Online" : "Offline"}
-          </span>
-        </div>
-
-        <div className="agent-topbar__actions">
+      <header className="agent-topbar" aria-label="Field agent toolbar">
+        <div className="agent-topbar__glass">
           <button
             type="button"
-            className="agent-topbar__icon-btn agent-topbar__icon-btn--accent"
-            onClick={onCreateAccount}
-            aria-label="Create new account"
-            title="Create new account"
+            className={`agent-topbar__icon-btn${unread > 0 ? " agent-topbar__icon-btn--badge" : ""}`}
+            onClick={() => setProfileOpen(true)}
+            aria-label={
+              unread > 0 ? `Open profile menu, ${unread} unread alerts` : "Open profile menu"
+            }
           >
-            <span aria-hidden>+</span>
-          </button>
-          <button
-            type="button"
-            className={`agent-topbar__icon-btn${pendingCount > 0 ? " agent-topbar__icon-btn--badge" : ""}${syncing ? " agent-topbar__icon-btn--busy" : ""}`}
-            onClick={() => void onSync()}
-            disabled={syncDisabled}
-            aria-label={syncLabel}
-            title={syncLabel}
-          >
-            <span aria-hidden>{syncing ? "…" : "↻"}</span>
-            {pendingCount > 0 && !syncing ? (
+            <span aria-hidden>☰</span>
+            {unread > 0 ? (
               <span className="agent-topbar__badge" aria-hidden>
-                {pendingCount > 9 ? "9+" : pendingCount}
+                {unread > 9 ? "9+" : unread}
               </span>
             ) : null}
           </button>
+
+          <div className="agent-topbar__brand">
+            <span className="agent-topbar__brand-title">Field agent</span>
+            <span
+              className={`agent-topbar__live${online ? " agent-topbar__live--on" : " agent-topbar__live--off"}`}
+            >
+              {online ? "Online" : "Offline"}
+            </span>
+          </div>
+
+          <div className="agent-topbar__actions">
+            <button
+              type="button"
+              className="agent-topbar__icon-btn agent-topbar__icon-btn--accent"
+              onClick={onCreateAccount}
+              aria-label="Create new account"
+              title="Create new account"
+            >
+              <span aria-hidden>+</span>
+            </button>
+            <button
+              type="button"
+              className={`agent-topbar__icon-btn${pendingCount > 0 ? " agent-topbar__icon-btn--badge" : ""}${syncing ? " agent-topbar__icon-btn--busy" : ""}`}
+              onClick={() => void onSync()}
+              disabled={syncDisabled}
+              aria-label={syncLabel}
+              title={syncLabel}
+            >
+              <span aria-hidden>{syncing ? "…" : "↻"}</span>
+              {pendingCount > 0 && !syncing ? (
+                <span className="agent-topbar__badge" aria-hidden>
+                  {pendingCount > 9 ? "9+" : pendingCount}
+                </span>
+              ) : null}
+            </button>
+          </div>
         </div>
       </header>
 
@@ -103,33 +105,59 @@ export function FieldAgentShell({
       <main className="agent-main">{children}</main>
 
       <nav className="agent-bottom-nav" aria-label="Field agent navigation">
-        <NavLink to="/app/agent/home" end className={({ isActive }) => `agent-tab${isActive ? " active" : ""}`}>
-          <span aria-hidden>⌂</span>
-          Home
-        </NavLink>
-        <NavLink to="/app/agent/customers" className={({ isActive }) => `agent-tab${isActive ? " active" : ""}`}>
-          <span aria-hidden>☰</span>
-          Customers
-        </NavLink>
-        <NavLink to="/app/agent/collect" className={({ isActive }) => `agent-tab${isActive ? " active" : ""}`}>
-          <span aria-hidden>₵</span>
-          Collect
-        </NavLink>
-        <NavLink to="/app/agent/callover" className={({ isActive }) => `agent-tab${isActive ? " active" : ""}`}>
-          <span aria-hidden>✓</span>
-          Call over
-        </NavLink>
+        <div className="agent-bottom-nav__glass">
+          <NavLink
+            to="/app/agent/home"
+            end
+            className={({ isActive }) => `agent-tab${isActive ? " active" : ""}`}
+          >
+            <span className="agent-tab__glyph" aria-hidden>
+              ⌂
+            </span>
+            Home
+          </NavLink>
+          <NavLink
+            to="/app/agent/customers"
+            className={({ isActive }) => `agent-tab${isActive ? " active" : ""}`}
+          >
+            <span className="agent-tab__glyph" aria-hidden>
+              ☰
+            </span>
+            Customers
+          </NavLink>
+          <NavLink
+            to="/app/agent/collect"
+            className={({ isActive }) => `agent-tab${isActive ? " active" : ""}`}
+          >
+            <span className="agent-tab__glyph" aria-hidden>
+              ₵
+            </span>
+            Collect
+          </NavLink>
+          <NavLink
+            to="/app/agent/callover"
+            className={({ isActive }) => `agent-tab${isActive ? " active" : ""}`}
+          >
+            <span className="agent-tab__glyph" aria-hidden>
+              ✓
+            </span>
+            Call over
+          </NavLink>
+        </div>
+
         <NavLink
           to="/app/agent/alerts"
-          className={({ isActive }) => `agent-tab agent-tab--alerts${isActive ? " active" : ""}`}
+          className={({ isActive }) =>
+            `agent-bottom-nav__fab${isActive ? " agent-bottom-nav__fab--active" : ""}`
+          }
+          aria-label={unread > 0 ? `Alerts, ${unread} unread` : "Alerts"}
         >
-          <span className="agent-tab__icon-wrap" aria-hidden>
+          <span className="agent-bottom-nav__fab-inner" aria-hidden>
             🔔
             {unread > 0 ? (
               <span className="agent-tab__badge">{unread > 9 ? "9+" : unread}</span>
             ) : null}
           </span>
-          Alerts
         </NavLink>
       </nav>
 

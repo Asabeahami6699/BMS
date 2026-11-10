@@ -1,4 +1,4 @@
-import { ledgerEntrySchema, type LedgerEntry } from "@bms/shared";
+import { ledgerDisplayReason, ledgerEntrySchema, type LedgerEntry } from "@bms/shared";
 import { randomUUID } from "node:crypto";
 import { getSupabaseAdminClient } from "../config/supabaseClient.js";
 import { fetchUserNameMap, ledgerPerformerLabel } from "./userNameResolver.js";
@@ -202,6 +202,7 @@ async function enrichLedgerEntries(
       createdAt: row.created_at,
       transactionType: tx?.type,
       notes: tx?.notes,
+      reason: ledgerDisplayReason(tx?.notes),
       recordedByName,
       fieldAgentName,
       performedByName: tx

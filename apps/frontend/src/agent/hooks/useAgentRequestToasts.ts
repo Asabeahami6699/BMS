@@ -1,3 +1,4 @@
+import { formatAccountAmount } from "@bms/shared";
 import { useEffect, useRef } from "react";
 import type { BalanceDisclosure } from "../../app/api";
 import { useToast } from "../../components/Toast";
@@ -14,7 +15,7 @@ function snapshot(disclosure: BalanceDisclosure | undefined): Snapshot | undefin
 }
 
 function formatMoney(amount: number): string {
-  return `GHS ${amount.toFixed(2)}`;
+  return `GHS ${formatAccountAmount(amount)}`;
 }
 
 export function useAgentRequestToasts(): void {

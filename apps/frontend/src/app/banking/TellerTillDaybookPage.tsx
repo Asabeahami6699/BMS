@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { roleRequiresTransactionPin } from "@bms/shared";
+import { roleRequiresTransactionPin, formatAccountAmount } from "@bms/shared";
 import {
   TELLER_TILL_ENTRY_LABELS,
   type TellerTillEntryType,
@@ -205,13 +205,13 @@ export function TellerTillDaybookPage() {
         <div className="card teller-daybook-summary">
           <h3>Today&apos;s movements</h3>
           <p className="teller-daybook-summary__total">
-            Total logged <strong>GHS {totals.sum.toFixed(2)}</strong>
+            Total logged <strong>GHS {formatAccountAmount(totals.sum)}</strong>
           </p>
           <ul className="teller-daybook-summary__types">
             {ENTRY_TYPES.filter((type) => (totals.byType.get(type) ?? 0) > 0).map((type) => (
               <li key={type}>
                 <span>{TELLER_TILL_ENTRY_LABELS[type]}</span>
-                <strong>GHS {(totals.byType.get(type) ?? 0).toFixed(2)}</strong>
+                <strong>GHS {formatAccountAmount((totals.byType.get(type) ?? 0))}</strong>
               </li>
             ))}
           </ul>
@@ -240,7 +240,7 @@ export function TellerTillDaybookPage() {
                   <tr key={row.id}>
                     <td>{new Date(row.createdAt).toLocaleString()}</td>
                     <td>{TELLER_TILL_ENTRY_LABELS[row.entryType]}</td>
-                    <td>GHS {row.amount.toFixed(2)}</td>
+                    <td>GHS {formatAccountAmount(row.amount)}</td>
                     <td>{row.notes ?? "—"}</td>
                   </tr>
                 ))}

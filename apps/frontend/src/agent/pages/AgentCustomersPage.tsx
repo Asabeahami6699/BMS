@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
+import { formatAccountAmount } from "@bms/shared";
 import { RowActionsMenu } from "../../components/RowActionsMenu";
 import { CustomerRequestsRow } from "../components/CustomerRequestsRow";
 import { RegistrationModal } from "../RegistrationModal";
@@ -204,7 +205,7 @@ export function AgentCustomersPage({
               </p>
               <p className="agent-customer-meta muted">{customer.phone}</p>
               <p className="agent-customer-amount muted">
-                Daily plan: GHS {Number(customer.dailyContributionAmount).toFixed(2)}
+                Daily plan: GHS {formatAccountAmount(customer.dailyContributionAmount)}
               </p>
             </article>
           ))

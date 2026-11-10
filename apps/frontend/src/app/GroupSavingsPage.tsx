@@ -1,3 +1,4 @@
+import { formatAccountAmount } from "@bms/shared";
 import { useMemo, useState } from "react";
 import type { AppRole, Customer } from "./api";
 import { AdminDataTable, filterRowsBySearch } from "../components/AdminDataTable";
@@ -12,6 +13,8 @@ const STATUS_LABELS: Record<Customer["status"], string> = {
   active: "Active",
   rejected: "Rejected",
   suspended: "Suspended",
+  inactive: "Inactive",
+  dormant: "Dormant",
   closed: "Closed"
 };
 
@@ -20,7 +23,9 @@ const STATUS_PILL: Record<Customer["status"], string> = {
   active: "active",
   rejected: "inactive",
   suspended: "inactive",
-  closed: "inactive"
+  inactive: "inactive",
+  dormant: "dormant",
+  closed: "failed"
 };
 
 function branchLabel(branchId: string, branches: { id: string; name: string; code: string }[]): string {
@@ -92,7 +97,7 @@ export function GroupSavingsPage({ role: _role }: Props) {
           <span className="kpi-label">Pending approval</span>
         </article>
         <article className="kpi-card">
-          <p className="kpi-value">GHS {totals.totalDailyPlan.toFixed(2)}</p>
+          <p className="kpi-value">GHS {formatAccountAmount(totals.totalDailyPlan)}</p>
           <span className="kpi-label">Combined daily plan</span>
         </article>
       </div>
@@ -137,7 +142,7 @@ export function GroupSavingsPage({ role: _role }: Props) {
               label: "Daily plan",
               render: (row) =>
                 row.dailyContributionAmount > 0
-                  ? `GHS ${row.dailyContributionAmount.toFixed(2)}`
+                  ? `GHS ${formatAccountAmount(row.dailyContributionAmount)}`
                   : "—"
             },
             {
@@ -145,7 +150,7 @@ export function GroupSavingsPage({ role: _role }: Props) {
               label: "Balance",
               render: (row) =>
                 row.accountBalance != null ? (
-                  `GHS ${Number(row.accountBalance).toFixed(2)}`
+                  `GHS ${formatAccountAmount(row.accountBalance)}`
                 ) : (
                   <span className="muted">—</span>
                 )

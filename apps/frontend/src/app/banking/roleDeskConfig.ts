@@ -81,10 +81,18 @@ export const AGENCY_ROLE_DESKS: RoleDeskConfig[] = [
       "Ledger reconciles when execution completes"
     ],
     quickLinks: [
-      { to: "/app/banking/back-office#deposits", label: "Deposit queue", description: "Teller deposits pending bank" },
-      { to: "/app/banking/back-office#balancing", label: "Account balancing", description: "Opening balances & ecash" },
       {
-        to: "/app/banking/back-office#reconciliation",
+        to: "/app/banking/back-office/deposits",
+        label: "Deposit queue",
+        description: "Teller deposits pending bank"
+      },
+      {
+        to: "/app/banking/back-office/balancing",
+        label: "Account balancing",
+        description: "Opening balances & ecash"
+      },
+      {
+        to: "/app/banking/back-office/reconciliation",
         label: "Teller/Back Officer reconciliation",
         description: "Teller vs back office per drawer"
       },

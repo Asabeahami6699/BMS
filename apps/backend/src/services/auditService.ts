@@ -115,10 +115,10 @@ export async function listAuditLogs(
       const method = row.method;
       const path = row.path;
       const statusCode = row.status_code;
-      const action =
-        row.action?.trim() ||
-        resolveAuditActivity(method, path, statusCode).action ||
-        `${method} ${path}`;
+      // Prefer live path→label mapping so older vague fallbacks (e.g. "Created customers")
+      // show the correct activity after rules are added.
+      const resolved = resolveAuditActivity(method, path, statusCode).action;
+      const action = resolved?.trim() || row.action?.trim() || `${method} ${path}`;
 
       return {
         id: String(row.id),
@@ -137,5 +137,14 @@ export async function listAuditLogs(
   }
 
   const rows = auditStore.get(tenantId) ?? [];
-  return [...rows].reverse().slice(offset, offset + limit);
+  return [...rows]
+    .reverse()
+    .slice(offset, offset + limit)
+    .map((row) => {
+      const resolved = resolveAuditActivity(row.method, row.path, row.statusCode).action;
+      return {
+        ...row,
+        action: resolved?.trim() || row.action
+      };
+    });
 }

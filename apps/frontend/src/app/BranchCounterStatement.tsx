@@ -1,3 +1,4 @@
+import { formatAccountAmount } from "@bms/shared";
 import { useMemo } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useToast } from "../components/Toast";
@@ -21,7 +22,7 @@ const ROLE_LABELS: Record<string, string> = {
 };
 
 function formatMoney(amount: number): string {
-  return `GHS ${amount.toFixed(2)}`;
+  return `GHS ${formatAccountAmount(amount)}`;
 }
 
 function formatTime(iso: string): string {

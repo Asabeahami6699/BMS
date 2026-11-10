@@ -100,7 +100,18 @@ export function AuditorExceptionsPage({ displayName }: Props) {
           createdAt: new Date(row.createdAt).toLocaleString(),
           action: row.action,
           actorRole: row.actorRole ?? "—",
-          statusCode: String(row.statusCode),
+          statusCode:
+            row.statusCode === 400
+              ? "400 (Bad request)"
+              : row.statusCode === 401
+                ? "401 (Unauthorized)"
+                : row.statusCode === 403
+                  ? "403 (Forbidden)"
+                  : row.statusCode === 404
+                    ? "404 (Not found)"
+                    : row.statusCode >= 500
+                      ? `${row.statusCode} (Server error)`
+                      : `${row.statusCode} (Client error)`,
           path: row.path
         }))}
         rowKey={(row) => row.id}

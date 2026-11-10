@@ -1,3 +1,4 @@
+import { formatAccountAmount } from "@bms/shared";
 import { useEffect, useRef, useState } from "react";
 import type { BalanceDisclosure } from "./api";
 import { approveBalanceDisclosure } from "./api";
@@ -109,7 +110,7 @@ export function WithdrawalMomoApproveModal({ open, request, onClose, onApproved 
         open={open}
         onClose={onClose}
         title="Approve MoMo withdrawal"
-        subtitle={`Send GHS ${request.withdrawalAmount?.toFixed(2)} to ${request.momoAccountName} (${request.momoNumber})`}
+        subtitle={`Send GHS ${formatAccountAmount(request.withdrawalAmount ?? 0)} to ${request.momoAccountName} (${request.momoNumber})`}
       >
         <p className="muted">Upload proof from your MoMo app. A receipt is generated for the field agent alert.</p>
         {request.requestReason ? <p className="muted">Agent reason: {request.requestReason}</p> : null}

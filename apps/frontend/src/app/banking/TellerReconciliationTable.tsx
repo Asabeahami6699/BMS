@@ -1,3 +1,4 @@
+import { formatAccountAmount } from "@bms/shared";
 import type { TellerReconciliationRow } from "@bms/shared";
 
 type Props = {
@@ -10,7 +11,7 @@ function money(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) {
     return "—";
   }
-  return `GHS ${value.toFixed(2)}`;
+  return `GHS ${formatAccountAmount(value)}`;
 }
 
 function diffTone(value: number | null): string {

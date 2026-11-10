@@ -44,6 +44,7 @@ import {
   getTenantFromStore,
   listUsersByTenant,
   listTenantsFromStore,
+  removeTenantFromStore,
   resolveSession,
   revokeSession,
   saveAuthUser,
@@ -90,9 +91,24 @@ async function enrichTenantContext(
       ? (async () => {
           const selected = await supabase
             .from("tenants")
-            .select("name, subscription_status, subdomain")
+            .select("name, subscription_status, subdomain, susu_loan_bridge_enabled")
             .eq("id", context.tenantId)
             .maybeSingle();
+          if (selected.error && /susu_loan_bridge_enabled/i.test(selected.error.message)) {
+            const withoutBridge = await supabase
+              .from("tenants")
+              .select("name, subscription_status, subdomain")
+              .eq("id", context.tenantId)
+              .maybeSingle();
+            if (withoutBridge.error && /subdomain/i.test(withoutBridge.error.message)) {
+              return supabase
+                .from("tenants")
+                .select("name, subscription_status")
+                .eq("id", context.tenantId)
+                .maybeSingle();
+            }
+            return withoutBridge;
+          }
           if (selected.error && /subdomain/i.test(selected.error.message)) {
             return supabase
               .from("tenants")
@@ -106,7 +122,12 @@ async function enrichTenantContext(
     loadTenantPermissionInputs(context.tenantId, context.role, context.userId)
   ]);
   const tenantRow = tenantLookup?.data as
-    | { name: string; subscription_status: string; subdomain?: string | null }
+    | {
+        name: string;
+        subscription_status: string;
+        subdomain?: string | null;
+        susu_loan_bridge_enabled?: boolean | null;
+      }
     | null
     | undefined;
   const currentTenant = getTenantFromStore(context.tenantId);
@@ -148,7 +169,8 @@ async function enrichTenantContext(
     tenantSubdomain: subdomainForTenant(context.tenantId, resolvedTenant),
     subscribedModules: modules,
     subscribedAddons: addons,
-    reportsAnalytics: resolvedTenant?.subscriptionStatus !== "inactive"
+    reportsAnalytics: resolvedTenant?.subscriptionStatus !== "inactive",
+    susuLoanBridgeEnabled: tenantRow?.susu_loan_bridge_enabled === true
   };
 }
 
@@ -264,10 +286,11 @@ export async function loginWithCredentials(
       throw new Error("User profile has invalid role or scope");
     }
 
+    const tenantId = profile.tenant_id ?? "platform";
     const [userContext] = await Promise.all([
       enrichTenantContext({
         userId: profile.id,
-        tenantId: profile.tenant_id ?? "platform",
+        tenantId,
         role: roleParsed,
         scopeType: scopeParsed.data,
         branchId: profile.branch_id ?? undefined,
@@ -277,6 +300,7 @@ export async function loginWithCredentials(
         email: profile.email ?? parsed.data.email,
         fullName: profile.full_name ?? undefined
       }),
+      assertLoginMatchesHost(profile.tenant_id ?? null, parsed.data.tenantSubdomain),
       !roleSchema.safeParse(roleParsed).success && profile.tenant_id
         ? assertValidUserJobTitle(profile.tenant_id, roleParsed)
         : Promise.resolve()
@@ -284,7 +308,6 @@ export async function loginWithCredentials(
     if (profile.tenant_id && userContext.reportsAnalytics === false) {
       throw new Error("Company subscription is inactive. Contact platform support.");
     }
-    await assertLoginMatchesHost(profile.tenant_id ?? null, parsed.data.tenantSubdomain);
 
     return {
       accessToken: signInData.session.access_token,
@@ -1140,6 +1163,112 @@ export async function resetTenantUserPassword(
   }
 
   updateStoredAuthUser(userId, { passwordHash: hashPassword(parsed.data.password) });
+}
+
+/**
+ * Permanently terminate a company: purge tenant-scoped data, auth users, and the tenant row.
+ * Cannot terminate the platform tenant.
+ */
+export async function terminateTenantCompany(tenantId: string): Promise<{
+  tenantId: string;
+  name: string;
+  deletedAuthUsers: number;
+  deletedRows?: number;
+}> {
+  const id = tenantId.trim();
+  if (!id || id === "platform") {
+    throw new Error("Cannot terminate the platform tenant");
+  }
+
+  const existing =
+    getTenantFromStore(id) ??
+    (await listPlatformTenants()).find((t) => t.id === id) ??
+    null;
+  if (!existing) {
+    throw new Error("Company not found");
+  }
+
+  const supabase = getSupabaseAdminClient();
+  let deletedAuthUsers = 0;
+  let deletedRows: number | undefined;
+
+  if (supabase) {
+    const { data: profiles, error: profileError } = await supabase
+      .from("users")
+      .select("id, auth_user_id")
+      .eq("tenant_id", id);
+    if (profileError && !/does not exist|schema cache/i.test(profileError.message)) {
+      throw new Error(`Failed to load company users: ${profileError.message}`);
+    }
+
+    for (const profile of profiles ?? []) {
+      const authUserId = profile.auth_user_id ? String(profile.auth_user_id) : null;
+      if (authUserId) {
+        try {
+          await supabase.auth.admin.deleteUser(authUserId);
+          deletedAuthUsers += 1;
+        } catch (error) {
+          console.warn(
+            "[tenants] auth user delete skipped:",
+            error instanceof Error ? error.message : error
+          );
+        }
+      }
+    }
+
+    const { data: rpcResult, error: rpcError } = await supabase.rpc("terminate_tenant", {
+      p_tenant_id: id
+    });
+    if (rpcError) {
+      // Fallback when migration 081 is not applied yet: best-effort table deletes.
+      if (/terminate_tenant|function|schema cache|does not exist/i.test(rpcError.message)) {
+        const fallbackTables = [
+          "ledger_entries",
+          "customer_transactions",
+          "customers",
+          "branches",
+          "users",
+          "tenant_modules",
+          "tenant_addons",
+          "audit_logs"
+        ];
+        for (const table of fallbackTables) {
+          await supabase.from(table).delete().eq("tenant_id", id);
+        }
+        const { error: tenantError } = await supabase.from("tenants").delete().eq("id", id);
+        if (tenantError) {
+          throw new Error(
+            `Failed to terminate company (apply migration 081): ${tenantError.message}`
+          );
+        }
+      } else {
+        throw new Error(`Failed to terminate company: ${rpcError.message}`);
+      }
+    } else if (rpcResult && typeof rpcResult === "object" && "deletedRows" in rpcResult) {
+      deletedRows = Number((rpcResult as { deletedRows?: number }).deletedRows ?? 0);
+    }
+  } else {
+    for (const user of listUsersByTenant(id)) {
+      deleteStoredAuthUser(user.id);
+      deletedAuthUsers += 1;
+    }
+  }
+
+  for (const user of listUsersByTenant(id)) {
+    try {
+      deleteStoredAuthUser(user.id);
+    } catch {
+      /* already removed */
+    }
+  }
+  removeTenantFromStore(id);
+
+  return {
+    tenantId: id,
+    name: existing.name,
+    deletedAuthUsers,
+    deletedRows
+  };
 }
 
 export async function deleteTenantUser(

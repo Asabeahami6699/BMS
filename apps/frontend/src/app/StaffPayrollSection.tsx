@@ -1,3 +1,4 @@
+import { formatAccountAmount } from "@bms/shared";
 import { useEffect, useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { PayslipViewer } from "./PayslipViewer";
@@ -120,11 +121,11 @@ export function StaffPayrollSection() {
             </div>
             <div className="payroll-kpi">
               <span className="muted">Staff projected gross</span>
-              <strong>{staffTotals.gross.toFixed(2)}</strong>
+              <strong>{formatAccountAmount(staffTotals.gross)}</strong>
             </div>
             <div className="payroll-kpi">
               <span className="muted">Staff projected net</span>
-              <strong>{staffTotals.net.toFixed(2)}</strong>
+              <strong>{formatAccountAmount(staffTotals.net)}</strong>
             </div>
             <div className="payroll-kpi">
               <span className="muted">Published payslips</span>
@@ -190,18 +191,18 @@ export function StaffPayrollSection() {
                       <strong>{row.fullName ?? row.email ?? row.userId}</strong>
                     </td>
                     <td>{formatRoleLabel(row.role)}</td>
-                    <td className="payroll-num">{row.baseSalary.toFixed(2)}</td>
+                    <td className="payroll-num">{formatAccountAmount(row.baseSalary)}</td>
                     <td className="payroll-num">
-                      {row.commissionsApply ? row.collectionsThisPeriod.toFixed(2) : "—"}
+                      {row.commissionsApply ? formatAccountAmount(row.collectionsThisPeriod) : "—"}
                     </td>
                     <td className="payroll-num live-gross">
-                      <strong>{row.projectedGross.toFixed(2)}</strong>
+                      <strong>{formatAccountAmount(row.projectedGross)}</strong>
                     </td>
                     <td className="payroll-num deduction-amount">
-                      −{row.projectedDeductions.toFixed(2)}
+                      −{formatAccountAmount(row.projectedDeductions)}
                     </td>
                     <td className="payroll-num live-net">
-                      <strong>{row.projectedNet.toFixed(2)}</strong>
+                      <strong>{formatAccountAmount(row.projectedNet)}</strong>
                     </td>
                     <td>
                       <input
@@ -249,13 +250,13 @@ export function StaffPayrollSection() {
                     <strong>All staff (projected)</strong>
                   </td>
                   <td className="payroll-num">
-                    <strong>{staffTotals.gross.toFixed(2)}</strong>
+                    <strong>{formatAccountAmount(staffTotals.gross)}</strong>
                   </td>
                   <td className="payroll-num deduction-amount">
-                    <strong>−{staffTotals.deductions.toFixed(2)}</strong>
+                    <strong>−{formatAccountAmount(staffTotals.deductions)}</strong>
                   </td>
                   <td className="payroll-num">
-                    <strong>{staffTotals.net.toFixed(2)}</strong>
+                    <strong>{formatAccountAmount(staffTotals.net)}</strong>
                   </td>
                   <td colSpan={3} />
                 </tr>
@@ -297,13 +298,13 @@ export function StaffPayrollSection() {
                         </td>
                         <td>{formatRoleLabel(p.role)}</td>
                         <td className="payroll-num">
-                          <strong>{p.grossPay.toFixed(2)}</strong>
+                          <strong>{formatAccountAmount(p.grossPay)}</strong>
                         </td>
                         <td className="payroll-num deduction-amount">
-                          −{p.totalDeductions.toFixed(2)}
+                          −{formatAccountAmount(p.totalDeductions)}
                         </td>
                         <td className="payroll-num live-net">
-                          <strong>{p.netPay.toFixed(2)}</strong>
+                          <strong>{formatAccountAmount(p.netPay)}</strong>
                         </td>
                         <td className="muted payroll-published-at">
                           {p.runAt ? new Date(p.runAt).toLocaleDateString() : "—"}
@@ -329,13 +330,13 @@ export function StaffPayrollSection() {
                       <strong>Total ({published.length} workers)</strong>
                     </td>
                     <td className="payroll-num">
-                      <strong>{publishedTotals.gross.toFixed(2)}</strong>
+                      <strong>{formatAccountAmount(publishedTotals.gross)}</strong>
                     </td>
                     <td className="payroll-num deduction-amount">
-                      <strong>−{publishedTotals.deductions.toFixed(2)}</strong>
+                      <strong>−{formatAccountAmount(publishedTotals.deductions)}</strong>
                     </td>
                     <td className="payroll-num">
-                      <strong>{publishedTotals.net.toFixed(2)}</strong>
+                      <strong>{formatAccountAmount(publishedTotals.net)}</strong>
                     </td>
                     <td colSpan={2} />
                   </tr>

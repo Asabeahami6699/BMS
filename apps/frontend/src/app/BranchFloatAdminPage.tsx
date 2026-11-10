@@ -1,8 +1,9 @@
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { AppRole, Branch, BranchFloatSession, UserRecord } from "./api";
 import {
   allocateBranchFloat,
+  getTenantId,
   isFloatTopUpRequest,
   listBranchFloatSessions,
   listBranches,
@@ -14,8 +15,10 @@ import {
 } from "./api";
 import { useToast } from "../components/Toast";
 import { toUserFacingError } from "../lib/networkError";
+import { subscribeToTenantRealtime } from "./realtime";
 import { usePageLoading } from "./hooks/usePageLoading";
 import { formatBranchLabel } from "./branchDisplay";
+import { useBranchCounterStore } from "./stores/branchCounterStore";
 
 type Props = { role: AppRole };
 
@@ -101,6 +104,35 @@ export function BranchFloatAdminPage({ role }: Props) {
     void load();
   }, [load]);
 
+  const loadSilentRef = useRef(load);
+  loadSilentRef.current = load;
+
+  useEffect(() => {
+    const tenantId = getTenantId();
+    if (!tenantId) {
+      return;
+    }
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const unsubscribe = subscribeToTenantRealtime({
+      tenantId,
+      tables: ["branch_float_sessions", "branch_float_movements", "agent_notifications"],
+      onChange: () => {
+        if (timer) {
+          clearTimeout(timer);
+        }
+        timer = setTimeout(() => {
+          void loadSilentRef.current();
+        }, 400);
+      }
+    });
+    return () => {
+      if (timer) {
+        clearTimeout(timer);
+      }
+      unsubscribe();
+    };
+  }, []);
+
   async function handleAllocate(session: BranchFloatSession) {
     const amount = Number(allocateAmount[session.id] ?? pendingFloatAmount(session));
     setBusy(true);
@@ -111,6 +143,7 @@ export function BranchFloatAdminPage({ role }: Props) {
         "success"
       );
       await load();
+      void useBranchCounterStore.getState().refreshSilent();
     } catch (error) {
       showToast(toUserFacingError(error, "Could not release float"), "error");
     } finally {
@@ -132,6 +165,7 @@ export function BranchFloatAdminPage({ role }: Props) {
         openingFloat: Number(pushAmount)
       });
       showToast("Float pushed — till opened for teller", "success");
+      void useBranchCounterStore.getState().refreshSilent();
       await load();
     } catch (error) {
       showToast(toUserFacingError(error, "Failed to push float"), "error");

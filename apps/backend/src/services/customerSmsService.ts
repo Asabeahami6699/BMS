@@ -1,5 +1,6 @@
 import {
   buildAccountOpenedMessage,
+  buildLoanRepaymentFromSusuMessage,
   buildTransactionAlertMessage,
   hasTenantAddon,
   normalizeGhanaPhone,
@@ -181,6 +182,60 @@ export async function notifyCustomerTransactionSms(input: NotifyInput): Promise<
     phone,
     message,
     idempotencyKey: `tx:${input.transactionId}`,
+    transactionId: input.transactionId,
+    senderId: settings.senderId
+  });
+}
+
+/** SMS when a loan repayment is taken from the customer's Susu/savings balance. */
+export async function notifyCustomerLoanRepaymentFromSusuSms(input: {
+  tenantId: string;
+  customerId: string;
+  transactionId: string;
+  amount: number;
+  loanReference?: string;
+  subscribedAddons?: TenantAddon[];
+}): Promise<void> {
+  const addons = input.subscribedAddons ?? (await loadTenantAddons(input.tenantId)) ?? [];
+  if (!hasTenantAddon(addons, "sms_notifications")) {
+    return;
+  }
+
+  if (!isSmsEventEnabled(await getTenantSmsSettings(input.tenantId), "withdrawal")) {
+    return;
+  }
+
+  const customer = await getCustomerById(input.tenantId, input.customerId);
+  if (!customer?.phone) {
+    return;
+  }
+
+  const phone = normalizeGhanaPhone(customer.phone);
+  if (!phone) {
+    return;
+  }
+
+  const [brand, balance, settings] = await Promise.all([
+    resolveTenantName(input.tenantId),
+    computeCustomerBalance(input.tenantId, input.customerId),
+    getTenantSmsSettings(input.tenantId)
+  ]);
+
+  const message = buildLoanRepaymentFromSusuMessage({
+    brand: brand.slice(0, 40),
+    amount: input.amount,
+    balance,
+    accountNumber: customer.accountNumber,
+    loanReference: input.loanReference
+  }).text;
+
+  await deliverSms({
+    tenantId: input.tenantId,
+    customerId: input.customerId,
+    eventType: "withdrawal",
+    phone,
+    message,
+    idempotencyKey: `loan-repay:${input.transactionId}`,
     transactionId: input.transactionId,
     senderId: settings.senderId
   });

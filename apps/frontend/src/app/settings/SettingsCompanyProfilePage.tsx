@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { tenantHasSusuAndLoans } from "@bms/shared";
 import { useAuth } from "../../auth/AuthContext";
 import { useToast } from "../../components/Toast";
 import { compressImageDataUrl, isDataUrlWithinLimit } from "../../lib/imageCompress";
@@ -19,7 +20,7 @@ function initials(name: string): string {
 
 export function SettingsCompanyProfilePage() {
   const { showToast } = useToast();
-  const { refreshMe } = useAuth();
+  const { user, refreshMe } = useAuth();
   const fileRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -31,7 +32,9 @@ export function SettingsCompanyProfilePage() {
   const [logoUrl, setLogoUrl] = useState<string | undefined>();
   const [brandColor, setBrandColor] = useState(DEFAULT_BRAND);
   const [fontSizeStep, setFontSizeStep] = useState(0);
+  const [susuLoanBridgeEnabled, setSusuLoanBridgeEnabled] = useState(false);
   const savedFontStep = useRef(0);
+  const canConfigureBridge = tenantHasSusuAndLoans(user?.subscribedModules);
 
   useEffect(() => {
     let cancelled = false;
@@ -75,6 +78,7 @@ export function SettingsCompanyProfilePage() {
     savedFontStep.current = step;
     setFontSizeStep(step);
     applyTenantFontStep(step);
+    setSusuLoanBridgeEnabled(Boolean(profile.susuLoanBridgeEnabled));
   }
 
   function onLogoFile(file: File) {
@@ -118,7 +122,8 @@ export function SettingsCompanyProfilePage() {
         taxId: taxId.trim() || null,
         logoUrl: logoUrl ?? null,
         brandColor,
-        fontSizeStep
+        fontSizeStep,
+        ...(canConfigureBridge ? { susuLoanBridgeEnabled } : {})
       });
       applyProfile(saved);
       window.dispatchEvent(new CustomEvent(COMPANY_PROFILE_UPDATED_EVENT, { detail: saved }));
@@ -261,6 +266,28 @@ export function SettingsCompanyProfilePage() {
             </select>
             <p className="muted">Default keeps the current size. A larger step applies to everyone in this company.</p>
           </label>
+
+          {canConfigureBridge ? (
+            <label className="field company-profile-bridge">
+              <span>Susu ↔ Loans bridge</span>
+              <span className="company-profile-bridge__row">
+                <input
+                  type="checkbox"
+                  checked={susuLoanBridgeEnabled}
+                  onChange={(e) => setSusuLoanBridgeEnabled(e.target.checked)}
+                />
+                <span>
+                  {susuLoanBridgeEnabled
+                    ? "Enabled — Susu can benchmark loan applications and fund repayments."
+                    : "Off — Susu and Loans stay separate under this company."}
+                </span>
+              </span>
+              <p className="muted">
+                Requires both Susu Management and Loans. Leave off unless you want blended qualification and
+                repay-from-Susu.
+              </p>
+            </label>
+          ) : null}
 
           <div className="form-actions">
             <button type="button" className="button" disabled={saving} onClick={() => void handleSave()}>

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 type Props = {
   open: boolean;
@@ -100,11 +101,11 @@ export function Modal({
     }
   }
 
-  if (!open) {
+  if (!open || typeof document === "undefined") {
     return null;
   }
 
-  return (
+  return createPortal(
     <div
       className={stacked ? "modal-backdrop modal-backdrop--stacked" : "modal-backdrop"}
       role="presentation"
@@ -136,6 +137,7 @@ export function Modal({
         <div className="modal-body">{children}</div>
         {footer ? <footer className="modal-footer">{footer}</footer> : null}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

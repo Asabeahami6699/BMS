@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { TellerDepositStatus } from "@bms/shared";
-import { isTellerDepositPending } from "@bms/shared";
+import { isTellerDepositPending, formatAccountAmount } from "@bms/shared";
 import { RowActionsMenu } from "../../components/RowActionsMenu";
 import { tellerDepositStatusLabel, tellerDepositStatusTone } from "./tellerDepositStatus";
 
@@ -13,7 +13,7 @@ type Props = {
 };
 
 function money(amount: number): string {
-  return `GHS ${amount.toFixed(2)}`;
+  return `GHS ${formatAccountAmount(amount)}`;
 }
 
 function formatTime(iso: string): string {

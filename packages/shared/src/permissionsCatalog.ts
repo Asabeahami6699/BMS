@@ -471,7 +471,14 @@ export const PERMISSION_CATALOG: PermissionCatalogEntry[] = [
   }
 ];
 
-export type LoansNavKey = "overview" | "products" | "groups" | "applications" | "apply" | "applyGroup";
+export type LoansNavKey =
+  | "overview"
+  | "customers"
+  | "products"
+  | "groups"
+  | "applications"
+  | "apply"
+  | "applyGroup";
 
 export type LoansNavVisibilityRow = {
   navPath: string;
@@ -489,6 +496,13 @@ export const LOANS_NAV_VISIBILITY: LoansNavVisibilityRow[] = [
     navKey: "overview",
     label: "Overview",
     description: "Loan KPIs and department summary.",
+    anyPermissions: ["loans.read"]
+  },
+  {
+    navPath: "loans/customers",
+    navKey: "customers",
+    label: "Loan customers",
+    description: "Borrowers with loan applications (not the full Susu book).",
     anyPermissions: ["loans.read"]
   },
   {

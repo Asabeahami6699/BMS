@@ -1,5 +1,4 @@
-import {
-  backOfficeBootstrapSchema,
+import { backOfficeBootstrapSchema,
   bankLabelsMatch,
   bankProductAppliesToBranch,
   createBackOfficeAgentTransferSchema,
@@ -8,8 +7,7 @@ import {
   resolveAgencyDepositCustomerName,
   updateBackOfficeAccountEntriesSchema,
   type BackOfficeAccountBalanceRow,
-  type BackOfficeBootstrap
-} from "@bms/shared";
+  type BackOfficeBootstrap, formatAccountAmount } from "@bms/shared";
 import { randomUUID } from "node:crypto";
 import { getSupabaseAdminClient } from "../config/supabaseClient.js";
 import { assertBranchAccess } from "../middleware/branchScope.js";
@@ -684,7 +682,7 @@ export async function createBackOfficeEcashRequest(
       roles: ["accountant", "admin"],
       kind: "back_office_ecash_requested",
       title: "Back office ecash request",
-      body: `GHS ${payload.amount.toFixed(2)} requested — allocate or approve ecash.`
+      body: `GHS ${formatAccountAmount(payload.amount)} requested — allocate or approve ecash.`
     });
   } catch {
     /* non-blocking */
@@ -967,7 +965,7 @@ export async function executeBackOfficeDeposit(
       kind: "deposit_completed",
       customerId: result.customerId,
       title: "Deposit completed at bank",
-      body: `GHS ${result.amount.toFixed(2)} — back office marked done. Customer account credited.`
+      body: `GHS ${formatAccountAmount(result.amount)} — back office marked done. Customer account credited.`
     });
   } catch {
     /* non-blocking */

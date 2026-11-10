@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import type { LoanApplication, LoanScheduleInstallment } from "@bms/shared";
+import { canUseSusuLoanBridge, type LoanApplication, type LoanScheduleInstallment } from "@bms/shared";
 import type { AppRole, AuthMe, Branch, LoanDetail } from "./api";
 import {
   approveLoanApplication,
@@ -55,8 +55,11 @@ export function LoanDetailPage({ role: _role }: Props) {
   const [repayAmount, setRepayAmount] = useState("");
   const [repayAmountNum, setRepayAmountNum] = useState(NaN);
   const [repayBranchId, setRepayBranchId] = useState("");
+  const [paymentSource, setPaymentSource] = useState<"cash" | "susu_account">("cash");
 
   usePageLoading(loading || busy, "loan-detail");
+
+  const bridgeActive = canUseSusuLoanBridge(me?.subscribedModules, me?.susuLoanBridgeEnabled);
 
   const load = useCallback(async () => {
     if (!loanId) {
@@ -104,6 +107,35 @@ export function LoanDetailPage({ role: _role }: Props) {
     }
     return Math.round((nextInstallment.amountDue - nextInstallment.amountPaid) * 100) / 100;
   }, [nextInstallment]);
+
+  const overdueInstallments = useMemo(() => {
+    const now = new Date();
+    return schedule.filter((s) => {
+      if (s.status === "paid" || s.status === "pending") {
+        return false;
+      }
+      if (s.status === "overdue") {
+        return true;
+      }
+      return s.status === "partial" && new Date(`${s.dueDate}T23:59:59`) < now;
+    });
+  }, [schedule]);
+
+  const hasOverdue = overdueInstallments.length > 0;
+
+  const overdueBulkDue = useMemo(() => {
+    if (!hasOverdue) {
+      return 0;
+    }
+    return (
+      Math.round(
+        overdueInstallments.reduce((sum, s) => sum + Math.max(0, s.amountDue - s.amountPaid), 0) *
+          100
+      ) / 100
+    );
+  }, [hasOverdue, overdueInstallments]);
+
+  const repayMax = hasOverdue && overdueBulkDue > 0 ? overdueBulkDue : nextInstallmentDue;
 
   const progressPct = useMemo(() => {
     if (!app || !app.totalRepayable) {
@@ -179,7 +211,8 @@ export function LoanDetailPage({ role: _role }: Props) {
       const result = await recordLoanRepayment(loanId, {
         amount,
         branchId: repayBranchId,
-        settleAll
+        settleAll,
+        paymentSource: bridgeActive ? paymentSource : "cash"
       });
       setDetail((prev) =>
         prev
@@ -408,6 +441,41 @@ export function LoanDetailPage({ role: _role }: Props) {
             </div>
           ) : null}
 
+          {app.susuCreditSnapshot ? (
+            <div className="loans-susu-snapshot">
+              <h4>Susu credit snapshot</h4>
+              <p className="muted">
+                Captured {formatLoanDateTime(app.susuCreditSnapshot.capturedAt)} via Susu↔Loans bridge
+                (advisory for qualification).
+              </p>
+              <dl className="loans-preview-dl">
+                <div>
+                  <dt>Account balance</dt>
+                  <dd>{formatLoanMoney(app.susuCreditSnapshot.accountBalance)}</dd>
+                </div>
+                <div>
+                  <dt>Withdrawable</dt>
+                  <dd>{formatLoanMoney(app.susuCreditSnapshot.withdrawableBalance)}</dd>
+                </div>
+                <div>
+                  <dt>Locked</dt>
+                  <dd>{formatLoanMoney(app.susuCreditSnapshot.lockedBalance)}</dd>
+                </div>
+                {app.susuCreditSnapshot.dailySusuCount90d != null ? (
+                  <div>
+                    <dt>Susu posts (90d)</dt>
+                    <dd>
+                      {app.susuCreditSnapshot.dailySusuCount90d}
+                      {app.susuCreditSnapshot.dailySusuTotal90d != null
+                        ? ` · ${formatLoanMoney(app.susuCreditSnapshot.dailySusuTotal90d)}`
+                        : ""}
+                    </dd>
+                  </div>
+                ) : null}
+              </dl>
+            </div>
+          ) : null}
+
           {app.rejectionReason ? (
             <p className="loans-notes loans-notes--danger">
               <strong>Rejection:</strong> {app.rejectionReason}
@@ -449,12 +517,38 @@ export function LoanDetailPage({ role: _role }: Props) {
                   {formatLoanDate(nextInstallment.dueDate)} · {formatLoanMoney(nextInstallmentDue)}
                 </p>
               ) : null}
+              {hasOverdue ? (
+                <p className="loans-next-installment" role="status">
+                  {overdueInstallments.length} overdue installment
+                  {overdueInstallments.length === 1 ? "" : "s"} · bulk catch-up up to{" "}
+                  {formatLoanMoney(overdueBulkDue)} spreads across due repayments
+                </p>
+              ) : null}
+              {bridgeActive ? (
+                <label className="field">
+                  <span>Payment source</span>
+                  <select
+                    value={paymentSource}
+                    onChange={(e) => setPaymentSource(e.target.value as "cash" | "susu_account")}
+                    disabled={busy}
+                  >
+                    <option value="cash">Cash / manual</option>
+                    <option value="susu_account">From Susu account</option>
+                  </select>
+                  {paymentSource === "susu_account" ? (
+                    <p className="field-hint muted">
+                      Debits the customer&apos;s Susu/savings balance, then posts the loan repayment.
+                      The Susu ledger shows loan repayment as the reason, and the customer is notified by SMS when enabled.
+                    </p>
+                  ) : null}
+                </label>
+              ) : null}
               <label className="field">
                 <span>Amount</span>
                 <LoanMoneyInput
                   required
                   value={repayAmount}
-                  max={nextInstallmentDue > 0 ? nextInstallmentDue : app.outstandingPrincipal}
+                  max={repayMax > 0 ? repayMax : app.outstandingPrincipal}
                   onChange={(display, numeric) => {
                     setRepayAmount(display);
                     setRepayAmountNum(numeric);
@@ -462,21 +556,38 @@ export function LoanDetailPage({ role: _role }: Props) {
                 />
               </label>
               <p className="field-hint muted">
-                Pay the current installment only. Installments cannot be skipped.
+                {hasOverdue
+                  ? "Overdue bulk payment: enter any amount up to the total due; it spreads across overdue installments in order."
+                  : "Pay the current installment only. Installments cannot be skipped until overdue."}
               </p>
               <label className="field">
-                <span>Apply to installment</span>
+                <span>{hasOverdue ? "Applies across" : "Apply to installment"}</span>
                 <input
                   type="text"
                   readOnly
                   disabled
                   value={
-                    nextInstallment
-                      ? `#${nextInstallment.installmentNumber} · ${formatLoanDate(nextInstallment.dueDate)}`
-                      : "All paid"
+                    hasOverdue
+                      ? `${overdueInstallments.length} due installment(s) · max ${formatLoanMoney(overdueBulkDue)}`
+                      : nextInstallment
+                        ? `#${nextInstallment.installmentNumber} · ${formatLoanDate(nextInstallment.dueDate)}`
+                        : "All paid"
                   }
                 />
               </label>
+              {hasOverdue && overdueBulkDue > 0 ? (
+                <button
+                  type="button"
+                  className="button secondary loans-settle-all"
+                  disabled={busy}
+                  onClick={() => {
+                    setRepayAmount(overdueBulkDue.toFixed(2));
+                    setRepayAmountNum(overdueBulkDue);
+                  }}
+                >
+                  Fill overdue total ({formatLoanMoney(overdueBulkDue)})
+                </button>
+              ) : null}
               <button
                 type="button"
                 className="button secondary loans-settle-all"
@@ -526,6 +637,9 @@ export function LoanDetailPage({ role: _role }: Props) {
                 <span className="muted">{formatLoanDateTime(r.createdAt)}</span>
                 {r.installmentNumber ? (
                   <span className="muted">Installment #{r.installmentNumber}</span>
+                ) : null}
+                {r.paymentSource === "susu_account" ? (
+                  <span className="muted">From Susu account</span>
                 ) : null}
               </li>
             ))}

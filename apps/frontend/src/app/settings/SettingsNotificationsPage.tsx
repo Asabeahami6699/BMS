@@ -246,7 +246,13 @@ export function SettingsNotificationsPage({ subscribedAddons }: Props) {
                   value={settings.senderId ?? ""}
                   onChange={(e) => setSettings({ ...settings, senderId: e.target.value })}
                 />
-                <p className="muted">Use the approved Arkesel name, including the space. Maximum 11 characters.</p>
+                <p className="muted">
+                  Must match an Arkesel-approved sender ID (max 11 characters). New names are not
+                  deliverable until Arkesel approves them — they usually ask for your business
+                  registration certificate and an authorization letter on company letterhead.
+                  Register the ID in your Arkesel dashboard and wait for approval before enabling
+                  live customer SMS.
+                </p>
               </label>
 
               <div className="form-actions">

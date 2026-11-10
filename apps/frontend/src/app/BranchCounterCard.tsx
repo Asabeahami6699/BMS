@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useShallow } from "zustand/react/shallow";
-import { SAVINGS_INITIAL_DEPOSIT_GHS, bankProductDisplayLabel, bankProductsForSubscription, type Permission, type TenantProductModule } from "@bms/shared";
+import { SAVINGS_INITIAL_DEPOSIT_GHS, bankProductDisplayLabel, bankProductsForSubscription, type Permission, type TenantProductModule, formatAccountAmount } from "@bms/shared";
 import type { AppRole } from "./api";
 import { BranchCounterFloatPanel } from "./BranchCounterFloatPanel";
 import { BranchCounterCashCalculator } from "./BranchCounterCashCalculator";
@@ -19,6 +19,10 @@ import {
   roleRequiresBranchFloat
 } from "../lib/branchFloatBalance";
 import { downloadCustomerLedgerCsv } from "../lib/customerLedgerCsv";
+import {
+  selectCustomerDetail,
+  useCustomerLedgerStore
+} from "./stores/customerLedgerStore";
 import { printCustomerAccountStatement } from "./customerAccountStatement";
 
 function todayIsoDate(): string {
@@ -191,6 +195,9 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
   const ledger = useBranchCounterStore(
     useShallow((s) => selectLedgerForCustomer(s, selectedCustomerId))
   );
+  const customerDetail = useCustomerLedgerStore((s) =>
+    selectCustomerDetail(s, selectedCustomerId)
+  );
 
   useEffect(() => {
     initBranchScope(isHeadOfficeRole);
@@ -199,6 +206,13 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
     return () => stopLiveSync();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mount lifecycle
   }, []);
+
+  useEffect(() => {
+    if (!selectedCustomerId) {
+      return;
+    }
+    void useCustomerLedgerStore.getState().ensureDetail(selectedCustomerId, { force: true });
+  }, [selectedCustomerId]);
 
   useEffect(() => {
     const paramId = searchParams.get("customerId");
@@ -248,16 +262,35 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
     [activeCustomers, search]
   );
 
-  const selectedCustomer = useMemo(
-    () => activeCustomers.find((c) => c.id === selectedCustomerId) ?? null,
-    [activeCustomers, selectedCustomerId]
-  );
+  const selectedCustomer = useMemo(() => {
+    const fromList = activeCustomers.find((c) => c.id === selectedCustomerId) ?? null;
+    if (!fromList) {
+      return null;
+    }
+    if (!customerDetail || customerDetail.id !== fromList.id) {
+      return fromList;
+    }
+    return {
+      ...fromList,
+      loanReserveAmount: customerDetail.loanReserveAmount ?? fromList.loanReserveAmount,
+      lockedBalance: customerDetail.lockedBalance ?? fromList.lockedBalance,
+      withdrawableBalance: customerDetail.withdrawableBalance ?? fromList.withdrawableBalance,
+      accountBalance: customerDetail.accountBalance ?? fromList.accountBalance
+    };
+  }, [activeCustomers, selectedCustomerId, customerDetail]);
 
   const balances = useMemo(
     () =>
       selectedCustomer
         ? balancesFromLedger(selectedCustomer, ledger)
-        : { accountBalance: 0, withdrawableBalance: 0, lockedAmount: 0, isSavings: false },
+        : {
+            accountBalance: 0,
+            withdrawableBalance: 0,
+            lockedAmount: 0,
+            loanReserveAmount: 0,
+            isSavings: false,
+            hasLoanReserve: false
+          },
     [selectedCustomer, ledger]
   );
 
@@ -276,7 +309,7 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
     setAmount(value.toFixed(2));
     setConfirmWithdraw(false);
     setCalculatorOpen(false);
-    showToast(`Amount set to GHS ${value.toFixed(2)}`, "success");
+    showToast(`Amount set to GHS ${formatAccountAmount(value)}`, "success");
   }
 
   async function handlePost() {
@@ -314,7 +347,7 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
     }
     if (type === "withdrawal" && parsedAmount > balances.withdrawableBalance) {
       showToast(
-        `Insufficient withdrawable balance (GHS ${balances.withdrawableBalance.toFixed(2)} available)`,
+        `Insufficient withdrawable balance (GHS ${formatAccountAmount(balances.withdrawableBalance)} available)`,
         "error"
       );
       return;
@@ -339,7 +372,7 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
         bankProductId: bankProductId || undefined
       });
       showToast(
-        `${TX_LABELS[type]} of GHS ${parsedAmount.toFixed(2)} posted for ${selectedCustomer.fullName}`,
+        `${TX_LABELS[type]} of GHS ${formatAccountAmount(parsedAmount)} posted for ${selectedCustomer.fullName}`,
         "success"
       );
       setAmount("");
@@ -552,25 +585,35 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
               <div className="branch-counter__hero-balances">
                 <div className="branch-counter__hero-balance branch-counter__hero-balance--primary">
                   <span>Account balance</span>
-                  <strong>{ledgerLoading ? "…" : `GHS ${balances.accountBalance.toFixed(2)}`}</strong>
+                  <strong>{ledgerLoading ? "…" : `GHS ${formatAccountAmount(balances.accountBalance)}`}</strong>
+                </div>
+                <div className="branch-counter__hero-balance">
+                  <span>Withdrawable</span>
+                  <strong>
+                    {ledgerLoading ? "…" : `GHS ${formatAccountAmount(balances.withdrawableBalance)}`}
+                  </strong>
                 </div>
                 {balances.isSavings ? (
-                  <>
-                    <div className="branch-counter__hero-balance">
-                      <span>Withdrawable</span>
-                      <strong>
-                        {ledgerLoading ? "…" : `GHS ${balances.withdrawableBalance.toFixed(2)}`}
-                      </strong>
-                    </div>
-                    <div className="branch-counter__hero-balance">
-                      <span>Locked</span>
-                      <strong>
-                        GHS {(selectedCustomer.lockedBalance ?? SAVINGS_INITIAL_DEPOSIT_GHS).toFixed(2)}
-                      </strong>
-                    </div>
-                  </>
+                  <div className="branch-counter__hero-balance">
+                    <span>Locked (savings min)</span>
+                    <strong>
+                      GHS {formatAccountAmount((selectedCustomer.lockedBalance ?? SAVINGS_INITIAL_DEPOSIT_GHS))}
+                    </strong>
+                  </div>
+                ) : null}
+                {balances.hasLoanReserve ? (
+                  <div className="branch-counter__hero-balance">
+                    <span>Loan repayment reserve</span>
+                    <strong>GHS {formatAccountAmount(balances.loanReserveAmount)}</strong>
+                  </div>
                 ) : null}
               </div>
+              {balances.hasLoanReserve ? (
+                <p className="branch-counter__reserve-note muted" role="status">
+                  GHS {formatAccountAmount(balances.loanReserveAmount)} is reserved for the next loan installment
+                  and cannot be withdrawn while the loan is open (Susu↔Loans bridge).
+                </p>
+              ) : null}
             </div>
           ) : (
             <div className="branch-counter__hero branch-counter__hero--empty card">
@@ -613,7 +656,7 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
                 >
                   <div className="branch-counter__float-balance-head">
                     <span>Float balance</span>
-                    <strong>GHS {floatSummary.floatBalance.toFixed(2)}</strong>
+                    <strong>GHS {formatAccountAmount(floatSummary.floatBalance)}</strong>
                   </div>
                   {floatSummary.isLowFloat ? (
                     <p className="branch-counter__float-reminder">
@@ -623,9 +666,9 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
                   {projectedTillBalance != null ? (
                     <p className="muted branch-counter__float-projected">
                       Float after this {TX_LABELS[type].toLowerCase()}: GHS{" "}
-                      {projectedTillBalance.toFixed(2)}
+                      {formatAccountAmount(projectedTillBalance)}
                       {type === "withdrawal"
-                        ? ` · Cash in till: GHS ${(floatSummary.expectedCash - parsedAmount).toFixed(2)}`
+                        ? ` · Cash in till: GHS ${formatAccountAmount((floatSummary.expectedCash - parsedAmount))}`
                         : null}
                     </p>
                   ) : null}
@@ -714,8 +757,8 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
 
             {type === "withdrawal" && confirmWithdraw && selectedCustomer ? (
               <p className="branch-counter__confirm" role="status">
-                Confirm withdrawal of <strong>GHS {Number(amount).toFixed(2)}</strong> for{" "}
-                {selectedCustomer.fullName}? Available: GHS {balances.withdrawableBalance.toFixed(2)}.
+                Confirm withdrawal of <strong>GHS {formatAccountAmount(Number(amount))}</strong> for{" "}
+                {selectedCustomer.fullName}? Available: GHS {formatAccountAmount(balances.withdrawableBalance)}.
               </p>
             ) : null}
 
@@ -732,7 +775,7 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
               ) : null}
               <button
                 type="button"
-                className={`button branch-counter__submit branch-counter__submit--${type}`}
+                className={`button branch-counter__submit branch-counter__submit--${type} login-submit${posting ? " login-submit--loading" : ""}`}
                 disabled={
                   !selectedCustomer ||
                   posting ||
@@ -743,13 +786,16 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
                 }
                 onClick={() => void handlePost()}
               >
-                {posting
-                  ? "Posting…"
-                  : confirmWithdraw
-                    ? "Confirm withdrawal"
-                    : type === "withdrawal"
-                      ? "Review withdrawal"
-                      : `Post ${TX_LABELS[type].toLowerCase()}`}
+                <span className="login-submit__fill" aria-hidden />
+                <span className="login-submit__label">
+                  {posting
+                    ? "Posting…"
+                    : confirmWithdraw
+                      ? "Confirm withdrawal"
+                      : type === "withdrawal"
+                        ? "Review withdrawal"
+                        : `Post ${TX_LABELS[type].toLowerCase()}`}
+                </span>
               </button>
             </div>
           </div>
@@ -848,11 +894,11 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
                     {typeLabel}
                     {entry.reversalStatus === "reversed" ? " · Reversed" : ""}
                   </span>
-                  <span className="branch-counter__ledger-amt">GHS {entry.amount.toFixed(2)}</span>
+                  <span className="branch-counter__ledger-amt">GHS {formatAccountAmount(entry.amount)}</span>
                   <span className="cif-ledger__by" title={entry.performedByName ?? undefined}>
                     {entry.performedByName ?? entry.recordedByName ?? "—"}
                   </span>
-                  <span className="branch-counter__ledger-bal">GHS {entry.balanceAfter.toFixed(2)}</span>
+                  <span className="branch-counter__ledger-bal">GHS {formatAccountAmount(entry.balanceAfter)}</span>
                 </>
               );
               return susuDetail ? (
@@ -860,7 +906,7 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
                   type="button"
                   className="cif-ledger__row"
                   key={entry.id}
-                  aria-label={`Reverse collection, ${typeLabel} GHS ${entry.amount.toFixed(2)}`}
+                  aria-label={`Reverse collection, ${typeLabel} GHS ${formatAccountAmount(entry.amount)}`}
                   onClick={() => setSusuTransactionId(entry.transactionId)}
                 >
                   {cells}

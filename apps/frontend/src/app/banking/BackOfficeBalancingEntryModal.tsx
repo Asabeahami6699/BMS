@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { bankProductAppliesToBranch, type OpenBackOfficeDayInput } from "@bms/shared";
 import { Modal } from "../../components/Modal";
+import { toUserFacingError } from "../../lib/networkError";
 
 type BranchOption = { id: string; name: string; code?: string };
 
@@ -51,7 +52,10 @@ export function BackOfficeBalancingEntryModal({
   const [ecashAmount, setEcashAmount] = useState("");
   const [ecashNotes, setEcashNotes] = useState("");
   const [ecashAccountId, setEcashAccountId] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
   const seededRef = useRef(false);
+  const amountRef = useRef<HTMLInputElement | null>(null);
 
   const branchAccounts = useMemo(
     () =>
@@ -61,9 +65,15 @@ export function BackOfficeBalancingEntryModal({
     [branchId, companyAccounts]
   );
 
+  const isBusy = Boolean(busy || submitting);
+  const isOpening = mode === "opening";
+  const formId = isOpening ? "back-office-opening-form" : "back-office-ecash-form";
+
   useEffect(() => {
     if (!open) {
       seededRef.current = false;
+      setSubmitting(false);
+      setFormError(null);
       return;
     }
     const preferred =
@@ -75,6 +85,8 @@ export function BackOfficeBalancingEntryModal({
       setBranchId(preferred);
       setEcashAmount("");
       setEcashNotes("");
+      setFormError(null);
+      setSubmitting(false);
       return;
     }
     setBranchId((current) => current || preferred);
@@ -98,42 +110,71 @@ export function BackOfficeBalancingEntryModal({
     setEcashAccountId((current) => current || branchAccounts[0]?.id || "");
   }, [open, branchAccounts]);
 
-  async function handleOpenDay(event: FormEvent) {
-    event.preventDefault();
-    if (!branchId) {
+  useEffect(() => {
+    if (!open || isOpening) {
       return;
     }
-    await onOpenDay({
-      branchId,
-      businessDate,
-      openings: branchAccounts.map((account) => ({
-        bankProductId: account.id,
-        openingBalance: Number(openingDraft[account.id]?.opening ?? 0),
-        extraCash: Number(openingDraft[account.id]?.ecash ?? 0)
-      }))
-    });
-    onClose();
+    const timer = window.setTimeout(() => amountRef.current?.focus(), 40);
+    return () => window.clearTimeout(timer);
+  }, [open, isOpening, mode]);
+
+  async function handleOpenDay(event: FormEvent) {
+    event.preventDefault();
+    setFormError(null);
+    if (!branchId) {
+      setFormError("Select a branch.");
+      return;
+    }
+    if (branchAccounts.length === 0) {
+      setFormError("No company accounts for this branch.");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await onOpenDay({
+        branchId,
+        businessDate,
+        openings: branchAccounts.map((account) => ({
+          bankProductId: account.id,
+          openingBalance: Number(openingDraft[account.id]?.opening ?? 0),
+          extraCash: Number(openingDraft[account.id]?.ecash ?? 0)
+        }))
+      });
+      onClose();
+    } catch (err) {
+      setFormError(toUserFacingError(err, "Could not save opening balances."));
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   async function handleEcash(event: FormEvent) {
     event.preventDefault();
+    setFormError(null);
     if (!branchId) {
+      setFormError("Select a branch.");
       return;
     }
     const parsed = Number(ecashAmount);
     if (!Number.isFinite(parsed) || parsed <= 0) {
+      setFormError("Enter a valid amount greater than zero.");
       return;
     }
-    await onRequestEcash({
-      branchId,
-      amount: parsed,
-      notes: ecashNotes.trim() || undefined,
-      bankProductId: ecashAccountId || undefined
-    });
-    onClose();
+    setSubmitting(true);
+    try {
+      await onRequestEcash({
+        branchId,
+        amount: parsed,
+        notes: ecashNotes.trim() || undefined,
+        bankProductId: ecashAccountId || undefined
+      });
+      onClose();
+    } catch (err) {
+      setFormError(toUserFacingError(err, "Ecash request failed."));
+    } finally {
+      setSubmitting(false);
+    }
   }
-
-  const isOpening = mode === "opening";
 
   return (
     <Modal
@@ -144,57 +185,71 @@ export function BackOfficeBalancingEntryModal({
           ? `Pick the branch and record each company account balance for ${businessDate}.`
           : "Pick the branch and ask the accountant for extra cash."
       }
-      onClose={onClose}
-      panelClassName="modal-panel--back-office"
+      onClose={isBusy ? () => undefined : onClose}
+      captureDismiss={!isBusy}
+      stacked
+      titleId={isOpening ? "back-office-opening-modal-title" : "back-office-ecash-modal-title"}
+      panelClassName={
+        isOpening ? "modal-panel--back-office modal-panel--back-office-wide" : "modal-panel--back-office"
+      }
       footer={
         <>
-          <button type="button" className="button secondary" onClick={onClose}>
+          <button type="button" className="button secondary" onClick={onClose} disabled={isBusy}>
             Cancel
           </button>
-          {isOpening ? (
-            <button
-              type="submit"
-              form="back-office-opening-form"
-              className="button primary"
-              disabled={busy || !branchId || branchAccounts.length === 0}
-            >
-              {busy ? "Saving…" : "Save & open day"}
-            </button>
-          ) : (
-            <button
-              type="submit"
-              form="back-office-ecash-form"
-              className="button primary"
-              disabled={busy || !branchId}
-            >
-              {busy ? "Sending…" : "Send request"}
-            </button>
-          )}
+          <button
+            type="submit"
+            form={formId}
+            className="button primary"
+            disabled={
+              isBusy ||
+              !branchId ||
+              (isOpening ? branchAccounts.length === 0 : false)
+            }
+          >
+            {isBusy
+              ? isOpening
+                ? "Saving…"
+                : "Sending…"
+              : isOpening
+                ? "Save & open day"
+                : "Send request"}
+          </button>
         </>
       }
     >
-      <label className="field">
-        <span>Branch</span>
-        <select value={branchId} onChange={(e) => setBranchId(e.target.value)} required>
-          <option value="">Select branch…</option>
-          {branches.map((branch) => (
-            <option key={branch.id} value={branch.id}>
-              {branch.name}
-              {branch.code ? ` (${branch.code})` : ""}
-            </option>
-          ))}
-        </select>
-      </label>
+      {formError ? <p className="error-text">{formError}</p> : null}
 
       {isOpening ? (
-        branchAccounts.length === 0 ? (
-          <p className="muted">
-            {branchId
-              ? "No company accounts for this branch. Add one under Bank Products → Company accounts."
-              : "Select a branch to load company accounts."}
-          </p>
-        ) : (
-          <form id="back-office-opening-form" onSubmit={(e) => void handleOpenDay(e)}>
+        <form id={formId} className="stack-form" onSubmit={(e) => void handleOpenDay(e)}>
+          <label className="field">
+            <span>Branch</span>
+            <select
+              value={branchId}
+              onChange={(e) => {
+                setBranchId(e.target.value);
+                setFormError(null);
+              }}
+              required
+              disabled={isBusy}
+            >
+              <option value="">Select branch…</option>
+              {branches.map((branch) => (
+                <option key={branch.id} value={branch.id}>
+                  {branch.name}
+                  {branch.code ? ` (${branch.code})` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          {branchAccounts.length === 0 ? (
+            <p className="muted">
+              {branchId
+                ? "No company accounts for this branch. Add one under Bank Products → Company accounts."
+                : "Select a branch to load company accounts."}
+            </p>
+          ) : (
             <div className="agency-deposit-table-wrap">
               <table className="agency-deposit-table back-office-balancing-entry-table">
                 <thead>
@@ -221,6 +276,7 @@ export function BackOfficeBalancingEntryModal({
                           step={0.01}
                           className="back-office-balancing-input"
                           value={openingDraft[account.id]?.opening ?? ""}
+                          disabled={isBusy}
                           onChange={(e) =>
                             setOpeningDraft((prev) => ({
                               ...prev,
@@ -241,6 +297,7 @@ export function BackOfficeBalancingEntryModal({
                           step={0.01}
                           className="back-office-balancing-input"
                           value={openingDraft[account.id]?.ecash ?? "0"}
+                          disabled={isBusy}
                           onChange={(e) =>
                             setOpeningDraft((prev) => ({
                               ...prev,
@@ -257,14 +314,38 @@ export function BackOfficeBalancingEntryModal({
                 </tbody>
               </table>
             </div>
-          </form>
-        )
+          )}
+        </form>
       ) : (
-        <form id="back-office-ecash-form" className="stack-form" onSubmit={(e) => void handleEcash(e)}>
+        <form id={formId} className="stack-form" onSubmit={(e) => void handleEcash(e)}>
+          <label className="field">
+            <span>Branch</span>
+            <select
+              value={branchId}
+              onChange={(e) => {
+                setBranchId(e.target.value);
+                setFormError(null);
+              }}
+              required
+              disabled={isBusy}
+            >
+              <option value="">Select branch…</option>
+              {branches.map((branch) => (
+                <option key={branch.id} value={branch.id}>
+                  {branch.name}
+                  {branch.code ? ` (${branch.code})` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
           {branchAccounts.length > 0 ? (
             <label className="field">
               <span>Company account</span>
-              <select value={ecashAccountId} onChange={(e) => setEcashAccountId(e.target.value)}>
+              <select
+                value={ecashAccountId}
+                onChange={(e) => setEcashAccountId(e.target.value)}
+                disabled={isBusy}
+              >
                 <option value="">Any / general request</option>
                 {branchAccounts.map((account) => (
                   <option key={account.id} value={account.id}>
@@ -277,14 +358,18 @@ export function BackOfficeBalancingEntryModal({
           <label className="field">
             <span>Amount (GHS)</span>
             <input
+              ref={amountRef}
               type="number"
               min={0.01}
               step={0.01}
               value={ecashAmount}
-              onChange={(e) => setEcashAmount(e.target.value)}
+              onChange={(e) => {
+                setEcashAmount(e.target.value);
+                setFormError(null);
+              }}
               placeholder="0.00"
               required
-              autoFocus
+              disabled={isBusy}
             />
           </label>
           <label className="field">
@@ -294,6 +379,7 @@ export function BackOfficeBalancingEntryModal({
               value={ecashNotes}
               onChange={(e) => setEcashNotes(e.target.value)}
               placeholder="Reason or reference (optional)"
+              disabled={isBusy}
             />
           </label>
         </form>

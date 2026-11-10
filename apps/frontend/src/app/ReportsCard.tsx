@@ -1,3 +1,4 @@
+import { formatAccountAmount } from "@bms/shared";
 import { useShallow } from "zustand/react/shallow";
 import type { AppRole } from "./api";
 import { exportReportsCsv } from "./api";
@@ -78,15 +79,15 @@ export function ReportsCard({ role }: Props) {
           </div>
           <div className="line">
             <span>Total Deposits</span>
-            <strong>{summary.totalDeposits.toFixed(2)}</strong>
+            <strong>{formatAccountAmount(summary.totalDeposits)}</strong>
           </div>
           <div className="line">
             <span>Total Withdrawals</span>
-            <strong>{summary.totalWithdrawals.toFixed(2)}</strong>
+            <strong>{formatAccountAmount(summary.totalWithdrawals)}</strong>
           </div>
           <div className="line">
             <span>Total Daily Susu</span>
-            <strong>{summary.totalDailySusu.toFixed(2)}</strong>
+            <strong>{formatAccountAmount(summary.totalDailySusu)}</strong>
           </div>
         </div>
       ) : (
@@ -99,7 +100,7 @@ export function ReportsCard({ role }: Props) {
           <div className="line" key={branch.branchId}>
             <span>{selectBranchDisplayName(branch.branchId, coordBranches)}</span>
             <small>
-              {branch.transactionCount} tx | {branch.totalAmount.toFixed(2)}
+              {branch.transactionCount} tx | {formatAccountAmount(branch.totalAmount)}
             </small>
           </div>
         ))}
@@ -110,7 +111,7 @@ export function ReportsCard({ role }: Props) {
         {agents.map((agent) => (
           <div className="line" key={agent.fieldAgentId}>
             <span>{selectAgentDisplayName(agent.fieldAgentId, agentNames)}</span>
-            <small>{agent.totalCollections.toFixed(2)}</small>
+            <small>{formatAccountAmount(agent.totalCollections)}</small>
           </div>
         ))}
       </div>

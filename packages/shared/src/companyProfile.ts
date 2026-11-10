@@ -28,7 +28,9 @@ export const companyProfileSchema = z.object({
   logoUrl: z.string().max(900_000).optional(),
   brandColor: hexColor.optional(),
   fontSizeStep: fontSizeStepSchema.default(0),
-  savingsOpeningFeeGhs: savingsOpeningFeeSchema.default(20)
+  savingsOpeningFeeGhs: savingsOpeningFeeSchema.default(20),
+  /** Opt-in Susu ↔ Loans bridge. Only meaningful when both modules are subscribed. */
+  susuLoanBridgeEnabled: z.boolean().default(false)
 });
 
 export type CompanyProfile = z.infer<typeof companyProfileSchema>;
@@ -42,7 +44,8 @@ export const updateCompanyProfileSchema = z.object({
   logoUrl: z.string().max(900_000).nullable().optional(),
   brandColor: z.preprocess(emptyToNull, hexColor.nullable().optional()),
   fontSizeStep: fontSizeStepSchema.optional(),
-  savingsOpeningFeeGhs: savingsOpeningFeeSchema.optional()
+  savingsOpeningFeeGhs: savingsOpeningFeeSchema.optional(),
+  susuLoanBridgeEnabled: z.boolean().optional()
 });
 
 export type UpdateCompanyProfileInput = z.infer<typeof updateCompanyProfileSchema>;

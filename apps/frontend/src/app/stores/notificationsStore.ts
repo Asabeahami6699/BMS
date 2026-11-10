@@ -81,12 +81,26 @@ export const useNotificationsStore = create<NotificationsState>((set, get) => ({
     }
     fetchInFlight = (async () => {
       try {
+        const previous = get().items;
         const items = await listAgentNotifications();
         set({
           items,
           lastFetchedAt: Date.now(),
           error: null
         });
+        const prevIds = new Set(previous.map((n) => n.id));
+        const floatChanged = items.some(
+          (n) =>
+            (n.kind === "float_allocated" ||
+              n.kind === "float_requested" ||
+              n.kind === "float_closed_pending_settlement") &&
+            (!prevIds.has(n.id) || previous.find((p) => p.id === n.id)?.readAt !== n.readAt)
+        );
+        if (floatChanged) {
+          void import("./branchCounterStore").then((mod) => {
+            void mod.useBranchCounterStore.getState().refreshSilent();
+          });
+        }
       } catch {
         /* keep cache */
       } finally {

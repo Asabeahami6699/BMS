@@ -72,3 +72,23 @@ export function listSubscribedProductModules(
   }
   return TENANT_PRODUCT_MODULES.filter((module) => hasTenantModule(modules, module));
 }
+
+/**
+ * Susu ↔ Loans bridge is available only when both products are subscribed
+ * and the tenant has explicitly enabled the setting (default off).
+ */
+export function canUseSusuLoanBridge(
+  modules: TenantProductModule[] | undefined,
+  settingEnabled: boolean | undefined | null
+): boolean {
+  return (
+    Boolean(settingEnabled) &&
+    hasTenantModule(modules, "susu_management") &&
+    hasTenantModule(modules, "loans_credit")
+  );
+}
+
+/** True when both modules are subscribed (setting may still be off). */
+export function tenantHasSusuAndLoans(modules: TenantProductModule[] | undefined): boolean {
+  return hasTenantModule(modules, "susu_management") && hasTenantModule(modules, "loans_credit");
+}

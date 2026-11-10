@@ -39,6 +39,17 @@ const ACTIVITY_RULES: ActivityRule[] = [
 
   { methods: ["POST"], pattern: /^\/customers\/registrations$/i, action: "Submitted customer registration" },
   { methods: ["POST"], pattern: /^\/customers$/i, action: "Created customer" },
+  {
+    methods: ["POST"],
+    pattern: /^\/customers\/[^/]+\/reset-account$/i,
+    action: "Reset customer account"
+  },
+  {
+    methods: ["PATCH"],
+    pattern: /^\/customers\/[^/]+\/status$/i,
+    action: "Updated customer account status"
+  },
+  { methods: ["DELETE"], pattern: /^\/customers\/[^/]+$/i, action: "Deleted customer" },
   { methods: ["PATCH"], pattern: /^\/customers\/[^/]+\/approve$/i, action: "Approved customer registration" },
   { methods: ["PATCH"], pattern: /^\/customers\/[^/]+\/reject$/i, action: "Rejected customer registration" },
   {

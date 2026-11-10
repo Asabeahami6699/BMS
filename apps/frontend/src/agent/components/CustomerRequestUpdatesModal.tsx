@@ -1,3 +1,4 @@
+import { formatAccountAmount } from "@bms/shared";
 import type { BalanceDisclosure } from "../../app/api";
 import { Modal } from "../../components/Modal";
 import { balanceExpiresLabel, fulfillmentLabel, isBalanceVisible } from "../stores/agentBalanceStore";
@@ -11,7 +12,7 @@ type Props = {
 };
 
 function formatMoney(amount: number): string {
-  return `GHS ${amount.toFixed(2)}`;
+  return `GHS ${formatAccountAmount(amount)}`;
 }
 
 function RequestDetail({ label, disclosure }: { label: string; disclosure: BalanceDisclosure }) {

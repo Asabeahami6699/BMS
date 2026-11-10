@@ -1,4 +1,4 @@
-import { APP_BRAND_NAME, type AccountType } from "@bms/shared";
+import { APP_BRAND_NAME, type AccountType, formatAccountAmount } from "@bms/shared";
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
 import { getCompanyProfile, type Customer, type LedgerEntry } from "./api";
@@ -276,8 +276,8 @@ export function buildCustomerAccountStatementHtml(options: {
       (entry) => `<tr>
       <td>${escapeHtml(formatWhen(entry.createdAt))}</td>
       <td>${escapeHtml(typeLabel(entry))}${entry.reversalStatus === "reversed" ? " · Reversed" : ""}</td>
-      <td class="num">${entry.amount.toFixed(2)}</td>
-      <td class="num">${entry.balanceAfter.toFixed(2)}</td>
+      <td class="num">${formatAccountAmount(entry.amount)}</td>
+      <td class="num">${formatAccountAmount(entry.balanceAfter)}</td>
       <td>${escapeHtml(entry.performedByName ?? entry.recordedByName ?? "—")}</td>
     </tr>`
     )
@@ -338,11 +338,11 @@ export function buildCustomerAccountStatementHtml(options: {
         </div>
         <div>
           <div class="stmt__label">Opening balance</div>
-          <div class="stmt__value">GHS ${opening.toFixed(2)}</div>
+          <div class="stmt__value">GHS ${formatAccountAmount(opening)}</div>
         </div>
         <div>
           <div class="stmt__label">Closing balance</div>
-          <div class="stmt__value">GHS ${closing.toFixed(2)}</div>
+          <div class="stmt__value">GHS ${formatAccountAmount(closing)}</div>
         </div>
       </div>
       <table>

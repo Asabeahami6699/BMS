@@ -1,3 +1,4 @@
+import { formatAccountAmount } from "@bms/shared";
 import { useEffect, useMemo, useState } from "react";
 
 import type { Customer } from "../../app/api";
@@ -43,7 +44,7 @@ function formatTotal(amount: number): string {
 
   }
 
-  return `GHS ${amount.toFixed(2)}`;
+  return `GHS ${formatAccountAmount(amount)}`;
 
 }
 
@@ -414,7 +415,7 @@ export function AgentCollectPage({ onQueueChange, onSync, syncing, pendingCount 
 
                   {customer.accountNumber ?? "No account #"} · GHS{" "}
 
-                  {Number(customer.dailyContributionAmount).toFixed(2)}/day
+                  {formatAccountAmount(customer.dailyContributionAmount)}/day
 
                 </p>
 

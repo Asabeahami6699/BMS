@@ -1,11 +1,14 @@
-import {
-  createTransactionInputSchema,
+import { createTransactionInputSchema,
   transactionSchema,
-  type Transaction
-} from "@bms/shared";
+  type Transaction, formatAccountAmount } from "@bms/shared";
 import { randomUUID } from "node:crypto";
 import { getSupabaseAdminClient } from "../config/supabaseClient.js";
-import { getCustomerById, getCustomerWithdrawableBalance } from "./customerService.js";
+import {
+  getCustomerById,
+  getCustomerWithdrawableBalance,
+  QUALIFYING_TX_TYPES,
+  touchCustomerQualifyingActivity
+} from "./customerService.js";
 import { addLedgerEntry, computeCustomerBalance } from "./ledgerService.js";
 import {
   computeOpeningFeeDeduction,
@@ -190,7 +193,7 @@ export async function postWithdrawalForApprovedDisclosure(params: {
   const withdrawable = await getCustomerWithdrawableBalance(params.tenantId, params.customerId);
   if (withdrawable < params.amount) {
     throw new Error(
-      `Insufficient withdrawable balance. Available: GHS ${withdrawable.toFixed(2)}`
+      `Insufficient withdrawable balance. Available: GHS ${formatAccountAmount(withdrawable)}`
     );
   }
 
@@ -280,7 +283,7 @@ export async function postWithdrawalForApprovedDisclosure(params: {
     const expected = Math.round((balanceBefore - params.amount) * 100) / 100;
     if (Math.abs(balanceAfter - expected) > 0.01) {
       throw new Error(
-        `Withdrawal debit did not update the customer ledger (expected GHS ${expected.toFixed(2)}, actual GHS ${balanceAfter.toFixed(2)}). Apply Supabase migrations 002 and 021.`
+        `Withdrawal debit did not update the customer ledger (expected GHS ${formatAccountAmount(expected)}, actual GHS ${formatAccountAmount(balanceAfter)}). Apply Supabase migrations 002 and 021.`
       );
     }
 
@@ -443,8 +446,21 @@ export async function createTransaction(
       payload.customerId
     );
     if (withdrawable < payload.amount) {
+      let reserveHint = "";
+      try {
+        const { getCustomerLoanInstallmentReserve } = await import("./loanReserveService.js");
+        const reserve = await getCustomerLoanInstallmentReserve(
+          context.tenantId,
+          payload.customerId
+        );
+        if (reserve > 0) {
+          reserveHint = ` (GHS ${formatAccountAmount(reserve)} reserved for next loan repayment)`;
+        }
+      } catch {
+        /* ignore */
+      }
       throw new Error(
-        `Insufficient withdrawable balance. Available: GHS ${withdrawable.toFixed(2)}`
+        `Insufficient withdrawable balance. Available: GHS ${formatAccountAmount(withdrawable)}${reserveHint}`
       );
     }
   }
@@ -602,6 +618,12 @@ export async function createTransaction(
   }
 
   await applyTransactionToFloat(context, transaction);
+
+  if (QUALIFYING_TX_TYPES.has(transaction.type)) {
+    void touchCustomerQualifyingActivity(context.tenantId, transaction.customerId).catch(() => {
+      /* non-blocking */
+    });
+  }
 
   if (
     transaction.type === "deposit" ||

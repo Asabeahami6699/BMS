@@ -1,3 +1,4 @@
+import { formatAccountAmount } from "@bms/shared";
 import type { Customer } from "@bms/shared";
 import { getSupabaseAdminClient } from "../config/supabaseClient.js";
 import { getCustomerById } from "./customerService.js";
@@ -73,9 +74,9 @@ export async function recordOpeningFeeRecovery(
 }
 
 export function openingFeeNote(deduction: OpeningFeeDeduction): string {
-  return `Opening fee GHS ${deduction.feeRetained.toFixed(2)} retained from collection${
+  return `Opening fee GHS ${formatAccountAmount(deduction.feeRetained)} retained from collection${
     deduction.feeRemaining > 0
-      ? ` (GHS ${deduction.feeRemaining.toFixed(2)} still to recover from deposits)`
+      ? ` (GHS ${formatAccountAmount(deduction.feeRemaining)} still to recover from deposits)`
       : ""
   }`;
 }

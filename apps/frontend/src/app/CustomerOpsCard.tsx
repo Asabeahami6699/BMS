@@ -1,11 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useShallow } from "zustand/react/shallow";
+import { formatAccountAmount } from "@bms/shared";
 import type { AppRole, Branch, Customer } from "./api";
-import { deleteCustomer, getRuntimeBranchId, resetCustomerAccount } from "./api";
+import {
+  deleteCustomer,
+  getRuntimeBranchId,
+  resetCustomerAccount,
+  updateCustomerStatus
+} from "./api";
 import { AdminDataTable, filterRowsBySearch } from "../components/AdminDataTable";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { RowActionsMenu } from "../components/RowActionsMenu";
 import { useToast } from "../components/Toast";
+import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { formatFieldAgent } from "../lib/formatFieldAgent";
 import { toUserFacingError } from "../lib/networkError";
 import { RegistrationModal } from "../agent/RegistrationModal";
@@ -18,12 +26,16 @@ import { formatBranchLabel } from "./branchDisplay";
 
 type Props = { role: AppRole };
 
+type ManagedStatus = "active" | "inactive" | "dormant" | "closed";
+
 const STATUS_CLASS: Record<Customer["status"], string> = {
   pending_activation: "pending",
   active: "active",
   rejected: "inactive",
   suspended: "inactive",
-  closed: "inactive"
+  inactive: "inactive",
+  dormant: "dormant",
+  closed: "failed"
 };
 
 const STATUS_LABEL: Record<Customer["status"], string> = {
@@ -31,6 +43,8 @@ const STATUS_LABEL: Record<Customer["status"], string> = {
   active: "Active",
   rejected: "Rejected",
   suspended: "Suspended",
+  inactive: "Inactive",
+  dormant: "Dormant",
   closed: "Closed"
 };
 
@@ -41,8 +55,10 @@ function branchLabel(branchId: string, branches: Branch[]): string {
 export function CustomerOpsCard({ role }: Props) {
   useCustomersLiveSync();
   const { showToast } = useToast();
+  const { confirm, dialogProps } = useConfirmDialog();
   const canCreate = role === "admin" || role === "coordinator" || role === "field_agent";
-  const canPurge = role === "admin" || role === "super_admin";
+  const canPurge = role === "super_admin";
+  const canManageStatus = role === "admin" || role === "super_admin";
   const [searchParams] = useSearchParams();
   const [search, setSearch] = useState(() => searchParams.get("q") ?? "");
   const [purgeBusyId, setPurgeBusyId] = useState<string | null>(null);
@@ -146,11 +162,13 @@ export function CustomerOpsCard({ role }: Props) {
   const initialLoad = loading && lastFetchedAt == null;
 
   async function handleResetAccount(customer: Customer) {
-    if (
-      !window.confirm(
-        `Reset account for ${customer.fullName}?\n\nThis clears ledger history and balances but keeps the customer profile.`
-      )
-    ) {
+    const ok = await confirm({
+      title: "Reset account",
+      message: `Reset account for ${customer.fullName}? This clears ledger history and balances but keeps the customer profile.`,
+      confirmLabel: "Reset account",
+      danger: true
+    });
+    if (!ok) {
       return;
     }
     setPurgeBusyId(customer.id);
@@ -166,11 +184,13 @@ export function CustomerOpsCard({ role }: Props) {
   }
 
   async function handleDeleteCustomer(customer: Customer) {
-    if (
-      !window.confirm(
-        `Permanently delete ${customer.fullName}?\n\nThis removes the customer and related transactions. This cannot be undone.`
-      )
-    ) {
+    const ok = await confirm({
+      title: "Delete customer",
+      message: `Permanently delete ${customer.fullName}? This removes the customer and related transactions. This cannot be undone.`,
+      confirmLabel: "Delete",
+      danger: true
+    });
+    if (!ok) {
       return;
     }
     setPurgeBusyId(customer.id);
@@ -188,6 +208,86 @@ export function CustomerOpsCard({ role }: Props) {
     }
   }
 
+  async function handleSetStatus(customer: Customer, status: ManagedStatus) {
+    const labels: Record<ManagedStatus, string> = {
+      active: "ACTIVE",
+      inactive: "INACTIVE",
+      dormant: "DORMANT",
+      closed: "CLOSED"
+    };
+    const ok = await confirm({
+      title: status === "active" ? "Reactivate account" : "Change account status",
+      message:
+        status === "active"
+          ? `Reactivate ${customer.fullName} to ACTIVE?`
+          : `Flag ${customer.fullName} as ${labels[status]}?`,
+      confirmLabel: status === "active" ? "Reactivate" : `Set ${labels[status]}`,
+      danger: status === "closed"
+    });
+    if (!ok) {
+      return;
+    }
+    setPurgeBusyId(customer.id);
+    try {
+      await updateCustomerStatus(customer.id, status);
+      showToast(`Account marked ${labels[status].toLowerCase()}`, "success");
+      await refreshSilent();
+    } catch (error) {
+      showToast(toUserFacingError(error, "Could not update status"), "error");
+    } finally {
+      setPurgeBusyId(null);
+    }
+  }
+
+  function statusActions(row: Customer) {
+    if (!canManageStatus) {
+      return [];
+    }
+    if (row.status === "pending_activation" || row.status === "rejected") {
+      return [];
+    }
+    const busy = purgeBusyId === row.id;
+    const items: { label: string; onClick: () => void; danger?: boolean }[] = [];
+    if (row.status !== "active") {
+      items.push({
+        label: busy ? "Working…" : "Reactivate (ACTIVE)",
+        onClick: () => {
+          if (purgeBusyId != null) return;
+          void handleSetStatus(row, "active");
+        }
+      });
+    }
+    if (row.status !== "inactive") {
+      items.push({
+        label: busy ? "Working…" : "Flag Inactive",
+        onClick: () => {
+          if (purgeBusyId != null) return;
+          void handleSetStatus(row, "inactive");
+        }
+      });
+    }
+    if (row.status !== "dormant") {
+      items.push({
+        label: busy ? "Working…" : "Flag Dormant",
+        onClick: () => {
+          if (purgeBusyId != null) return;
+          void handleSetStatus(row, "dormant");
+        }
+      });
+    }
+    if (row.status !== "closed") {
+      items.push({
+        label: busy ? "Working…" : "Flag Closed",
+        onClick: () => {
+          if (purgeBusyId != null) return;
+          void handleSetStatus(row, "closed");
+        },
+        danger: true
+      });
+    }
+    return items;
+  }
+
   return (
     <>
       <section className="card customers-card">
@@ -197,9 +297,10 @@ export function CustomerOpsCard({ role }: Props) {
             <p className="muted">
               Browse and search customer records. Use Register customer for walk-in onboarding (full KYC, pending
               approval).
-              {canPurge
-                ? " Admins can reset balances or delete trial customers from the row menu."
-                : ""}{" "}
+              {canManageStatus
+                ? " Admins can flag accounts closed, inactive, or dormant, and reactivate them."
+                : ""}
+              {canPurge ? " Super users can reset balances or permanently delete accounts." : ""}{" "}
               {statusLine}
             </p>
           </div>
@@ -266,7 +367,7 @@ export function CustomerOpsCard({ role }: Props) {
               {
                 key: "contribution",
                 label: "Daily (GHS)",
-                render: (row) => Number(row.dailyContributionAmount).toFixed(2)
+                render: (row) => formatAccountAmount(row.dailyContributionAmount)
               },
               {
                 key: "status",
@@ -296,6 +397,7 @@ export function CustomerOpsCard({ role }: Props) {
                     label: "Account statement",
                     onClick: () => setStatementCustomerId(row.id)
                   },
+                  ...statusActions(row),
                   ...(canPurge
                     ? [
                         {
@@ -348,6 +450,8 @@ export function CustomerOpsCard({ role }: Props) {
         customer={statementCustomer}
         onClose={() => setStatementCustomerId(null)}
       />
+
+      <ConfirmDialog {...dialogProps} />
     </>
   );
 }

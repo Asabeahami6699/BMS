@@ -231,6 +231,22 @@ export const loanApplicationStatusSchema = z.enum([
 
 export type LoanApplicationStatus = z.infer<typeof loanApplicationStatusSchema>;
 
+/** Susu account snapshot captured when the Susu↔Loans bridge is enabled. */
+export const susuCreditSnapshotSchema = z.object({
+  capturedAt: z.string(),
+  accountBalance: z.number(),
+  withdrawableBalance: z.number(),
+  lockedBalance: z.number().nonnegative().default(0),
+  dailySusuCount90d: z.number().int().nonnegative().optional(),
+  dailySusuTotal90d: z.number().nonnegative().optional(),
+  note: z.string().optional()
+});
+
+export type SusuCreditSnapshot = z.infer<typeof susuCreditSnapshotSchema>;
+
+export const loanRepaymentPaymentSourceSchema = z.enum(["cash", "susu_account"]);
+export type LoanRepaymentPaymentSource = z.infer<typeof loanRepaymentPaymentSourceSchema>;
+
 export const loanScheduleStatusSchema = z.enum(["pending", "paid", "partial", "overdue"]);
 export type LoanScheduleStatus = z.infer<typeof loanScheduleStatusSchema>;
 
@@ -284,6 +300,7 @@ export const loanApplicationSchema = z.object({
   existingLoanBalance: z.number().nonnegative().optional(),
   yearsAtCurrentJob: z.number().nonnegative().optional(),
   guarantor: loanGuarantorSchema.optional(),
+  susuCreditSnapshot: susuCreditSnapshotSchema.optional(),
   rejectionReason: z.string().optional(),
   appliedAt: z.string(),
   approvedAt: z.string().optional(),
@@ -360,7 +377,8 @@ export const recordLoanRepaymentSchema = z.object({
   amount: z.number().positive(),
   branchId: z.string().min(1),
   notes: z.string().optional(),
-  settleAll: z.boolean().optional()
+  settleAll: z.boolean().optional(),
+  paymentSource: loanRepaymentPaymentSourceSchema.default("cash")
 });
 
 export const loanRepaymentSchema = z.object({
@@ -371,6 +389,8 @@ export const loanRepaymentSchema = z.object({
   branchId: z.string(),
   installmentNumber: z.number().int().positive().optional(),
   notes: z.string().optional(),
+  paymentSource: loanRepaymentPaymentSourceSchema.default("cash"),
+  susuTransactionId: z.string().optional(),
   recordedBy: z.string(),
   createdAt: z.string()
 });

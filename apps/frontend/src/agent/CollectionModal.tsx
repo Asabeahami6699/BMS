@@ -1,3 +1,4 @@
+import { formatAccountAmount } from "@bms/shared";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import type { Customer } from "../app/api";
 import { useAuth } from "../auth/AuthContext";
@@ -96,7 +97,7 @@ export function CollectionModal({ open, customer, topUp, priorAmount = 0, onClos
       subtitle={
         customer
           ? topUp
-            ? `${customer.fullName} — already GHS ${priorAmount.toFixed(2)} today`
+            ? `${customer.fullName} — already GHS ${formatAccountAmount(priorAmount)} today`
             : `${customer.fullName}${customer.accountNumber ? ` · ${customer.accountNumber}` : ""}`
           : undefined
       }
@@ -136,7 +137,7 @@ export function CollectionModal({ open, customer, topUp, priorAmount = 0, onClos
             required={amountText.trim() !== ""}
           />
           {!topUp && suggested > 0 ? (
-            <p className="muted agent-amount-hint">Leave empty to use default GHS {suggested.toFixed(2)}</p>
+            <p className="muted agent-amount-hint">Leave empty to use default GHS {formatAccountAmount(suggested)}</p>
           ) : null}
         </label>
         <label className="field">

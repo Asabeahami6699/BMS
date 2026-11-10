@@ -1,4 +1,4 @@
-import { auditorDashboardSchema, type AuditorDashboard, type Permission } from "@bms/shared";
+import { auditorDashboardSchema, type AuditorDashboard, type Permission, formatAccountAmount } from "@bms/shared";
 import { getBackOfficeBootstrap } from "./backOfficeService.js";
 import { listBranches } from "./branchService.js";
 import { listTransactions } from "./transactionService.js";
@@ -107,7 +107,7 @@ export async function getAuditorDashboard(
     reviewQueue.push({
       id: row.id,
       kind: "high_value",
-      label: `${row.type} — ${row.amount.toFixed(2)}`,
+      label: `${row.type} — ${formatAccountAmount(row.amount)}`,
       amount: row.amount
     });
   }

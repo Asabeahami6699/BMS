@@ -1,7 +1,14 @@
-import type { LoanApplicationStatus, LoanIncomeSource, LoanPurpose, LoanRepaymentFrequency, LoanScheduleStatus } from "@bms/shared";
+import {
+  formatGhs,
+  type LoanApplicationStatus,
+  type LoanIncomeSource,
+  type LoanPurpose,
+  type LoanRepaymentFrequency,
+  type LoanScheduleStatus
+} from "@bms/shared";
 
 export function formatLoanMoney(amount: number): string {
-  return `GHS ${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return formatGhs(amount);
 }
 
 export function parseMoneyInput(raw: string): number {

@@ -39,6 +39,7 @@ import { LoanApplicationsPage } from "./LoanApplicationsPage";
 import { LoanApplyWizard } from "./loans/LoanApplyWizard";
 import { LoanGroupApplyWizard } from "./loans/LoanGroupApplyWizard";
 import { LoanBlankFormPage } from "./loans/LoanBlankFormPage";
+import { LoanCustomersPage } from "./loans/LoanCustomersPage";
 import { LoanGroupsPage } from "./LoanGroupsPage";
 import { LoanDetailPage } from "./LoanDetailPage";
 import { InvestmentsOverviewPage } from "./investments/InvestmentsOverviewPage";
@@ -65,7 +66,10 @@ import { AgencyDepositsPage } from "./banking/AgencyDepositsPage";
 import { AgencyAccountOpeningPage } from "./banking/AgencyAccountOpeningPage";
 import { AgencyInitiateWithdrawalPage } from "./banking/AgencyInitiateWithdrawalPage";
 import { AgencyWithdrawalsPage } from "./banking/AgencyWithdrawalsPage";
+import { BackOfficeBalancingPage } from "./banking/BackOfficeBalancingPage";
+import { BackOfficeDepositQueuePage } from "./banking/BackOfficeDepositQueuePage";
 import { BackOfficeDeskPage } from "./banking/BackOfficeDeskPage";
+import { BackOfficeReconciliationPage } from "./banking/BackOfficeReconciliationPage";
 import { CustomerServiceDeskPage } from "./banking/CustomerServiceDeskPage";
 import { RoleDeskRoute } from "./banking/RoleDeskRoute";
 import { AccountantApprovalsPage } from "./banking/AccountantApprovalsPage";
@@ -447,15 +451,37 @@ export function TenantApp() {
         />
         <Route
           path="/banking/back-office/deposits"
-          element={<Navigate to="/app/banking/back-office#deposits" replace />}
+          element={
+            <TenantAgencyRoute route="banking/back-office/deposits" modules={modules} permissions={permissions}>
+              <RoleDeskRoute kind="back_officer" role={role} permissions={permissions}>
+                <BackOfficeDepositQueuePage displayName={displayName} />
+              </RoleDeskRoute>
+            </TenantAgencyRoute>
+          }
         />
         <Route
           path="/banking/back-office/balancing"
-          element={<Navigate to="/app/banking/back-office#balancing" replace />}
+          element={
+            <TenantAgencyRoute route="banking/back-office/balancing" modules={modules} permissions={permissions}>
+              <RoleDeskRoute kind="back_officer" role={role} permissions={permissions}>
+                <BackOfficeBalancingPage displayName={displayName} />
+              </RoleDeskRoute>
+            </TenantAgencyRoute>
+          }
         />
         <Route
           path="/banking/back-office/reconciliation"
-          element={<Navigate to="/app/banking/back-office#reconciliation" replace />}
+          element={
+            <TenantAgencyRoute
+              route="banking/back-office/reconciliation"
+              modules={modules}
+              permissions={permissions}
+            >
+              <RoleDeskRoute kind="back_officer" role={role} permissions={permissions}>
+                <BackOfficeReconciliationPage displayName={displayName} />
+              </RoleDeskRoute>
+            </TenantAgencyRoute>
+          }
         />
         <Route
           path="/banking/accountant"
@@ -670,6 +696,14 @@ export function TenantApp() {
 
         {/* Other departments */}
         <Route path="/loans" element={<TenantLoansRoute route="loans" modules={modules} permissions={permissions}><LoansOverviewPage role={role} /></TenantLoansRoute>} />
+        <Route
+          path="/loans/customers"
+          element={
+            <TenantLoansRoute route="loans/customers" modules={modules} permissions={permissions}>
+              <LoanCustomersPage role={role} />
+            </TenantLoansRoute>
+          }
+        />
         <Route
           path="/loans/products"
           element={<TenantLoansRoute route="loans/products" modules={modules} permissions={permissions}><LoanProductsPage role={role} /></TenantLoansRoute>}

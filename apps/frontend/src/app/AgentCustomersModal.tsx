@@ -15,6 +15,8 @@ const STATUS_LABEL: Record<Customer["status"], string> = {
   active: "Active",
   rejected: "Rejected",
   suspended: "Suspended",
+  inactive: "Inactive",
+  dormant: "Dormant",
   closed: "Closed"
 };
 
@@ -23,7 +25,9 @@ const STATUS_CLASS: Record<Customer["status"], string> = {
   active: "active",
   rejected: "inactive",
   suspended: "inactive",
-  closed: "inactive"
+  inactive: "inactive",
+  dormant: "dormant",
+  closed: "failed"
 };
 
 type Props = {

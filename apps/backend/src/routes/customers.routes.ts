@@ -33,7 +33,9 @@ import {
 
   searchActiveCustomers,
 
-  submitCustomerRegistration
+  submitCustomerRegistration,
+
+  updateCustomerStatus
 
 } from "../services/customerService.js";
 import { getCustomerBootstrap } from "../services/customerBootstrapService.js";
@@ -559,37 +561,56 @@ customersRouter.get("/:customerId", requirePermission("customers.read"), async (
   }
 });
 
-customersRouter.post(
-  "/:customerId/reset-account",
-  requirePermission("customers.create"),
-  async (req, res) => {
-    const context = req.userContext;
-    if (!context) {
-      res.status(401).json({ error: "Unauthorized" });
-      return;
-    }
-    if (context.role !== "admin" && context.role !== "super_admin") {
-      res.status(403).json({ error: "Only company admins can reset customer accounts" });
-      return;
-    }
-    try {
-      res.json(await resetCustomerAccount(context.tenantId, String(req.params.customerId)));
-    } catch (error) {
-      res.status(400).json({
-        error: error instanceof Error ? error.message : "Failed to reset customer account"
-      });
-    }
-  }
-);
-
-customersRouter.delete("/:customerId", requirePermission("customers.create"), async (req, res) => {
+customersRouter.patch("/:customerId/status", async (req, res) => {
   const context = req.userContext;
   if (!context) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
-  if (context.role !== "admin" && context.role !== "super_admin") {
-    res.status(403).json({ error: "Only company admins can delete customers" });
+  const canManage =
+    context.role === "admin" ||
+    context.role === "super_admin" ||
+    context.permissions.includes("customers.create");
+  if (!canManage || (context.role !== "admin" && context.role !== "super_admin")) {
+    res.status(403).json({ error: "Only tenant administrators can change account status" });
+    return;
+  }
+  try {
+    res.json(await updateCustomerStatus(context.tenantId, String(req.params.customerId), req.body));
+  } catch (error) {
+    res.status(400).json({
+      error: error instanceof Error ? error.message : "Failed to update customer status"
+    });
+  }
+});
+
+customersRouter.post("/:customerId/reset-account", async (req, res) => {
+  const context = req.userContext;
+  if (!context) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  if (context.role !== "super_admin") {
+    res.status(403).json({ error: "Only the platform super user can reset customer accounts" });
+    return;
+  }
+  try {
+    res.json(await resetCustomerAccount(context.tenantId, String(req.params.customerId)));
+  } catch (error) {
+    res.status(400).json({
+      error: error instanceof Error ? error.message : "Failed to reset customer account"
+    });
+  }
+});
+
+customersRouter.delete("/:customerId", async (req, res) => {
+  const context = req.userContext;
+  if (!context) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  if (context.role !== "super_admin") {
+    res.status(403).json({ error: "Only the platform super user can delete customers" });
     return;
   }
   try {

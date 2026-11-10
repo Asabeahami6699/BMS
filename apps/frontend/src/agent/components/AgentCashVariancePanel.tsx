@@ -1,9 +1,10 @@
+import { formatAccountAmount } from "@bms/shared";
 import { useEffect, useState } from "react";
 import type { AgentCashVarianceSummary } from "../../app/api";
 import { getMyCashVariances } from "../../app/api";
 
 function formatMoney(amount: number): string {
-  return `GHS ${amount.toFixed(2)}`;
+  return `GHS ${formatAccountAmount(amount)}`;
 }
 
 type Props = {
