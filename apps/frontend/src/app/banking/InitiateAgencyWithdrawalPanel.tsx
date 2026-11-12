@@ -4,19 +4,20 @@ import { bankProductDisplayLabel,
   bankProductsForSubscription,
   hasTenantModule,
   workflowFieldsForStage,
-  type TenantBankProduct, formatAccountAmount } from "@bms/shared";
+  formatAccountAmount } from "@bms/shared";
 import { useAuth } from "../../auth/AuthContext";
 import { filterRowsBySearch } from "../../components/AdminDataTable";
 import { useToast } from "../../components/Toast";
 import { balancesFromLedger } from "../../lib/customerBalance";
 import { toUserFacingError } from "../../lib/networkError";
-import { initiateAgencyWithdrawal, listBankProducts } from "../api";
+import { initiateAgencyWithdrawal } from "../api";
 import { isSusuCustomer } from "./agencyDepositCustomer";
 import { DynamicWorkflowForm } from "./DynamicWorkflowForm";
 import {
   selectActiveAgencyCustomers,
   useAgencyTellerStore
 } from "../stores/agencyTellerStore";
+import { useBankProductsStore } from "../stores/bankProductsStore";
 
 type CustomerSearchTab = "all" | "susu" | "savings";
 type WithdrawalCaptureMode = "bms" | "manual";
@@ -38,7 +39,12 @@ export function InitiateAgencyWithdrawalPanel({ onInitiated }: Props) {
   const [reason, setReason] = useState("");
   const [bankProductId, setBankProductId] = useState("");
   const [workflowData, setWorkflowData] = useState<Record<string, unknown>>({});
-  const [withdrawalProducts, setWithdrawalProducts] = useState<TenantBankProduct[]>([]);
+  const bankProducts = useBankProductsStore((s) => s.products);
+  const hydrateBankProducts = useBankProductsStore((s) => s.hydrate);
+  const withdrawalProducts = useMemo(
+    () => bankProductsForSubscription(bankProducts, modules, "withdrawal"),
+    [bankProducts, modules]
+  );
   const [submitting, setSubmitting] = useState(false);
 
   const {
@@ -72,14 +78,9 @@ export function InitiateAgencyWithdrawalPanel({ onInitiated }: Props) {
   useEffect(() => {
     hydrate({ force: true });
     startLiveSync();
+    hydrateBankProducts();
     return () => stopLiveSync();
-  }, [hydrate, startLiveSync, stopLiveSync]);
-
-  useEffect(() => {
-    void listBankProducts({ direction: "withdrawal", activeOnly: true })
-      .then((products) => setWithdrawalProducts(bankProductsForSubscription(products, modules, "withdrawal")))
-      .catch(() => setWithdrawalProducts([]));
-  }, [modules]);
+  }, [hydrate, startLiveSync, stopLiveSync, hydrateBankProducts]);
 
   useEffect(() => {
     if (branches.length === 1 && transactionBranchId !== branches[0].id) {

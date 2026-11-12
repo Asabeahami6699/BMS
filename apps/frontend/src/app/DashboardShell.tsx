@@ -172,7 +172,7 @@ export function DashboardShell({
         brandColor ? brandColorStyle(brandColor) : undefined
       }
     >
-      <aside className="dash-sidebar">
+      <aside className="dash-sidebar" aria-label="Main navigation">
         <div className="dash-brand">
           <div className="dash-brand-title-row">
             {companyLogoUrl ? (
@@ -196,12 +196,14 @@ export function DashboardShell({
                 <NavLink
                   key={item.to}
                   to={item.to}
+                  title={item.label}
+                  aria-label={item.label}
                   className={({ isActive }) => `dash-nav-link${isActive ? " active" : ""}`}
                 >
                   <span className="dash-nav-icon" aria-hidden>
                     {getNavIcon(item.label, item.to)}
                   </span>
-                  <span>{item.label}</span>
+                  <span className="dash-nav-label">{item.label}</span>
                 </NavLink>
               );
             }
@@ -218,6 +220,8 @@ export function DashboardShell({
                   type="button"
                   className="dash-nav-group-trigger"
                   aria-expanded={isOpen}
+                  title={item.label}
+                  aria-label={item.label}
                   onClick={() => toggleGroup(item.id)}
                 >
                   <span className="dash-nav-icon" aria-hidden>
@@ -236,12 +240,14 @@ export function DashboardShell({
                           <NavLink
                             key={child.to}
                             to={child.to}
+                            title={child.label}
+                            aria-label={child.label}
                             className={({ isActive }) => `dash-nav-sublink${isActive ? " active" : ""}`}
                           >
                             <span className="dash-nav-sublink-icon" aria-hidden>
                               {getNavIcon(child.label, child.to)}
                             </span>
-                            {child.label}
+                            <span className="dash-nav-label">{child.label}</span>
                           </NavLink>
                         );
                       }
@@ -256,6 +262,8 @@ export function DashboardShell({
                             type="button"
                             className="dash-nav-subgroup-trigger"
                             aria-expanded={subOpen}
+                            title={child.label}
+                            aria-label={child.label}
                             onClick={() => toggleSubgroup(child.id)}
                           >
                             <span className="dash-nav-sublink-icon" aria-hidden>
@@ -272,6 +280,8 @@ export function DashboardShell({
                                 <NavLink
                                   key={sub.to}
                                   to={sub.to}
+                                  title={sub.label}
+                                  aria-label={sub.label}
                                   className={({ isActive }) =>
                                     `dash-nav-sublink dash-nav-sublink--nested${isActive ? " active" : ""}`
                                   }
@@ -279,7 +289,7 @@ export function DashboardShell({
                                   <span className="dash-nav-sublink-icon" aria-hidden>
                                     {getNavIcon(sub.label, sub.to)}
                                   </span>
-                                  {sub.label}
+                                  <span className="dash-nav-label">{sub.label}</span>
                                 </NavLink>
                               ))}
                             </div>

@@ -11,6 +11,12 @@ import { getSusuLoanBridgeEnabled } from "./tenantProfileService.js";
 import { loadTenantModules } from "./tenantModuleService.js";
 
 export const LOAN_REPAYMENT_SUSU_NOTE_TAG = "loan_repay:";
+export const LOAN_REPAYMENT_SUSU_REVERSE_TAG = "loan_repay_reverse:";
+export const LOAN_DISBURSE_SUSU_NOTE_TAG = "loan_disburse:";
+
+function rpcPostFailedMessage(action: string, rpcMessage: string): string {
+  return `Failed to ${action}: ${rpcMessage}. Apply Supabase migrations (including 084) and retry — non-atomic fallback is disabled.`;
+}
 
 export async function isSusuLoanBridgeActive(tenantId: string): Promise<boolean> {
   const [modules, settingEnabled] = await Promise.all([
@@ -167,50 +173,7 @@ export async function postSusuDebitForLoanRepayment(params: {
     });
 
     if (rpcError) {
-      const { error: insertError } = await supabase.from("customer_transactions").insert({
-        id: transactionId,
-        tenant_id: params.tenantId,
-        customer_id: params.customerId,
-        type: "withdrawal",
-        amount: params.amount,
-        transaction_branch_id: params.branchId,
-        home_branch_id: homeBranchId,
-        recorded_by_user_id: params.recordedByUserId,
-        field_agent_id: customer.assignedFieldAgentId ?? params.recordedByUserId,
-        notes: fullNotes
-      });
-      if (insertError) {
-        throw new Error(
-          `Failed to debit Susu account for loan repayment: ${insertError.message} (RPC: ${rpcError.message})`
-        );
-      }
-      await addLedgerEntry({
-        tenantId: params.tenantId,
-        customerId: params.customerId,
-        transactionId,
-        entryType: "debit",
-        amount: params.amount,
-        transactionBranchId: params.branchId
-      });
-    } else {
-      const { data: ledgerRow, error: ledgerCheckError } = await supabase
-        .from("ledger_entries")
-        .select("id")
-        .eq("transaction_id", transactionId)
-        .maybeSingle();
-      if (ledgerCheckError) {
-        throw new Error(`Failed to verify ledger entry: ${ledgerCheckError.message}`);
-      }
-      if (!ledgerRow) {
-        await addLedgerEntry({
-          tenantId: params.tenantId,
-          customerId: params.customerId,
-          transactionId,
-          entryType: "debit",
-          amount: params.amount,
-          transactionBranchId: params.branchId
-        });
-      }
+      throw new Error(rpcPostFailedMessage("debit Susu for loan repayment", rpcError.message));
     }
 
     const balanceAfter = await computeCustomerBalance(params.tenantId, params.customerId);
@@ -257,4 +220,233 @@ export async function postSusuDebitForLoanRepayment(params: {
   });
 
   return transactionId;
+}
+
+/** Compensating credit if loan repayment bookkeeping fails after Susu was already debited. */
+export async function reverseSusuDebitForLoanRepayment(params: {
+  tenantId: string;
+  customerId: string;
+  branchId: string;
+  amount: number;
+  repaymentId: string;
+  loanId: string;
+  recordedByUserId: string;
+}): Promise<string | null> {
+  const reverseTag = `${LOAN_REPAYMENT_SUSU_REVERSE_TAG}${params.repaymentId}`;
+  const debitTag = `${LOAN_REPAYMENT_SUSU_NOTE_TAG}${params.repaymentId}`;
+  const loanRef = params.loanId.replace(/-/g, "").slice(0, 8).toUpperCase();
+  const fullNotes = `Loan repayment reverse · Restoring Susu after failed loan post · Loan ${loanRef} · ${reverseTag}`;
+  const customer = await getCustomerById(params.tenantId, params.customerId);
+  if (!customer) {
+    return null;
+  }
+  const supabase = getSupabaseAdminClient();
+  const transactionId = randomUUID();
+  const homeBranchId = customer.homeBranchId || params.branchId;
+
+  if (supabase) {
+    const { data: debitRow } = await supabase
+      .from("customer_transactions")
+      .select("id")
+      .eq("tenant_id", params.tenantId)
+      .eq("customer_id", params.customerId)
+      .eq("type", "withdrawal")
+      .like("notes", `%${debitTag}%`)
+      .limit(1)
+      .maybeSingle();
+    if (!debitRow?.id) {
+      return null;
+    }
+    const { data: existingReverse } = await supabase
+      .from("customer_transactions")
+      .select("id")
+      .eq("tenant_id", params.tenantId)
+      .eq("customer_id", params.customerId)
+      .eq("type", "deposit")
+      .like("notes", `%${reverseTag}%`)
+      .limit(1)
+      .maybeSingle();
+    if (existingReverse?.id) {
+      return String(existingReverse.id);
+    }
+
+    const { error: rpcError } = await supabase.rpc("post_customer_transaction_atomic", {
+      p_transaction_id: transactionId,
+      p_tenant_id: params.tenantId,
+      p_customer_id: params.customerId,
+      p_type: "deposit",
+      p_amount: params.amount,
+      p_transaction_branch_id: params.branchId,
+      p_home_branch_id: homeBranchId,
+      p_recorded_by_user_id: params.recordedByUserId,
+      p_field_agent_id: customer.assignedFieldAgentId ?? params.recordedByUserId,
+      p_notes: fullNotes
+    });
+    if (rpcError) {
+      console.warn("[loans] Susu repayment reverse failed:", rpcError.message);
+      return null;
+    }
+    return transactionId;
+  }
+
+  await addLedgerEntry({
+    tenantId: params.tenantId,
+    customerId: params.customerId,
+    transactionId,
+    entryType: "credit",
+    amount: params.amount,
+    transactionBranchId: params.branchId
+  });
+  return transactionId;
+}
+
+/**
+ * Credit loan principal into the customer's Susu/savings ledger so they can
+ * withdraw at the branch counter.
+ */
+export async function postSusuCreditForLoanDisbursement(params: {
+  tenantId: string;
+  customerId: string;
+  branchId: string;
+  amount: number;
+  loanId: string;
+  recordedByUserId: string;
+}): Promise<string> {
+  if (!(await isSusuLoanBridgeActive(params.tenantId))) {
+    throw new Error("Susu↔Loans bridge is not enabled for this company");
+  }
+  if (params.amount <= 0) {
+    throw new Error("Disbursement amount must be greater than zero");
+  }
+
+  const customer = await getCustomerById(params.tenantId, params.customerId);
+  if (!customer || customer.status !== "active") {
+    throw new Error("Customer not found or not active");
+  }
+
+  const idempotencyTag = `${LOAN_DISBURSE_SUSU_NOTE_TAG}${params.loanId}`;
+  const loanRef = params.loanId.replace(/-/g, "").slice(0, 8).toUpperCase();
+  const fullNotes = `Loan disbursement · Credited to Susu/savings · Loan ${loanRef} · ${idempotencyTag}`;
+  const transactionId = randomUUID();
+  const homeBranchId = customer.homeBranchId || params.branchId;
+  const supabase = getSupabaseAdminClient();
+  const balanceBefore = await computeCustomerBalance(params.tenantId, params.customerId);
+
+  if (supabase) {
+    const { data: existing, error: existingError } = await supabase
+      .from("customer_transactions")
+      .select("id")
+      .eq("tenant_id", params.tenantId)
+      .eq("customer_id", params.customerId)
+      .eq("type", "deposit")
+      .like("notes", `%${idempotencyTag}%`)
+      .limit(1)
+      .maybeSingle();
+
+    if (existingError) {
+      throw new Error(`Failed to check prior Susu loan disbursement: ${existingError.message}`);
+    }
+    if (existing?.id) {
+      return String(existing.id);
+    }
+
+    const { error: rpcError } = await supabase.rpc("post_customer_transaction_atomic", {
+      p_transaction_id: transactionId,
+      p_tenant_id: params.tenantId,
+      p_customer_id: params.customerId,
+      p_type: "deposit",
+      p_amount: params.amount,
+      p_transaction_branch_id: params.branchId,
+      p_home_branch_id: homeBranchId,
+      p_recorded_by_user_id: params.recordedByUserId,
+      p_field_agent_id: customer.assignedFieldAgentId ?? params.recordedByUserId,
+      p_notes: fullNotes
+    });
+
+    if (rpcError) {
+      throw new Error(rpcPostFailedMessage("credit Susu for loan disbursement", rpcError.message));
+    }
+
+    const balanceAfter = await computeCustomerBalance(params.tenantId, params.customerId);
+    const expected = Math.round((balanceBefore + params.amount) * 100) / 100;
+    if (Math.abs(balanceAfter - expected) > 0.01) {
+      throw new Error(
+        `Susu credit did not update the customer ledger (expected GHS ${formatAccountAmount(expected)}, actual GHS ${formatAccountAmount(balanceAfter)}).`
+      );
+    }
+
+    return transactionId;
+  }
+
+  await addLedgerEntry({
+    tenantId: params.tenantId,
+    customerId: params.customerId,
+    transactionId,
+    entryType: "credit",
+    amount: params.amount,
+    transactionBranchId: params.branchId
+  });
+  return transactionId;
+}
+
+/** Lock a share of Susu/savings as passbook collateral for an open loan. */
+export async function setCustomerLoanCollateralLocked(
+  tenantId: string,
+  customerId: string,
+  amount: number
+): Promise<void> {
+  const locked = Math.max(0, Math.round(amount * 100) / 100);
+  const supabase = getSupabaseAdminClient();
+  if (!supabase) {
+    return;
+  }
+  const { error } = await supabase
+    .from("customers")
+    .update({ loan_collateral_locked: locked })
+    .eq("tenant_id", tenantId)
+    .eq("id", customerId);
+  if (error && !/loan_collateral_locked/i.test(error.message)) {
+    throw new Error(`Failed to set loan collateral lock: ${error.message}`);
+  }
+}
+
+/**
+ * Recompute passbook collateral from all still-open (disbursed) loans for the customer.
+ * Closing one loan must not wipe liens belonging to other open loans.
+ */
+export async function recomputeCustomerLoanCollateralLocked(
+  tenantId: string,
+  customerId: string,
+  excludeLoanId?: string
+): Promise<number> {
+  const supabase = getSupabaseAdminClient();
+  let total = 0;
+  if (supabase) {
+    let query = supabase
+      .from("loan_applications")
+      .select("id, collateral_lien_amount")
+      .eq("tenant_id", tenantId)
+      .eq("customer_id", customerId)
+      .eq("status", "disbursed");
+    if (excludeLoanId) {
+      query = query.neq("id", excludeLoanId);
+    }
+    const { data, error } = await query;
+    if (error && !/collateral_lien_amount|loan_applications/i.test(error.message)) {
+      throw new Error(`Failed to recompute loan collateral: ${error.message}`);
+    }
+    for (const row of data ?? []) {
+      total += Number(row.collateral_lien_amount ?? 0);
+    }
+  }
+  total = Math.max(0, Math.round(total * 100) / 100);
+  await setCustomerLoanCollateralLocked(tenantId, customerId, total);
+  return total;
+}
+
+export async function clearCustomerLoanCollateralLocked(
+  tenantId: string,
+  customerId: string
+): Promise<void> {
+  await setCustomerLoanCollateralLocked(tenantId, customerId, 0);
 }

@@ -567,31 +567,9 @@ async function postAgencyWithdrawalLedgerDebit(
       p_notes: notes
     });
     if (rpcError) {
-      const { error: insertError } = await supabase.from("customer_transactions").insert({
-        id: transactionId,
-        tenant_id: context.tenantId,
-        customer_id: params.customerId,
-        type: "withdrawal",
-        amount: params.amount,
-        transaction_branch_id: params.homeBranchId,
-        home_branch_id: params.homeBranchId,
-        recorded_by_user_id: context.userId,
-        field_agent_id: params.fieldAgentId,
-        notes,
-        execution_status: "completed",
-        bank_product_id: params.bankProductId ?? null
-      });
-      if (insertError) {
-        throw new Error(`Failed to post withdrawal debit: ${insertError.message}`);
-      }
-      await addLedgerEntry({
-        tenantId: context.tenantId,
-        customerId: params.customerId,
-        transactionId,
-        entryType: "debit",
-        amount: params.amount,
-        transactionBranchId: params.homeBranchId
-      });
+      throw new Error(
+        `Failed to post withdrawal debit: ${rpcError.message}. Apply Supabase migrations (including 084) — non-atomic fallback is disabled.`
+      );
     } else if (params.bankProductId) {
       await supabase
         .from("customer_transactions")
@@ -702,14 +680,9 @@ export async function executeBankDeposit(
       p_notes: transaction.notes ?? null
     });
     if (rpcError) {
-      await addLedgerEntry({
-        tenantId: context.tenantId,
-        customerId: transaction.customerId,
-        transactionId: transaction.id,
-        entryType: "credit",
-        amount: transaction.amount,
-        transactionBranchId: transaction.transactionBranchId
-      });
+      throw new Error(
+        `Failed to execute deposit at bank: ${rpcError.message}. Apply Supabase migrations (including 084) — non-atomic fallback is disabled.`
+      );
     }
     const { error: updateError } = await supabase
       .from("customer_transactions")
@@ -1063,31 +1036,9 @@ export async function executeBankWithdrawal(
       p_notes: notes
     });
     if (rpcError) {
-      const { error: insertError } = await supabase.from("customer_transactions").insert({
-        id: transactionId,
-        tenant_id: context.tenantId,
-        customer_id: row.customer_id,
-        type: "withdrawal",
-        amount,
-        transaction_branch_id: customer.homeBranchId,
-        home_branch_id: customer.homeBranchId,
-        recorded_by_user_id: context.userId,
-        field_agent_id: row.field_agent_id,
-        notes,
-        execution_status: "bank_executed",
-        bank_product_id: resolvedProductId ?? row.bank_product_id ?? null
-      });
-      if (insertError) {
-        throw new Error(`Failed to post bank withdrawal: ${insertError.message}`);
-      }
-      await addLedgerEntry({
-        tenantId: context.tenantId,
-        customerId: row.customer_id,
-        transactionId,
-        entryType: "debit",
-        amount,
-        transactionBranchId: customer.homeBranchId
-      });
+      throw new Error(
+        `Failed to post bank withdrawal: ${rpcError.message}. Apply Supabase migrations (including 084) — non-atomic fallback is disabled.`
+      );
     } else if (resolvedProductId ?? row.bank_product_id) {
       await supabase
         .from("customer_transactions")

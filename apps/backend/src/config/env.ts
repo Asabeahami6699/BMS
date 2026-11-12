@@ -37,6 +37,14 @@ const envSchema = z.object({
   SMTP_SECURE: z
     .enum(["true", "false"])
     .default("false")
+    .transform((v) => v === "true"),
+  /**
+   * Dev/test only: allow x-user-id / x-role header auth without a Bearer JWT.
+   * Ignored when NODE_ENV is production (header auth is always rejected there).
+   */
+  ALLOW_HEADER_AUTH: z
+    .enum(["true", "false"])
+    .default("false")
     .transform((v) => v === "true")
 });
 
@@ -54,7 +62,8 @@ const fallbackEnv: Env = {
   OLLAMA_MODEL: "llama3.2:3b",
   ARKESEL_SMS_BASE_URL: "https://sms.arkesel.com",
   SMTP_PORT: 587,
-  SMTP_SECURE: false
+  SMTP_SECURE: false,
+  ALLOW_HEADER_AUTH: false
 };
 
 export const env: Env = parsed.success ? parsed.data : fallbackEnv;
@@ -138,4 +147,12 @@ export function getSmtpConfig() {
     from: env.SMTP_FROM ?? "",
     secure: env.SMTP_SECURE ?? false
   };
+}
+
+/** Header auth (x-user-id) is for Vitest/local only — never in production. */
+export function isHeaderAuthAllowed(): boolean {
+  if (process.env.NODE_ENV === "production") {
+    return false;
+  }
+  return IS_TEST || env.ALLOW_HEADER_AUTH === true;
 }

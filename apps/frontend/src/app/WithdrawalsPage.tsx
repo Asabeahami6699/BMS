@@ -3,12 +3,11 @@ import { Link } from "react-router-dom";
 import type { AppRole, BalanceDisclosure, FieldWithdrawalFulfillmentRow } from "./api";
 import {
   approveBalanceDisclosure,
-  BRANCH_CONTEXT_CHANGED_EVENT,
-  listBankProducts,
   listFieldWithdrawalFulfillment,
   rejectBalanceDisclosure
 } from "./api";
 import { bankProductDisplayLabel,
+  bankProductsForSubscription,
   DEFAULT_APPROVAL_WORKFLOW,
   isManualPartnerWithdrawal,
   roleMayApprove,
@@ -16,12 +15,12 @@ import { bankProductDisplayLabel,
 import { useAuth } from "../auth/AuthContext";
 import { DynamicWorkflowForm } from "./banking/DynamicWorkflowForm";
 import { prefillWithdrawalVerificationData } from "./banking/workflowPrefill";
-import type { TenantBankProduct } from "@bms/shared";
 import { AdminDataTable, filterRowsBySearch } from "../components/AdminDataTable";
 import { useToast } from "../components/Toast";
 import { toUserFacingError } from "../lib/networkError";
 import { DeclineRequestModal } from "./DeclineRequestModal";
 import { useWithdrawalsLiveSync } from "./hooks/useWithdrawalsLiveSync";
+import { useBankProductsStore } from "./stores/bankProductsStore";
 import { selectWithdrawalKpis, useWithdrawalsStore } from "./stores/withdrawalsStore";
 import { WithdrawalMomoApproveModal } from "./WithdrawalMomoApproveModal";
 
@@ -146,7 +145,12 @@ export function WithdrawalsPage({ role, variant = "susu" }: Props) {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [momoRequest, setMomoRequest] = useState<BalanceDisclosure | null>(null);
   const [declineTarget, setDeclineTarget] = useState<BalanceDisclosure | null>(null);
-  const [withdrawalProducts, setWithdrawalProducts] = useState<TenantBankProduct[]>([]);
+  const bankProducts = useBankProductsStore((s) => s.products);
+  const hydrateBankProducts = useBankProductsStore((s) => s.hydrate);
+  const withdrawalProducts = useMemo(
+    () => bankProductsForSubscription(bankProducts, user?.subscribedModules, "withdrawal"),
+    [bankProducts, user?.subscribedModules]
+  );
   const [bankProductByRequest, setBankProductByRequest] = useState<Record<string, string>>({});
   const [workflowDataByRequest, setWorkflowDataByRequest] = useState<
     Record<string, Record<string, unknown>>
@@ -163,15 +167,8 @@ export function WithdrawalsPage({ role, variant = "susu" }: Props) {
   );
 
   useEffect(() => {
-    function loadProducts() {
-      void listBankProducts({ direction: "withdrawal", activeOnly: true })
-        .then(setWithdrawalProducts)
-        .catch(() => setWithdrawalProducts([]));
-    }
-    loadProducts();
-    window.addEventListener(BRANCH_CONTEXT_CHANGED_EVENT, loadProducts);
-    return () => window.removeEventListener(BRANCH_CONTEXT_CHANGED_EVENT, loadProducts);
-  }, []);
+    hydrateBankProducts();
+  }, [hydrateBankProducts]);
 
   useEffect(() => {
     if (isAgency) {

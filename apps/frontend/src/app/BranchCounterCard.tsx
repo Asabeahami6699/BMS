@@ -5,7 +5,6 @@ import { SAVINGS_INITIAL_DEPOSIT_GHS, bankProductDisplayLabel, bankProductsForSu
 import type { AppRole } from "./api";
 import { BranchCounterFloatPanel } from "./BranchCounterFloatPanel";
 import { BranchCounterCashCalculator } from "./BranchCounterCashCalculator";
-import { BranchCounterExpensesPanel } from "./BranchCounterExpensesPanel";
 import { BranchCounterStatementPanel } from "./BranchCounterStatement";
 import { SusuReversalDialog } from "./SusuReversalDialog";
 import { filterRowsBySearch } from "../components/AdminDataTable";
@@ -59,16 +58,10 @@ const TX_LABELS: Record<TxType, string> = {
 
 const QUICK_AMOUNTS = [20, 50, 100, 200, 500];
 
-function allowedTransactionTypes(role: AppRole, permissions: Permission[] | undefined): TxType[] {
-  if (role === "teller") {
-    const types: TxType[] = ["deposit"];
-    if (permissions?.includes("transactions.create.withdrawal")) {
-      types.push("withdrawal");
-    }
-    return types;
-  }
-  if (role === "coordinator" || role === "admin" || role === "field_agent") {
-    return ["deposit", "withdrawal", "daily_susu"];
+function allowedTransactionTypes(role: AppRole, _permissions: Permission[] | undefined): TxType[] {
+  if (role === "teller" || role === "coordinator" || role === "admin" || role === "field_agent") {
+    // Branch counter posts walk-in deposit/withdrawal only. Daily Susu is via agents/callover.
+    return ["deposit", "withdrawal"];
   }
   return [];
 }
@@ -430,7 +423,7 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
         <div>
           <h2>Branch counter</h2>
           <p className="muted branch-counter__subtitle">
-            Susu teller desk — walk-in deposits, withdrawals &amp; daily Susu · {updatedLabel}
+            Susu teller desk — walk-in deposits &amp; withdrawals · {updatedLabel}
           </p>
         </div>
         <div className="branch-counter__toolbar-actions">
@@ -496,15 +489,6 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
           floatSummary={floatSummary}
           pendingFloatRequests={pendingFloatRequests}
           onUpdated={() => void refresh()}
-        />
-      ) : null}
-
-      {!sessionExpired ? (
-        <BranchCounterExpensesPanel
-          role={role}
-          branches={branches}
-          transactionBranchId={transactionBranchId}
-          modules={modules}
         />
       ) : null}
 
@@ -655,12 +639,21 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
                   role="status"
                 >
                   <div className="branch-counter__float-balance-head">
-                    <span>Float balance</span>
-                    <strong>GHS {formatAccountAmount(floatSummary.floatBalance)}</strong>
+                    <span>Float / cash in till</span>
+                    <strong>
+                      GHS {formatAccountAmount(floatSummary.floatBalance)}
+                      {" · "}
+                      GHS {formatAccountAmount(floatSummary.expectedCash)}
+                    </strong>
                   </div>
                   {floatSummary.isLowFloat ? (
                     <p className="branch-counter__float-reminder">
-                      Low float — request more from admin before large deposits or Susu collections.
+                      Low float — request extra float before large deposits or Susu collections.
+                    </p>
+                  ) : null}
+                  {floatSummary.expectedCash <= 0 && type === "withdrawal" ? (
+                    <p className="branch-counter__float-reminder">
+                      No physical cash in till — collect extra cash before paying a withdrawal.
                     </p>
                   ) : null}
                   {projectedTillBalance != null ? (
@@ -668,7 +661,7 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
                       Float after this {TX_LABELS[type].toLowerCase()}: GHS{" "}
                       {formatAccountAmount(projectedTillBalance)}
                       {type === "withdrawal"
-                        ? ` · Cash in till: GHS ${formatAccountAmount((floatSummary.expectedCash - parsedAmount))}`
+                        ? ` · Cash left: GHS ${formatAccountAmount(floatSummary.expectedCash - parsedAmount)}`
                         : null}
                     </p>
                   ) : null}

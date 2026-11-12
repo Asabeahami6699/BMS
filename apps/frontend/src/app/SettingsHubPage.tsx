@@ -22,6 +22,11 @@ const SETTINGS_ENTRIES = [
   { to: "settings/roles", label: "Roles & Permissions", description: "Roles, duties, and permissions." },
   { to: "settings/approval-workflows", label: "Approval Workflows", description: "Choose who approves new accounts and withdrawals." },
   { to: "settings/notifications", label: "Notification Settings", description: "SMS and email preferences, and the customer message log." },
+  {
+    to: "settings/loan-qualification",
+    label: "Loan qualification",
+    description: "Consistency period, Susu thresholds, passbook collateral %, and Susu disbursement."
+  },
   { to: "settings/audit-logs", label: "Audit Logs", description: "Activity trail across the workspace." }
 ] as const;
 

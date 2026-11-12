@@ -45,7 +45,7 @@ export function checkTillFloatForTransaction(input: {
   if (input.type === "withdrawal" && input.amount > input.floatSummary.expectedCash + 1e-9) {
     return {
       ok: false,
-      message: `Insufficient cash in till for this withdrawal (GHS ${formatAccountAmount(input.floatSummary.expectedCash)} available).`
+      message: `Insufficient physical cash in till (GHS ${formatAccountAmount(input.floatSummary.expectedCash)} available). Collect extra cash first — float is not cash.`
     };
   }
 

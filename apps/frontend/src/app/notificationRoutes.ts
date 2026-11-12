@@ -38,8 +38,16 @@ export function notificationTargetPath(notification: AgentNotification): string 
       return "/app/susu/callover-batches";
     case "cash_shortage_opened":
     case "cash_overage_opened":
-    case "cash_variance_settled":
-      return "/app/susu/overages-shortages";
+    case "cash_variance_settled": {
+      const hay = `${notification.title} ${notification.body}`.toLowerCase();
+      if (hay.includes("till") || hay.includes("teller")) {
+        return "/app/susu/overages-shortages#os-branch-till";
+      }
+      return "/app/susu/overages-shortages#os-field-agents";
+    }
+    case "vault_opening_adjusted":
+    case "vault_close_variance":
+      return "/app/susu/closing-balances";
     case "loan_repayment_reserved":
     case "loan_auto_repayment":
     case "loan_auto_repayment_failed":

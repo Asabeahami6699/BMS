@@ -1,21 +1,24 @@
-import { useEffect, useState } from "react";
-import type { TenantRecord } from "../api";
-import { listPlatformTenants } from "../api";
+import { useEffect } from "react";
+import { useShallow } from "zustand/react/shallow";
+import { usePlatformAdminStore } from "../stores/platformAdminStore";
 
 export function SubscriptionManagementPage() {
-  const [tenants, setTenants] = useState<TenantRecord[]>([]);
-  const [status, setStatus] = useState("Loading subscriptions...");
+  const { tenants, statusMessage, loading, lastFetchedAt, hydrate } = usePlatformAdminStore(
+    useShallow((s) => ({
+      tenants: s.tenants,
+      statusMessage: s.statusMessage,
+      loading: s.loading,
+      lastFetchedAt: s.lastFetchedAt,
+      hydrate: s.hydrate
+    }))
+  );
 
   useEffect(() => {
-    void listPlatformTenants()
-      .then((data) => {
-        setTenants(data);
-        setStatus("");
-      })
-      .catch((error) => setStatus(error instanceof Error ? error.message : "Failed to load"));
-  }, []);
+    hydrate();
+  }, [hydrate]);
 
   const active = tenants.filter((t) => t.subscriptionStatus === "active").length;
+  const showStatus = statusMessage && (loading && lastFetchedAt == null);
 
   return (
     <>
@@ -37,7 +40,7 @@ export function SubscriptionManagementPage() {
       <article className="card">
         <h2>Subscription Management</h2>
         <p className="muted">Platform-wide view of company subscription status, products, and add-ons.</p>
-        <p className="muted">{status}</p>
+        {showStatus ? <p className="muted">{statusMessage}</p> : null}
         <div className="lines">
           {tenants.map((tenant) => (
             <div className="line tenant-line" key={tenant.id}>

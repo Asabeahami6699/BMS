@@ -1,39 +1,39 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import type { AppRole, LoanBorrowerRow } from "../api";
-import { listLoanBorrowers } from "../api";
 import { AdminDataTable, filterRowsBySearch } from "../../components/AdminDataTable";
 import { useToast } from "../../components/Toast";
-import { toUserFacingError } from "../../lib/networkError";
 import { formatLoanMoney, LOAN_STATUS_LABELS, LOAN_STATUS_PILL } from "./loanUi";
 import { LoansLayout } from "./LoansLayout";
 import { usePageLoading } from "../hooks/usePageLoading";
+import { useLoanCustomersStore } from "../stores/loanCustomersStore";
 
 type Props = { role: AppRole };
 
 export function LoanCustomersPage({ role: _role }: Props) {
   const { showToast } = useToast();
-  const [rows, setRows] = useState<LoanBorrowerRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const rows = useLoanCustomersStore((s) => s.rows);
+  const loading = useLoanCustomersStore((s) => s.loading);
+  const error = useLoanCustomersStore((s) => s.error);
+  const hydrate = useLoanCustomersStore((s) => s.hydrate);
+  const refresh = useLoanCustomersStore((s) => s.refresh);
+  const startLiveSync = useLoanCustomersStore((s) => s.startLiveSync);
+  const stopLiveSync = useLoanCustomersStore((s) => s.stopLiveSync);
   const [search, setSearch] = useState("");
 
   usePageLoading(loading, "loan-customers");
 
-  async function refresh() {
-    setLoading(true);
-    try {
-      setRows(await listLoanBorrowers());
-    } catch (err) {
-      showToast(toUserFacingError(err, "Failed to load loan customers"), "error");
-    } finally {
-      setLoading(false);
-    }
-  }
+  useEffect(() => {
+    hydrate();
+    startLiveSync();
+    return () => stopLiveSync();
+  }, [hydrate, startLiveSync, stopLiveSync]);
 
   useEffect(() => {
-    void refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (error) {
+      showToast(error, "error");
+    }
+  }, [error, showToast]);
 
   const filtered = useMemo(
     () =>

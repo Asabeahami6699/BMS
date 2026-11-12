@@ -14,8 +14,16 @@ import { useCustomersStore } from "./stores/customersStore";
 import { useGroupSavingsStore } from "./stores/groupSavingsStore";
 import { useHrDeskStore } from "./stores/hrDeskStore";
 import { useInvestmentStore } from "./stores/investmentStore";
+import { useLoanQualificationStore } from "./stores/loanQualificationStore";
 import { useLoansStore } from "./stores/loansStore";
+import { useLoanCustomersStore } from "./stores/loanCustomersStore";
+import { useAuditLogsStore } from "./stores/auditLogsStore";
+import { usePlatformAdminStore } from "./stores/platformAdminStore";
+import { useRoleManagementStore } from "./stores/roleManagementStore";
+import { useSettingsWorkspaceStore } from "./stores/settingsWorkspaceStore";
+import { useBranchesStore } from "./stores/branchesStore";
 import { usePayrollStore } from "./stores/payrollStore";
+import { useSiteManualStore } from "./stores/siteManualStore";
 import { usePerformanceStore } from "./stores/performanceStore";
 import { useReportsAnalyticsStore } from "./stores/reportsAnalyticsStore";
 import { useRoleWorkspaceStore } from "./stores/roleWorkspaceStore";
@@ -23,9 +31,18 @@ import { useRoutesStore } from "./stores/routesStore";
 import { useTellerReconciliationStore } from "./stores/tellerReconciliationStore";
 import { useTreasuryStore } from "./stores/treasuryStore";
 import { useUniversalOpsStore } from "./stores/universalOpsStore";
+import { useCalloverBatchesStore } from "./stores/calloverBatchesStore";
+import { useOveragesShortagesStore } from "./stores/overagesShortagesStore";
+import { useSusuClosingBalancesStore } from "./stores/susuClosingBalancesStore";
+import { useTillFloatAdminStore } from "./stores/tillFloatAdminStore";
+import { useTellerTillDaybookStore } from "./stores/tellerTillDaybookStore";
 import { useWithdrawalsStore } from "./stores/withdrawalsStore";
+import { useUsersStore } from "./stores/usersStore";
 
 function appPath(pathname: string): string {
+  if (pathname.startsWith("/platform")) {
+    return pathname.replace(/^\/platform\/?/, "") || "companies";
+  }
   return pathname.replace(/^\/app\/?/, "") || "dashboard";
 }
 
@@ -139,6 +156,37 @@ function investmentLoading(path: string): boolean {
   return s.loading;
 }
 
+function settingsWorkspaceLoading(path: string): boolean {
+  const s = useSettingsWorkspaceStore.getState();
+  if (path === "settings/approval-workflows") {
+    return s.section.approvalWorkflow.loading || s.savingApproval;
+  }
+  if (path === "settings/profile") {
+    return s.section.companyProfile.loading || s.savingCompanyProfile;
+  }
+  if (path === "settings/form-setup") {
+    return s.section.formSetup.loading || s.savingFormSetup;
+  }
+  if (path === "settings/notifications") {
+    return (
+      s.section.notifications.loading ||
+      s.messageLogLoading ||
+      s.savingNotifications
+    );
+  }
+  return any(
+    s.section.approvalWorkflow.loading,
+    s.section.companyProfile.loading,
+    s.section.formSetup.loading,
+    s.section.notifications.loading,
+    s.messageLogLoading,
+    s.savingApproval,
+    s.savingCompanyProfile,
+    s.savingFormSetup,
+    s.savingNotifications
+  );
+}
+
 export function computeDashboardPageLoading(pathname: string): boolean {
   const path = appPath(pathname);
 
@@ -196,6 +244,26 @@ export function computeDashboardPageLoading(pathname: string): boolean {
     return usePerformanceStore.getState().loading;
   }
 
+  if (path === "susu/closing-balances") {
+    const s = useSusuClosingBalancesStore.getState();
+    return s.loading || s.saving;
+  }
+
+  if (path === "susu/callover-batches") {
+    const s = useCalloverBatchesStore.getState();
+    return s.loading || s.busyId !== null;
+  }
+
+  if (path === "susu/overages-shortages") {
+    const s = useOveragesShortagesStore.getState();
+    return s.loading || s.busyId !== null;
+  }
+
+  if (path === "susu/till-float") {
+    const s = useTillFloatAdminStore.getState();
+    return s.loading || s.busy;
+  }
+
   if (path === "reports" || path.includes("/reports")) {
     return useReportsAnalyticsStore.getState().loading;
   }
@@ -214,7 +282,18 @@ export function computeDashboardPageLoading(pathname: string): boolean {
   }
 
   if (path === "banking/account-opening") {
-    return useAgencyAccountsStore.getState().loading || useAgencyTellerStore.getState().loading;
+    const accounts = useAgencyAccountsStore.getState();
+    return (
+      accounts.loading ||
+      accounts.openingProductsLoading ||
+      accounts.posting ||
+      useAgencyTellerStore.getState().loading
+    );
+  }
+
+  if (path === "banking/till-daybook") {
+    const s = useTellerTillDaybookStore.getState();
+    return s.loading || s.posting;
   }
 
   if (path === "banking/reconciliation") {
@@ -223,6 +302,10 @@ export function computeDashboardPageLoading(pathname: string): boolean {
 
   if (path === "banking/products") {
     return useBankProductsStore.getState().loading;
+  }
+
+  if (path === "banking/hrm/roles") {
+    return useRoleManagementStore.getState().loading;
   }
 
   if (path.startsWith("banking/hrm")) {
@@ -255,8 +338,57 @@ export function computeDashboardPageLoading(pathname: string): boolean {
     return any(useAgencyStore.getState().loading, roleDeskLoading(), backOfficeLoading());
   }
 
+  if (path === "loans/customers") {
+    return useLoanCustomersStore.getState().loading;
+  }
+
+  const loanDetailMatch = path.match(/^loans\/applications\/([^/]+)$/);
+  if (loanDetailMatch) {
+    const loanId = loanDetailMatch[1];
+    const loans = useLoansStore.getState();
+    const detailLoading = Boolean(loans.detailLoadingByLoanId[loanId]);
+    return detailLoading || useBranchesStore.getState().loading;
+  }
+
   if (path.startsWith("loans")) {
     return useLoansStore.getState().loading;
+  }
+
+  if (
+    path === "settings/roles" ||
+    path === "roles" ||
+    path === "role-management" ||
+    path === "banking/hrm/roles"
+  ) {
+    return useRoleManagementStore.getState().loading;
+  }
+
+  if (path === "settings/audit-logs" || path === "audit-logs") {
+    return any(useAuditLogsStore.getState().loading, useBranchesStore.getState().loading);
+  }
+
+  if (path === "settings/users") {
+    return any(useHrDeskStore.getState().rosterLoading, useUsersStore.getState().loading);
+  }
+
+  if (path === "settings/branches") {
+    return useBranchesStore.getState().loading;
+  }
+
+  if (path === "companies" || path === "subscriptions") {
+    return usePlatformAdminStore.getState().loading;
+  }
+
+  if (path.startsWith("settings/loan-qualification")) {
+    return useLoanQualificationStore.getState().loading;
+  }
+
+  if (path.startsWith("settings/")) {
+    return settingsWorkspaceLoading(path);
+  }
+
+  if (path.startsWith("help/manual")) {
+    return useSiteManualStore.getState().loading;
   }
 
   if (path.startsWith("investments")) {
@@ -299,9 +431,23 @@ const WATCHED_STORES: StoreLike[] = [
   useHrDeskStore,
   useUniversalOpsStore,
   useLoansStore,
+  useLoanCustomersStore,
+  useBranchesStore,
+  useLoanQualificationStore,
+  useSiteManualStore,
   useInvestmentStore,
   useTreasuryStore,
-  useBankProductsStore
+  useBankProductsStore,
+  useSusuClosingBalancesStore,
+  useCalloverBatchesStore,
+  useOveragesShortagesStore,
+  useTillFloatAdminStore,
+  useTellerTillDaybookStore,
+  useRoleManagementStore,
+  useAuditLogsStore,
+  usePlatformAdminStore,
+  useSettingsWorkspaceStore,
+  useUsersStore
 ];
 
 export function initDashboardPageLoadingSubscriptions(recompute: () => void): () => void {

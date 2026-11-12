@@ -347,6 +347,22 @@ export const PERMISSION_CATALOG: PermissionCatalogEntry[] = [
     requires: ["loans.read"]
   },
   {
+    id: "loans.qualification.manage",
+    label: "Manage loan qualification setup",
+    description:
+      "Edit Susu↔Loans qualification thresholds, collateral percent, and Susu disbursement defaults.",
+    group: "loans",
+    requires: ["loans.read"],
+    suggests: ["users.read"]
+  },
+  {
+    id: "workspace.manual.read",
+    label: "Read site operations manual",
+    description: "Open the in-app product/department how-to manual (recovery ladder, bridge flows).",
+    group: "audit",
+    suggests: ["workspace.notifications"]
+  },
+  {
     id: "investments.read",
     label: "View investments",
     description: "See investment products, applications, portfolio, and customer records.",
@@ -639,7 +655,8 @@ export const SUSU_NAV_VISIBILITY: SusuNavVisibilityRow[] = [
   {
     navPath: "susu/overages-shortages",
     label: "Overages/Shortages",
-    description: "Agent cash variances — repay shortages or credit customers from overages.",
+    description:
+      "Field agent callover and branch till EOD cash variances — separate sources, never mixed.",
     anyPermissions: ["transactions.read", "transactions.create.daily_susu", "customers.read"],
     roles: ["admin", "coordinator"]
   },
@@ -723,7 +740,8 @@ export const SUSU_NAV_VISIBILITY: SusuNavVisibilityRow[] = [
   {
     navPath: "susu/closing-balances",
     label: "Closing balances",
-    description: "Daily susu cash closing calculation for susu-only tenants.",
+    description:
+      "Branch vault day-close: opening vault, tills, field activity, cash to bank, and vault remaining.",
     anyPermissions: ["transactions.read"],
     roles: ["admin", "coordinator", "accountant"]
   }
@@ -907,6 +925,12 @@ export const SETTINGS_ROUTE_VISIBILITY: SettingsRouteVisibilityRow[] = [
     routePath: "settings/notifications",
     label: "Notifications",
     anyPermissions: ["workspace.notifications"],
+    roles: ["admin"]
+  },
+  {
+    routePath: "settings/loan-qualification",
+    label: "Loan qualification",
+    anyPermissions: ["loans.qualification.manage"],
     roles: ["admin"]
   },
   {

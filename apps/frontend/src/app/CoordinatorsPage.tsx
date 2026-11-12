@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useShallow } from "zustand/react/shallow";
 import type { CoordinatorRosterRow, UserRecord } from "./api";
-import { getTenantId, listBranches, updateUser, deleteUser } from "./api";
+import { getTenantId, updateUser, deleteUser } from "./api";
 import { AdminDataTable, filterRowsBySearch } from "../components/AdminDataTable";
 import { Modal } from "../components/Modal";
 import { RowActionsMenu } from "../components/RowActionsMenu";
@@ -12,6 +12,7 @@ import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { useCoordinatorsLiveSync } from "./hooks/useCoordinatorsLiveSync";
 import { ResetPasswordModal } from "./ResetPasswordModal";
 import { UserFormModal } from "./UserFormModal";
+import { useBranchesStore } from "./stores/branchesStore";
 import { selectCoordinatorsKpis, useCoordinatorsStore } from "./stores/coordinatorsStore";
 
 function scopeLabel(row: CoordinatorRosterRow): string {
@@ -177,7 +178,8 @@ export function CoordinatorsPage() {
     if (allBranches.length > 0) {
       return allBranches;
     }
-    const rows = await listBranches().catch(() => []);
+    await useBranchesStore.getState().refresh().catch(() => undefined);
+    const rows = useBranchesStore.getState().branches;
     setAllBranches(rows);
     return rows;
   }

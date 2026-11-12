@@ -223,10 +223,14 @@ export type Customer = {
   createdByFieldAgentName?: string;
   dailyContributionAmount: number;
   lockedBalance?: number;
+  loanCollateralLocked?: number;
   accountBalance?: number;
   withdrawableBalance?: number;
   /** Next loan installment(s) reserved when Susu↔Loans bridge is active. */
   loanReserveAmount?: number;
+  loanQualifiedAt?: string;
+  loanQualificationBadge?: string;
+  loanQualificationSuggestedMaxGhs?: number;
   routeId?: string;
   status:
     | "pending_activation"
@@ -339,6 +343,8 @@ export type AgentNotification = {
     | "cash_shortage_opened"
     | "cash_overage_opened"
     | "cash_variance_settled"
+    | "vault_opening_adjusted"
+    | "vault_close_variance"
     | "deposit_pending_bank"
     | "deposit_pending_accountant"
     | "deposit_completed"
@@ -675,13 +681,24 @@ type AuthSession = {
 
 let authSession: AuthSession | null = loadStoredSession();
 
+/**
+ * Session tokens live in sessionStorage (not localStorage) so a stolen XSS
+ * payload cannot keep credentials after the tab closes, and shared PCs are safer.
+ * Legacy localStorage sessions are migrated once then cleared.
+ */
 function loadStoredSession(): AuthSession | null {
   try {
-    const raw = localStorage.getItem(AUTH_STORAGE_KEY);
-    if (!raw) {
+    const fromSession = sessionStorage.getItem(AUTH_STORAGE_KEY);
+    if (fromSession) {
+      return JSON.parse(fromSession) as AuthSession;
+    }
+    const legacy = localStorage.getItem(AUTH_STORAGE_KEY);
+    if (!legacy) {
       return null;
     }
-    return JSON.parse(raw) as AuthSession;
+    localStorage.removeItem(AUTH_STORAGE_KEY);
+    sessionStorage.setItem(AUTH_STORAGE_KEY, legacy);
+    return JSON.parse(legacy) as AuthSession;
   } catch {
     return null;
   }
@@ -689,11 +706,24 @@ function loadStoredSession(): AuthSession | null {
 
 function persistSession(session: AuthSession | null): void {
   authSession = session;
-  if (!session) {
+  try {
     localStorage.removeItem(AUTH_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+  if (!session) {
+    try {
+      sessionStorage.removeItem(AUTH_STORAGE_KEY);
+    } catch {
+      /* ignore */
+    }
     return;
   }
-  localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
+  try {
+    sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
+  } catch {
+    /* ignore quota / private mode */
+  }
   runtimeContext.tenantId = session.user.tenantId;
   if (session.user.scopeType === "branch" && session.user.branchId) {
     runtimeContext.branchId = session.user.branchId;
@@ -1242,6 +1272,37 @@ export async function updateTenantSmsSettings(
   });
 }
 
+export async function getLoanQualificationSetup(): Promise<
+  import("@bms/shared").LoanQualificationSetup
+> {
+  return fetchJson(`${API_BASE_URL}/api/v1/tenant/loan-qualification`, {
+    headers: authHeaders()
+  });
+}
+
+export async function updateLoanQualificationSetup(
+  body: import("@bms/shared").LoanQualificationSetup
+): Promise<import("@bms/shared").LoanQualificationSetup> {
+  return fetchJson(`${API_BASE_URL}/api/v1/tenant/loan-qualification`, {
+    method: "PUT",
+    headers: authHeaders(),
+    body: JSON.stringify(body)
+  });
+}
+
+export async function getSiteManual(query?: string): Promise<{
+  departments: Array<{ id: string; label: string; description: string }>;
+  articles: import("@bms/shared").SiteManualArticle[];
+  total: number;
+  bridgeActive: boolean;
+  modules: import("@bms/shared").TenantProductModule[];
+}> {
+  const q = query?.trim() ? `?q=${encodeURIComponent(query.trim())}` : "";
+  return fetchJson(`${API_BASE_URL}/api/v1/tenant/site-manual${q}`, {
+    headers: authHeaders()
+  });
+}
+
 export type MessageLogItem = {
   id: string;
   channel: "sms" | "email";
@@ -1384,6 +1445,30 @@ export type CashVarianceCase = {
   settledAt?: string;
   fieldAgentName?: string;
   fieldAgentEmail?: string;
+  source?: "field_agent";
+};
+
+export type TellerTillCashVarianceCase = {
+  id: string;
+  source: "teller_till";
+  tenantId: string;
+  cashierUserId: string;
+  floatSessionId: string;
+  businessDate: string;
+  branchId?: string;
+  varianceType: CashVarianceType;
+  expectedCash: number;
+  actualCash: number;
+  varianceAmount: number;
+  outstandingAmount: number;
+  status: CashVarianceCaseStatus;
+  notes?: string;
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
+  settledAt?: string;
+  cashierName?: string;
+  cashierEmail?: string;
 };
 
 export type AgentCashVarianceSummary = {
@@ -2382,6 +2467,9 @@ export type BranchFloatSession = {
   businessDate: string;
   status: "requested" | "approved" | "open" | "closed" | "settled" | "rejected";
   openingFloat: number;
+  initialCash: number;
+  extraCash: number;
+  totalExpenses: number;
   expectedClosing: number | null;
   actualClosing: number | null;
   variance: number | null;
@@ -2399,6 +2487,10 @@ export type BranchFloatSession = {
   varianceNote?: string;
   topUpRequested?: number;
   topUpNote?: string;
+  extraCashRequested?: number;
+  extraCashRequestNote?: string;
+  expenseRequested?: number;
+  expenseRequestNote?: string;
 };
 
 export function isFloatTopUpRequest(session: BranchFloatSession): boolean {
@@ -2413,6 +2505,10 @@ export type BranchFloatSummary = {
   expectedCash: number;
   floatBalance: number;
   openingFloat: number;
+  initialCash: number;
+  extraCash: number;
+  totalExpenses: number;
+  dayCapital: number;
   totalDeposits: number;
   totalWithdrawals: number;
   totalDailySusu: number;
@@ -2436,6 +2532,7 @@ export type BranchCounterBootstrapResponse = {
 export async function requestBranchFloat(payload: {
   branchId: string;
   requestedAmount: number;
+  requestedInitialCash?: number;
   note?: string;
 }): Promise<BranchFloatSession> {
   const res = await fetchJson<{ session: BranchFloatSession }>(
@@ -2447,11 +2544,19 @@ export async function requestBranchFloat(payload: {
 
 export async function allocateBranchFloat(
   sessionId: string,
-  openingFloat: number
+  openingFloat: number,
+  initialCash?: number
 ): Promise<BranchFloatSession> {
   const res = await fetchJson<{ session: BranchFloatSession }>(
     `${API_BASE_URL}/api/v1/transactions/branch-float/${sessionId}/allocate`,
-    { method: "POST", headers: authHeaders(), body: JSON.stringify({ openingFloat }) }
+    {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        openingFloat,
+        ...(initialCash != null ? { initialCash } : {})
+      })
+    }
   );
   return res.session;
 }
@@ -2498,6 +2603,7 @@ export async function pushBranchFloat(payload: {
   branchId: string;
   cashierUserId: string;
   openingFloat: number;
+  initialCash?: number;
   businessDate?: string;
 }): Promise<BranchFloatSession> {
   const res = await fetchJson<{ session: BranchFloatSession }>(
@@ -2513,6 +2619,88 @@ export async function settleBranchFloat(sessionId: string): Promise<BranchFloatS
     { method: "POST", headers: authHeaders(), body: JSON.stringify({}) }
   );
   return res.session;
+}
+
+export async function collectBranchFloatExtraCash(
+  sessionId: string,
+  payload: { amount: number; note?: string }
+): Promise<BranchFloatSession> {
+  const res = await fetchJson<{ session: BranchFloatSession }>(
+    `${API_BASE_URL}/api/v1/transactions/branch-float/${sessionId}/extra-cash`,
+    { method: "POST", headers: authHeaders(), body: JSON.stringify(payload) }
+  );
+  return res.session;
+}
+
+export async function approveBranchFloatExtraCash(
+  sessionId: string,
+  amount?: number
+): Promise<BranchFloatSession> {
+  const res = await fetchJson<{ session: BranchFloatSession }>(
+    `${API_BASE_URL}/api/v1/transactions/branch-float/${sessionId}/extra-cash/approve`,
+    {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify(amount != null ? { amount } : {})
+    }
+  );
+  return res.session;
+}
+
+export async function recordBranchFloatExpense(
+  sessionId: string,
+  payload: { amount: number; note?: string }
+): Promise<BranchFloatSession> {
+  const res = await fetchJson<{ session: BranchFloatSession }>(
+    `${API_BASE_URL}/api/v1/transactions/branch-float/${sessionId}/expense`,
+    { method: "POST", headers: authHeaders(), body: JSON.stringify(payload) }
+  );
+  return res.session;
+}
+
+export async function approveBranchFloatExpense(
+  sessionId: string,
+  amount?: number
+): Promise<BranchFloatSession> {
+  const res = await fetchJson<{ session: BranchFloatSession }>(
+    `${API_BASE_URL}/api/v1/transactions/branch-float/${sessionId}/expense/approve`,
+    {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify(amount != null ? { amount } : {})
+    }
+  );
+  return res.session;
+}
+
+export async function listTellerTillCashVariances(params?: {
+  status?: "open" | "all";
+  cashierUserId?: string;
+  varianceType?: CashVarianceType;
+  fromDate?: string;
+  toDate?: string;
+}): Promise<TellerTillCashVarianceCase[]> {
+  const q = new URLSearchParams();
+  if (params?.status) q.set("status", params.status);
+  if (params?.cashierUserId) q.set("cashierUserId", params.cashierUserId);
+  if (params?.varianceType) q.set("varianceType", params.varianceType);
+  if (params?.fromDate) q.set("fromDate", params.fromDate);
+  if (params?.toDate) q.set("toDate", params.toDate);
+  const query = q.toString();
+  return fetchJson<TellerTillCashVarianceCase[]>(
+    `${API_BASE_URL}/api/v1/transactions/till-cash-variances${query ? `?${query}` : ""}`,
+    { headers: authHeaders() }
+  );
+}
+
+export async function settleTellerTillCashVariance(
+  varianceId: string,
+  body: { amount: number; method: CashVarianceSettlementMethod; notes?: string }
+): Promise<TellerTillCashVarianceCase> {
+  return fetchJson<TellerTillCashVarianceCase>(
+    `${API_BASE_URL}/api/v1/transactions/till-cash-variances/${varianceId}/settle`,
+    { method: "POST", headers: authHeaders(), body: JSON.stringify(body) }
+  );
 }
 
 export async function getBranchCounterBootstrap(
@@ -2675,6 +2863,21 @@ export type SusuClosingBalanceSnapshot = {
   totalInflows: number;
   totalOutflows: number;
   cashRemaining: number;
+  tillPhysicalCash: number;
+  tillExpenses: number;
+  tillExpectedCash: number;
+  tillSessionCount: number;
+  cashReturnedFromClosedTills: number;
+  cashStillInOpenTills: number;
+  suggestedOpeningVault: number;
+  openingVault: number;
+  openingVaultDelta: number;
+  cashToBank: number;
+  expectedClosingVault: number;
+  closingVaultCounted: number | null;
+  vaultCountVariance: number | null;
+  branchCashPosition: number;
+  usingSavedInputs: boolean;
   notes?: string;
   recordedBy?: string;
   updatedAt?: string;
@@ -2716,8 +2919,11 @@ export async function getSusuClosingBalance(
 export async function saveSusuClosingBalance(input: {
   branchId: string;
   businessDate: string;
-  initialCash: number;
+  openingVault: number;
+  cashToBank: number;
   susuExpenses: number;
+  closingVaultCounted?: number | null;
+  initialCash?: number;
   notes?: string;
 }): Promise<SusuClosingBalanceSnapshot> {
   return fetchJson<SusuClosingBalanceSnapshot>(
@@ -3210,13 +3416,17 @@ export async function recordLoanRepayment(
     notes?: string;
     settleAll?: boolean;
     paymentSource?: "cash" | "susu_account";
-  }
+  },
+  idempotencyKey: string = crypto.randomUUID()
 ): Promise<{ application: LoanApplication; repayment: LoanRepayment; schedule: LoanScheduleInstallment[] }> {
   return fetchJson<{ application: LoanApplication; repayment: LoanRepayment; schedule: LoanScheduleInstallment[] }>(
     `${API_BASE_URL}/api/v1/loans/applications/${loanId}/repayments`,
     {
       method: "POST",
-      headers: authHeaders(),
+      headers: {
+        ...authHeaders(),
+        "Idempotency-Key": idempotencyKey
+      },
       body: JSON.stringify(payload)
     }
   );

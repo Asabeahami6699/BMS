@@ -396,6 +396,9 @@ reportsRouter.put("/susu-closing-balance", requirePermission("transactions.read"
   const body = req.body as {
     branchId?: string;
     businessDate?: string;
+    openingVault?: number;
+    cashToBank?: number;
+    closingVaultCounted?: number | null;
     initialCash?: number;
     susuExpenses?: number;
     notes?: string;
@@ -419,7 +422,14 @@ reportsRouter.put("/susu-closing-balance", requirePermission("transactions.read"
         {
           branchId: body.branchId,
           businessDate: body.businessDate,
-          initialCash: Number(body.initialCash ?? 0),
+          openingVault: Number(body.openingVault ?? body.initialCash ?? 0),
+          cashToBank: Number(body.cashToBank ?? 0),
+          closingVaultCounted:
+            body.closingVaultCounted === null || body.closingVaultCounted === undefined
+              ? null
+              : Number(body.closingVaultCounted),
+          initialCash:
+            body.initialCash != null ? Number(body.initialCash) : undefined,
           susuExpenses: Number(body.susuExpenses ?? 0),
           notes: body.notes
         }

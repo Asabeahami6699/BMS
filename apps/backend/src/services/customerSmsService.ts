@@ -2,6 +2,7 @@ import {
   buildAccountOpenedMessage,
   buildLoanRepaymentFromSusuMessage,
   buildTransactionAlertMessage,
+  formatAccountAmount,
   hasTenantAddon,
   normalizeGhanaPhone,
   type SmsEventType,
@@ -185,6 +186,101 @@ export async function notifyCustomerTransactionSms(input: NotifyInput): Promise<
     transactionId: input.transactionId,
     senderId: settings.senderId
   });
+}
+
+/** SMS for missed Susu auto-debit recovery ladder. */
+export async function deliverLoanRecoveryCustomerSms(input: {
+  tenantId: string;
+  customerId: string;
+  amount: number;
+  customerName?: string;
+}): Promise<boolean> {
+  const addons = (await loadTenantAddons(input.tenantId)) ?? [];
+  if (!hasTenantAddon(addons, "sms_notifications")) {
+    return false;
+  }
+  const settings = await getTenantSmsSettings(input.tenantId);
+  if (
+    !settings.enabled ||
+    (!isSmsEventEnabled(settings, "withdrawal") && !isSmsEventEnabled(settings, "deposit"))
+  ) {
+    return false;
+  }
+  const customer = await getCustomerById(input.tenantId, input.customerId);
+  if (!customer?.phone) {
+    return false;
+  }
+  const phone = normalizeGhanaPhone(customer.phone);
+  if (!phone) {
+    return false;
+  }
+  const brand = await resolveTenantName(input.tenantId);
+  const acct = customer.accountNumber ? ` Acct ${customer.accountNumber}.` : "";
+  const message = `${brand.slice(0, 40)}: Loan installment of GHS ${formatAccountAmount(input.amount)} could not be taken from your Susu account. Please deposit or visit your branch.${acct}`;
+  await deliverSms({
+    tenantId: input.tenantId,
+    customerId: input.customerId,
+    eventType: "withdrawal",
+    phone,
+    message,
+    idempotencyKey: `loan-recovery:${input.customerId}:${new Date().toISOString().slice(0, 10)}:${formatAccountAmount(input.amount)}`,
+    senderId: settings.senderId
+  });
+  return true;
+}
+
+/** SMS when a customer newly qualifies for a Susu-secured loan. */
+export async function notifyCustomerLoanQualifiedSms(input: {
+  tenantId: string;
+  customerId: string;
+  badgeLabel: string;
+  suggestedMaxLoanGhs: number;
+  periodMonths: number;
+  subscribedAddons?: TenantAddon[];
+}): Promise<boolean> {
+  const addons = input.subscribedAddons ?? (await loadTenantAddons(input.tenantId)) ?? [];
+  if (!hasTenantAddon(addons, "sms_notifications")) {
+    return false;
+  }
+
+  const settings = await getTenantSmsSettings(input.tenantId);
+  if (
+    !settings.enabled ||
+    (!isSmsEventEnabled(settings, "deposit") && !isSmsEventEnabled(settings, "withdrawal"))
+  ) {
+    return false;
+  }
+
+  const customer = await getCustomerById(input.tenantId, input.customerId);
+  if (!customer?.phone) {
+    return false;
+  }
+
+  const phone = normalizeGhanaPhone(customer.phone);
+  if (!phone) {
+    return false;
+  }
+
+  const brand = await resolveTenantName(input.tenantId);
+  const maxPart =
+    input.suggestedMaxLoanGhs > 0
+      ? ` Suggested up to GHS ${formatAccountAmount(input.suggestedMaxLoanGhs)}.`
+      : "";
+  const acct = customer.accountNumber ? ` Acct ${customer.accountNumber}.` : "";
+  const message = `${brand.slice(0, 40)}: You qualify for a loan (${input.badgeLabel}) based on ${input.periodMonths} month(s) Susu consistency.${maxPart}${acct} Visit your branch to apply.`;
+
+  await deliverSms({
+    tenantId: input.tenantId,
+    customerId: input.customerId,
+    eventType: "deposit",
+    phone,
+    message,
+    idempotencyKey: `loan-qualify:${input.customerId}:${input.periodMonths}:${new Date()
+      .toISOString()
+      .slice(0, 10)}`,
+    senderId: settings.senderId
+  });
+  return true;
 }
 
 /** SMS when a loan repayment is taken from the customer's Susu/savings balance. */

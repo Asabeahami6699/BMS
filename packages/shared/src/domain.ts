@@ -103,10 +103,13 @@ export const customerSchema = z.object({
 
   lockedBalance: z.number().nonnegative().optional(),
 
+  /** Passbook lien held while a bridge loan is open (separate from savings minimum). */
+  loanCollateralLocked: z.number().nonnegative().optional(),
+
   /** Ledger balance (sum of credits − debits). Populated on list/detail when requested. */
   accountBalance: z.number().optional(),
 
-  /** accountBalance minus lockedBalance (and loan reserve when bridge is on). */
+  /** accountBalance minus lockedBalance, loan collateral, and loan reserve when bridge is on. */
   withdrawableBalance: z.number().optional(),
 
   /**
@@ -114,6 +117,10 @@ export const customerSchema = z.object({
    * Not withdrawable until the loan is settled or the installment is paid.
    */
   loanReserveAmount: z.number().nonnegative().optional(),
+
+  loanQualifiedAt: z.string().optional(),
+  loanQualificationBadge: z.string().optional(),
+  loanQualificationSuggestedMaxGhs: z.number().nonnegative().optional(),
 
   routeId: z.string().uuid().optional(),
 

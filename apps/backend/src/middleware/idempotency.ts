@@ -37,6 +37,13 @@ function isMissingTable(error: { code?: string; message?: string }): boolean {
   return error.code === "42P01" || (error.message ?? "").includes("api_idempotency_keys");
 }
 
+class IdempotencyStoreError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "IdempotencyStoreError";
+  }
+}
+
 async function readStoredSuccess(
   tenantId: string,
   idempotencyKey: string
@@ -52,10 +59,12 @@ async function readStoredSuccess(
     .eq("idempotency_key", idempotencyKey)
     .maybeSingle();
   if (error) {
-    if (!isMissingTable(error)) {
-      console.warn("[idempotency] lookup skipped:", error.message);
+    if (isMissingTable(error)) {
+      throw new IdempotencyStoreError(
+        "Idempotency store is not migrated (api_idempotency_keys). Apply migration 067 before posting money."
+      );
     }
-    return null;
+    throw new IdempotencyStoreError(`Idempotency lookup failed: ${error.message}`);
   }
   if (!data || Number(data.status_code) < 200 || Number(data.status_code) >= 300) {
     return null;
@@ -82,8 +91,13 @@ async function persistSuccess(
     },
     { onConflict: "tenant_id,idempotency_key" }
   );
-  if (error && !isMissingTable(error)) {
-    console.warn("[idempotency] save skipped:", error.message);
+  if (error) {
+    if (isMissingTable(error)) {
+      throw new IdempotencyStoreError(
+        "Idempotency store is not migrated (api_idempotency_keys). Apply migration 067 before posting money."
+      );
+    }
+    throw new IdempotencyStoreError(`Idempotency save failed: ${error.message}`);
   }
 }
 
@@ -139,11 +153,17 @@ export async function beginIdempotency(
   };
   responseStore.set(key, pending);
 
-  const stored = await readStoredSuccess(tenantId, idempotencyKey);
-  if (stored) {
-    const done = rememberDone(key, stored.statusCode, stored.body, SUCCESS_TTL_MS);
-    resolve(done);
-    return { owned: false, statusCode: done.statusCode, body: done.body };
+  try {
+    const stored = await readStoredSuccess(tenantId, idempotencyKey);
+    if (stored) {
+      const done = rememberDone(key, stored.statusCode, stored.body, SUCCESS_TTL_MS);
+      resolve(done);
+      return { owned: false, statusCode: done.statusCode, body: done.body };
+    }
+  } catch (error) {
+    responseStore.delete(key);
+    resolve(null);
+    throw error;
   }
 
   let settled = false;
@@ -197,9 +217,24 @@ export function requireIdempotencyKey(req: Request, res: Response, next: NextFun
         if (!completed) {
           completed = true;
           const statusCode = res.statusCode || 200;
-          void claim.finish(statusCode, body).finally(() => {
-            originalJson(body);
-          });
+          void claim
+            .finish(statusCode, body)
+            .then(() => {
+              originalJson(body);
+            })
+            .catch((error) => {
+              claim.abort();
+              if (!res.headersSent) {
+                res.status(503).json({
+                  error:
+                    error instanceof Error
+                      ? error.message
+                      : "Idempotency store unavailable; money post blocked"
+                });
+                return;
+              }
+              originalJson(body);
+            });
           return res;
         }
         return originalJson(body);
@@ -214,6 +249,10 @@ export function requireIdempotencyKey(req: Request, res: Response, next: NextFun
       next();
     })
     .catch((error) => {
+      if (error instanceof IdempotencyStoreError) {
+        res.status(503).json({ error: error.message });
+        return;
+      }
       next(error);
     });
 }

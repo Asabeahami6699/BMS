@@ -18,18 +18,63 @@ import { isMissingSupabaseResource } from "../lib/supabaseSchema.js";
 import { resolveBranchId } from "./branchService.js";
 import { getCustomerById, patchCustomerKycPhotos, registerLoanBorrower } from "./customerService.js";
 import { getLoanGroupNameMap, listLoanGroups, validateGroupForLoanApplication } from "./loanGroupService.js";
+import { assertBranchAccess } from "../middleware/branchScope.js";
 import {
   buildSusuCreditSnapshot,
   isSusuLoanBridgeActive,
-  postSusuDebitForLoanRepayment
+  postSusuCreditForLoanDisbursement,
+  postSusuDebitForLoanRepayment,
+  recomputeCustomerLoanCollateralLocked,
+  reverseSusuDebitForLoanRepayment,
+  setCustomerLoanCollateralLocked
 } from "./susuLoanBridgeService.js";
+import {
+  evaluateCustomerLoanQualification,
+  getLoanQualificationSetup
+} from "./loanQualificationService.js";
+import { computeCustomerBalance } from "./ledgerService.js";
 
 type ActorContext = {
   tenantId: string;
   userId: string;
   role: string;
+  scopeType: "head_office" | "branch";
   branchId?: string;
 };
+
+function assertLoanBranchAccess(context: ActorContext, loanBranchId: string): void {
+  assertBranchAccess(
+    { scopeType: context.scopeType, branchId: context.branchId },
+    loanBranchId
+  );
+}
+
+async function assertLoanQualificationForMoneyPath(
+  context: ActorContext,
+  app: LoanApplication
+): Promise<void> {
+  if (!(await isSusuLoanBridgeActive(context.tenantId))) {
+    return;
+  }
+  const setup = await getLoanQualificationSetup(context.tenantId);
+  if (!setup.enabled) {
+    return;
+  }
+  const result = await evaluateCustomerLoanQualification(context.tenantId, app.customerId);
+  if (!result.qualified) {
+    throw new Error(
+      `Borrower does not meet loan qualification: ${result.reasons.join(" ")}`
+    );
+  }
+  if (
+    result.suggestedMaxLoanGhs > 0 &&
+    app.principalAmount > result.suggestedMaxLoanGhs + 1e-9
+  ) {
+    throw new Error(
+      `Principal GHS ${formatAccountAmount(app.principalAmount)} exceeds suggested max GHS ${formatAccountAmount(result.suggestedMaxLoanGhs)} from qualification setup.`
+    );
+  }
+}
 
 type MemoryStore = {
   products: LoanProduct[];
@@ -114,6 +159,25 @@ function rowToApplication(row: Record<string, unknown>): LoanApplication {
       row.susu_credit_snapshot != null
         ? susuCreditSnapshotSchema.parse(row.susu_credit_snapshot as Record<string, unknown>)
         : undefined,
+    collateralLienAmount:
+      row.collateral_lien_amount != null ? Number(row.collateral_lien_amount) : undefined,
+    disburseToSusu: row.disburse_to_susu == null ? undefined : Boolean(row.disburse_to_susu),
+    susuDisbursementTransactionId:
+      row.susu_disbursement_transaction_id != null
+        ? String(row.susu_disbursement_transaction_id)
+        : undefined,
+    autoDebitFailCount:
+      row.auto_debit_fail_count != null ? Number(row.auto_debit_fail_count) : undefined,
+    autoDebitLastFailedAt:
+      row.auto_debit_last_failed_at != null ? String(row.auto_debit_last_failed_at) : undefined,
+    autoDebitRecoveryStage:
+      row.auto_debit_recovery_stage === "retry_pending" ||
+      row.auto_debit_recovery_stage === "sms_sent" ||
+      row.auto_debit_recovery_stage === "agent_task" ||
+      row.auto_debit_recovery_stage === "par_escalated"
+        ? row.auto_debit_recovery_stage
+        : undefined,
+    parEscalatedAt: row.par_escalated_at != null ? String(row.par_escalated_at) : undefined,
     rejectionReason: row.rejection_reason != null ? String(row.rejection_reason) : undefined,
     appliedAt: String(row.applied_at),
     approvedAt: row.approved_at != null ? String(row.approved_at) : undefined,
@@ -471,6 +535,7 @@ export async function createLoanApplication(
   input: unknown
 ): Promise<LoanApplication> {
   const payload = createLoanApplicationSchema.parse(input);
+  assertLoanBranchAccess(context, payload.branchId);
   let customerId = payload.customerId;
   let customerName: string | undefined;
 
@@ -679,24 +744,48 @@ async function persistApplication(application: LoanApplication): Promise<void> {
     mem.applications = mem.applications.map((a) => (a.id === application.id ? application : a));
     return;
   }
-  const { error } = await supabase
+  const baseUpdate: Record<string, unknown> = {
+    status: application.status,
+    outstanding_principal: application.outstandingPrincipal,
+    total_repaid: application.totalRepaid,
+    installments_paid: application.installmentsPaid,
+    next_due_date: application.nextDueDate ?? null,
+    rejection_reason: application.rejectionReason ?? null,
+    approved_at: application.approvedAt ?? null,
+    approved_by: application.approvedBy ?? null,
+    disbursed_at: application.disbursedAt ?? null,
+    disbursed_by: application.disbursedBy ?? null,
+    closed_at: application.closedAt ?? null,
+    updated_at: new Date().toISOString()
+  };
+  const bridgeUpdate: Record<string, unknown> = {
+    ...baseUpdate,
+    collateral_lien_amount: application.collateralLienAmount ?? 0,
+    disburse_to_susu: application.disburseToSusu ?? true,
+    susu_disbursement_transaction_id: application.susuDisbursementTransactionId ?? null,
+    auto_debit_fail_count: application.autoDebitFailCount ?? 0,
+    auto_debit_last_failed_at: application.autoDebitLastFailedAt ?? null,
+    auto_debit_recovery_stage: application.autoDebitRecoveryStage ?? null,
+    par_escalated_at: application.parEscalatedAt ?? null
+  };
+  let { error } = await supabase
     .from("loan_applications")
-    .update({
-      status: application.status,
-      outstanding_principal: application.outstandingPrincipal,
-      total_repaid: application.totalRepaid,
-      installments_paid: application.installmentsPaid,
-      next_due_date: application.nextDueDate ?? null,
-      rejection_reason: application.rejectionReason ?? null,
-      approved_at: application.approvedAt ?? null,
-      approved_by: application.approvedBy ?? null,
-      disbursed_at: application.disbursedAt ?? null,
-      disbursed_by: application.disbursedBy ?? null,
-      closed_at: application.closedAt ?? null,
-      updated_at: new Date().toISOString()
-    })
+    .update(bridgeUpdate)
     .eq("tenant_id", application.tenantId)
     .eq("id", application.id);
+  if (
+    error &&
+    /collateral_lien|disburse_to_susu|susu_disbursement|auto_debit_|par_escalated/i.test(
+      error.message
+    )
+  ) {
+    const retry = await supabase
+      .from("loan_applications")
+      .update(baseUpdate)
+      .eq("tenant_id", application.tenantId)
+      .eq("id", application.id);
+    error = retry.error;
+  }
   if (error && !isMissingSupabaseResource(error.message)) {
     throw new Error(`Failed to update loan application: ${error.message}`);
   }
@@ -756,9 +845,11 @@ export async function approveLoanApplication(
   if (!app) {
     throw new Error("Loan application not found");
   }
+  assertLoanBranchAccess(context, app.branchId);
   if (app.status !== "pending_approval") {
     throw new Error("Only pending applications can be approved");
   }
+  await assertLoanQualificationForMoneyPath(context, app);
   const updated: LoanApplication = {
     ...app,
     status: "approved",
@@ -779,6 +870,7 @@ export async function rejectLoanApplication(
   if (!app) {
     throw new Error("Loan application not found");
   }
+  assertLoanBranchAccess(context, app.branchId);
   if (app.status !== "pending_approval") {
     throw new Error("Only pending applications can be rejected");
   }
@@ -798,9 +890,11 @@ export async function disburseLoan(context: ActorContext, loanId: string): Promi
   if (!app) {
     throw new Error("Loan application not found");
   }
+  assertLoanBranchAccess(context, app.branchId);
   if (app.status !== "approved") {
     throw new Error("Only approved loans can be disbursed");
   }
+  await assertLoanQualificationForMoneyPath(context, app);
 
   const disbursedAt = new Date().toISOString();
   const schedule = await listScheduleForLoan(context.tenantId, loanId);
@@ -813,13 +907,70 @@ export async function disburseLoan(context: ActorContext, loanId: string): Promi
     nextDueDate = schedule.find((s) => s.status !== "paid")?.dueDate ?? schedule[0]?.dueDate;
   }
 
+  let susuDisbursementTransactionId = app.susuDisbursementTransactionId;
+  let collateralLienAmount = app.collateralLienAmount ?? 0;
+  let disburseToSusu = app.disburseToSusu ?? true;
+
+  if (await isSusuLoanBridgeActive(context.tenantId)) {
+    try {
+      const setup = await getLoanQualificationSetup(context.tenantId);
+      disburseToSusu = app.disburseToSusu ?? setup.disburseToSusu;
+
+      // Lock collateral from pre-credit Susu first so the race window cannot drain the lien base.
+      if (setup.collateralPercent > 0) {
+        const customer = await getCustomerById(context.tenantId, app.customerId);
+        const balanceBefore = await computeCustomerBalance(context.tenantId, app.customerId);
+        const lockedMin = customer?.lockedBalance ?? 0;
+        const base = Math.max(0, balanceBefore - lockedMin);
+        collateralLienAmount =
+          Math.round(((base * setup.collateralPercent) / 100) * 100) / 100;
+        if (collateralLienAmount > 0) {
+          const otherOpen = await recomputeCustomerLoanCollateralLocked(
+            context.tenantId,
+            app.customerId,
+            app.id
+          );
+          await setCustomerLoanCollateralLocked(
+            context.tenantId,
+            app.customerId,
+            Math.round((otherOpen + collateralLienAmount) * 100) / 100
+          );
+        }
+      }
+
+      if (disburseToSusu && !susuDisbursementTransactionId) {
+        susuDisbursementTransactionId = await postSusuCreditForLoanDisbursement({
+          tenantId: context.tenantId,
+          customerId: app.customerId,
+          branchId: app.branchId,
+          amount: app.principalAmount,
+          loanId: app.id,
+          recordedByUserId: context.userId
+        });
+      }
+    } catch (error) {
+      console.warn(
+        "[loans] Susu disbursement / collateral skipped:",
+        error instanceof Error ? error.message : error
+      );
+      throw error;
+    }
+  }
+
   const updated: LoanApplication = {
     ...app,
     status: "disbursed",
     outstandingPrincipal: app.totalRepayable || app.principalAmount,
     disbursedAt,
     disbursedBy: context.userId,
-    nextDueDate
+    nextDueDate,
+    disburseToSusu,
+    susuDisbursementTransactionId,
+    collateralLienAmount: collateralLienAmount > 0 ? collateralLienAmount : undefined,
+    autoDebitFailCount: 0,
+    autoDebitRecoveryStage: undefined,
+    autoDebitLastFailedAt: undefined,
+    parEscalatedAt: undefined
   };
   await persistApplication(updated);
 
@@ -828,13 +979,29 @@ export async function disburseLoan(context: ActorContext, loanId: string): Promi
       const { getCustomerLoanInstallmentReserve } = await import("./loanReserveService.js");
       const { createAgentNotification, notifyTenantStaff } = await import("./notificationService.js");
       const reserve = await getCustomerLoanInstallmentReserve(context.tenantId, app.customerId);
-      if (reserve > 0) {
-        const body = `GHS ${formatAccountAmount(reserve)} is reserved on the Susu/savings account for the next loan installment and is not withdrawable until paid or the loan is closed.`;
+      if (reserve > 0 || collateralLienAmount > 0 || susuDisbursementTransactionId) {
+        const parts: string[] = [];
+        if (susuDisbursementTransactionId) {
+          parts.push(
+            `GHS ${formatAccountAmount(app.principalAmount)} credited to Susu for branch-counter withdrawal`
+          );
+        }
+        if (collateralLienAmount > 0) {
+          parts.push(
+            `GHS ${formatAccountAmount(collateralLienAmount)} locked as passbook collateral for the loan term`
+          );
+        }
+        if (reserve > 0) {
+          parts.push(
+            `GHS ${formatAccountAmount(reserve)} reserved for the next installment (not withdrawable)`
+          );
+        }
+        const body = parts.join(". ") + ".";
         await notifyTenantStaff({
           tenantId: context.tenantId,
           roles: ["admin", "coordinator", "accountant"],
           kind: "loan_repayment_reserved",
-          title: "Loan repayment reserved on Susu account",
+          title: "Loan disbursed to Susu account",
           body: `${app.customerName ?? "Borrower"}: ${body}`,
           customerId: app.customerId
         });
@@ -846,7 +1013,7 @@ export async function disburseLoan(context: ActorContext, loanId: string): Promi
             userId: agentId,
             customerId: app.customerId,
             kind: "loan_repayment_reserved",
-            title: "Loan repayment reserved",
+            title: "Loan disbursed to Susu",
             body
           });
         }
@@ -945,6 +1112,7 @@ export async function recordLoanRepayment(
   if (!app) {
     throw new Error("Loan not found");
   }
+  assertLoanBranchAccess(context, app.branchId);
   if (app.status !== "disbursed") {
     throw new Error("Repayments can only be recorded on disbursed loans");
   }
@@ -1008,68 +1176,36 @@ export async function recordLoanRepayment(
   if (!branchId) {
     throw new Error("Invalid branch");
   }
+  assertLoanBranchAccess(context, branchId);
 
   const repaymentId = crypto.randomUUID();
   let susuTransactionId: string | undefined;
-  if (paymentSource === "susu_account") {
-    susuTransactionId = await postSusuDebitForLoanRepayment({
-      tenantId: context.tenantId,
-      customerId: app.customerId,
-      branchId,
-      amount: payAmount,
-      repaymentId,
-      loanId,
-      recordedByUserId: context.userId
-    });
-  }
+  const supabase = getSupabaseAdminClient();
 
-  const { installmentNumber, schedule } = await applyRepaymentToSchedule(
-    context.tenantId,
-    loanId,
-    payAmount,
-    Boolean(payload.settleAll)
-  );
-
-  const repayment: LoanRepayment = {
+  // Reserve the repayment row first so Susu debit is tied to a durable id (M2).
+  const provisionalRepayment: LoanRepayment = {
     id: repaymentId,
     tenantId: context.tenantId,
     loanId,
     amount: payAmount,
     branchId,
-    installmentNumber,
     notes: payload.notes,
     paymentSource,
-    susuTransactionId,
     recordedBy: context.userId,
     createdAt: new Date().toISOString()
   };
 
-  const newOutstanding = Math.round((app.outstandingPrincipal - payAmount) * 100) / 100;
-  const paidInstallments = schedule.filter((s) => s.status === "paid").length;
-  const nextDueDate = schedule.find((s) => s.status !== "paid")?.dueDate;
-
-  const updated: LoanApplication = {
-    ...app,
-    outstandingPrincipal: newOutstanding,
-    totalRepaid: Math.round((app.totalRepaid + payAmount) * 100) / 100,
-    installmentsPaid: paidInstallments,
-    nextDueDate,
-    status: newOutstanding <= 0 ? "closed" : "disbursed",
-    closedAt: newOutstanding <= 0 ? new Date().toISOString() : app.closedAt
-  };
-
-  const supabase = getSupabaseAdminClient();
   if (supabase) {
     const insertRow: Record<string, unknown> = {
-      id: repayment.id,
+      id: provisionalRepayment.id,
       tenant_id: context.tenantId,
       loan_id: loanId,
-      amount: repayment.amount,
+      amount: provisionalRepayment.amount,
       branch_id: branchId,
-      installment_number: installmentNumber ?? null,
-      notes: repayment.notes ?? null,
+      installment_number: null,
+      notes: provisionalRepayment.notes ?? null,
       payment_source: paymentSource,
-      susu_transaction_id: susuTransactionId ?? null,
+      susu_transaction_id: null,
       recorded_by: context.userId
     };
     let { error: repayError } = await supabase.from("loan_repayments").insert(insertRow);
@@ -1087,12 +1223,102 @@ export async function recordLoanRepayment(
     if (repayError && !isMissingSupabaseResource(repayError.message)) {
       throw new Error(`Failed to record repayment: ${repayError.message}`);
     }
-  } else {
-    ensureMemory(context.tenantId).repayments.unshift(repayment);
   }
 
-  await persistApplication(updated);
-  return { application: updated, repayment, schedule };
+  try {
+    if (paymentSource === "susu_account") {
+      susuTransactionId = await postSusuDebitForLoanRepayment({
+        tenantId: context.tenantId,
+        customerId: app.customerId,
+        branchId,
+        amount: payAmount,
+        repaymentId,
+        loanId,
+        recordedByUserId: context.userId
+      });
+    }
+
+    const { installmentNumber, schedule } = await applyRepaymentToSchedule(
+      context.tenantId,
+      loanId,
+      payAmount,
+      Boolean(payload.settleAll)
+    );
+
+    const repayment: LoanRepayment = {
+      ...provisionalRepayment,
+      installmentNumber,
+      susuTransactionId
+    };
+
+    const newOutstanding = Math.round((app.outstandingPrincipal - payAmount) * 100) / 100;
+    const paidInstallments = schedule.filter((s) => s.status === "paid").length;
+    const nextDueDate = schedule.find((s) => s.status !== "paid")?.dueDate;
+
+    const closed = newOutstanding <= 0;
+    const updated: LoanApplication = {
+      ...app,
+      outstandingPrincipal: newOutstanding,
+      totalRepaid: Math.round((app.totalRepaid + payAmount) * 100) / 100,
+      installmentsPaid: paidInstallments,
+      nextDueDate,
+      status: closed ? "closed" : "disbursed",
+      closedAt: closed ? new Date().toISOString() : app.closedAt,
+      autoDebitFailCount: paymentSource === "susu_account" ? 0 : app.autoDebitFailCount,
+      autoDebitRecoveryStage:
+        paymentSource === "susu_account" ? undefined : app.autoDebitRecoveryStage,
+      autoDebitLastFailedAt:
+        paymentSource === "susu_account" ? undefined : app.autoDebitLastFailedAt,
+      collateralLienAmount: closed ? 0 : app.collateralLienAmount
+    };
+
+    if (closed && (app.collateralLienAmount ?? 0) > 0) {
+      try {
+        await recomputeCustomerLoanCollateralLocked(context.tenantId, app.customerId, app.id);
+      } catch (error) {
+        console.warn(
+          "[loans] collateral unlock skipped:",
+          error instanceof Error ? error.message : error
+        );
+      }
+    }
+
+    if (supabase) {
+      await supabase
+        .from("loan_repayments")
+        .update({
+          installment_number: installmentNumber ?? null,
+          susu_transaction_id: susuTransactionId ?? null
+        })
+        .eq("tenant_id", context.tenantId)
+        .eq("id", repaymentId);
+    } else {
+      ensureMemory(context.tenantId).repayments.unshift(repayment);
+    }
+
+    await persistApplication(updated);
+    return { application: updated, repayment, schedule };
+  } catch (error) {
+    if (paymentSource === "susu_account" && susuTransactionId) {
+      await reverseSusuDebitForLoanRepayment({
+        tenantId: context.tenantId,
+        customerId: app.customerId,
+        branchId,
+        amount: payAmount,
+        repaymentId,
+        loanId,
+        recordedByUserId: context.userId
+      });
+    }
+    if (supabase) {
+      await supabase
+        .from("loan_repayments")
+        .delete()
+        .eq("tenant_id", context.tenantId)
+        .eq("id", repaymentId);
+    }
+    throw error;
+  }
 }
 
 export type LoanBorrowerRow = {

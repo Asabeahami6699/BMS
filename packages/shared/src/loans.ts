@@ -301,6 +301,15 @@ export const loanApplicationSchema = z.object({
   yearsAtCurrentJob: z.number().nonnegative().optional(),
   guarantor: loanGuarantorSchema.optional(),
   susuCreditSnapshot: susuCreditSnapshotSchema.optional(),
+  collateralLienAmount: z.number().nonnegative().optional(),
+  disburseToSusu: z.boolean().optional(),
+  susuDisbursementTransactionId: z.string().optional(),
+  autoDebitFailCount: z.number().int().nonnegative().optional(),
+  autoDebitLastFailedAt: z.string().optional(),
+  autoDebitRecoveryStage: z
+    .enum(["retry_pending", "sms_sent", "agent_task", "par_escalated"])
+    .optional(),
+  parEscalatedAt: z.string().optional(),
   rejectionReason: z.string().optional(),
   appliedAt: z.string(),
   approvedAt: z.string().optional(),

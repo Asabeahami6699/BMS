@@ -80,17 +80,8 @@ export async function resolveUserContextFromHeaders(headers: {
   }
 
   if (!data) {
-    return {
-      userId: fallback.userId,
-      tenantId: fallback.tenantId,
-      role: fallback.role,
-      scopeType: fallback.scopeType,
-      branchId: fallback.branchId,
-      permissions: await resolvePerms(fallback.tenantId, fallback.role, fallback.userId),
-      subscribedModules: modules,
-      subscribedAddons: addons,
-      reportsAnalytics: tenant?.subscriptionStatus !== "inactive"
-    };
+    // Never invent an admin context from claimed headers when the user row is missing.
+    throw new Error("User not found for header auth");
   }
 
   const roleParsed = parseProfileJobTitle(data.role);

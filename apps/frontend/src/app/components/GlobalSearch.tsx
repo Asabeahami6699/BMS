@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { Customer, UserRecord } from "../api";
-import { listUsers, searchCustomers } from "../api";
+import { searchCustomers } from "../api";
+import { useUsersStore } from "../stores/usersStore";
 
 type Props = {
   canSearchCustomers: boolean;
@@ -67,7 +68,13 @@ export function GlobalSearch({ canSearchCustomers, canSearchUsers }: Props) {
 
           if (canSearchUsers) {
             if (!usersCacheRef.current) {
-              usersCacheRef.current = await listUsers();
+              const usersState = useUsersStore.getState();
+              if (!usersState.users.length) {
+                await usersState.refresh();
+              } else {
+                usersState.hydrate();
+              }
+              usersCacheRef.current = useUsersStore.getState().users;
             }
             const lower = q.toLowerCase();
             for (const u of usersCacheRef.current) {

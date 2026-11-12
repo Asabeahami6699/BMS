@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import type { AppRole } from "./api";
-import { assignRole, createRole, getRoleAssignments, getRoles, getTenantId } from "./api";
-import { subscribeToTenantRealtime } from "./realtime";
+import { assignRole, createRole } from "./api";
+import { useRoleManagementStore } from "./stores/roleManagementStore";
 
 type Props = {
   role: AppRole;
@@ -38,33 +39,35 @@ export function RoleManagementCard({ role }: Props) {
   const [assignUserId, setAssignUserId] = useState("demo-fieldagent");
   const [assignRoleKey, setAssignRoleKey] = useState("branch_supervisor");
   const [status, setStatus] = useState("Loading roles...");
-  const [roles, setRoles] = useState<Array<{ roleKey: string; displayName: string; duties: string[] }>>([]);
-  const [assignments, setAssignments] = useState<Array<{ userId: string; roleKey: string }>>([]);
 
-  async function loadRoles() {
-    try {
-      const data = await getRoles();
-      setRoles(data);
-      const assignmentData = await getRoleAssignments();
-      setAssignments(assignmentData);
-      setStatus("Roles loaded.");
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Failed to load roles.");
-    }
-  }
+  const { roles, assignments, error, hydrate, refresh, startLiveSync, stopLiveSync } =
+    useRoleManagementStore(
+      useShallow((s) => ({
+        roles: s.roles,
+        assignments: s.assignments,
+        error: s.error,
+        hydrate: s.hydrate,
+        refresh: s.refresh,
+        startLiveSync: s.startLiveSync,
+        stopLiveSync: s.stopLiveSync
+      }))
+    );
 
   useEffect(() => {
-    void loadRoles();
-    const unsubscribe = subscribeToTenantRealtime({
-      tenantId: getTenantId(),
-      tables: ["tenant_roles", "user_role_assignments"],
-      onChange: () => {
-        void loadRoles();
-      }
-    });
+    hydrate();
+    startLiveSync();
+    return () => stopLiveSync();
+  }, [hydrate, startLiveSync, stopLiveSync]);
 
-    return () => unsubscribe();
-  }, [role]);
+  useEffect(() => {
+    if (error) {
+      setStatus(error);
+      return;
+    }
+    if (roles.length > 0) {
+      setStatus("Roles loaded.");
+    }
+  }, [error, roles.length]);
 
   function toggleDuty(duty: string) {
     setDuties((prev) => (prev.includes(duty) ? prev.filter((item) => item !== duty) : [...prev, duty]));
@@ -79,9 +82,9 @@ export function RoleManagementCard({ role }: Props) {
         duties
       });
       setStatus("Role created.");
-      await loadRoles();
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Failed to create role.");
+      await refresh();
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : "Failed to create role.");
     }
   }
 
@@ -89,10 +92,10 @@ export function RoleManagementCard({ role }: Props) {
     try {
       setStatus("Assigning role...");
       await assignRole({ userId: assignUserId, roleKey: assignRoleKey });
-      await loadRoles();
+      await refresh();
       setStatus("Role assigned.");
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Failed to assign role.");
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : "Failed to assign role.");
     }
   }
 
@@ -131,7 +134,7 @@ export function RoleManagementCard({ role }: Props) {
         </div>
       </div>
 
-      <button type="button" className="button" disabled={!canManageRoles} onClick={handleCreateRole}>
+      <button type="button" className="button" disabled={!canManageRoles} onClick={() => void handleCreateRole()}>
         Create Role
       </button>
 
@@ -153,7 +156,7 @@ export function RoleManagementCard({ role }: Props) {
         />
       </label>
 
-      <button type="button" className="button" disabled={!canManageRoles} onClick={handleAssignRole}>
+      <button type="button" className="button" disabled={!canManageRoles} onClick={() => void handleAssignRole()}>
         Assign Role
       </button>
 

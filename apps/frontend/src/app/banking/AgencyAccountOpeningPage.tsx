@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useShallow } from "zustand/react/shallow";
-import type { TenantBankProduct } from "@bms/shared";
 import { AdminDataTable } from "../../components/AdminDataTable";
 import { useAuth } from "../../auth/AuthContext";
 import { useToast } from "../../components/Toast";
 import { toUserFacingError } from "../../lib/networkError";
-import { getRuntimeBranchId, listAccountOpeningProducts } from "../api";
+import { getRuntimeBranchId } from "../api";
 import { usePageLoading } from "../hooks/usePageLoading";
 import { useAgencyAccountsStore } from "../stores/agencyAccountsStore";
 import { useBranchesStore } from "../stores/branchesStore";
@@ -29,43 +28,48 @@ export function AgencyAccountOpeningPage() {
   const { showToast } = useToast();
   const [search, setSearch] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
-  const [openingProducts, setOpeningProducts] = useState<TenantBankProduct[]>([]);
-  const [productsLoading, setProductsLoading] = useState(true);
 
-  const { accounts, loading: accountsLoading, hydrate: hydrateAccounts, createAccount, posting } =
-    useAgencyAccountsStore(
-      useShallow((s) => ({
-        accounts: s.accounts,
-        loading: s.loading,
-        hydrate: s.hydrate,
-        createAccount: s.createAccount,
-        posting: s.posting
-      }))
-    );
+  const {
+    accounts,
+    loading: accountsLoading,
+    openingProducts,
+    openingProductsLoading,
+    hydrate: hydrateAccounts,
+    hydrateOpeningProducts,
+    createAccount,
+    posting,
+    startLiveSync,
+    stopLiveSync
+  } = useAgencyAccountsStore(
+    useShallow((s) => ({
+      accounts: s.accounts,
+      loading: s.loading,
+      openingProducts: s.openingProducts,
+      openingProductsLoading: s.openingProductsLoading,
+      hydrate: s.hydrate,
+      hydrateOpeningProducts: s.hydrateOpeningProducts,
+      createAccount: s.createAccount,
+      posting: s.posting,
+      startLiveSync: s.startLiveSync,
+      stopLiveSync: s.stopLiveSync
+    }))
+  );
 
   const branches = useBranchesStore((s) => s.branches);
   const hydrateBranches = useBranchesStore((s) => s.hydrate);
 
-  usePageLoading(accountsLoading || productsLoading, "agency-account-opening");
-
-  const loadOpeningProducts = () => {
-    setProductsLoading(true);
-    return listAccountOpeningProducts({ branchId: getRuntimeBranchId() || undefined })
-      .then((products) => {
-        setOpeningProducts(products);
-      })
-      .catch((err) => {
-        showToast(toUserFacingError(err, "Could not load account-opening products"), "error");
-        setOpeningProducts([]);
-      })
-      .finally(() => setProductsLoading(false));
-  };
+  usePageLoading(accountsLoading || openingProductsLoading, "agency-account-opening");
 
   useEffect(() => {
-    hydrateAccounts({ force: true });
-    hydrateBranches({ force: true });
-    void loadOpeningProducts();
-  }, [hydrateAccounts, hydrateBranches]);
+    const branchId = getRuntimeBranchId() || undefined;
+    hydrateAccounts();
+    hydrateOpeningProducts({ branchId });
+    hydrateBranches();
+    startLiveSync();
+    return () => {
+      stopLiveSync();
+    };
+  }, [hydrateAccounts, hydrateOpeningProducts, hydrateBranches, startLiveSync, stopLiveSync]);
 
   const tableRows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -218,7 +222,7 @@ export function AgencyAccountOpeningPage() {
       <AccountOpeningModal
         open={modalOpen}
         posting={posting}
-        productsLoading={productsLoading}
+        productsLoading={openingProductsLoading}
         branches={branches.filter((b) => b.status !== "inactive")}
         openingProducts={openingProducts}
         openedByName={openedByName}

@@ -40,6 +40,8 @@ import { companyProfileRouter } from "./routes/companyProfile.routes.js";
 import { approvalWorkflowRouter } from "./routes/approvalWorkflow.routes.js";
 import { registrationFormRouter } from "./routes/registrationForm.routes.js";
 import { smsSettingsRouter } from "./routes/smsSettings.routes.js";
+import { loanQualificationRouter } from "./routes/loanQualification.routes.js";
+import { siteManualRouter } from "./routes/siteManual.routes.js";
 import { emailSettingsRouter } from "./routes/emailSettings.routes.js";
 import { notificationPlatformRouter } from "./routes/notificationPlatform.routes.js";
 
@@ -89,6 +91,8 @@ export function createApp() {
   app.use("/api/v1/tenant/sms-settings", adminMutationRateLimit, smsSettingsRouter);
   app.use("/api/v1/tenant/email-settings", adminMutationRateLimit, emailSettingsRouter);
   app.use("/api/v1/tenant/notifications", notificationPlatformRouter);
+  app.use("/api/v1/tenant/loan-qualification", adminMutationRateLimit, loanQualificationRouter);
+  app.use("/api/v1/tenant/site-manual", siteManualRouter);
 
   return app;
 }

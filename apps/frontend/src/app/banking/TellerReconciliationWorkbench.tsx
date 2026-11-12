@@ -1,9 +1,9 @@
 import { formatAccountAmount } from "@bms/shared";
 import { useEffect, useMemo, useState } from "react";
-import type { TellerReconciliationTab, TenantBankProduct } from "@bms/shared";
+import type { TellerReconciliationTab } from "@bms/shared";
 import { useShallow } from "zustand/react/shallow";
-import { listBankProducts } from "../api";
 import { useBranchesLiveSync } from "../hooks/useBranchesLiveSync";
+import { useBankProductsStore } from "../stores/bankProductsStore";
 import { useBranchesStore } from "../stores/branchesStore";
 import { useTellerReconciliationStore } from "../stores/tellerReconciliationStore";
 import { TellerTransactionRecords } from "./TellerTransactionRecords";
@@ -35,16 +35,15 @@ function compactMoney(value: number): string {
 
 export function TellerReconciliationWorkbench({ compact, fallbackBranchId }: Props) {
   const [activeTab, setActiveTab] = useState<TellerReconciliationTab>("deposits");
-  const [bankProducts, setBankProducts] = useState<TenantBankProduct[]>([]);
+  const bankProducts = useBankProductsStore((s) => s.products);
+  const hydrateBankProducts = useBankProductsStore((s) => s.hydrate);
   const branches = useBranchesStore((s) => s.branches);
 
   useBranchesLiveSync();
 
   useEffect(() => {
-    void listBankProducts({ activeOnly: true })
-      .then(setBankProducts)
-      .catch(() => setBankProducts([]));
-  }, []);
+    hydrateBankProducts();
+  }, [hydrateBankProducts]);
 
   const {
     data,

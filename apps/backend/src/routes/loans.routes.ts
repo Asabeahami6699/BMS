@@ -1,4 +1,5 @@
 import { Router, type Request } from "express";
+import { requireIdempotencyKey } from "../middleware/idempotency.js";
 import { requirePermission } from "../middleware/requirePermission.js";
 import {
   approveLoanApplication,
@@ -33,6 +34,9 @@ function contextFromReq(req: Request) {
     tenantId: ctx.tenantId,
     userId: ctx.userId,
     role: ctx.role,
+    scopeType: (ctx.scopeType === "branch" ? "branch" : "head_office") as
+      | "head_office"
+      | "branch",
     branchId: ctx.branchId
   };
 }
@@ -200,6 +204,7 @@ loansRouter.post("/applications/:loanId/disburse", requirePermission("loans.disb
 loansRouter.post(
   "/applications/:loanId/repayments",
   requirePermission("loans.repayments.create"),
+  requireIdempotencyKey,
   async (req, res) => {
     try {
       if (!req.userContext) {

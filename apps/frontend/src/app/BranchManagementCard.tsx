@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import type { AppRole, Branch } from "./api";
-import { deleteBranch, listBranches, updateBranch } from "./api";
+import { deleteBranch, updateBranch } from "./api";
 import { AdminDataTable, filterRowsBySearch } from "../components/AdminDataTable";
 import { RowActionsMenu } from "../components/RowActionsMenu";
 import { BranchFormModal } from "./BranchFormModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useToast } from "../components/Toast";
 import { useConfirmDialog } from "../hooks/useConfirmDialog";
+import { useBranchesLiveSync } from "./hooks/useBranchesLiveSync";
+import { useBranchesStore } from "./stores/branchesStore";
 
 type Props = { role: AppRole };
 
@@ -25,28 +28,30 @@ export function BranchManagementCard({ role }: Props) {
   const canManage = role === "admin";
   const { showToast } = useToast();
   const { confirm, dialogProps } = useConfirmDialog();
-  const [branches, setBranches] = useState<Branch[]>([]);
+  useBranchesLiveSync();
+  const { branches, loading, error, hydrate, refresh } = useBranchesStore(
+    useShallow((s) => ({
+      branches: s.branches,
+      loading: s.loading,
+      error: s.error,
+      hydrate: s.hydrate,
+      refresh: s.refresh
+    }))
+  );
   const [search, setSearch] = useState("");
-  const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<"create" | "edit">("create");
   const [editingBranch, setEditingBranch] = useState<Branch | null>(null);
 
-  async function loadBranches() {
-    setLoading(true);
-    try {
-      const data = await listBranches();
-      setBranches(data.map((b) => ({ ...b, status: b.status ?? "active" })));
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : "Failed to load branches", "error");
-    } finally {
-      setLoading(false);
-    }
-  }
+  useEffect(() => {
+    hydrate();
+  }, [hydrate, role]);
 
   useEffect(() => {
-    void loadBranches();
-  }, [role]);
+    if (error) {
+      showToast(error, "error");
+    }
+  }, [error, showToast]);
 
   const filtered = useMemo(
     () => filterRowsBySearch(branches, search, ["code", "name", "status"]),
@@ -70,9 +75,9 @@ export function BranchManagementCard({ role }: Props) {
     try {
       await updateBranch(branch.id, { status: next });
       showToast(`Branch ${next === "active" ? "activated" : "deactivated"}`, "success");
-      await loadBranches();
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : "Failed to update status", "error");
+      await refresh();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to update status", "error");
     }
   }
 
@@ -89,9 +94,9 @@ export function BranchManagementCard({ role }: Props) {
     try {
       await deleteBranch(branch.id);
       showToast("Branch deleted", "success");
-      await loadBranches();
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : "Failed to delete branch", "error");
+      await refresh();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to delete branch", "error");
     }
   }
 
@@ -163,7 +168,7 @@ export function BranchManagementCard({ role }: Props) {
           mode={modalMode}
           branch={editingBranch}
           onClose={() => setModalOpen(false)}
-          onSaved={() => void loadBranches()}
+          onSaved={() => void refresh()}
         />
       ) : null}
 

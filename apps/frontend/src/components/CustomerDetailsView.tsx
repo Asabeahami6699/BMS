@@ -128,7 +128,8 @@ export function CustomerDetailsView({
   const [ledgerVisibleCount, setLedgerVisibleCount] = useState(LEDGER_PAGE_SIZE);
 
   const detail = useCustomerLedgerStore((s) => selectCustomerDetail(s, customerProp.id));
-  const customer = detail ?? customerProp;
+  // Merge so list bootstrap fields (DOB, occupation, etc.) stay visible while detail adds photos.
+  const customer = detail ? { ...customerProp, ...detail } : customerProp;
   const ledger = useCustomerLedgerStore((s) => selectLedgerForCustomer(s, customerProp.id));
   const ledgerLoading = useCustomerLedgerStore((s) => Boolean(s.loadingByCustomer[customerProp.id]));
   const ledgerError = useCustomerLedgerStore((s) => s.errorByCustomer[customerProp.id] ?? null);
@@ -181,9 +182,15 @@ export function CustomerDetailsView({
   const accountBalance =
     ledger.length > 0 ? ledger[ledger.length - 1]!.balanceAfter : 0;
   const lockedAmount = isSavings ? (customer.lockedBalance ?? SAVINGS_INITIAL_DEPOSIT_GHS) : 0;
+  const loanCollateralLocked = Math.max(0, customer.loanCollateralLocked ?? 0);
   const loanReserveAmount = Math.max(0, customer.loanReserveAmount ?? 0);
-  const withdrawableBalance = Math.max(0, accountBalance - lockedAmount - loanReserveAmount);
+  const withdrawableBalance = Math.max(
+    0,
+    accountBalance - lockedAmount - loanCollateralLocked - loanReserveAmount
+  );
   const hasLoanReserve = loanReserveAmount > 0;
+  const hasLoanCollateral = loanCollateralLocked > 0;
+  const loanBadge = customer.loanQualificationBadge?.trim();
   const ledgerNewestFirst = [...ledger].reverse();
   const displayedLedger = ledgerNewestFirst.slice(0, ledgerVisibleCount);
   const olderEntriesCount = Math.max(0, ledgerNewestFirst.length - ledgerVisibleCount);
@@ -248,6 +255,15 @@ export function CustomerDetailsView({
             </span>
           </article>
 
+          {loanBadge ? (
+            <p className="cif-loan-badge" role="status">
+              <span className="status-pill status-pill--active">{loanBadge}</span>
+              <span className="muted">
+                Qualifies for a Susu-secured loan based on account consistency.
+              </span>
+            </p>
+          ) : null}
+
           {showFinancials ? (
             <Section
               icon={
@@ -266,7 +282,7 @@ export function CustomerDetailsView({
                       {ledgerLoading ? "…" : `GHS ${formatAccountAmount(accountBalance)}`}
                     </strong>
                   </div>
-                  {(isSavings || hasLoanReserve) ? (
+                  {(isSavings || hasLoanReserve || hasLoanCollateral) ? (
                     <div className="cif-financial__balance">
                       <span className="cif-financial__balance-label">Withdrawable</span>
                       <strong className="cif-financial__balance-value">
@@ -282,6 +298,14 @@ export function CustomerDetailsView({
                       </strong>
                     </div>
                   ) : null}
+                  {hasLoanCollateral ? (
+                    <div className="cif-financial__balance">
+                      <span className="cif-financial__balance-label">Passbook collateral</span>
+                      <strong className="cif-financial__balance-value">
+                        GHS {formatAccountAmount(loanCollateralLocked)}
+                      </strong>
+                    </div>
+                  ) : null}
                   {hasLoanReserve ? (
                     <div className="cif-financial__balance">
                       <span className="cif-financial__balance-label">Loan repayment reserve</span>
@@ -291,6 +315,12 @@ export function CustomerDetailsView({
                     </div>
                   ) : null}
                 </div>
+                {hasLoanCollateral ? (
+                  <p className="muted" role="status">
+                    GHS {formatAccountAmount(loanCollateralLocked)} is locked as passbook collateral for
+                    the open loan term and cannot be withdrawn until the loan is closed.
+                  </p>
+                ) : null}
                 {hasLoanReserve ? (
                   <p className="muted" role="status">
                     GHS {formatAccountAmount(loanReserveAmount)} is held for the next loan installment and
@@ -493,11 +523,18 @@ export function CustomerDetailsView({
                   label="Date of birth"
                   value={
                     customer.dateOfBirth
-                      ? new Date(`${customer.dateOfBirth}T00:00:00`).toLocaleDateString("en-GB")
-                      : "—"
+                      ? new Date(`${customer.dateOfBirth}T00:00:00`).toLocaleDateString("en-GB", {
+                          day: "2-digit",
+                          month: "short",
+                          year: "numeric"
+                        })
+                      : "Not provided"
                   }
                 />
-                <InfoRow label="Occupation" value={customer.occupation || "—"} />
+                <InfoRow
+                  label="Occupation"
+                  value={customer.occupation?.trim() ? customer.occupation : "Not provided"}
+                />
                 <InfoRow label="Ghana Card / ID" value={customer.idCardNumber} />
                 <InfoRow label="Address" value={address} fullWidth />
               </div>

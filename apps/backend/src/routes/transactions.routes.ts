@@ -15,15 +15,23 @@ import { listTransactions, createTransaction } from "../services/transactionServ
 import { getSusuCollectionDetail, listSusuReversals, reverseSusuCollection } from "../services/susuReversalService.js";
 import {
   allocateBranchFloat,
+  approveExtraCash,
+  approveTillExpense,
   closeBranchFloat,
+  collectExtraCash,
   getMyBranchFloatSession,
   listBranchFloatSessions,
   listPendingFloatRequests,
   pushBranchFloat,
+  recordTillExpense,
   requestBranchFloat,
   settleBranchFloat,
   type FloatSessionStatus
 } from "../services/branchFloatService.js";
+import {
+  listTellerTillCashVariances,
+  settleTellerTillCashVariance
+} from "../services/tellerTillCashVarianceService.js";
 
 export const transactionsRouter = Router();
 
@@ -184,6 +192,10 @@ transactionsRouter.post("/branch-float/request", requirePermission("transactions
       {
         branchId: String(req.body?.branchId ?? ""),
         requestedAmount: Number(req.body?.requestedAmount ?? 0),
+        requestedInitialCash:
+          req.body?.requestedInitialCash != null
+            ? Number(req.body.requestedInitialCash)
+            : undefined,
         note: typeof req.body?.note === "string" ? req.body.note : undefined,
         businessDate: typeof req.body?.businessDate === "string" ? req.body.businessDate : undefined
       }
@@ -216,7 +228,11 @@ transactionsRouter.post(
           branchId: context.branchId
         },
         sessionId,
-        { openingFloat: Number(req.body?.openingFloat ?? 0) }
+        {
+          openingFloat: Number(req.body?.openingFloat ?? 0),
+          initialCash:
+            req.body?.initialCash != null ? Number(req.body.initialCash) : undefined
+        }
       );
       res.json({ session });
     } catch (error) {
@@ -246,6 +262,8 @@ transactionsRouter.post("/branch-float/push", requirePermission("transactions.re
         branchId: String(req.body?.branchId ?? ""),
         cashierUserId: String(req.body?.cashierUserId ?? ""),
         openingFloat: Number(req.body?.openingFloat ?? 0),
+        initialCash:
+          req.body?.initialCash != null ? Number(req.body.initialCash) : undefined,
         businessDate: typeof req.body?.businessDate === "string" ? req.body.businessDate : undefined
       }
     );
@@ -361,6 +379,214 @@ transactionsRouter.post(
     } catch (error) {
       res.status(400).json({
         error: error instanceof Error ? error.message : "Failed to settle float"
+      });
+    }
+  }
+);
+
+transactionsRouter.post(
+  "/branch-float/:sessionId/extra-cash",
+  requirePermission("transactions.read"),
+  async (req, res) => {
+    const context = req.userContext;
+    if (!context) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    const sessionId = Array.isArray(req.params.sessionId) ? req.params.sessionId[0] : req.params.sessionId;
+    try {
+      const session = await collectExtraCash(
+        {
+          tenantId: context.tenantId,
+          userId: context.userId,
+          role: context.role,
+          scopeType: context.scopeType as "head_office" | "branch",
+          branchId: context.branchId
+        },
+        sessionId,
+        {
+          amount: Number(req.body?.amount ?? 0),
+          note: typeof req.body?.note === "string" ? req.body.note : undefined
+        }
+      );
+      res.json({ session });
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Failed to collect extra cash"
+      });
+    }
+  }
+);
+
+transactionsRouter.post(
+  "/branch-float/:sessionId/extra-cash/approve",
+  requirePermission("transactions.read"),
+  async (req, res) => {
+    const context = req.userContext;
+    if (!context) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    const sessionId = Array.isArray(req.params.sessionId) ? req.params.sessionId[0] : req.params.sessionId;
+    try {
+      const session = await approveExtraCash(
+        {
+          tenantId: context.tenantId,
+          userId: context.userId,
+          role: context.role,
+          scopeType: context.scopeType as "head_office" | "branch",
+          branchId: context.branchId
+        },
+        sessionId,
+        {
+          amount: req.body?.amount != null ? Number(req.body.amount) : undefined
+        }
+      );
+      res.json({ session });
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Failed to approve extra cash"
+      });
+    }
+  }
+);
+
+transactionsRouter.post(
+  "/branch-float/:sessionId/expense",
+  requirePermission("transactions.read"),
+  async (req, res) => {
+    const context = req.userContext;
+    if (!context) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    const sessionId = Array.isArray(req.params.sessionId) ? req.params.sessionId[0] : req.params.sessionId;
+    try {
+      const session = await recordTillExpense(
+        {
+          tenantId: context.tenantId,
+          userId: context.userId,
+          role: context.role,
+          scopeType: context.scopeType as "head_office" | "branch",
+          branchId: context.branchId
+        },
+        sessionId,
+        {
+          amount: Number(req.body?.amount ?? 0),
+          note: typeof req.body?.note === "string" ? req.body.note : undefined
+        }
+      );
+      res.json({ session });
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Failed to record expense"
+      });
+    }
+  }
+);
+
+transactionsRouter.post(
+  "/branch-float/:sessionId/expense/approve",
+  requirePermission("transactions.read"),
+  async (req, res) => {
+    const context = req.userContext;
+    if (!context) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    const sessionId = Array.isArray(req.params.sessionId) ? req.params.sessionId[0] : req.params.sessionId;
+    try {
+      const session = await approveTillExpense(
+        {
+          tenantId: context.tenantId,
+          userId: context.userId,
+          role: context.role,
+          scopeType: context.scopeType as "head_office" | "branch",
+          branchId: context.branchId
+        },
+        sessionId,
+        {
+          amount: req.body?.amount != null ? Number(req.body.amount) : undefined
+        }
+      );
+      res.json({ session });
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Failed to approve expense"
+      });
+    }
+  }
+);
+
+transactionsRouter.get("/till-cash-variances", requirePermission("transactions.read"), async (req, res) => {
+  const context = req.userContext;
+  if (!context) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  if (context.role !== "admin" && context.role !== "coordinator") {
+    res.status(403).json({ error: PERMISSION_DENIED_MESSAGE });
+    return;
+  }
+  try {
+    const cases = await listTellerTillCashVariances(
+      {
+        tenantId: context.tenantId,
+        userId: context.userId,
+        role: context.role,
+        branchId: context.branchId
+      },
+      {
+        status: (typeof req.query.status === "string" ? req.query.status : "open") as "open" | "all",
+        cashierUserId:
+          typeof req.query.cashierUserId === "string" ? req.query.cashierUserId : undefined,
+        varianceType:
+          req.query.varianceType === "shortage" || req.query.varianceType === "overage"
+            ? req.query.varianceType
+            : undefined,
+        fromDate: typeof req.query.fromDate === "string" ? req.query.fromDate : undefined,
+        toDate: typeof req.query.toDate === "string" ? req.query.toDate : undefined
+      }
+    );
+    res.json(cases);
+  } catch (error) {
+    res.status(400).json({
+      error: error instanceof Error ? error.message : "Failed to list till cash variances"
+    });
+  }
+});
+
+transactionsRouter.post(
+  "/till-cash-variances/:varianceId/settle",
+  requirePermission("transactions.read"),
+  async (req, res) => {
+    const context = req.userContext;
+    if (!context) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    const varianceId = Array.isArray(req.params.varianceId)
+      ? req.params.varianceId[0]
+      : req.params.varianceId;
+    try {
+      const updated = await settleTellerTillCashVariance(
+        {
+          tenantId: context.tenantId,
+          userId: context.userId,
+          role: context.role,
+          branchId: context.branchId
+        },
+        varianceId,
+        {
+          amount: Number(req.body?.amount ?? 0),
+          method: req.body?.method,
+          notes: typeof req.body?.notes === "string" ? req.body.notes : undefined
+        }
+      );
+      res.json(updated);
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Failed to settle till variance"
       });
     }
   }

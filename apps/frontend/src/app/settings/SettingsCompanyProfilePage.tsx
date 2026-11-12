@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { tenantHasSusuAndLoans } from "@bms/shared";
 import { useAuth } from "../../auth/AuthContext";
 import { useToast } from "../../components/Toast";
 import { compressImageDataUrl, isDataUrlWithinLimit } from "../../lib/imageCompress";
-import { getCompanyProfile, updateCompanyProfile, type CompanyProfile } from "../api";
+import type { CompanyProfile } from "../api";
 import { applyTenantFontStep, clampFontSizeStep, FONT_SIZE_OPTIONS } from "../fontSize";
+import { useSettingsWorkspaceStore } from "../stores/settingsWorkspaceStore";
 
 export const COMPANY_PROFILE_UPDATED_EVENT = "bms:company-profile-updated";
 
@@ -22,8 +24,29 @@ export function SettingsCompanyProfilePage() {
   const { showToast } = useToast();
   const { user, refreshMe } = useAuth();
   const fileRef = useRef<HTMLInputElement>(null);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const {
+    loading,
+    saving,
+    lastFetchedAt,
+    error,
+    hydrateSection,
+    startLiveSync,
+    stopLiveSync,
+    saveCompanyProfile
+  } = useSettingsWorkspaceStore(
+    useShallow((s) => ({
+      loading: s.section.companyProfile.loading,
+      saving: s.savingCompanyProfile,
+      lastFetchedAt: s.section.companyProfile.lastFetchedAt,
+      error: s.section.companyProfile.error,
+      hydrateSection: s.hydrateSection,
+      startLiveSync: s.startLiveSync,
+      stopLiveSync: s.stopLiveSync,
+      saveCompanyProfile: s.saveCompanyProfile
+    }))
+  );
+  const companyProfile = useSettingsWorkspaceStore((s) => s.companyProfile);
+  const appliedProfileKey = useRef("");
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
@@ -37,28 +60,28 @@ export function SettingsCompanyProfilePage() {
   const canConfigureBridge = tenantHasSusuAndLoans(user?.subscribedModules);
 
   useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const profile = await getCompanyProfile();
-        if (cancelled) {
-          return;
-        }
-        applyProfile(profile);
-      } catch (error) {
-        if (!cancelled) {
-          showToast(error instanceof Error ? error.message : "Failed to load company profile", "error");
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [showToast]);
+    hydrateSection("companyProfile");
+    startLiveSync("companyProfile");
+    return () => stopLiveSync();
+  }, [hydrateSection, startLiveSync, stopLiveSync]);
+
+  useEffect(() => {
+    if (error) {
+      showToast(error, "error");
+    }
+  }, [error, showToast]);
+
+  useEffect(() => {
+    if (!companyProfile || saving) {
+      return;
+    }
+    const key = JSON.stringify(companyProfile);
+    if (key === appliedProfileKey.current) {
+      return;
+    }
+    applyProfile(companyProfile);
+    appliedProfileKey.current = key;
+  }, [companyProfile, saving]);
 
   useEffect(() => {
     return () => {
@@ -112,9 +135,8 @@ export function SettingsCompanyProfilePage() {
       showToast("Enter the company name", "error");
       return;
     }
-    setSaving(true);
     try {
-      const saved = await updateCompanyProfile({
+      const saved = await saveCompanyProfile({
         name: name.trim(),
         phone: phone.trim() || null,
         email: email.trim() || null,
@@ -131,12 +153,10 @@ export function SettingsCompanyProfilePage() {
       showToast("Company profile saved", "success");
     } catch (error) {
       showToast(error instanceof Error ? error.message : "Failed to save company profile", "error");
-    } finally {
-      setSaving(false);
     }
   }
 
-  if (loading) {
+  if (loading && lastFetchedAt == null) {
     return (
       <article className="card">
         <h2>Company Profile</h2>

@@ -233,50 +233,9 @@ export async function postWithdrawalForApprovedDisclosure(params: {
     });
 
     if (rpcError) {
-      const { error: insertError } = await supabase.from("customer_transactions").insert({
-        id: transactionId,
-        tenant_id: params.tenantId,
-        customer_id: params.customerId,
-        type: "withdrawal",
-        amount: params.amount,
-        transaction_branch_id: params.homeBranchId,
-        home_branch_id: params.homeBranchId,
-        recorded_by_user_id: params.recordedByUserId,
-        field_agent_id: params.fieldAgentId,
-        notes: fullNotes
-      });
-      if (insertError) {
-        throw new Error(
-          `Failed to post withdrawal to customer ledger: ${insertError.message} (RPC: ${rpcError.message})`
-        );
-      }
-      await addLedgerEntry({
-        tenantId: params.tenantId,
-        customerId: params.customerId,
-        transactionId,
-        entryType: "debit",
-        amount: params.amount,
-        transactionBranchId: params.homeBranchId
-      });
-    } else {
-      const { data: ledgerRow, error: ledgerCheckError } = await supabase
-        .from("ledger_entries")
-        .select("id")
-        .eq("transaction_id", transactionId)
-        .maybeSingle();
-      if (ledgerCheckError) {
-        throw new Error(`Failed to verify ledger entry: ${ledgerCheckError.message}`);
-      }
-      if (!ledgerRow) {
-        await addLedgerEntry({
-          tenantId: params.tenantId,
-          customerId: params.customerId,
-          transactionId,
-          entryType: "debit",
-          amount: params.amount,
-          transactionBranchId: params.homeBranchId
-        });
-      }
+      throw new Error(
+        `Failed to post withdrawal to customer ledger: ${rpcError.message}. Apply Supabase migrations (including 084) — non-atomic fallback is disabled.`
+      );
     }
 
     const balanceAfter = await computeCustomerBalance(params.tenantId, params.customerId);
@@ -557,53 +516,12 @@ export async function createTransaction(
       p_notes: transaction.notes ?? null
     });
 
-    // Fallback for environments where RPC migration hasn't been applied yet.
     if (rpcError) {
-      const { error } = await supabase.from("customer_transactions").insert({
-        id: transaction.id,
-        tenant_id: transaction.tenantId,
-        customer_id: transaction.customerId,
-        type: transaction.type,
-        amount: transaction.amount,
-        transaction_branch_id: transaction.transactionBranchId,
-        home_branch_id: transaction.homeBranchId,
-        recorded_by_user_id: transaction.recordedByUserId,
-        field_agent_id: transaction.fieldAgentId,
-        notes: transaction.notes,
-        bank_product_id: bankProductId ?? null
-      });
-      if (error) {
-        throw new Error(`Failed to save transaction: ${error.message}`);
-      }
-      await addLedgerEntry({
-        tenantId: context.tenantId,
-        customerId: transaction.customerId,
-        transactionId: transaction.id,
-        entryType: transaction.type === "withdrawal" ? "debit" : "credit",
-        amount: ledgerAmount,
-        transactionBranchId: transaction.transactionBranchId
-      });
-    } else {
-      await persistBankProductId(transaction.id, bankProductId);
-      const { data: ledgerRow, error: ledgerCheckError } = await supabase
-        .from("ledger_entries")
-        .select("id")
-        .eq("transaction_id", transaction.id)
-        .maybeSingle();
-      if (ledgerCheckError) {
-        throw new Error(`Failed to verify ledger entry: ${ledgerCheckError.message}`);
-      }
-      if (!ledgerRow) {
-        await addLedgerEntry({
-          tenantId: context.tenantId,
-          customerId: transaction.customerId,
-          transactionId: transaction.id,
-          entryType: transaction.type === "withdrawal" ? "debit" : "credit",
-          amount: ledgerAmount,
-          transactionBranchId: transaction.transactionBranchId
-        });
-      }
+      throw new Error(
+        `Failed to save transaction: ${rpcError.message}. Apply Supabase migrations (including 084) — non-atomic fallback is disabled.`
+      );
     }
+    await persistBankProductId(transaction.id, bankProductId);
   } else {
     const transactions = getTenantTransactions(context.tenantId);
     setTenantTransactions(context.tenantId, [...transactions, transaction]);

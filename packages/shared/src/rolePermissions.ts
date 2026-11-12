@@ -42,6 +42,7 @@ export const permissionsByRole: Record<Role, Permission[]> = {
     "loans.applications.approve",
     "loans.disburse",
     "loans.repayments.create",
+    "loans.qualification.manage",
     "treasury.read",
     "treasury.cash.move",
     "treasury.reconcile",
@@ -59,7 +60,8 @@ export const permissionsByRole: Record<Role, Permission[]> = {
     "investments.redeem",
     "investments.forms.manage",
     "investments.reports.read",
-    "workspace.notifications"
+    "workspace.notifications",
+    "workspace.manual.read"
   ],
   coordinator: [
     "customers.create",
@@ -74,7 +76,8 @@ export const permissionsByRole: Record<Role, Permission[]> = {
     "payroll.read",
     "commission_policy.read",
     "treasury.read",
-    "workspace.notifications"
+    "workspace.notifications",
+    "workspace.manual.read"
   ],
   field_agent: [
     "customers.create",
@@ -99,7 +102,8 @@ export const permissionsByRole: Record<Role, Permission[]> = {
     "audit.read",
     "loans.read",
     "treasury.read",
-    "workspace.notifications"
+    "workspace.notifications",
+    "workspace.manual.read"
   ],
   accountant: [
     "roles.read",
@@ -120,7 +124,8 @@ export const permissionsByRole: Record<Role, Permission[]> = {
     "treasury.read",
     "treasury.cash.move",
     "treasury.reconcile",
-    "workspace.notifications"
+    "workspace.notifications",
+    "workspace.manual.read"
   ],
   teller: [
     "customers.read",
@@ -130,6 +135,8 @@ export const permissionsByRole: Record<Role, Permission[]> = {
     "banking.products.read",
     "agency.withdrawals.pay",
     "transactions.read",
+    "transactions.create.deposit",
+    "transactions.create.withdrawal",
     "ledger.read",
     "reports.read",
     "payroll.read",

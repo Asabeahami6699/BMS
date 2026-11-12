@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import type {
   CustomRoleProductScope,
   Permission,
@@ -23,19 +24,13 @@ import {
   validateDutySelection,
   validateSusuNavVisibilityItems
 } from "@bms/shared";
-import type { AppRole, Branch, BuiltinRolePermissionView, SusuNavVisibilityConfigItem, UserRecord } from "./api";
+import type { AppRole, SusuNavVisibilityConfigItem } from "./api";
 import {
   assignRole,
   createRole,
   createTenantJobTitle,
   deleteTenantJobTitle,
   getBuiltinRolePermissions,
-  getRoleAssignments,
-  getRoles,
-  getSusuNavVisibilityConfig,
-  getTenantId,
-  listBranches,
-  listUsers,
   resetBuiltinRolePermissions,
   resetSusuNavVisibilityConfig,
   saveBuiltinRolePermissions,
@@ -43,7 +38,9 @@ import {
   updateTenantJobTitle
 } from "./api";
 import { UserFormModal } from "./UserFormModal";
-import { subscribeToTenantRealtime } from "./realtime";
+import { useBranchesLiveSync } from "./hooks/useBranchesLiveSync";
+import { useBranchesStore } from "./stores/branchesStore";
+import { useRoleManagementStore } from "./stores/roleManagementStore";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useToast } from "../components/Toast";
 import { useConfirmDialog } from "../hooks/useConfirmDialog";
@@ -92,20 +89,38 @@ export function RoleManagementPage({ role }: Props) {
   const [duties, setDuties] = useState<Permission[]>(["customers.read", "transactions.read"]);
   const [assignUserId, setAssignUserId] = useState("");
   const [assignRoleKey, setAssignRoleKey] = useState("");
-  const [users, setUsers] = useState<UserRecord[]>([]);
-  const [branches, setBranches] = useState<Branch[]>([]);
   const [userModalOpen, setUserModalOpen] = useState(false);
-  const [roles, setRoles] = useState<
-    Array<{
-      roleKey: string;
-      displayName: string;
-      roleKind?: "job_title" | "extra_duties";
-      productScope?: CustomRoleProductScope;
-      duties: string[];
-    }>
-  >([]);
-  const [assignments, setAssignments] = useState<Array<{ userId: string; roleKey: string }>>([]);
-  const [builtinViews, setBuiltinViews] = useState<BuiltinRolePermissionView[]>([]);
+  useBranchesLiveSync();
+  const branches = useBranchesStore((s) => s.branches);
+  const {
+    roles,
+    assignments,
+    users,
+    builtinViews,
+    navItems,
+    error: rolesError,
+    hydrate,
+    refresh: refreshRoles,
+    startLiveSync,
+    stopLiveSync,
+    setNavItems,
+    setBuiltinViews
+  } = useRoleManagementStore(
+    useShallow((s) => ({
+      roles: s.roles,
+      assignments: s.assignments,
+      users: s.users,
+      builtinViews: s.builtinViews,
+      navItems: s.navItems,
+      error: s.error,
+      hydrate: s.hydrate,
+      refresh: s.refresh,
+      startLiveSync: s.startLiveSync,
+      stopLiveSync: s.stopLiveSync,
+      setNavItems: s.setNavItems,
+      setBuiltinViews: s.setBuiltinViews
+    }))
+  );
   const [editingBuiltin, setEditingBuiltin] = useState<Role | null>(null);
   const [builtinDraft, setBuiltinDraft] = useState<Permission[]>([]);
   const [builtinSaving, setBuiltinSaving] = useState(false);
@@ -116,7 +131,6 @@ export function RoleManagementPage({ role }: Props) {
   const [editingTenantJobTitle, setEditingTenantJobTitle] = useState<string | null>(null);
   const [tenantJobTitleDraft, setTenantJobTitleDraft] = useState<Permission[]>([]);
   const [tenantJobTitleSaving, setTenantJobTitleSaving] = useState(false);
-  const [navItems, setNavItems] = useState<SusuNavVisibilityConfigItem[]>([]);
   const [navSaving, setNavSaving] = useState(false);
   const [customRoleScope, setCustomRoleScope] = useState<CustomRoleProductScope>("susu_management");
   const [expandedNavPath, setExpandedNavPath] = useState<string | null>(null);
@@ -296,27 +310,12 @@ export function RoleManagementPage({ role }: Props) {
   }
 
   async function loadRoles() {
-    try {
-      const [data, assignmentData, builtin, nav, userRows, branchRows] = await Promise.all([
-        getRoles(),
-        getRoleAssignments(),
-        getBuiltinRolePermissions(),
-        getSusuNavVisibilityConfig(),
-        listUsers().catch(() => []),
-        listBranches().catch(() => [])
-      ]);
-      setRoles(data);
-      setAssignments(assignmentData);
-      setBuiltinViews(builtin);
-      setNavItems(nav);
-      setUsers(userRows);
-      setBranches(branchRows);
-      const extraRoles = data.filter((role) => (role.roleKind ?? "extra_duties") === "extra_duties");
-      if (!assignRoleKey && extraRoles[0]?.roleKey) {
-        setAssignRoleKey(extraRoles[0].roleKey);
-      }
-    } catch (error) {
-      showToast(toUserFacingError(error, "Failed to load roles"), "error");
+    await refreshRoles();
+    const extraRoles = useRoleManagementStore
+      .getState()
+      .roles.filter((role) => (role.roleKind ?? "extra_duties") === "extra_duties");
+    if (!assignRoleKey && extraRoles[0]?.roleKey) {
+      setAssignRoleKey(extraRoles[0].roleKey);
     }
   }
 
@@ -371,7 +370,8 @@ export function RoleManagementPage({ role }: Props) {
     setBuiltinSaving(true);
     try {
       const updated = await resetBuiltinRolePermissions(builtinRole);
-      setBuiltinViews((prev) => prev.map((v) => (v.role === updated.role ? updated : v)));
+      const builtinViews = useRoleManagementStore.getState().builtinViews;
+      setBuiltinViews(builtinViews.map((v) => (v.role === updated.role ? updated : v)));
       if (editingBuiltin === builtinRole) {
         setBuiltinDraft(updated.effectiveDuties);
       }
@@ -472,21 +472,29 @@ export function RoleManagementPage({ role }: Props) {
   }
 
   useEffect(() => {
-    void loadRoles();
-    const unsubscribe = subscribeToTenantRealtime({
-      tenantId: getTenantId(),
-      tables: [
-        "tenant_roles",
-        "user_role_assignments",
-        "tenant_builtin_role_overrides",
-        "tenant_susu_nav_overrides"
-      ],
-      onChange: () => {
-        void loadRoles();
-      }
-    });
-    return () => unsubscribe();
-  }, [role]);
+    hydrate();
+    startLiveSync();
+    const extraRoles = useRoleManagementStore
+      .getState()
+      .roles.filter((item) => (item.roleKind ?? "extra_duties") === "extra_duties");
+    if (!assignRoleKey && extraRoles[0]?.roleKey) {
+      setAssignRoleKey(extraRoles[0].roleKey);
+    }
+    return () => stopLiveSync();
+  }, [hydrate, startLiveSync, stopLiveSync]);
+
+  useEffect(() => {
+    const extraRoles = roles.filter((item) => (item.roleKind ?? "extra_duties") === "extra_duties");
+    if (!assignRoleKey && extraRoles[0]?.roleKey) {
+      setAssignRoleKey(extraRoles[0].roleKey);
+    }
+  }, [roles, assignRoleKey]);
+
+  useEffect(() => {
+    if (rolesError) {
+      showToast(rolesError, "error");
+    }
+  }, [rolesError, showToast]);
 
   function toggleDuty(duty: Permission) {
     setDuties((prev) => (prev.includes(duty) ? prev.filter((item) => item !== duty) : [...prev, duty]));

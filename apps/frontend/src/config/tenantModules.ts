@@ -162,6 +162,11 @@ const SETTINGS_CHILDREN: NavChildDef[] = [
   { to: "settings/approval-workflows", label: "Approval Workflows", roleCheck: (r) => r === "admin" },
   { to: "settings/notifications", label: "Notification Settings", roleCheck: (r) => r === "admin" },
   {
+    to: "settings/loan-qualification",
+    label: "Loan qualification",
+    roleCheck: (r) => r === "admin"
+  },
+  {
     to: "settings/audit-logs",
     label: "Audit Logs",
     roleCheck: (r) => r === "admin" || r === "auditor",
@@ -381,6 +386,13 @@ export function buildTenantNav(
         children: settingsChildren.map((child) => ({ kind: "link" as const, ...child }))
       });
     }
+  }
+
+  if (
+    hasAnyProduct(subscribedModules) &&
+    hasAnyPermission(permissions, ["workspace.manual.read"])
+  ) {
+    items.push({ kind: "link", to: "help/manual", label: "Site manual" });
   }
 
   return items;

@@ -3,33 +3,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type {
   AppRole,
-  Branch,
   CashVarianceCase,
   CashVarianceSettlementMethod,
-  Customer,
   PendingCollectionBatch
-} from "./api";
-import {
-  getAuthMe,
-  listBranches,
-  listCashVariances,
-  listCustomers,
-  listFieldAgents,
-  listPendingCollectionBatches,
-  postAllCollectionBatches,
-  postCollectionBatch,
-  settleCashVariance
 } from "./api";
 import { useToast } from "../components/Toast";
 import { toUserFacingError } from "../lib/networkError";
 import { usePageLoading } from "./hooks/usePageLoading";
 import { formatBranchLabel } from "./branchDisplay";
+import { useCalloverBatchesStore } from "./stores/calloverBatchesStore";
 
 type Props = { role: AppRole };
-
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
-}
 
 function formatMoney(amount: number): string {
   return `GHS ${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -100,21 +84,32 @@ function cashFlag(batchTotal: number, cashText: string): {
 
 export function CalloverBatchesPage({ role }: Props) {
   const { showToast } = useToast();
-  const [businessDate, setBusinessDate] = useState(todayIso());
-  const [branchId, setBranchId] = useState("");
-  const [branchLocked, setBranchLocked] = useState(false);
-  const [fieldAgentId, setFieldAgentId] = useState("");
-  const [batches, setBatches] = useState<PendingCollectionBatch[]>([]);
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [branches, setBranches] = useState<Branch[]>([]);
-  const [agents, setAgents] = useState<
-    { userId: string; fullName: string; email: string; branchId?: string }[]
-  >([]);
-  const [loading, setLoading] = useState(true);
-  const [busyId, setBusyId] = useState<string | null>(null);
+  const businessDate = useCalloverBatchesStore((s) => s.businessDate);
+  const branchId = useCalloverBatchesStore((s) => s.branchId);
+  const branchLocked = useCalloverBatchesStore((s) => s.branchLocked);
+  const fieldAgentId = useCalloverBatchesStore((s) => s.fieldAgentId);
+  const batches = useCalloverBatchesStore((s) => s.batches);
+  const customers = useCalloverBatchesStore((s) => s.customers);
+  const branches = useCalloverBatchesStore((s) => s.branches);
+  const agents = useCalloverBatchesStore((s) => s.agents);
+  const variances = useCalloverBatchesStore((s) => s.variances);
+  const loading = useCalloverBatchesStore((s) => s.loading);
+  const busyId = useCalloverBatchesStore((s) => s.busyId);
+  const error = useCalloverBatchesStore((s) => s.error);
+  const hydrate = useCalloverBatchesStore((s) => s.hydrate);
+  const refresh = useCalloverBatchesStore((s) => s.refresh);
+  const startLiveSync = useCalloverBatchesStore((s) => s.startLiveSync);
+  const stopLiveSync = useCalloverBatchesStore((s) => s.stopLiveSync);
+  const initScope = useCalloverBatchesStore((s) => s.initScope);
+  const setBusinessDate = useCalloverBatchesStore((s) => s.setBusinessDate);
+  const setBranchId = useCalloverBatchesStore((s) => s.setBranchId);
+  const setFieldAgentId = useCalloverBatchesStore((s) => s.setFieldAgentId);
+  const postBatch = useCalloverBatchesStore((s) => s.postBatch);
+  const postAll = useCalloverBatchesStore((s) => s.postAll);
+  const settleVariance = useCalloverBatchesStore((s) => s.settleVariance);
+
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [cashByBatchId, setCashByBatchId] = useState<Record<string, string>>({});
-  const [variances, setVariances] = useState<CashVarianceCase[]>([]);
   const [settleId, setSettleId] = useState<string | null>(null);
   const [settleAmount, setSettleAmount] = useState("");
   const [settleMethod, setSettleMethod] = useState<CashVarianceSettlementMethod>("cash_repayment");
@@ -140,15 +135,28 @@ export function CalloverBatchesPage({ role }: Props) {
   }, [agents, branchId]);
 
   useEffect(() => {
-    void getAuthMe()
-      .then((me) => {
-        if (me.scopeType === "branch" && me.branchId) {
-          setBranchId(me.branchId);
-          setBranchLocked(true);
-        }
-      })
-      .catch(() => undefined);
-  }, []);
+    void (async () => {
+      await initScope();
+      hydrate({ force: true });
+      startLiveSync();
+    })();
+    return () => stopLiveSync();
+  }, [hydrate, initScope, startLiveSync, stopLiveSync]);
+
+  useEffect(() => {
+    if (error) {
+      showToast(error, "error");
+    }
+  }, [error, showToast]);
+
+  useEffect(() => {
+    setExpandedId((prev) => {
+      if (prev && batches.some((b) => b.id === prev)) {
+        return prev;
+      }
+      return batches[0]?.id ?? null;
+    });
+  }, [batches]);
 
   const customerById = useMemo(() => new Map(customers.map((c) => [c.id, c])), [customers]);
 
@@ -166,49 +174,6 @@ export function CalloverBatchesPage({ role }: Props) {
     [customerById]
   );
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [batchRows, customerRows, agentRows, branchRows, varianceRows] = await Promise.all([
-        listPendingCollectionBatches({
-          businessDate,
-          fieldAgentId: fieldAgentId || undefined,
-          branchId: branchId || undefined
-        }),
-        listCustomers(),
-        listFieldAgents(),
-        listBranches(),
-        listCashVariances({
-          status: "open",
-          fieldAgentId: fieldAgentId || undefined,
-          branchId: branchId || undefined
-        })
-      ]);
-      setBatches(batchRows);
-      setCustomers(customerRows);
-      setBranches(branchRows.filter((b) => b.status !== "inactive"));
-      setAgents(
-        agentRows.map((a) => ({
-          userId: a.userId,
-          fullName: a.fullName ?? a.email,
-          email: a.email,
-          branchId: a.branchId
-        }))
-      );
-      setVariances(varianceRows);
-      setExpandedId((prev) => {
-        if (prev && batchRows.some((b) => b.id === prev)) {
-          return prev;
-        }
-        return batchRows[0]?.id ?? null;
-      });
-    } catch (error) {
-      showToast(toUserFacingError(error, "Failed to load callover batches"), "error");
-    } finally {
-      setLoading(false);
-    }
-  }, [businessDate, branchId, fieldAgentId, showToast]);
-
   useEffect(() => {
     if (!fieldAgentId) {
       return;
@@ -217,11 +182,7 @@ export function CalloverBatchesPage({ role }: Props) {
     if (!stillVisible) {
       setFieldAgentId("");
     }
-  }, [fieldAgentId, visibleAgents]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  }, [fieldAgentId, setFieldAgentId, visibleAgents]);
 
   const totals = useMemo(
     () => ({
@@ -249,9 +210,8 @@ export function CalloverBatchesPage({ role }: Props) {
       return;
     }
     postingRef.current = true;
-    setBusyId(batch.id);
     try {
-      const posted = await postCollectionBatch(batch.id, { cashReceivedAmount: cash.amount });
+      const posted = await postBatch(batch.id, cash.amount);
       const flag =
         posted.cashVarianceStatus === "balanced"
           ? "Balanced"
@@ -261,12 +221,10 @@ export function CalloverBatchesPage({ role }: Props) {
               ? `Overage ${formatMoney(posted.cashVariance ?? 0)}`
               : "Posted";
       showToast(`Batch posted · ${flag}`, "success");
-      await load();
     } catch (error) {
       showToast(toUserFacingError(error, "Failed to post batch"), "error");
     } finally {
       postingRef.current = false;
-      setBusyId(null);
     }
   }
 
@@ -286,9 +244,8 @@ export function CalloverBatchesPage({ role }: Props) {
       showToast("Enter a valid settlement amount", "error");
       return;
     }
-    setBusyId(`settle:${settleId}`);
     try {
-      const updated = await settleCashVariance(settleId, {
+      const updated = await settleVariance(settleId, {
         amount,
         method: settleMethod,
         notes: settleNotes.trim() || undefined
@@ -300,11 +257,8 @@ export function CalloverBatchesPage({ role }: Props) {
         "success"
       );
       setSettleId(null);
-      await load();
     } catch (error) {
       showToast(toUserFacingError(error, "Failed to settle variance"), "error");
-    } finally {
-      setBusyId(null);
     }
   }
 
@@ -325,7 +279,6 @@ export function CalloverBatchesPage({ role }: Props) {
       return;
     }
     postingRef.current = true;
-    setBusyId("all");
     try {
       const cashMap: Record<string, number> = {};
       for (const batch of batches) {
@@ -335,19 +288,12 @@ export function CalloverBatchesPage({ role }: Props) {
         }
         cashMap[batch.id] = cash.amount;
       }
-      const result = await postAllCollectionBatches({
-        businessDate,
-        fieldAgentId: fieldAgentId || undefined,
-        branchId: branchId || undefined,
-        cashByBatchId: cashMap
-      });
+      const result = await postAll(cashMap);
       showToast(`Posted ${result.posted} batch${result.posted === 1 ? "" : "es"}`, "success");
-      await load();
     } catch (error) {
       showToast(toUserFacingError(error, "Failed to post batches"), "error");
     } finally {
       postingRef.current = false;
-      setBusyId(null);
     }
   }
 
@@ -378,7 +324,7 @@ export function CalloverBatchesPage({ role }: Props) {
           <button
             type="button"
             className="button secondary"
-            onClick={() => void load()}
+            onClick={() => void refresh()}
             disabled={loading || busyId !== null}
           >
             {loading ? "Refreshing…" : "Refresh"}

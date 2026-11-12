@@ -1,33 +1,17 @@
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo } from "react";
 import { Link } from "react-router-dom";
-import type { AppRole, Branch, BranchFloatSession, UserRecord } from "./api";
-import {
-  allocateBranchFloat,
-  getTenantId,
-  isFloatTopUpRequest,
-  listBranchFloatSessions,
-  listBranches,
-  listPendingBranchFloats,
-  listUsers,
-  pendingFloatAmount,
-  pushBranchFloat,
-  settleBranchFloat
-} from "./api";
+import type { AppRole, BranchFloatSession } from "./api";
+import { isFloatTopUpRequest, pendingFloatAmount } from "./api";
+import { Modal } from "../components/Modal";
 import { useToast } from "../components/Toast";
-import { toUserFacingError } from "../lib/networkError";
-import { subscribeToTenantRealtime } from "./realtime";
 import { usePageLoading } from "./hooks/usePageLoading";
 import { formatBranchLabel } from "./branchDisplay";
-import { useBranchCounterStore } from "./stores/branchCounterStore";
+import { useTillFloatAdminStore } from "./stores/tillFloatAdminStore";
 
 type Props = { role: AppRole };
 
 function formatMoney(n: number): string {
   return `GHS ${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
 }
 
 const STATUS_LABEL: Record<BranchFloatSession["status"], string> = {
@@ -41,18 +25,51 @@ const STATUS_LABEL: Record<BranchFloatSession["status"], string> = {
 
 export function BranchFloatAdminPage({ role }: Props) {
   const { showToast } = useToast();
-  const [pending, setPending] = useState<BranchFloatSession[]>([]);
-  const [todaySessions, setTodaySessions] = useState<BranchFloatSession[]>([]);
-  const [branches, setBranches] = useState<Branch[]>([]);
-  const [users, setUsers] = useState<UserRecord[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [allocateAmount, setAllocateAmount] = useState<Record<string, string>>({});
-  const [pushBranchId, setPushBranchId] = useState("");
-  const [pushUserId, setPushUserId] = useState("");
-  const [pushAmount, setPushAmount] = useState("500");
+  const pending = useTillFloatAdminStore((s) => s.pending);
+  const todaySessions = useTillFloatAdminStore((s) => s.todaySessions);
+  const branches = useTillFloatAdminStore((s) => s.branches);
+  const users = useTillFloatAdminStore((s) => s.users);
+  const loading = useTillFloatAdminStore((s) => s.loading);
+  const busy = useTillFloatAdminStore((s) => s.busy);
+  const error = useTillFloatAdminStore((s) => s.error);
+  const allocateAmount = useTillFloatAdminStore((s) => s.allocateAmount);
+  const allocateInitialCash = useTillFloatAdminStore((s) => s.allocateInitialCash);
+  const pushOpen = useTillFloatAdminStore((s) => s.pushOpen);
+  const pushBranchId = useTillFloatAdminStore((s) => s.pushBranchId);
+  const pushUserId = useTillFloatAdminStore((s) => s.pushUserId);
+  const pushAmount = useTillFloatAdminStore((s) => s.pushAmount);
+  const pushInitialCash = useTillFloatAdminStore((s) => s.pushInitialCash);
+  const hydrate = useTillFloatAdminStore((s) => s.hydrate);
+  const refresh = useTillFloatAdminStore((s) => s.refresh);
+  const startLiveSync = useTillFloatAdminStore((s) => s.startLiveSync);
+  const stopLiveSync = useTillFloatAdminStore((s) => s.stopLiveSync);
+  const setAllocateAmount = useTillFloatAdminStore((s) => s.setAllocateAmount);
+  const setAllocateInitialCash = useTillFloatAdminStore((s) => s.setAllocateInitialCash);
+  const openPushModal = useTillFloatAdminStore((s) => s.openPushModal);
+  const closePushModal = useTillFloatAdminStore((s) => s.closePushModal);
+  const setPushBranchId = useTillFloatAdminStore((s) => s.setPushBranchId);
+  const setPushUserId = useTillFloatAdminStore((s) => s.setPushUserId);
+  const setPushAmount = useTillFloatAdminStore((s) => s.setPushAmount);
+  const setPushInitialCash = useTillFloatAdminStore((s) => s.setPushInitialCash);
+  const allocate = useTillFloatAdminStore((s) => s.allocate);
+  const push = useTillFloatAdminStore((s) => s.push);
+  const settle = useTillFloatAdminStore((s) => s.settle);
+  const approveExtraCash = useTillFloatAdminStore((s) => s.approveExtraCash);
+  const approveExpense = useTillFloatAdminStore((s) => s.approveExpense);
 
   usePageLoading(loading || busy, "branch-float");
+
+  useEffect(() => {
+    hydrate({ force: true });
+    startLiveSync();
+    return () => stopLiveSync();
+  }, [hydrate, startLiveSync, stopLiveSync]);
+
+  useEffect(() => {
+    if (error) {
+      showToast(error, "error");
+    }
+  }, [error, showToast]);
 
   const counterStaff = useMemo(
     () =>
@@ -78,112 +95,54 @@ export function BranchFloatAdminPage({ role }: Props) {
     [branches]
   );
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [pendingRows, sessions, branchRows, userRows] = await Promise.all([
-        listPendingBranchFloats(),
-        listBranchFloatSessions({ date: todayIso() }),
-        listBranches(),
-        listUsers()
-      ]);
-      setPending(pendingRows);
-      setTodaySessions(sessions);
-      const activeBranches = branchRows.filter((b) => b.status !== "inactive");
-      setBranches(activeBranches);
-      setUsers(userRows);
-      setPushBranchId((prev) => prev || activeBranches[0]?.id || "");
-    } catch (error) {
-      showToast(toUserFacingError(error, "Failed to load till float data"), "error");
-    } finally {
-      setLoading(false);
-    }
-  }, [showToast]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const loadSilentRef = useRef(load);
-  loadSilentRef.current = load;
-
-  useEffect(() => {
-    const tenantId = getTenantId();
-    if (!tenantId) {
-      return;
-    }
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const unsubscribe = subscribeToTenantRealtime({
-      tenantId,
-      tables: ["branch_float_sessions", "branch_float_movements", "agent_notifications"],
-      onChange: () => {
-        if (timer) {
-          clearTimeout(timer);
-        }
-        timer = setTimeout(() => {
-          void loadSilentRef.current();
-        }, 400);
-      }
-    });
-    return () => {
-      if (timer) {
-        clearTimeout(timer);
-      }
-      unsubscribe();
-    };
-  }, []);
-
   async function handleAllocate(session: BranchFloatSession) {
-    const amount = Number(allocateAmount[session.id] ?? pendingFloatAmount(session));
-    setBusy(true);
     try {
-      await allocateBranchFloat(session.id, amount);
+      await allocate(session);
       showToast(
-        isFloatTopUpRequest(session) ? "Top-up released onto the open till" : "Float released — teller till is open",
+        isFloatTopUpRequest(session)
+          ? "Extra float released — day capital updated"
+          : "Till opened with float + physical cash",
         "success"
       );
-      await load();
-      void useBranchCounterStore.getState().refreshSilent();
-    } catch (error) {
-      showToast(toUserFacingError(error, "Could not release float"), "error");
-    } finally {
-      setBusy(false);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Could not release float", "error");
     }
   }
 
   async function handlePush(e: FormEvent) {
     e.preventDefault();
-    if (!pushBranchId || !pushUserId) {
-      showToast("Select branch and teller", "error");
-      return;
-    }
-    setBusy(true);
     try {
-      await pushBranchFloat({
-        branchId: pushBranchId,
-        cashierUserId: pushUserId,
-        openingFloat: Number(pushAmount)
-      });
-      showToast("Float pushed — till opened for teller", "success");
-      void useBranchCounterStore.getState().refreshSilent();
-      await load();
-    } catch (error) {
-      showToast(toUserFacingError(error, "Failed to push float"), "error");
-    } finally {
-      setBusy(false);
+      await push();
+      showToast("Till opened with float + physical cash for teller", "success");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to push float", "error");
     }
   }
 
   async function handleSettle(session: BranchFloatSession) {
-    setBusy(true);
     try {
-      await settleBranchFloat(session.id);
+      await settle(session);
       showToast("Session settled", "success");
-      await load();
-    } catch (error) {
-      showToast(toUserFacingError(error, "Failed to settle"), "error");
-    } finally {
-      setBusy(false);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to settle", "error");
+    }
+  }
+
+  async function handleApproveExtraCash(session: BranchFloatSession) {
+    try {
+      await approveExtraCash(session);
+      showToast("Extra cash approved", "success");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Could not approve extra cash", "error");
+    }
+  }
+
+  async function handleApproveExpense(session: BranchFloatSession) {
+    try {
+      await approveExpense(session);
+      showToast("Expense approved", "success");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Could not approve expense", "error");
     }
   }
 
@@ -196,11 +155,17 @@ export function BranchFloatAdminPage({ role }: Props) {
           <p className="overview-hero__eyebrow">Susu management</p>
           <h1 className="overview-hero__title">Till float</h1>
           <p className="overview-hero__sub muted">
-            Approve teller requests or push opening cash for branch counter staff. Tellers work from{" "}
+            Open teller tills with separate float capacity and physical cash (cash may be GHS 0). Day
+            capital = float + initial cash + extra cash. Tellers work from{" "}
             <Link to="/app/susu/collections">Branch counter</Link>.
           </p>
         </div>
-        <button type="button" className="button secondary" disabled={loading || busy} onClick={() => void load()}>
+        <button
+          type="button"
+          className="button secondary"
+          disabled={loading || busy}
+          onClick={() => void refresh()}
+        >
           {loading ? "Loading…" : "Refresh"}
         </button>
       </header>
@@ -210,15 +175,63 @@ export function BranchFloatAdminPage({ role }: Props) {
       ) : (
         <>
           <section className="overview-panel branch-float-admin__push">
-            <h2 className="overview-panel__title">Push float (no request needed)</h2>
-            <p className="overview-panel__lead muted">
-              Open a teller&apos;s till for today without waiting for a request — typical start-of-day
-              workflow.
-            </p>
-            <form className="branch-float-admin__push-form" onSubmit={(e) => void handlePush(e)}>
+            <div className="branch-float-admin__push-header">
+              <div>
+                <h2 className="overview-panel__title">Push float + cash</h2>
+                <p className="overview-panel__lead muted">
+                  Open a teller&apos;s till for today without a request. Float is deposit capacity;
+                  initial cash is physical notes (use 0 if none yet).
+                </p>
+              </div>
+              <button
+                type="button"
+                className="button"
+                disabled={busy || branches.length === 0}
+                onClick={openPushModal}
+              >
+                Push &amp; open till
+              </button>
+            </div>
+          </section>
+
+          <Modal
+            open={pushOpen}
+            onClose={() => !busy && closePushModal()}
+            title="Push float + cash"
+            subtitle="Open a teller's till for today — no request needed"
+            panelClassName="modal-panel--till-movement"
+            footer={
+              <>
+                <button
+                  type="button"
+                  className="button secondary"
+                  disabled={busy}
+                  onClick={closePushModal}
+                >
+                  Cancel
+                </button>
+                <button type="submit" form="push-float-form" className="button" disabled={busy}>
+                  {busy ? "Opening…" : "Push & open till"}
+                </button>
+              </>
+            }
+          >
+            <form
+              id="push-float-form"
+              className="till-movement-form"
+              onSubmit={(e) => void handlePush(e)}
+            >
+              <p className="muted till-movement-form__hint">
+                Float is deposit capacity. Initial cash is physical notes handed over — use 0 if none
+                yet. Day capital = float + initial cash.
+              </p>
               <label className="field">
                 <span>Branch</span>
-                <select value={pushBranchId} onChange={(e) => setPushBranchId(e.target.value)} required>
+                <select
+                  value={pushBranchId}
+                  onChange={(e) => setPushBranchId(e.target.value)}
+                  required
+                >
                   <option value="">Select branch</option>
                   {branches.map((b) => (
                     <option key={b.id} value={b.id}>
@@ -229,7 +242,11 @@ export function BranchFloatAdminPage({ role }: Props) {
               </label>
               <label className="field">
                 <span>Teller / coordinator</span>
-                <select value={pushUserId} onChange={(e) => setPushUserId(e.target.value)} required>
+                <select
+                  value={pushUserId}
+                  onChange={(e) => setPushUserId(e.target.value)}
+                  required
+                >
                   <option value="">Select staff</option>
                   {counterStaff.map((u) => (
                     <option key={u.userId} value={u.userId}>
@@ -242,18 +259,31 @@ export function BranchFloatAdminPage({ role }: Props) {
                 <span>Opening float (GHS)</span>
                 <input
                   type="number"
+                  className="input-no-spin"
                   min={0}
                   step="0.01"
                   value={pushAmount}
                   onChange={(e) => setPushAmount(e.target.value)}
+                  placeholder="0.00"
+                  required
+                  autoFocus
+                />
+              </label>
+              <label className="field">
+                <span>Initial physical cash (GHS)</span>
+                <input
+                  type="number"
+                  className="input-no-spin"
+                  min={0}
+                  step="0.01"
+                  value={pushInitialCash}
+                  onChange={(e) => setPushInitialCash(e.target.value)}
+                  placeholder="0.00"
                   required
                 />
               </label>
-              <button type="submit" className="button" disabled={busy}>
-                Push &amp; open till
-              </button>
             </form>
-          </section>
+          </Modal>
 
           <section className="overview-panel">
             <h2 className="overview-panel__title">
@@ -274,30 +304,69 @@ export function BranchFloatAdminPage({ role }: Props) {
                       <strong>{userLabel(s.cashierUserId)}</strong>
                       <p className="muted">
                         {branchLabel(s.branchId)} · {s.businessDate} ·{" "}
-                        {isFloatTopUpRequest(s) ? "top-up" : "requested"} {formatMoney(pendingFloatAmount(s))}
+                        {isFloatTopUpRequest(s) ? "top-up" : "requested"}{" "}
+                        {formatMoney(pendingFloatAmount(s))}
                       </p>
-                      {isFloatTopUpRequest(s) && s.topUpNote ? <p className="muted">{s.topUpNote}</p> : null}
-                      {!isFloatTopUpRequest(s) && s.requestedNote ? <p className="muted">{s.requestedNote}</p> : null}
+                      {isFloatTopUpRequest(s) && s.topUpNote ? (
+                        <p className="muted">{s.topUpNote}</p>
+                      ) : null}
+                      {!isFloatTopUpRequest(s) && s.requestedNote ? (
+                        <p className="muted">{s.requestedNote}</p>
+                      ) : null}
                     </div>
                     <div className="branch-float__pending-actions">
                       <input
                         type="number"
                         min={0}
                         step="0.01"
-                        className="branch-float__allocate-input"
+                        className="input-no-spin branch-float__allocate-input"
+                        title="Float amount"
+                        placeholder="Float"
                         value={allocateAmount[s.id] ?? String(pendingFloatAmount(s))}
-                        onChange={(e) =>
-                          setAllocateAmount((prev) => ({ ...prev, [s.id]: e.target.value }))
-                        }
+                        onChange={(e) => setAllocateAmount(s.id, e.target.value)}
                       />
-                      <button
-                        type="button"
-                        className="button"
-                        disabled={busy}
-                        onClick={() => void handleAllocate(s)}
-                      >
-                        {isFloatTopUpRequest(s) ? "Release top-up" : "Approve & release"}
-                      </button>
+                      {!isFloatTopUpRequest(s) ? (
+                        <input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          className="input-no-spin branch-float__allocate-input"
+                          title="Initial physical cash"
+                          placeholder="Initial cash"
+                          value={allocateInitialCash[s.id] ?? String(s.initialCash ?? 0)}
+                          onChange={(e) => setAllocateInitialCash(s.id, e.target.value)}
+                        />
+                      ) : null}
+                      {s.status === "requested" || isFloatTopUpRequest(s) ? (
+                        <button
+                          type="button"
+                          className="button"
+                          disabled={busy}
+                          onClick={() => void handleAllocate(s)}
+                        >
+                          {isFloatTopUpRequest(s) ? "Approve float" : "Approve & open"}
+                        </button>
+                      ) : null}
+                      {(s.extraCashRequested ?? 0) > 0 ? (
+                        <button
+                          type="button"
+                          className="button"
+                          disabled={busy}
+                          onClick={() => void handleApproveExtraCash(s)}
+                        >
+                          Approve cash {formatMoney(s.extraCashRequested ?? 0)}
+                        </button>
+                      ) : null}
+                      {(s.expenseRequested ?? 0) > 0 ? (
+                        <button
+                          type="button"
+                          className="button secondary"
+                          disabled={busy}
+                          onClick={() => void handleApproveExpense(s)}
+                        >
+                          Approve expense {formatMoney(s.expenseRequested ?? 0)}
+                        </button>
+                      ) : null}
                     </div>
                   </li>
                 ))}
@@ -345,7 +414,8 @@ export function BranchFloatAdminPage({ role }: Props) {
                       <th>Staff</th>
                       <th>Branch</th>
                       <th>Status</th>
-                      <th>Opening</th>
+                      <th>Float</th>
+                      <th>Cash / capital</th>
                       <th>Expected</th>
                       <th>Variance</th>
                     </tr>
@@ -358,13 +428,18 @@ export function BranchFloatAdminPage({ role }: Props) {
                         <td>{STATUS_LABEL[s.status]}</td>
                         <td>{formatMoney(s.openingFloat)}</td>
                         <td>
+                          {formatMoney((s.initialCash ?? 0) + (s.extraCash ?? 0))}
+                          <span className="muted">
+                            {" "}
+                            / {formatMoney(s.openingFloat + (s.initialCash ?? 0) + (s.extraCash ?? 0))}
+                          </span>
+                        </td>
+                        <td>
                           {s.status === "open" || s.status === "closed" || s.status === "settled"
                             ? formatMoney(s.expectedClosing ?? 0)
                             : "—"}
                         </td>
-                        <td>
-                          {s.variance != null ? formatMoney(s.variance) : "—"}
-                        </td>
+                        <td>{s.variance != null ? formatMoney(s.variance) : "—"}</td>
                       </tr>
                     ))}
                   </tbody>

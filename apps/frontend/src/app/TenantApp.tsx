@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { useShallow } from "zustand/react/shallow";
-import { hasAnyPermission } from "@bms/shared";
+import { hasAnyPermission, tenantHasSusuAndLoans } from "@bms/shared";
+import { prefetchLoanQualificationSetup } from "./stores/loanQualificationStore";
+import { prefetchSiteManual } from "./stores/siteManualStore";
 import { useAuth } from "../auth/AuthContext";
 import { buildTenantNav } from "../config/tenantModules";
 import { getCompanyProfile, type AppRole, type AuthMe, type CompanyProfile } from "./api";
@@ -21,8 +23,10 @@ import { SettingsCompanyProfilePage, COMPANY_PROFILE_UPDATED_EVENT } from "./set
 import { SettingsFormSetupPage } from "./settings/SettingsFormSetupPage";
 import { applyTenantFontStep } from "./fontSize";
 import { SettingsNotificationsPage } from "./settings/SettingsNotificationsPage";
+import { SettingsLoanQualificationPage } from "./settings/SettingsLoanQualificationPage";
 import { SettingsSubscriptionPage } from "./settings/SettingsSubscriptionPage";
 import { SettingsHubPage } from "./SettingsHubPage";
+import { SiteManualPage } from "./SiteManualPage";
 import { FieldAgentsPage } from "./FieldAgentsPage";
 import { CoordinatorsPage } from "./CoordinatorsPage";
 import { RoutesPage } from "./RoutesPage";
@@ -126,6 +130,21 @@ export function TenantApp() {
   useEffect(() => {
     void refreshMe();
   }, [refreshMe]);
+
+  useEffect(() => {
+    if (!user?.tenantId || role === "field_agent") {
+      return;
+    }
+    if (hasAnyPermission(user.permissions, ["workspace.manual.read"])) {
+      prefetchSiteManual();
+    }
+    if (
+      tenantHasSusuAndLoans(user.subscribedModules) &&
+      hasAnyPermission(user.permissions, ["loans.qualification.manage"])
+    ) {
+      prefetchLoanQualificationSetup();
+    }
+  }, [user?.tenantId, user?.subscribedModules, user?.permissions, role]);
 
   const showBranchSelector = Boolean(user?.scopeType === "head_office");
   useBranchContextSync(showBranchSelector);
@@ -865,7 +884,25 @@ export function TenantApp() {
             </TenantSettingsRoute>
           }
         />
+        <Route
+          path="/settings/loan-qualification"
+          element={
+            <TenantSettingsRoute route="settings/loan-qualification" role={role} permissions={permissions}>
+              <SettingsLoanQualificationPage />
+            </TenantSettingsRoute>
+          }
+        />
         <Route path="/settings/audit-logs" element={<TenantSettingsRoute route="settings/audit-logs" role={role} permissions={permissions}><AuditLogsPage /></TenantSettingsRoute>} />
+        <Route
+          path="/help/manual"
+          element={
+            hasAnyPermission(permissions, ["workspace.manual.read"]) ? (
+              <SiteManualPage />
+            ) : (
+              <Navigate to="dashboard" replace />
+            )
+          }
+        />
 
         {/* Legacy redirects */}
         <Route path="/core-banking" element={<Navigate to="banking" replace />} />

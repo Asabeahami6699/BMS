@@ -1,15 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { hasTenantAddon, type TenantAddon } from "@bms/shared";
-import {
-  getMessageLog,
-  getSmsPlatformStatus,
-  getTenantSmsSettings,
-  sendTenantTestSms,
-  updateTenantSmsSettings,
-  type MessageLogItem,
-  type TenantSmsSettings
-} from "../api";
+import { sendTenantTestSms, type MessageLogItem, type TenantSmsSettings } from "../api";
 import { useToast } from "../../components/Toast";
+import { useSettingsWorkspaceStore } from "../stores/settingsWorkspaceStore";
 
 type Props = {
   subscribedAddons: TenantAddon[] | undefined;
@@ -67,87 +61,85 @@ export function SettingsNotificationsPage({ subscribedAddons }: Props) {
   const hasSms = hasTenantAddon(subscribedAddons, "sms_notifications");
   const hasEmail = hasTenantAddon(subscribedAddons, "email_notifications");
   const { showToast } = useToast();
-
-  const [loading, setLoading] = useState(hasSms);
-  const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [smsReady, setSmsReady] = useState<boolean | null>(null);
-  const [settings, setSettings] = useState<TenantSmsSettings | null>(null);
   const [testPhone, setTestPhone] = useState("");
-  const [logLoading, setLogLoading] = useState(hasSms || hasEmail);
-  const [logItems, setLogItems] = useState<MessageLogItem[]>([]);
-  const [logReady, setLogReady] = useState(true);
 
-  const loadLog = useCallback(async () => {
-    if (!hasSms && !hasEmail) {
-      setLogLoading(false);
-      return;
-    }
-    setLogLoading(true);
-    try {
-      const log = await getMessageLog();
-      setLogItems(log.items);
-      setLogReady(log.storageReady);
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : "Failed to load message log", "error");
-    } finally {
-      setLogLoading(false);
-    }
-  }, [hasEmail, hasSms, showToast]);
-
-  useEffect(() => {
-    if (!hasSms) {
-      return;
-    }
-    let cancelled = false;
-    void (async () => {
-      try {
-        const [platform, smsSettings] = await Promise.all([
-          getSmsPlatformStatus(),
-          getTenantSmsSettings()
-        ]);
-        if (!cancelled) {
-          setSmsReady(platform.configured);
-          setSettings(smsSettings);
-        }
-      } catch (error) {
-        if (!cancelled) {
-          showToast(error instanceof Error ? error.message : "Failed to load SMS settings", "error");
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [hasSms, showToast]);
+  const {
+    loading,
+    saving,
+    lastFetchedAt,
+    error,
+    smsReady,
+    settings,
+    logLoading,
+    logItems,
+    logReady,
+    hydrateSection,
+    startLiveSync,
+    stopLiveSync,
+    setNotificationsChannels,
+    setSmsSettings,
+    saveSmsSettings,
+    refreshMessageLog
+  } = useSettingsWorkspaceStore(
+    useShallow((s) => ({
+      loading: s.section.notifications.loading,
+      saving: s.savingNotifications,
+      lastFetchedAt: s.section.notifications.lastFetchedAt,
+      error: s.section.notifications.error,
+      smsReady: s.smsReady,
+      settings: s.smsSettings,
+      logLoading: s.messageLogLoading,
+      logItems: s.messageLogItems,
+      logReady: s.messageLogReady,
+      hydrateSection: s.hydrateSection,
+      startLiveSync: s.startLiveSync,
+      stopLiveSync: s.stopLiveSync,
+      setNotificationsChannels: s.setNotificationsChannels,
+      setSmsSettings: s.setSmsSettings,
+      saveSmsSettings: s.saveSmsSettings,
+      refreshMessageLog: s.refreshMessageLog
+    }))
+  );
 
   useEffect(() => {
-    void loadLog();
-  }, [loadLog]);
+    setNotificationsChannels({ hasSms, hasEmail });
+    if (hasSms || hasEmail) {
+      hydrateSection("notifications");
+      startLiveSync("notifications");
+    }
+    return () => stopLiveSync();
+  }, [hasEmail, hasSms, hydrateSection, setNotificationsChannels, startLiveSync, stopLiveSync]);
+
+  useEffect(() => {
+    if (error) {
+      showToast(error, "error");
+    }
+  }, [error, showToast]);
+
+  function updateSettings(patch: Partial<TenantSmsSettings>) {
+    if (!settings) {
+      return;
+    }
+    setSmsSettings({ ...settings, ...patch });
+  }
 
   async function handleSave() {
     if (!settings) {
       return;
     }
-    setSaving(true);
     try {
-      const updated = await updateTenantSmsSettings({
+      const updated = await saveSmsSettings({
         enabled: settings.enabled,
         notifyDeposit: settings.notifyDeposit,
         notifyWithdrawal: settings.notifyWithdrawal,
         notifyDailySusu: settings.notifyDailySusu,
-        senderId: settings.senderId?.trim() || null
+        senderId: settings.senderId?.trim() || undefined
       });
-      setSettings(updated);
+      setSmsSettings(updated);
       showToast("SMS settings saved", "success");
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : "Failed to save SMS settings", "error");
-    } finally {
-      setSaving(false);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to save SMS settings", "error");
     }
   }
 
@@ -160,13 +152,15 @@ export function SettingsNotificationsPage({ subscribedAddons }: Props) {
     try {
       const result = await sendTenantTestSms({ phone: testPhone.trim() });
       showToast(`Test SMS sent to ${result.phone}`, "success");
-      await loadLog();
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : "Test SMS failed", "error");
+      await refreshMessageLog();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Test SMS failed", "error");
     } finally {
       setTesting(false);
     }
   }
+
+  const smsLoading = hasSms && loading && lastFetchedAt == null;
 
   return (
     <article className="card">
@@ -182,19 +176,19 @@ export function SettingsNotificationsPage({ subscribedAddons }: Props) {
 
           {!hasSms ? (
             <p>Contact platform support to add SMS notifications to your subscription.</p>
-          ) : loading ? (
+          ) : smsLoading ? (
             <p className="muted">Loading SMS settings…</p>
           ) : settings ? (
             <>
               {smsReady === false ? (
                 <p className="muted">
-                  Arkesel is not configured on the server yet. Ask your platform administrator to add
-                  the Arkesel API key.
+                  Arkesel is not configured on the server yet. Ask your platform administrator to add the Arkesel API
+                  key.
                 </p>
               ) : (
                 <p className="muted">
-                  Customers receive SMS when deposits, withdrawals, or daily susu collections are posted to
-                  their account.
+                  Customers receive SMS when deposits, withdrawals, or daily susu collections are posted to their
+                  account.
                 </p>
               )}
 
@@ -202,7 +196,7 @@ export function SettingsNotificationsPage({ subscribedAddons }: Props) {
                 <input
                   type="checkbox"
                   checked={settings.enabled}
-                  onChange={(e) => setSettings({ ...settings, enabled: e.target.checked })}
+                  onChange={(e) => updateSettings({ enabled: e.target.checked })}
                 />
                 <span>Enable customer SMS alerts</span>
               </label>
@@ -212,7 +206,7 @@ export function SettingsNotificationsPage({ subscribedAddons }: Props) {
                   type="checkbox"
                   checked={settings.notifyDeposit}
                   disabled={!settings.enabled}
-                  onChange={(e) => setSettings({ ...settings, notifyDeposit: e.target.checked })}
+                  onChange={(e) => updateSettings({ notifyDeposit: e.target.checked })}
                 />
                 <span>Deposit credited</span>
               </label>
@@ -222,7 +216,7 @@ export function SettingsNotificationsPage({ subscribedAddons }: Props) {
                   type="checkbox"
                   checked={settings.notifyWithdrawal}
                   disabled={!settings.enabled}
-                  onChange={(e) => setSettings({ ...settings, notifyWithdrawal: e.target.checked })}
+                  onChange={(e) => updateSettings({ notifyWithdrawal: e.target.checked })}
                 />
                 <span>Withdrawal debited</span>
               </label>
@@ -232,7 +226,7 @@ export function SettingsNotificationsPage({ subscribedAddons }: Props) {
                   type="checkbox"
                   checked={settings.notifyDailySusu}
                   disabled={!settings.enabled}
-                  onChange={(e) => setSettings({ ...settings, notifyDailySusu: e.target.checked })}
+                  onChange={(e) => updateSettings({ notifyDailySusu: e.target.checked })}
                 />
                 <span>Daily susu collection posted</span>
               </label>
@@ -244,14 +238,13 @@ export function SettingsNotificationsPage({ subscribedAddons }: Props) {
                   maxLength={11}
                   placeholder="Evans Susu"
                   value={settings.senderId ?? ""}
-                  onChange={(e) => setSettings({ ...settings, senderId: e.target.value })}
+                  onChange={(e) => updateSettings({ senderId: e.target.value })}
                 />
                 <p className="muted">
-                  Must match an Arkesel-approved sender ID (max 11 characters). New names are not
-                  deliverable until Arkesel approves them — they usually ask for your business
-                  registration certificate and an authorization letter on company letterhead.
-                  Register the ID in your Arkesel dashboard and wait for approval before enabling
-                  live customer SMS.
+                  Must match an Arkesel-approved sender ID (max 11 characters). New names are not deliverable until
+                  Arkesel approves them — they usually ask for your business registration certificate and an
+                  authorization letter on company letterhead. Register the ID in your Arkesel dashboard and wait for
+                  approval before enabling live customer SMS.
                 </p>
               </label>
 
@@ -305,7 +298,12 @@ export function SettingsNotificationsPage({ subscribedAddons }: Props) {
                 phone received it. Failed shows why it did not go out.
               </p>
             </div>
-            <button type="button" className="button secondary" disabled={logLoading} onClick={() => void loadLog()}>
+            <button
+              type="button"
+              className="button secondary"
+              disabled={logLoading}
+              onClick={() => void refreshMessageLog()}
+            >
               {logLoading ? "Refreshing…" : "Refresh"}
             </button>
           </div>

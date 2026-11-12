@@ -1,4 +1,5 @@
 import type { NextFunction, Request, Response } from "express";
+import { isHeaderAuthAllowed } from "../config/env.js";
 import { isSupabaseAuthNetworkError } from "../lib/networkError.js";
 import { resolveUserFromAccessToken } from "../services/authService.js";
 import { resolveUserContextFromHeaders } from "../services/userContextService.js";
@@ -54,7 +55,8 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
     }
   }
 
-  if (req.header("x-user-id")) {
+  // Dev/test escape hatch only. Production always requires a Bearer JWT.
+  if (req.header("x-user-id") && isHeaderAuthAllowed()) {
     try {
       const context = await resolveUserContextFromHeaders({
         userId: req.header("x-user-id") ?? undefined,

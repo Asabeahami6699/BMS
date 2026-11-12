@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { ADDON_LABELS, MODULE_LABELS, TENANT_ROOT_DOMAIN, isTenantSubdomain, tenantSignInHost } from "@bms/shared";
 import type { TenantRecord } from "../api";
-import { listPlatformTenants, updateTenantSubdomain, updateTenantSubscription } from "../api";
+import { updateTenantSubdomain, updateTenantSubscription } from "../api";
 import { useToast } from "../../components/Toast";
+import { usePlatformAdminStore } from "../stores/platformAdminStore";
 import { CreateAdminModal } from "./CreateAdminModal";
 import { EditTenantAddonsModal } from "./EditTenantAddonsModal";
 import { EditTenantModulesModal } from "./EditTenantModulesModal";
@@ -60,8 +62,16 @@ function CompanyAddressField({
 
 export function CompaniesPage() {
   const { showToast } = useToast();
-  const [tenants, setTenants] = useState<TenantRecord[]>([]);
-  const [status, setStatus] = useState("Loading companies...");
+  const { tenants, statusMessage, error, hydrate, refresh, patchTenant } = usePlatformAdminStore(
+    useShallow((s) => ({
+      tenants: s.tenants,
+      statusMessage: s.statusMessage,
+      error: s.error,
+      hydrate: s.hydrate,
+      refresh: s.refresh,
+      patchTenant: s.patchTenant
+    }))
+  );
   const [registerOpen, setRegisterOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
   const [adminDefaultTenantId, setAdminDefaultTenantId] = useState<string | undefined>();
@@ -74,26 +84,21 @@ export function CompaniesPage() {
   const [terminateOpen, setTerminateOpen] = useState(false);
   const [terminateTenant, setTerminateTenant] = useState<TenantRecord | null>(null);
 
-  async function loadTenants() {
-    try {
-      const data = await listPlatformTenants();
-      setTenants(data);
-      setStatus(data.length === 0 ? "No companies registered yet." : "");
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Failed to load companies");
-      showToast("Failed to load companies", "error");
-    }
-  }
+  useEffect(() => {
+    hydrate();
+  }, [hydrate]);
 
   useEffect(() => {
-    void loadTenants();
-  }, []);
+    if (error) {
+      showToast(error, "error");
+    }
+  }, [error, showToast]);
 
   async function toggleSubscription(tenant: TenantRecord) {
     const next = tenant.subscriptionStatus === "active" ? "inactive" : "active";
     try {
       await updateTenantSubscription(tenant.id, next);
-      await loadTenants();
+      await refresh();
       showToast(`${tenant.name} subscription set to ${next}`, "success");
     } catch (error) {
       showToast(error instanceof Error ? error.message : "Failed to update subscription", "error");
@@ -169,7 +174,7 @@ export function CompaniesPage() {
 
       <article className="card">
         <h2>Registered Companies</h2>
-        <p className="muted">{status}</p>
+        <p className="muted">{statusMessage}</p>
         <div className="lines">
           {tenants.map((tenant) => (
             <div className="line tenant-line" key={tenant.id}>
@@ -204,12 +209,7 @@ export function CompaniesPage() {
                     </>
                   )}
                 </div>
-                <CompanyAddressField
-                  tenant={tenant}
-                  onSaved={(saved) =>
-                    setTenants((current) => current.map((item) => (item.id === saved.id ? saved : item)))
-                  }
-                />
+                <CompanyAddressField tenant={tenant} onSaved={patchTenant} />
               </div>
               <div className="tenant-line-actions">
                 <button
@@ -268,7 +268,7 @@ export function CompaniesPage() {
         open={registerOpen}
         onClose={() => setRegisterOpen(false)}
         onCreated={(tenant) => {
-          void loadTenants();
+          void refresh();
           setAdminDefaultTenantId(tenant.id);
         }}
       />
@@ -278,7 +278,7 @@ export function CompaniesPage() {
         onClose={() => setAdminOpen(false)}
         tenants={tenants}
         defaultTenantId={adminDefaultTenantId}
-        onCreated={() => void loadTenants()}
+        onCreated={() => void refresh()}
       />
 
       <EditTenantModulesModal
@@ -288,7 +288,7 @@ export function CompaniesPage() {
           setEditModulesOpen(false);
           setEditModulesTenant(null);
         }}
-        onUpdated={() => void loadTenants()}
+        onUpdated={() => void refresh()}
       />
 
       <EditTenantAddonsModal
@@ -298,7 +298,7 @@ export function CompaniesPage() {
           setEditAddonsOpen(false);
           setEditAddonsTenant(null);
         }}
-        onUpdated={() => void loadTenants()}
+        onUpdated={() => void refresh()}
       />
 
       <TenantCustomerSupportModal
@@ -317,7 +317,7 @@ export function CompaniesPage() {
           setTerminateOpen(false);
           setTerminateTenant(null);
         }}
-        onTerminated={() => void loadTenants()}
+        onTerminated={() => void refresh()}
       />
     </>
   );

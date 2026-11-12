@@ -1,16 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { canUseSusuLoanBridge, type LoanApplication, type LoanScheduleInstallment } from "@bms/shared";
-import type { AppRole, AuthMe, Branch, LoanDetail } from "./api";
+import type { AppRole } from "./api";
 import {
   approveLoanApplication,
   disburseLoan,
-  getAuthMe,
-  getLoanDetail,
-  listBranches,
   recordLoanRepayment,
   rejectLoanApplication
 } from "./api";
+import { useAuth } from "../auth/AuthContext";
 import { useToast } from "../components/Toast";
 import { toUserFacingError } from "../lib/networkError";
 import { LoanStatusTimeline } from "./loans/LoanStatusTimeline";
@@ -32,7 +30,8 @@ import {
   parseMoneyInput
 } from "./loans/loanUi";
 import { LoanMoneyInput } from "./loans/LoanMoneyInput";
-import { useLoansStore } from "./stores/loansStore";
+import { selectLoanDetail, useLoansStore } from "./stores/loansStore";
+import { useBranchesStore } from "./stores/branchesStore";
 import { usePageLoading } from "./hooks/usePageLoading";
 import { applicationToReviewSnapshot } from "./loans/loanDocument";
 import { printLoanDocument } from "./loans/loanPrint";
@@ -42,13 +41,25 @@ type Props = { role: AppRole };
 export function LoanDetailPage({ role: _role }: Props) {
   const { loanId } = useParams<{ loanId: string }>();
   const { showToast } = useToast();
+  const { user: me } = useAuth();
   const patchStoreApplication = useLoansStore((s) => s.patchApplication);
+  const setLoanDetail = useLoansStore((s) => s.setLoanDetail);
+  const ensureLoanDetail = useLoansStore((s) => s.ensureLoanDetail);
+  const startDetailLiveSync = useLoansStore((s) => s.startDetailLiveSync);
+  const stopDetailLiveSync = useLoansStore((s) => s.stopDetailLiveSync);
+  const detail = useLoansStore((s) => selectLoanDetail(s, loanId));
+  const detailLoading = useLoansStore((s) => Boolean(loanId && s.detailLoadingByLoanId[loanId]));
+  const detailError = useLoansStore((s) => (loanId ? s.detailErrorByLoanId[loanId] : null));
+  const branchRows = useBranchesStore((s) => s.branches);
+  const hydrateBranches = useBranchesStore((s) => s.hydrate);
+  const startBranchesLiveSync = useBranchesStore((s) => s.startLiveSync);
+  const stopBranchesLiveSync = useBranchesStore((s) => s.stopLiveSync);
   const { canApprove, canDisburse, canRecordRepayment } = useLoanPermissions();
 
-  const [detail, setDetail] = useState<LoanDetail | null>(null);
-  const [branches, setBranches] = useState<Branch[]>([]);
-  const [me, setMe] = useState<AuthMe | null>(null);
-  const [loading, setLoading] = useState(true);
+  const branches = useMemo(
+    () => branchRows.filter((b) => b.status !== "inactive"),
+    [branchRows]
+  );
   const [busy, setBusy] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
   const [showReject, setShowReject] = useState(false);
@@ -57,37 +68,45 @@ export function LoanDetailPage({ role: _role }: Props) {
   const [repayBranchId, setRepayBranchId] = useState("");
   const [paymentSource, setPaymentSource] = useState<"cash" | "susu_account">("cash");
 
+  const loading = detailLoading || (Boolean(loanId) && !detail && !detailError);
+
   usePageLoading(loading || busy, "loan-detail");
 
   const bridgeActive = canUseSusuLoanBridge(me?.subscribedModules, me?.susuLoanBridgeEnabled);
 
-  const load = useCallback(async () => {
+  useEffect(() => {
     if (!loanId) {
       return;
     }
-    setLoading(true);
-    try {
-      const [detailRow, branchRows, meRow] = await Promise.all([
-        getLoanDetail(loanId),
-        listBranches(),
-        getAuthMe()
-      ]);
-      setDetail(detailRow);
-      setBranches(branchRows.filter((b) => b.status !== "inactive"));
-      setMe(meRow);
-      if (meRow.scopeType === "branch" && meRow.branchId) {
-        setRepayBranchId(meRow.branchId);
-      }
-    } catch (err) {
-      showToast(toUserFacingError(err, "Failed to load loan"), "error");
-    } finally {
-      setLoading(false);
-    }
-  }, [loanId, showToast]);
+    void ensureLoanDetail(loanId);
+    startDetailLiveSync(loanId);
+    hydrateBranches();
+    startBranchesLiveSync();
+    return () => {
+      stopDetailLiveSync();
+      stopBranchesLiveSync();
+    };
+  }, [
+    loanId,
+    ensureLoanDetail,
+    startDetailLiveSync,
+    stopDetailLiveSync,
+    hydrateBranches,
+    startBranchesLiveSync,
+    stopBranchesLiveSync
+  ]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (detailError) {
+      showToast(detailError, "error");
+    }
+  }, [detailError, showToast]);
+
+  useEffect(() => {
+    if (me?.scopeType === "branch" && me.branchId) {
+      setRepayBranchId(me.branchId);
+    }
+  }, [me?.scopeType, me?.branchId]);
 
   const app = detail?.application;
   const customer = detail?.customer;
@@ -151,7 +170,11 @@ export function LoanDetailPage({ role: _role }: Props) {
   );
 
   function patchApplication(updated: LoanApplication) {
-    setDetail((prev) => (prev ? { ...prev, application: updated } : prev));
+    if (!loanId || !detail) {
+      patchStoreApplication(updated);
+      return;
+    }
+    setLoanDetail(loanId, { ...detail, application: updated });
     patchStoreApplication(updated);
   }
 
@@ -193,7 +216,7 @@ export function LoanDetailPage({ role: _role }: Props) {
     setBusy(true);
     try {
       patchApplication(await disburseLoan(loanId));
-      await load();
+      await ensureLoanDetail(loanId, { force: true });
       showToast("Loan disbursed — repayment schedule created", "success");
     } catch (err) {
       showToast(toUserFacingError(err, "Disburse failed"), "error");
@@ -214,15 +237,12 @@ export function LoanDetailPage({ role: _role }: Props) {
         settleAll,
         paymentSource: bridgeActive ? paymentSource : "cash"
       });
-      setDetail((prev) =>
-        prev
-          ? {
-              application: result.application,
-              schedule: result.schedule,
-              repayments: [result.repayment, ...prev.repayments]
-            }
-          : prev
-      );
+      setLoanDetail(loanId, {
+        application: result.application,
+        customer: detail?.customer,
+        schedule: result.schedule,
+        repayments: [result.repayment, ...(detail?.repayments ?? [])]
+      });
       patchStoreApplication(result.application);
       setRepayAmount("");
       setRepayAmountNum(NaN);

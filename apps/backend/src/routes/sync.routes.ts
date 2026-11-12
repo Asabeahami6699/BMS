@@ -28,7 +28,8 @@ syncRouter.post("/batch", requirePermission("customers.create"), async (req, res
           context.tenantId,
           context.userId,
           context.branchId,
-          item.payload
+          item.payload,
+          { offlineClientId: item.clientId }
         );
         results.push({ clientId: item.clientId, ok: true, resourceId: customer.id });
       } else {

@@ -190,6 +190,7 @@ export function buildRegistrationFormDocumentHtml(options: RegistrationFormDocum
   const personalFields = [
     blankField("Full name"),
     blankField("Phone"),
+    // Always print DOB + occupation on paper; ID card photo stays digital-only.
     blankField("Date of birth (DOB)"),
     blankField("Occupation"),
     blankField("Marital status"),
@@ -240,9 +241,9 @@ export function buildRegistrationFormDocumentHtml(options: RegistrationFormDocum
     <section class="reg-doc__section">
       <h2>Customer details</h2>
       <div class="reg-doc__grid">${personalFields}</div>
-      ${fields.idCardPhoto !== "hidden" ? `<div class="reg-doc__id-photo">ID card photo</div>` : ""}
       <p class="reg-doc__note" style="margin-top:8px">
         I confirm that the information on this form is true and I agree to the account rules that apply.
+        ID card photo is captured in the system registration only (not on this paper form).
       </p>
       <div class="reg-doc__sign-block">
         <div class="reg-doc__sign-line">Customer signature</div>

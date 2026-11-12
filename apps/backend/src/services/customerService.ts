@@ -178,6 +178,13 @@ function mapCustomerRow(row: Record<string, unknown>): Customer {
     lockedBalance:
       row.locked_balance != null ? Number(row.locked_balance) : undefined,
 
+    loanCollateralLocked:
+      row.loan_collateral_locked != null ? Number(row.loan_collateral_locked) : undefined,
+
+    loanQualifiedAt: row.loan_qualified_at != null ? String(row.loan_qualified_at) : undefined,
+    loanQualificationBadge:
+      row.loan_qualification_badge != null ? String(row.loan_qualification_badge) : undefined,
+
     routeId: row.route_id ? String(row.route_id) : undefined,
 
     status: row.status
@@ -188,20 +195,16 @@ function mapCustomerRow(row: Record<string, unknown>): Customer {
 
 
 
-function insertRowFromCustomer(customer: Customer): Record<string, unknown> {
-
-  return {
-
+function insertRowFromCustomer(
+  customer: Customer,
+  options?: { offlineClientId?: string }
+): Record<string, unknown> {
+  const row: Record<string, unknown> = {
     id: customer.id,
-
     tenant_id: customer.tenantId,
-
     full_name: customer.fullName,
-
     email: customer.email || null,
-
     phone: customer.phone,
-
     location: customer.location ?? null,
     house_number: customer.houseNumber ?? null,
     date_of_birth: customer.dateOfBirth ?? null,
@@ -218,21 +221,17 @@ function insertRowFromCustomer(customer: Customer): Record<string, unknown> {
     next_of_kin_house_number: customer.nextOfKin?.houseNumber ?? null,
     next_of_kin: kinSummary(customer.nextOfKin),
     account_number: customer.accountNumber ?? null,
-
     rejection_reason: customer.rejectionReason ?? null,
-
     home_branch_id: customer.homeBranchId,
-
     assigned_field_agent_id: customer.assignedFieldAgentId ?? null,
-
     created_by_field_agent_id: customer.createdByFieldAgentId,
-
     daily_contribution_amount: customer.dailyContributionAmount,
-
     status: customer.status
-
   };
-
+  if (options?.offlineClientId) {
+    row.offline_client_id = options.offlineClientId;
+  }
+  return row;
 }
 
 
@@ -248,6 +247,7 @@ export async function getCustomerWithdrawableBalance(
   }
   const total = await computeCustomerBalance(tenantId, customerId);
   const locked = customer.lockedBalance ?? 0;
+  const collateral = customer.loanCollateralLocked ?? 0;
   let loanReserve = 0;
   if (!options?.allowLoanReserve) {
     try {
@@ -257,7 +257,7 @@ export async function getCustomerWithdrawableBalance(
       loanReserve = 0;
     }
   }
-  return Math.max(0, total - locked - loanReserve);
+  return Math.max(0, total - locked - collateral - loanReserve);
 }
 
 export async function createCustomer(
@@ -380,11 +380,14 @@ export async function submitCustomerRegistration(
 
   agentBranchId: string | undefined,
 
-  input: unknown
+  input: unknown,
+
+  options?: { offlineClientId?: string }
 
 ): Promise<Customer> {
 
   const payload = customerRegistrationInputSchema.parse(input) as CustomerRegistrationInput;
+  const offlineClientId = options?.offlineClientId?.trim() || undefined;
   const formSetup = await getRegistrationFormSetup(tenantId);
   const formIssue = registrationFormIssue(payload, formSetup);
   if (formIssue) {
@@ -396,6 +399,30 @@ export async function submitCustomerRegistration(
     agentBranchId,
     payload.homeBranchId
   );
+
+  const supabase = getSupabaseAdminClient();
+
+  if (supabase && offlineClientId) {
+    const { data: existing, error: existingError } = await supabase
+      .from("customers")
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .eq("offline_client_id", offlineClientId)
+      .maybeSingle();
+    if (existingError && !/offline_client_id/i.test(existingError.message)) {
+      throw new Error(`Failed to check offline registration: ${existingError.message}`);
+    }
+    if (existing) {
+      return enrichCustomerWithAgentNames(tenantId, mapCustomerRow(existing));
+    }
+  } else if (!supabase && offlineClientId) {
+    const existing = getTenantCustomers(tenantId).find(
+      (c) => (c as Customer & { offlineClientId?: string }).offlineClientId === offlineClientId
+    );
+    if (existing) {
+      return enrichCustomerWithAgentNames(tenantId, existing);
+    }
+  }
 
   const nextCustomer: Customer = customerSchema.parse({
 
@@ -441,16 +468,24 @@ export async function submitCustomerRegistration(
 
   });
 
-
-
-  const supabase = getSupabaseAdminClient();
-
   if (supabase) {
 
-    const { error } = await supabase.from("customers").insert(insertRowFromCustomer(nextCustomer));
+    const { error } = await supabase
+      .from("customers")
+      .insert(insertRowFromCustomer(nextCustomer, { offlineClientId }));
 
     if (error) {
-
+      if (offlineClientId && /offline_client_id|duplicate|unique/i.test(error.message)) {
+        const { data: raced } = await supabase
+          .from("customers")
+          .select("*")
+          .eq("tenant_id", tenantId)
+          .eq("offline_client_id", offlineClientId)
+          .maybeSingle();
+        if (raced) {
+          return enrichCustomerWithAgentNames(tenantId, mapCustomerRow(raced));
+        }
+      }
       throw new Error(`Failed to submit registration: ${error.message}`);
 
     }
@@ -458,8 +493,10 @@ export async function submitCustomerRegistration(
   } else {
 
     const customers = getTenantCustomers(tenantId);
-
-    setTenantCustomers(tenantId, [...customers, nextCustomer]);
+    const stored = offlineClientId
+      ? ({ ...nextCustomer, offlineClientId } as Customer & { offlineClientId: string })
+      : nextCustomer;
+    setTenantCustomers(tenantId, [...customers, stored]);
 
   }
 
@@ -783,6 +820,7 @@ async function enrichCustomersWithAccountBalances(
       }
       const accountBalance = totals.get(customer.id) ?? 0;
       const locked = customer.lockedBalance ?? 0;
+      const collateral = customer.loanCollateralLocked ?? 0;
       let loanReserveAmount = 0;
       try {
         const { getCustomerLoanInstallmentReserve } = await import("./loanReserveService.js");
@@ -793,8 +831,13 @@ async function enrichCustomersWithAccountBalances(
       return customerSchema.parse({
         ...customer,
         accountBalance,
+        loanCollateralLocked: collateral > 0 ? collateral : undefined,
         loanReserveAmount: loanReserveAmount > 0 ? loanReserveAmount : undefined,
-        withdrawableBalance: Math.max(0, accountBalance - locked - loanReserveAmount)
+        loanQualificationSuggestedMaxGhs: undefined,
+        withdrawableBalance: Math.max(
+          0,
+          accountBalance - locked - collateral - loanReserveAmount
+        )
       });
     })
   );
@@ -827,6 +870,9 @@ const LIGHT_CUSTOMER_COLUMNS = [
   "created_by_field_agent_id",
   "daily_contribution_amount",
   "locked_balance",
+  "loan_collateral_locked",
+  "loan_qualified_at",
+  "loan_qualification_badge",
   "route_id",
   "status",
   "created_at"

@@ -338,6 +338,11 @@ export function CustomerOpsCard({ role }: Props) {
                 render: (row) => (
                   <div className="customers-table-name">
                     <strong>{row.fullName}</strong>
+                    {row.loanQualificationBadge ? (
+                      <span className="status-pill status-pill--active" style={{ marginLeft: "0.4rem" }}>
+                        {row.loanQualificationBadge}
+                      </span>
+                    ) : null}
                     <small>{row.phone}</small>
                   </div>
                 )

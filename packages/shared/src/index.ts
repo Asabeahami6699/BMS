@@ -15,6 +15,8 @@ export * from "./savings.js";
 export * from "./payroll.js";
 export * from "./loans.js";
 export * from "./loanCalculations.js";
+export * from "./loanQualification.js";
+export * from "./siteManual.js";
 export * from "./tellerOps.js";
 export * from "./treasury.js";
 export * from "./agencyBanking.js";

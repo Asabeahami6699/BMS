@@ -1,14 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
+import { useShallow } from "zustand/react/shallow";
 import {
   APPROVAL_ASSIGNABLE_ROLES,
   BUILTIN_ROLE_LABELS,
-  parseApprovalWorkflow,
   type ApprovalAssignableRole,
   type ApprovalWorkflow
 } from "@bms/shared";
 import { useAuth } from "../../auth/AuthContext";
 import { useToast } from "../../components/Toast";
-import { getApprovalWorkflow, updateApprovalWorkflow } from "../api";
+import { useSettingsWorkspaceStore } from "../stores/settingsWorkspaceStore";
 
 function toggleRole(
   roles: ApprovalAssignableRole[],
@@ -57,44 +57,51 @@ function RoleChecks({
 export function SettingsApprovalWorkflowsPage() {
   const { showToast } = useToast();
   const { refreshMe } = useAuth();
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [workflow, setWorkflow] = useState<ApprovalWorkflow>(() => parseApprovalWorkflow(null));
+  const {
+    workflow,
+    loading,
+    saving,
+    lastFetchedAt,
+    error,
+    hydrateSection,
+    startLiveSync,
+    stopLiveSync,
+    setApprovalWorkflow,
+    saveApprovalWorkflow
+  } = useSettingsWorkspaceStore(
+    useShallow((s) => ({
+      workflow: s.approvalWorkflow,
+      loading: s.section.approvalWorkflow.loading,
+      saving: s.savingApproval,
+      lastFetchedAt: s.section.approvalWorkflow.lastFetchedAt,
+      error: s.section.approvalWorkflow.error,
+      hydrateSection: s.hydrateSection,
+      startLiveSync: s.startLiveSync,
+      stopLiveSync: s.stopLiveSync,
+      setApprovalWorkflow: s.setApprovalWorkflow,
+      saveApprovalWorkflow: s.saveApprovalWorkflow
+    }))
+  );
 
   useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const loaded = await getApprovalWorkflow();
-        if (!cancelled) {
-          setWorkflow(loaded);
-        }
-      } catch (error) {
-        if (!cancelled) {
-          showToast(error instanceof Error ? error.message : "Failed to load approval workflows", "error");
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [showToast]);
+    hydrateSection("approvalWorkflow");
+    startLiveSync("approvalWorkflow");
+    return () => stopLiveSync();
+  }, [hydrateSection, startLiveSync, stopLiveSync]);
+
+  useEffect(() => {
+    if (error) {
+      showToast(error, "error");
+    }
+  }, [error, showToast]);
 
   async function handleSave() {
-    setSaving(true);
     try {
-      const saved = await updateApprovalWorkflow(workflow);
-      setWorkflow(saved);
+      await saveApprovalWorkflow(workflow);
       await refreshMe();
       showToast("Approval workflows saved", "success");
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : "Failed to save approval workflows", "error");
-    } finally {
-      setSaving(false);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to save approval workflows", "error");
     }
   }
 
@@ -106,7 +113,7 @@ export function SettingsApprovalWorkflowsPage() {
         stays on both. Field agents submit requests and are not approvers.
       </p>
 
-      {loading ? (
+      {loading && lastFetchedAt == null ? (
         <p className="muted">Loading approval workflows…</p>
       ) : (
         <>
@@ -114,13 +121,17 @@ export function SettingsApprovalWorkflowsPage() {
             legend="New account"
             hint="These roles can approve or reject a registration and assign the account number."
             roles={workflow.registrationApproverRoles}
-            onChange={(registrationApproverRoles) => setWorkflow({ ...workflow, registrationApproverRoles })}
+            onChange={(registrationApproverRoles) =>
+              setApprovalWorkflow({ ...workflow, registrationApproverRoles })
+            }
           />
           <RoleChecks
             legend="Withdrawal"
             hint="These roles can approve or decline a customer withdrawal request."
             roles={workflow.withdrawalApproverRoles}
-            onChange={(withdrawalApproverRoles) => setWorkflow({ ...workflow, withdrawalApproverRoles })}
+            onChange={(withdrawalApproverRoles) =>
+              setApprovalWorkflow({ ...workflow, withdrawalApproverRoles })
+            }
           />
           <div className="form-actions">
             <button type="button" className="button" disabled={saving} onClick={() => void handleSave()}>

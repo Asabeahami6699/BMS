@@ -1,18 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { useShallow } from "zustand/react/shallow";
 import { roleRequiresTransactionPin, formatAccountAmount } from "@bms/shared";
 import {
   TELLER_TILL_ENTRY_LABELS,
-  type TellerTillEntryType,
-  type TellerTillJournalEntry
+  type TellerTillEntryType
 } from "@bms/shared";
 import { useAuth } from "../../auth/AuthContext";
 import { useTransactionPin } from "../../auth/TransactionPinProvider";
-import { createTellerTillJournalEntry, getRuntimeBranchId, listTellerTillJournalEntries } from "../api";
+import { getRuntimeBranchId } from "../api";
 import { useToast } from "../../components/Toast";
 import { ensureTransactionStepUpForRole } from "../../lib/ensureTransactionStepUp";
 import { toUserFacingError } from "../../lib/networkError";
 import { usePageLoading } from "../hooks/usePageLoading";
+import { useTellerTillDaybookStore } from "../stores/tellerTillDaybookStore";
 
 const ENTRY_TYPES = Object.keys(TELLER_TILL_ENTRY_LABELS) as TellerTillEntryType[];
 
@@ -31,13 +32,35 @@ export function TellerTillDaybookPage() {
   const { requestStepUp } = useTransactionPin();
   const { showToast } = useToast();
   const [pinReady, setPinReady] = useState(() => !roleRequiresTransactionPin(user?.role ?? ""));
-  const [businessDate, setBusinessDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [entries, setEntries] = useState<TellerTillJournalEntry[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [posting, setPosting] = useState(false);
   const [entryType, setEntryType] = useState<TellerTillEntryType>("cash_to_bank");
   const [amount, setAmount] = useState("");
   const [notes, setNotes] = useState("");
+
+  const {
+    entries,
+    businessDate,
+    loading,
+    posting,
+    error,
+    hydrate,
+    setBusinessDate,
+    postEntry,
+    startLiveSync,
+    stopLiveSync
+  } = useTellerTillDaybookStore(
+    useShallow((s) => ({
+      entries: s.entries,
+      businessDate: s.businessDate,
+      loading: s.loading,
+      posting: s.posting,
+      error: s.error,
+      hydrate: s.hydrate,
+      setBusinessDate: s.setBusinessDate,
+      postEntry: s.postEntry,
+      startLiveSync: s.startLiveSync,
+      stopLiveSync: s.stopLiveSync
+    }))
+  );
 
   const branchId = getRuntimeBranchId() ?? "";
 
@@ -68,24 +91,22 @@ export function TellerTillDaybookPage() {
     };
   }, [navigate, requestStepUp, showToast, user]);
 
-  async function loadEntries() {
+  useEffect(() => {
     if (!branchId || !pinReady) {
       return;
     }
-    setLoading(true);
-    try {
-      const rows = await listTellerTillJournalEntries({ branchId, date: businessDate });
-      setEntries(rows);
-    } catch (err) {
-      showToast(toUserFacingError(err, "Could not load till daybook"), "error");
-    } finally {
-      setLoading(false);
-    }
-  }
+    hydrate({ branchId });
+    startLiveSync();
+    return () => {
+      stopLiveSync();
+    };
+  }, [branchId, pinReady, hydrate, startLiveSync, stopLiveSync]);
 
   useEffect(() => {
-    void loadEntries();
-  }, [branchId, businessDate, pinReady]);
+    if (error) {
+      showToast(error, "error");
+    }
+  }, [error, showToast]);
 
   const totals = useMemo(() => {
     const sum = entries.reduce((acc, row) => acc + row.amount, 0);
@@ -106,11 +127,8 @@ export function TellerTillDaybookPage() {
       showToast("Enter a valid amount", "error");
       return;
     }
-    setPosting(true);
     try {
-      await createTellerTillJournalEntry({
-        branchId,
-        businessDate,
+      await postEntry({
         entryType,
         amount: parsed,
         notes: notes.trim() || undefined
@@ -118,11 +136,8 @@ export function TellerTillDaybookPage() {
       showToast("Till movement recorded", "success");
       setAmount("");
       setNotes("");
-      await loadEntries();
     } catch (err) {
       showToast(toUserFacingError(err, "Failed to record movement"), "error");
-    } finally {
-      setPosting(false);
     }
   }
 
@@ -172,7 +187,11 @@ export function TellerTillDaybookPage() {
 
           <label className="field">
             <span>Business date</span>
-            <input type="date" value={businessDate} onChange={(e) => setBusinessDate(e.target.value)} />
+            <input
+              type="date"
+              value={businessDate}
+              onChange={(e) => setBusinessDate(e.target.value)}
+            />
           </label>
 
           <label className="field">

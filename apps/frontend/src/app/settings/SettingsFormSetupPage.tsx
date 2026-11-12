@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import {
   defaultRegistrationFormSetup,
   type RegistrationAccountForm,
@@ -7,7 +8,7 @@ import {
   type RegistrationFormSetup
 } from "@bms/shared";
 import { useToast } from "../../components/Toast";
-import { getCompanyProfile, getRegistrationFormSetup, updateRegistrationFormSetup } from "../api";
+import { useSettingsWorkspaceStore } from "../stores/settingsWorkspaceStore";
 import {
   downloadDefaultRegistrationForm,
   downloadRegistrationForm,
@@ -52,54 +53,53 @@ function formMatchesDefault(form: RegistrationAccountForm): boolean {
 
 export function SettingsFormSetupPage() {
   const { showToast } = useToast();
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [setup, setSetup] = useState<RegistrationFormSetup>(() => defaultRegistrationFormSetup());
-  const [openingFee, setOpeningFee] = useState("20.00");
-  const [printContext, setPrintContext] = useState<RegistrationFormPrintContext>({});
-  const [dailyAmounts, setDailyAmounts] = useState<Record<string, string>>(() =>
-    Object.fromEntries(
-      defaultRegistrationFormSetup().forms.map((form) => [form.id, form.defaultDailyContributionGhs.toFixed(2)])
-    )
+  const {
+    setup,
+    openingFee,
+    printContext,
+    dailyAmounts,
+    loading,
+    saving,
+    lastFetchedAt,
+    error,
+    hydrateSection,
+    startLiveSync,
+    stopLiveSync,
+    setFormSetup,
+    setOpeningFee,
+    setDailyAmounts,
+    saveFormSetup
+  } = useSettingsWorkspaceStore(
+    useShallow((s) => ({
+      setup: s.formSetup,
+      openingFee: s.openingFee,
+      printContext: s.formSetupPrintContext,
+      dailyAmounts: s.dailyAmounts,
+      loading: s.section.formSetup.loading,
+      saving: s.savingFormSetup,
+      lastFetchedAt: s.section.formSetup.lastFetchedAt,
+      error: s.section.formSetup.error,
+      hydrateSection: s.hydrateSection,
+      startLiveSync: s.startLiveSync,
+      stopLiveSync: s.stopLiveSync,
+      setFormSetup: s.setFormSetup,
+      setOpeningFee: s.setOpeningFee,
+      setDailyAmounts: s.setDailyAmounts,
+      saveFormSetup: s.saveFormSetup
+    }))
   );
 
   useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const [loaded, profile] = await Promise.all([
-          getRegistrationFormSetup(),
-          getCompanyProfile().catch(() => null)
-        ]);
-        if (cancelled) {
-          return;
-        }
-        setSetup(loaded);
-        setOpeningFee(loaded.savingsOpeningFeeGhs.toFixed(2));
-        setDailyAmounts(
-          Object.fromEntries(loaded.forms.map((form) => [form.id, form.defaultDailyContributionGhs.toFixed(2)]))
-        );
-        if (profile) {
-          setPrintContext({
-            companyName: profile.name,
-            companyPhone: profile.phone,
-            companyAddress: profile.address
-          });
-        }
-      } catch (error) {
-        if (!cancelled) {
-          showToast(error instanceof Error ? error.message : "Failed to load form setup", "error");
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [showToast]);
+    hydrateSection("formSetup");
+    startLiveSync("formSetup");
+    return () => stopLiveSync();
+  }, [hydrateSection, startLiveSync, stopLiveSync]);
+
+  useEffect(() => {
+    if (error) {
+      showToast(error, "error");
+    }
+  }, [error, showToast]);
 
   function currentSetupForPrint(): RegistrationFormSetup {
     const fee = Number(openingFee);
@@ -171,17 +171,17 @@ export function SettingsFormSetupPage() {
   }
 
   function patchForm(id: RegistrationAccountForm["id"], patch: Partial<RegistrationAccountForm>) {
-    setSetup((current) => ({
-      ...current,
-      forms: current.forms.map((form) => (form.id === id ? { ...form, ...patch } : form))
-    }));
+    setFormSetup({
+      ...setup,
+      forms: setup.forms.map((form) => (form.id === id ? { ...form, ...patch } : form))
+    });
   }
 
   function patchField(key: keyof RegistrationFormFields, requirement: RegistrationFieldRequirement) {
-    setSetup((current) => ({
-      ...current,
-      fields: { ...current.fields, [key]: requirement }
-    }));
+    setFormSetup({
+      ...setup,
+      fields: { ...setup.fields, [key]: requirement }
+    });
   }
 
   function restoreForm(id: RegistrationAccountForm["id"]) {
@@ -190,10 +190,10 @@ export function SettingsFormSetupPage() {
       return;
     }
     patchForm(id, baseline);
-    setDailyAmounts((current) => ({
-      ...current,
+    setDailyAmounts({
+      ...dailyAmounts,
       [id]: baseline.defaultDailyContributionGhs.toFixed(2)
-    }));
+    });
     if (id === "savings") {
       setOpeningFee("20.00");
     }
@@ -201,7 +201,7 @@ export function SettingsFormSetupPage() {
 
   function restoreAll() {
     const defaults = defaultRegistrationFormSetup();
-    setSetup(defaults);
+    setFormSetup(defaults);
     setOpeningFee("20.00");
     setDailyAmounts(
       Object.fromEntries(defaults.forms.map((form) => [form.id, form.defaultDailyContributionGhs.toFixed(2)]))
@@ -231,20 +231,15 @@ export function SettingsFormSetupPage() {
         defaultDailyContributionGhs: Number(dailyAmounts[form.id] === "" ? 0 : dailyAmounts[form.id])
       }))
     };
-    setSaving(true);
     try {
-      const saved = await updateRegistrationFormSetup(next);
-      setSetup(saved);
-      setOpeningFee(saved.savingsOpeningFeeGhs.toFixed(2));
+      await saveFormSetup(next);
       showToast("Form setup saved", "success");
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : "Failed to save form setup", "error");
-    } finally {
-      setSaving(false);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to save form setup", "error");
     }
   }
 
-  if (loading) {
+  if (loading && lastFetchedAt == null) {
     return (
       <article className="card">
         <h2>Form setup</h2>
@@ -356,7 +351,7 @@ export function SettingsFormSetupPage() {
                   if (!moneyInput(value)) {
                     return;
                   }
-                  setDailyAmounts((current) => ({ ...current, [form.id]: value }));
+                  setDailyAmounts({ ...dailyAmounts, [form.id]: value });
                   patchForm(form.id, {
                     defaultDailyContributionGhs: value === "" || value === "." ? 0 : Number(value)
                   });
@@ -410,10 +405,10 @@ export function SettingsFormSetupPage() {
         type="button"
         className="button secondary"
         onClick={() =>
-          setSetup((current) => ({
-            ...current,
+          setFormSetup({
+            ...setup,
             fields: defaultRegistrationFormSetup().fields
-          }))
+          })
         }
       >
         Use default fields

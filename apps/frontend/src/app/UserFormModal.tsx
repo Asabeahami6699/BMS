@@ -11,13 +11,12 @@ import type { AppRole, Branch, RoleDefinition, UserRecord } from "./api";
 import {
   assignRole,
   createUser,
-  getRoleAssignments,
-  getRoles,
   unassignRole,
   updateUser
 } from "./api";
 import { Modal } from "../components/Modal";
 import { useToast } from "../components/Toast";
+import { useRoleManagementStore } from "./stores/roleManagementStore";
 
 type Mode = "create" | "edit";
 
@@ -90,25 +89,27 @@ export function UserFormModal({ open, mode, user, branches, createDefaults, onCl
       return;
     }
     rolesSeededRef.current = true;
-    void getRoles()
-      .then(setAllTenantRoles)
-      .catch(() => setAllTenantRoles([]));
-
-    if (mode === "edit" && user) {
-      void getRoleAssignments()
-        .then((rows) => {
-          const keys = rows.filter((row) => row.userId === user.userId).map((row) => row.roleKey);
-          setSelectedCustomRoleKeys(keys);
-          setInitialCustomRoleKeys(keys);
-        })
-        .catch(() => {
-          setSelectedCustomRoleKeys([]);
-          setInitialCustomRoleKeys([]);
-        });
+    const store = useRoleManagementStore.getState();
+    store.hydrate();
+    const applyFromStore = () => {
+      const state = useRoleManagementStore.getState();
+      setAllTenantRoles(state.roles);
+      if (mode === "edit" && user) {
+        const keys = state.assignments
+          .filter((row) => row.userId === user.userId)
+          .map((row) => row.roleKey);
+        setSelectedCustomRoleKeys(keys);
+        setInitialCustomRoleKeys(keys);
+      } else {
+        const preset = createDefaults?.customRoleKeys ?? [];
+        setSelectedCustomRoleKeys(preset);
+        setInitialCustomRoleKeys([]);
+      }
+    };
+    if (store.lastFetchedAt) {
+      applyFromStore();
     } else {
-      const preset = createDefaults?.customRoleKeys ?? [];
-      setSelectedCustomRoleKeys(preset);
-      setInitialCustomRoleKeys([]);
+      void store.refresh().then(applyFromStore);
     }
   }, [open, mode, user, createDefaults?.customRoleKeys]);
 

@@ -1,6 +1,12 @@
 import { create } from "zustand";
 import type { LoanApplication, LoanGroup, LoanProduct } from "@bms/shared";
-import { getLoansBootstrap, getTenantId, type LoansBootstrap } from "../api";
+import {
+  getLoanDetail,
+  getLoansBootstrap,
+  getTenantId,
+  type LoanDetail,
+  type LoansBootstrap
+} from "../api";
 import { toUserFacingError } from "../../lib/networkError";
 import {
   createLiveSyncManager,
@@ -30,12 +36,26 @@ type LoansState = {
   upsertProduct: (row: LoanProduct) => void;
   upsertGroup: (row: LoanGroup) => void;
   setGroups: (rows: LoanGroup[]) => void;
+  detailByLoanId: Record<string, LoanDetail>;
+  detailFetchedAtByLoanId: Record<string, number>;
+  detailLoadingByLoanId: Record<string, boolean>;
+  detailErrorByLoanId: Record<string, string | null>;
+  detailLiveSyncActive: boolean;
+  ensureLoanDetail: (loanId: string, options?: { force?: boolean }) => Promise<void>;
+  refreshLoanDetailSilent: (loanId: string) => Promise<void>;
+  setLoanDetail: (loanId: string, detail: LoanDetail) => void;
+  startDetailLiveSync: (loanId: string) => void;
+  stopDetailLiveSync: () => void;
 };
 
 let fetchInFlight: Promise<void> | null = null;
 let lastSnapshotKey = "";
 const silentScheduler = createSilentRefreshScheduler();
 const liveSync = createLiveSyncManager();
+const detailSilentScheduler = createSilentRefreshScheduler();
+const detailLiveSync = createLiveSyncManager();
+const detailInFlight = new Map<string, Promise<void>>();
+let watchedLoanId: string | null = null;
 
 function bootstrapSnapshotKey(data: LoansBootstrap): string {
   const productSig = data.products
@@ -220,8 +240,151 @@ export const useLoansStore = create<LoansState>((set, get) => ({
   setGroups: (rows) => {
     lastSnapshotKey = "";
     set({ groups: rows });
+  },
+
+  detailByLoanId: {},
+  detailFetchedAtByLoanId: {},
+  detailLoadingByLoanId: {},
+  detailErrorByLoanId: {},
+  detailLiveSyncActive: false,
+
+  ensureLoanDetail: async (loanId, options) => {
+    if (!loanId) {
+      return;
+    }
+    watchedLoanId = loanId;
+    const force = options?.force ?? false;
+    const fetchedAt = get().detailFetchedAtByLoanId[loanId];
+    const cached = get().detailByLoanId[loanId];
+    if (!force && cached && isFresh(fetchedAt ?? null)) {
+      return;
+    }
+
+    const existing = detailInFlight.get(loanId);
+    if (existing) {
+      return existing;
+    }
+
+    const showLoader = !cached;
+    if (showLoader) {
+      set((state) => ({
+        detailLoadingByLoanId: { ...state.detailLoadingByLoanId, [loanId]: true },
+        detailErrorByLoanId: { ...state.detailErrorByLoanId, [loanId]: null }
+      }));
+    }
+
+    const flight = (async () => {
+      try {
+        const detail = await getLoanDetail(loanId);
+        set((state) => ({
+          detailByLoanId: { ...state.detailByLoanId, [loanId]: detail },
+          detailFetchedAtByLoanId: { ...state.detailFetchedAtByLoanId, [loanId]: Date.now() },
+          detailErrorByLoanId: { ...state.detailErrorByLoanId, [loanId]: null }
+        }));
+      } catch (error) {
+        set((state) => ({
+          detailErrorByLoanId: {
+            ...state.detailErrorByLoanId,
+            [loanId]: toUserFacingError(error, "Failed to load loan")
+          }
+        }));
+      } finally {
+        set((state) => ({
+          detailLoadingByLoanId: { ...state.detailLoadingByLoanId, [loanId]: false }
+        }));
+        detailInFlight.delete(loanId);
+      }
+    })();
+
+    detailInFlight.set(loanId, flight);
+    return flight;
+  },
+
+  refreshLoanDetailSilent: async (loanId) => {
+    if (!loanId) {
+      return;
+    }
+    const existing = detailInFlight.get(loanId);
+    if (existing) {
+      return existing;
+    }
+    const flight = (async () => {
+      try {
+        const detail = await getLoanDetail(loanId);
+        set((state) => ({
+          detailByLoanId: { ...state.detailByLoanId, [loanId]: detail },
+          detailFetchedAtByLoanId: { ...state.detailFetchedAtByLoanId, [loanId]: Date.now() },
+          detailErrorByLoanId: { ...state.detailErrorByLoanId, [loanId]: null }
+        }));
+      } catch {
+        /* keep cache */
+      } finally {
+        detailInFlight.delete(loanId);
+      }
+    })();
+    detailInFlight.set(loanId, flight);
+    return flight;
+  },
+
+  setLoanDetail: (loanId, detail) => {
+    set((state) => ({
+      detailByLoanId: { ...state.detailByLoanId, [loanId]: detail },
+      detailFetchedAtByLoanId: { ...state.detailFetchedAtByLoanId, [loanId]: Date.now() }
+    }));
+  },
+
+  startDetailLiveSync: (loanId) => {
+    if (!loanId) {
+      return;
+    }
+    watchedLoanId = loanId;
+    if (!get().detailLiveSyncActive) {
+      set({ detailLiveSyncActive: true });
+    }
+    detailLiveSync.start({
+      getTenantId,
+      tables: [
+        "loan_applications",
+        "loan_repayments",
+        "loan_repayment_schedule",
+        "customers"
+      ],
+      onRefresh: () => {
+        const id = watchedLoanId;
+        if (!id) {
+          return;
+        }
+        detailSilentScheduler.schedule(() => void get().refreshLoanDetailSilent(id));
+      },
+      isStale: () => {
+        const id = watchedLoanId;
+        if (!id) {
+          return false;
+        }
+        return !isFresh(get().detailFetchedAtByLoanId[id] ?? null);
+      }
+    });
+  },
+
+  stopDetailLiveSync: () => {
+    detailLiveSync.stop();
+    detailSilentScheduler.clear();
+    watchedLoanId = null;
+    if (get().detailLiveSyncActive) {
+      set({ detailLiveSyncActive: false });
+    }
   }
 }));
+
+export function selectLoanDetail(
+  state: Pick<LoansState, "detailByLoanId">,
+  loanId: string | undefined
+): LoanDetail | null {
+  if (!loanId) {
+    return null;
+  }
+  return state.detailByLoanId[loanId] ?? null;
+}
 
 export function selectLoansKpis(state: { summary: LoansSummary | null }) {
   const summary = state.summary;

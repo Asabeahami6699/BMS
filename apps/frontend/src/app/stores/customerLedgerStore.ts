@@ -106,7 +106,15 @@ export const useCustomerLedgerStore = create<CustomerLedgerState>((set, get) => 
     const fetchedAt = get().detailFetchedAt[customerId];
     const cached = get().detailByCustomer[customerId];
     const hasPhotos = Boolean(cached?.photoUrl || cached?.idCardPhotoUrl);
-    if (!force && cached && hasPhotos && fetchedAt && Date.now() - fetchedAt < DETAIL_STALE_MS) {
+    const hasIdentity = Boolean(cached?.dateOfBirth || cached?.occupation);
+    if (
+      !force &&
+      cached &&
+      hasPhotos &&
+      hasIdentity &&
+      fetchedAt &&
+      Date.now() - fetchedAt < DETAIL_STALE_MS
+    ) {
       return;
     }
 

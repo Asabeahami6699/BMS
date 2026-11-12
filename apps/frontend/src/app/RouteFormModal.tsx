@@ -1,9 +1,10 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { Branch, FieldRoute } from "./api";
-import { createFieldRoute, listBranches, listFieldAgents, updateFieldRoute } from "./api";
+import { createFieldRoute, listFieldAgents, updateFieldRoute } from "./api";
 import { Modal } from "../components/Modal";
 import { useToast } from "../components/Toast";
 import { formatBranchLabel } from "./branchDisplay";
+import { useBranchesStore } from "./stores/branchesStore";
 
 type Mode = "create" | "edit";
 type CreateStep = "details" | "assign-agent";
@@ -80,8 +81,10 @@ export function RouteFormModal({ open, mode, route, branches, onClose, onSaved }
       return;
     }
     if (branches.length === 0) {
-      void listBranches()
-        .then((rows) => setLoadedBranches(rows))
+      void useBranchesStore
+        .getState()
+        .refresh()
+        .then(() => setLoadedBranches(useBranchesStore.getState().branches))
         .catch(() => setLoadedBranches([]));
     }
     void listFieldAgents()

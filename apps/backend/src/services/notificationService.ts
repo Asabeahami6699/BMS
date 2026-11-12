@@ -23,6 +23,8 @@ export type AgentNotificationKind =
   | "cash_shortage_opened"
   | "cash_overage_opened"
   | "cash_variance_settled"
+  | "vault_opening_adjusted"
+  | "vault_close_variance"
   | "deposit_pending_bank"
   | "deposit_pending_accountant"
   | "deposit_completed"

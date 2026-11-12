@@ -22,7 +22,14 @@ export type BranchFloatSession = {
   cashierUserId: string;
   businessDate: string;
   status: FloatSessionStatus;
+  /** Deposit/Susu capacity allocated (grows with float top-ups). Not physical cash. */
   openingFloat: number;
+  /** Physical cash handed at open (may be 0). */
+  initialCash: number;
+  /** Extra physical cash collected during the day for payouts. */
+  extraCash: number;
+  /** Till expenses / petty cash paid from the drawer. */
+  totalExpenses: number;
   expectedClosing: number | null;
   actualClosing: number | null;
   variance: number | null;
@@ -38,9 +45,15 @@ export type BranchFloatSession = {
   settledBy?: string;
   settledAt?: string;
   varianceNote?: string;
-  /** Extra cash asked for while this till is already open. */
+  /** Extra float capacity asked for while this till is already open. */
   topUpRequested?: number;
   topUpNote?: string;
+  /** Pending extra physical cash awaiting admin/coordinator approval. */
+  extraCashRequested?: number;
+  extraCashRequestNote?: string;
+  /** Pending expense awaiting admin/coordinator approval. */
+  expenseRequested?: number;
+  expenseRequestNote?: string;
 };
 
 type ActorContext = {
@@ -61,16 +74,27 @@ function todayDate(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+/**
+ * Physical cash that should be in the drawer.
+ * Float capacity is NOT assumed to be cash.
+ */
 function expectedCash(session: BranchFloatSession): number {
   return (
-    session.openingFloat +
+    session.initialCash +
+    session.extraCash +
     session.totalDeposits +
     session.totalDailySusu -
-    session.totalWithdrawals
+    session.totalWithdrawals -
+    session.totalExpenses
   );
 }
 
-/** Remaining allocated float: reduced by deposits/Susu, increased by withdrawals. */
+/** Issued till capital for the day: float capacity + all physical cash issued. */
+function dayCapital(session: BranchFloatSession): number {
+  return session.openingFloat + session.initialCash + session.extraCash;
+}
+
+/** Remaining allocated float: reduced by deposits/Susu, restored by withdrawals. */
 function remainingFloatBalance(session: BranchFloatSession): number {
   return (
     session.openingFloat -
@@ -89,6 +113,9 @@ function rowToSession(row: Record<string, unknown>): BranchFloatSession {
     businessDate: String(row.business_date).slice(0, 10),
     status: row.status as FloatSessionStatus,
     openingFloat: Number(row.opening_float ?? 0),
+    initialCash: Number(row.initial_cash ?? 0),
+    extraCash: Number(row.extra_cash ?? 0),
+    totalExpenses: Number(row.total_expenses ?? 0),
     expectedClosing: row.expected_closing != null ? Number(row.expected_closing) : null,
     actualClosing: row.actual_closing != null ? Number(row.actual_closing) : null,
     variance: row.variance != null ? Number(row.variance) : null,
@@ -105,7 +132,14 @@ function rowToSession(row: Record<string, unknown>): BranchFloatSession {
     settledAt: row.settled_at != null ? String(row.settled_at) : undefined,
     varianceNote: row.variance_note != null ? String(row.variance_note) : undefined,
     topUpRequested: row.top_up_requested != null ? Number(row.top_up_requested) : undefined,
-    topUpNote: row.top_up_note != null ? String(row.top_up_note) : undefined
+    topUpNote: row.top_up_note != null ? String(row.top_up_note) : undefined,
+    extraCashRequested:
+      row.extra_cash_requested != null ? Number(row.extra_cash_requested) : undefined,
+    extraCashRequestNote:
+      row.extra_cash_request_note != null ? String(row.extra_cash_request_note) : undefined,
+    expenseRequested: row.expense_requested != null ? Number(row.expense_requested) : undefined,
+    expenseRequestNote:
+      row.expense_request_note != null ? String(row.expense_request_note) : undefined
   };
 }
 
@@ -118,6 +152,9 @@ function sessionToRow(session: BranchFloatSession): Record<string, unknown> {
     business_date: session.businessDate,
     status: session.status,
     opening_float: session.openingFloat,
+    initial_cash: session.initialCash,
+    extra_cash: session.extraCash,
+    total_expenses: session.totalExpenses,
     expected_closing: session.expectedClosing,
     actual_closing: session.actualClosing,
     variance: session.variance,
@@ -135,6 +172,10 @@ function sessionToRow(session: BranchFloatSession): Record<string, unknown> {
     variance_note: session.varianceNote ?? null,
     top_up_requested: session.topUpRequested ?? null,
     top_up_note: session.topUpNote ?? null,
+    extra_cash_requested: session.extraCashRequested ?? null,
+    extra_cash_request_note: session.extraCashRequestNote ?? null,
+    expense_requested: session.expenseRequested ?? null,
+    expense_request_note: session.expenseRequestNote ?? null,
     updated_at: new Date().toISOString()
   };
 }
@@ -165,6 +206,27 @@ async function persistSession(session: BranchFloatSession): Promise<void> {
     void _topUpAmount;
     void _topUpNote;
     const retry = await supabase.from("branch_float_sessions").upsert(withoutTopUp);
+    error = retry.error;
+  }
+  if (
+    error &&
+    /initial_cash|extra_cash|total_expenses/i.test(error.message)
+  ) {
+    if (session.initialCash > 0 || session.extraCash > 0 || session.totalExpenses > 0) {
+      throw new Error(
+        "Till cash capital columns are not ready. Apply migration 085_branch_float_cash_capital.sql in Supabase, then try again."
+      );
+    }
+    const {
+      initial_cash: _initialCash,
+      extra_cash: _extraCash,
+      total_expenses: _totalExpenses,
+      ...withoutCashCapital
+    } = row;
+    void _initialCash;
+    void _extraCash;
+    void _totalExpenses;
+    const retry = await supabase.from("branch_float_sessions").upsert(withoutCashCapital);
     error = retry.error;
   }
   if (error && !isMissingSupabaseResource(error.message)) {
@@ -237,7 +299,13 @@ export async function getMyBranchFloatSession(
 
 export async function requestBranchFloat(
   context: ActorContext,
-  input: { branchId: string; requestedAmount: number; note?: string; businessDate?: string }
+  input: {
+    branchId: string;
+    requestedAmount: number;
+    requestedInitialCash?: number;
+    note?: string;
+    businessDate?: string;
+  }
 ): Promise<BranchFloatSession> {
   if (!branchCounterRequiresFloat(context.role) && context.role !== "admin") {
     throw new Error("Only branch counter staff can request a till float");
@@ -270,6 +338,9 @@ export async function requestBranchFloat(
     businessDate,
     status: "requested",
     openingFloat: Math.max(0, input.requestedAmount),
+    initialCash: Math.max(0, input.requestedInitialCash ?? 0),
+    extraCash: 0,
+    totalExpenses: 0,
     expectedClosing: null,
     actualClosing: null,
     variance: null,
@@ -289,7 +360,7 @@ export async function requestBranchFloat(
       roles: ["admin", "coordinator"],
       kind: "float_requested",
       title: "Till float requested",
-      body: `GHS ${formatAccountAmount(session.openingFloat)} requested for ${branchLabel} on ${businessDate}.`
+      body: `Float GHS ${formatAccountAmount(session.openingFloat)} · initial cash GHS ${formatAccountAmount(session.initialCash)} requested for ${branchLabel} on ${businessDate}.`
     });
   } catch {
     // Non-blocking
@@ -355,7 +426,7 @@ async function requestFloatTopUp(
 export async function allocateBranchFloat(
   context: ActorContext,
   sessionId: string,
-  input: { openingFloat: number }
+  input: { openingFloat: number; initialCash?: number }
 ): Promise<BranchFloatSession> {
   if (context.role !== "admin" && context.role !== "coordinator") {
     throw new Error("Only admin or coordinator can release float");
@@ -380,15 +451,15 @@ export async function allocateBranchFloat(
       movementType: "adjustment",
       amount: added,
       createdBy: context.userId,
-      notes: "Float top-up released"
+      notes: "Extra float released — adds to day capital"
     });
     try {
       await createAgentNotification({
         tenantId: session.tenantId,
         userId: session.cashierUserId,
         kind: "float_allocated",
-        title: "Till float topped up",
-        body: `GHS ${added.toFixed(2)} was added to your till for ${session.businessDate}.`
+        title: "Extra float released",
+        body: `GHS ${added.toFixed(2)} float capacity was added for ${session.businessDate}. Day capital is now GHS ${formatAccountAmount(dayCapital(session))}.`
       });
     } catch {
       // Non-blocking
@@ -401,7 +472,14 @@ export async function allocateBranchFloat(
   }
 
   const opening = Math.max(0, input.openingFloat);
+  const initialCash = Math.max(
+    0,
+    input.initialCash != null ? input.initialCash : session.initialCash
+  );
   session.openingFloat = opening;
+  session.initialCash = initialCash;
+  session.extraCash = 0;
+  session.totalExpenses = 0;
   session.status = "open";
   session.allocatedBy = context.userId;
   session.allocatedAt = new Date().toISOString();
@@ -412,7 +490,7 @@ export async function allocateBranchFloat(
     movementType: "allocation",
     amount: opening,
     createdBy: context.userId,
-    notes: "Opening float released"
+    notes: `Opening float released · initial cash GHS ${formatAccountAmount(initialCash)}`
   });
 
   try {
@@ -420,8 +498,8 @@ export async function allocateBranchFloat(
       tenantId: session.tenantId,
       userId: session.cashierUserId,
       kind: "float_allocated",
-      title: "Till float released",
-      body: `GHS ${opening.toFixed(2)} is now open for ${session.businessDate}. You can transact at the branch counter.`
+      title: "Till opened",
+      body: `Float GHS ${formatAccountAmount(opening)} · physical cash GHS ${formatAccountAmount(initialCash)} for ${session.businessDate}. Day capital GHS ${formatAccountAmount(dayCapital(session))}.`
     });
   } catch {
     // Non-blocking
@@ -430,13 +508,14 @@ export async function allocateBranchFloat(
   return session;
 }
 
-/** Admin pushes float directly (skip request queue). */
+/** Admin pushes float + initial cash directly (skip request queue). */
 export async function pushBranchFloat(
   context: ActorContext,
   input: {
     branchId: string;
     cashierUserId: string;
     openingFloat: number;
+    initialCash?: number;
     businessDate?: string;
   }
 ): Promise<BranchFloatSession> {
@@ -450,6 +529,8 @@ export async function pushBranchFloat(
   }
 
   const businessDate = input.businessDate?.trim() || todayDate();
+  const openingFloat = Math.max(0, input.openingFloat);
+  const initialCash = Math.max(0, input.initialCash ?? 0);
   let session = await getFloatSessionForCashier(
     context.tenantId,
     input.cashierUserId,
@@ -465,7 +546,10 @@ export async function pushBranchFloat(
       cashierUserId: input.cashierUserId,
       businessDate,
       status: "open",
-      openingFloat: Math.max(0, input.openingFloat),
+      openingFloat,
+      initialCash,
+      extraCash: 0,
+      totalExpenses: 0,
       expectedClosing: null,
       actualClosing: null,
       variance: null,
@@ -478,7 +562,10 @@ export async function pushBranchFloat(
       allocatedAt: new Date().toISOString()
     };
   } else {
-    session.openingFloat = Math.max(0, input.openingFloat);
+    session.openingFloat = openingFloat;
+    session.initialCash = initialCash;
+    session.extraCash = 0;
+    session.totalExpenses = 0;
     session.status = "open";
     session.allocatedBy = context.userId;
     session.allocatedAt = new Date().toISOString();
@@ -490,7 +577,7 @@ export async function pushBranchFloat(
     movementType: "allocation",
     amount: session.openingFloat,
     createdBy: context.userId,
-    notes: "Float pushed by admin"
+    notes: `Float pushed by admin · initial cash GHS ${formatAccountAmount(initialCash)}`
   });
 
   try {
@@ -498,8 +585,8 @@ export async function pushBranchFloat(
       tenantId: session.tenantId,
       userId: session.cashierUserId,
       kind: "float_allocated",
-      title: "Till float pushed",
-      body: `Admin opened GHS ${formatAccountAmount(session.openingFloat)} for ${session.businessDate}.`
+      title: "Till opened by admin",
+      body: `Float GHS ${formatAccountAmount(session.openingFloat)} · physical cash GHS ${formatAccountAmount(session.initialCash)} for ${session.businessDate}.`
     });
   } catch {
     // Non-blocking
@@ -511,8 +598,19 @@ export async function pushBranchFloat(
 export async function listPendingFloatRequests(tenantId: string): Promise<BranchFloatSession[]> {
   const sessions = await listSessions(tenantId);
   return sessions
-    .filter((s) => s.status === "requested" || (s.status === "open" && (s.topUpRequested ?? 0) > 0))
+    .filter(
+      (s) =>
+        s.status === "requested" ||
+        (s.status === "open" &&
+          ((s.topUpRequested ?? 0) > 0 ||
+            (s.extraCashRequested ?? 0) > 0 ||
+            (s.expenseRequested ?? 0) > 0))
+    )
     .sort((a, b) => b.requestedAt.localeCompare(a.requestedAt));
+}
+
+export function canApproveTillMovements(role: string): boolean {
+  return role === "admin" || role === "coordinator";
 }
 
 export async function listBranchFloatSessions(
@@ -561,13 +659,36 @@ export async function closeBranchFloat(
   session.closedAt = new Date().toISOString();
 
   await persistSession(session);
+
+  if (Math.abs(session.variance ?? 0) >= 0.005) {
+    try {
+      const { openTillCashVarianceFromClose } = await import("./tellerTillCashVarianceService.js");
+      await openTillCashVarianceFromClose(session, context.userId);
+    } catch {
+      // Non-blocking — close still succeeds; OS case can be opened after migration
+    }
+  }
+
   try {
+    const variance = session.variance ?? 0;
+    const absVariance = Math.abs(variance);
+    const flagLabel =
+      absVariance < 0.005
+        ? "balanced"
+        : variance > 0
+          ? `overage GHS ${absVariance.toFixed(2)} — Branch till OS opened`
+          : `shortage GHS ${absVariance.toFixed(2)} — Branch till OS opened`;
     await notifyTenantStaff({
       tenantId: context.tenantId,
       roles: ["admin", "coordinator"],
       kind: "float_closed_pending_settlement",
-      title: "Till closed — settlement needed",
-      body: `${await branchDisplayLabel(context.tenantId, session.branchId)} closed with GHS ${actual.toFixed(2)} (variance ${session.variance?.toFixed(2) ?? "0"}).`
+      title:
+        absVariance < 0.005
+          ? "Till closed — settlement needed"
+          : variance > 0
+            ? "Till closed — overage flagged"
+            : "Till closed — shortage flagged",
+      body: `${await branchDisplayLabel(context.tenantId, session.branchId)} closed with GHS ${actual.toFixed(2)} (${flagLabel}).`
     });
   } catch {
     // Non-blocking
@@ -610,7 +731,14 @@ export async function settleBranchFloat(
 async function recordMovement(
   session: BranchFloatSession,
   input: {
-    movementType: "allocation" | "deposit" | "withdrawal" | "adjustment" | "settlement";
+    movementType:
+      | "allocation"
+      | "deposit"
+      | "withdrawal"
+      | "adjustment"
+      | "settlement"
+      | "extra_cash"
+      | "expense";
     amount: number;
     customerTransactionId?: string;
     createdBy: string;
@@ -687,7 +815,7 @@ export async function applyTransactionToFloat(
     const cashInTill = expectedCash(session);
     if (transaction.amount > cashInTill + 1e-9) {
       throw new Error(
-        `Insufficient cash in till for this withdrawal. Available: GHS ${formatAccountAmount(cashInTill)}.`
+        `Insufficient physical cash in till for this withdrawal. Available: GHS ${formatAccountAmount(cashInTill)}. Collect extra cash first — float alone is not cash.`
       );
     }
   }
@@ -772,6 +900,10 @@ export function floatSessionSummary(session: BranchFloatSession | null): {
   expectedCash: number;
   floatBalance: number;
   openingFloat: number;
+  initialCash: number;
+  extraCash: number;
+  totalExpenses: number;
+  dayCapital: number;
   totalDeposits: number;
   totalWithdrawals: number;
   totalDailySusu: number;
@@ -786,11 +918,17 @@ export function floatSessionSummary(session: BranchFloatSession | null): {
   }
   const expected = expectedCash(session);
   const floatBalance = remainingFloatBalance(session);
+  const capital = dayCapital(session);
   const lowFloatThreshold = Math.max(50, session.openingFloat * 0.2);
   const statusLabels: Record<FloatSessionStatus, string> = {
     requested: "Awaiting float release",
     approved: "Approved — not yet open",
-    open: (session.topUpRequested ?? 0) > 0 ? "Till open · top-up waiting" : "Till open",
+    open:
+      (session.topUpRequested ?? 0) > 0 ||
+      (session.extraCashRequested ?? 0) > 0 ||
+      (session.expenseRequested ?? 0) > 0
+        ? "Till open · movement awaiting approval"
+        : "Till open",
     closed: "Closed — pending settlement",
     settled: "Settled",
     rejected: "Rejected"
@@ -799,6 +937,10 @@ export function floatSessionSummary(session: BranchFloatSession | null): {
     expectedCash: expected,
     floatBalance,
     openingFloat: session.openingFloat,
+    initialCash: session.initialCash,
+    extraCash: session.extraCash,
+    totalExpenses: session.totalExpenses,
+    dayCapital: capital,
     totalDeposits: session.totalDeposits,
     totalWithdrawals: session.totalWithdrawals,
     totalDailySusu: session.totalDailySusu,
@@ -808,4 +950,195 @@ export function floatSessionSummary(session: BranchFloatSession | null): {
     canTransact: session.status === "open",
     statusLabel: statusLabels[session.status]
   };
+}
+
+/** Request or (if authorized) immediately apply extra physical cash. */
+export async function collectExtraCash(
+  context: ActorContext,
+  sessionId: string,
+  input: { amount: number; note?: string }
+): Promise<BranchFloatSession> {
+  const amount = Math.round(Math.max(0, input.amount) * 100) / 100;
+  if (amount <= 0) {
+    throw new Error("Enter the extra cash amount collected");
+  }
+
+  const sessions = await listSessions(context.tenantId);
+  const session = sessions.find((s) => s.id === sessionId);
+  if (!session) {
+    throw new Error("Float session not found");
+  }
+  if (session.cashierUserId !== context.userId && !canApproveTillMovements(context.role)) {
+    throw new Error("You can only collect extra cash on your own till");
+  }
+  if (session.status !== "open") {
+    throw new Error("Till must be open to collect extra cash");
+  }
+
+  if (canApproveTillMovements(context.role)) {
+    return applyExtraCash(context, session, amount, input.note);
+  }
+
+  if ((session.extraCashRequested ?? 0) > 0) {
+    throw new Error("An extra cash request is already waiting for approval");
+  }
+  session.extraCashRequested = amount;
+  session.extraCashRequestNote = input.note?.trim() || undefined;
+  await persistSession(session);
+  try {
+    await notifyTenantStaff({
+      tenantId: context.tenantId,
+      roles: ["admin", "coordinator"],
+      kind: "float_requested",
+      title: "Extra cash requested",
+      body: `GHS ${formatAccountAmount(amount)} extra cash requested for till on ${session.businessDate}.`
+    });
+  } catch {
+    // Non-blocking
+  }
+  return session;
+}
+
+async function applyExtraCash(
+  context: ActorContext,
+  session: BranchFloatSession,
+  amount: number,
+  note?: string
+): Promise<BranchFloatSession> {
+  session.extraCash = Math.round((session.extraCash + amount) * 100) / 100;
+  session.extraCashRequested = undefined;
+  session.extraCashRequestNote = undefined;
+  session.expectedClosing = expectedCash(session);
+  await persistSession(session);
+  await recordMovement(session, {
+    movementType: "extra_cash",
+    amount,
+    createdBy: context.userId,
+    notes: note?.trim() || "Extra cash collected for till payouts"
+  });
+  return session;
+}
+
+export async function approveExtraCash(
+  context: ActorContext,
+  sessionId: string,
+  input?: { amount?: number }
+): Promise<BranchFloatSession> {
+  if (!canApproveTillMovements(context.role)) {
+    throw new Error("Only admin or coordinator can approve extra cash");
+  }
+  const sessions = await listSessions(context.tenantId);
+  const session = sessions.find((s) => s.id === sessionId);
+  if (!session) {
+    throw new Error("Float session not found");
+  }
+  if (session.status !== "open") {
+    throw new Error("Till must be open");
+  }
+  const amount = Math.round(Math.max(0, input?.amount ?? session.extraCashRequested ?? 0) * 100) / 100;
+  if (amount <= 0) {
+    throw new Error("No pending extra cash to approve");
+  }
+  const note = session.extraCashRequestNote;
+  return applyExtraCash(context, session, amount, note);
+}
+
+/** Request or (if authorized) immediately apply a till expense. */
+export async function recordTillExpense(
+  context: ActorContext,
+  sessionId: string,
+  input: { amount: number; note?: string }
+): Promise<BranchFloatSession> {
+  const amount = Math.round(Math.max(0, input.amount) * 100) / 100;
+  if (amount <= 0) {
+    throw new Error("Enter the expense amount");
+  }
+  if (!input.note?.trim()) {
+    throw new Error("Enter a reason for the expense");
+  }
+
+  const sessions = await listSessions(context.tenantId);
+  const session = sessions.find((s) => s.id === sessionId);
+  if (!session) {
+    throw new Error("Float session not found");
+  }
+  if (session.cashierUserId !== context.userId && !canApproveTillMovements(context.role)) {
+    throw new Error("You can only record expenses on your own till");
+  }
+  if (session.status !== "open") {
+    throw new Error("Till must be open to record an expense");
+  }
+
+  if (canApproveTillMovements(context.role)) {
+    return applyTillExpense(context, session, amount, input.note);
+  }
+
+  if ((session.expenseRequested ?? 0) > 0) {
+    throw new Error("An expense request is already waiting for approval");
+  }
+  session.expenseRequested = amount;
+  session.expenseRequestNote = input.note.trim();
+  await persistSession(session);
+  try {
+    await notifyTenantStaff({
+      tenantId: context.tenantId,
+      roles: ["admin", "coordinator"],
+      kind: "float_requested",
+      title: "Till expense requested",
+      body: `GHS ${formatAccountAmount(amount)} expense requested for till on ${session.businessDate}.`
+    });
+  } catch {
+    // Non-blocking
+  }
+  return session;
+}
+
+async function applyTillExpense(
+  context: ActorContext,
+  session: BranchFloatSession,
+  amount: number,
+  note: string
+): Promise<BranchFloatSession> {
+  const cashInTill = expectedCash(session);
+  if (amount > cashInTill + 1e-9) {
+    throw new Error(
+      `Expense exceeds physical cash in till (GHS ${formatAccountAmount(cashInTill)} available).`
+    );
+  }
+  session.totalExpenses = Math.round((session.totalExpenses + amount) * 100) / 100;
+  session.expenseRequested = undefined;
+  session.expenseRequestNote = undefined;
+  session.expectedClosing = expectedCash(session);
+  await persistSession(session);
+  await recordMovement(session, {
+    movementType: "expense",
+    amount,
+    createdBy: context.userId,
+    notes: note.trim() || "Till expense"
+  });
+  return session;
+}
+
+export async function approveTillExpense(
+  context: ActorContext,
+  sessionId: string,
+  input?: { amount?: number }
+): Promise<BranchFloatSession> {
+  if (!canApproveTillMovements(context.role)) {
+    throw new Error("Only admin or coordinator can approve till expenses");
+  }
+  const sessions = await listSessions(context.tenantId);
+  const session = sessions.find((s) => s.id === sessionId);
+  if (!session) {
+    throw new Error("Float session not found");
+  }
+  if (session.status !== "open") {
+    throw new Error("Till must be open");
+  }
+  const amount = Math.round(Math.max(0, input?.amount ?? session.expenseRequested ?? 0) * 100) / 100;
+  if (amount <= 0) {
+    throw new Error("No pending expense to approve");
+  }
+  const note = session.expenseRequestNote || "Till expense";
+  return applyTillExpense(context, session, amount, note);
 }

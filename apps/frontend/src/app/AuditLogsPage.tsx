@@ -1,13 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import type { AuditLogRecord } from "./api";
-import { listAuditLogs, getTenantId } from "./api";
-import { subscribeToTenantRealtime } from "./realtime";
 import { AdminDataTable, filterRowsBySearch } from "../components/AdminDataTable";
 import { Modal } from "../components/Modal";
 import { useToast } from "../components/Toast";
-import { usePageLoading } from "./hooks/usePageLoading";
 import { useBranchesLiveSync } from "./hooks/useBranchesLiveSync";
 import { useBranchesStore } from "./stores/branchesStore";
+import { useAuditLogsStore } from "./stores/auditLogsStore";
 import { formatBranchLabel } from "./branchDisplay";
 
 type AuditRow = AuditLogRecord & { branchLabel: string };
@@ -55,36 +54,34 @@ function statusClass(code: number): string {
 
 export function AuditLogsPage() {
   const { showToast } = useToast();
-  const [rows, setRows] = useState<AuditLogRecord[]>([]);
-  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<AuditRow | null>(null);
   useBranchesLiveSync();
   const branches = useBranchesStore((s) => s.branches);
 
-  usePageLoading(loading, "audit-logs");
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      setRows(await listAuditLogs({ limit: 200 }));
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Failed to load audit logs", "error");
-      setRows([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [showToast]);
+  const { rows, loading, error, lastFetchedAt, hydrate, startLiveSync, stopLiveSync } = useAuditLogsStore(
+    useShallow((s) => ({
+      rows: s.rows,
+      loading: s.loading,
+      error: s.error,
+      lastFetchedAt: s.lastFetchedAt,
+      hydrate: s.hydrate,
+      startLiveSync: s.startLiveSync,
+      stopLiveSync: s.stopLiveSync
+    }))
+  );
 
   useEffect(() => {
-    void load();
-    const unsub = subscribeToTenantRealtime({
-      tenantId: getTenantId(),
-      tables: ["audit_logs"],
-      onChange: () => void load()
-    });
-    return unsub;
-  }, [load]);
+    hydrate();
+    startLiveSync();
+    return () => stopLiveSync();
+  }, [hydrate, startLiveSync, stopLiveSync]);
+
+  useEffect(() => {
+    if (error) {
+      showToast(error, "error");
+    }
+  }, [error, showToast]);
 
   const labeled = useMemo(
     () =>
@@ -104,6 +101,8 @@ export function AuditLogsPage() {
     "path"
   ]);
 
+  const showLoading = loading && lastFetchedAt == null;
+
   return (
     <div className="audit-logs-page">
       <header className="audit-logs-page__header">
@@ -114,7 +113,12 @@ export function AuditLogsPage() {
             notifications read are not logged. Click a row for full details.
           </p>
         </div>
-        <button type="button" className="button secondary" disabled={loading} onClick={() => void load()}>
+        <button
+          type="button"
+          className="button secondary"
+          disabled={loading}
+          onClick={() => useAuditLogsStore.getState().hydrate({ force: true })}
+        >
           {loading ? "Refreshing…" : "Refresh"}
         </button>
       </header>
@@ -164,7 +168,7 @@ export function AuditLogsPage() {
           search={search}
           onSearchChange={setSearch}
           searchPlaceholder="Search activity, actor, branch…"
-          emptyMessage={loading ? "Loading audit logs…" : "No audit entries yet."}
+          emptyMessage={showLoading ? "Loading audit logs…" : "No audit entries yet."}
           onRowClick={(row) => setSelected(row)}
         />
       </section>
