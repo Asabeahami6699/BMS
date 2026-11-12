@@ -26,6 +26,10 @@ export type StoredTenant = {
   createdAt: string;
   /** Public address label: {subdomain}.aabanker.com */
   subdomain?: string;
+  planId?: string | null;
+  periodStart?: string | null;
+  periodEnd?: string | null;
+  billingStatus?: import("@bms/shared").TenantBillingStatus;
 };
 
 const tenants = new Map<string, StoredTenant>();

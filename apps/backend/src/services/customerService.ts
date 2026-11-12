@@ -30,6 +30,7 @@ import { computeCustomerBalance } from "./ledgerService.js";
 import { generateCustomerAccountNumber } from "./accountNumberPolicyService.js";
 import { applySavingsInitialDepositOnApproval } from "./savingsInitialDepositService.js";
 import { getRegistrationFormSetup } from "./registrationFormService.js";
+import { listFieldRoutes } from "./routeService.js";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -1096,12 +1097,68 @@ export async function patchCustomerKycPhotos(
   return enrichCustomerWithAgentNames(tenantId, updated);
 }
 
+async function resolveAssignmentRouteId(
+  tenantId: string,
+  customer: Customer,
+  assignedFieldAgentId: string | null,
+  explicitRouteId: string | null | undefined
+): Promise<string | null> {
+  if (explicitRouteId !== undefined) {
+    if (explicitRouteId === null) {
+      return null;
+    }
+    const routes = await listFieldRoutes(tenantId);
+    const route = routes.find((r) => r.id === explicitRouteId);
+    if (!route) {
+      throw new Error("Target route not found");
+    }
+    if (route.branchId !== customer.homeBranchId) {
+      throw new Error("Route branch must match the customer's home branch");
+    }
+    if (route.status !== "active") {
+      throw new Error("Target route is inactive");
+    }
+    if (
+      assignedFieldAgentId &&
+      route.assignedFieldAgentId &&
+      route.assignedFieldAgentId !== assignedFieldAgentId
+    ) {
+      throw new Error("Target route is assigned to a different field agent");
+    }
+    return explicitRouteId;
+  }
+
+  if (!assignedFieldAgentId) {
+    return null;
+  }
+
+  const routes = await listFieldRoutes(tenantId);
+  const matches = routes.filter(
+    (r) =>
+      r.status === "active" &&
+      r.branchId === customer.homeBranchId &&
+      r.assignedFieldAgentId === assignedFieldAgentId
+  );
+  if (matches.length === 1) {
+    return matches[0]!.id;
+  }
+  if (matches.length === 0) {
+    return null;
+  }
+  // Ambiguous: keep current route only if the new agent owns it; otherwise clear.
+  if (customer.routeId && matches.some((r) => r.id === customer.routeId)) {
+    return customer.routeId;
+  }
+  return null;
+}
+
 export async function assignCustomerFieldAgent(
   tenantId: string,
   customerId: string,
   input: unknown
 ): Promise<Customer> {
-  const { assignedFieldAgentId } = assignCustomerFieldAgentSchema.parse(input);
+  const { assignedFieldAgentId, routeId: explicitRouteId } =
+    assignCustomerFieldAgentSchema.parse(input);
 
   const customer = await getCustomerById(tenantId, customerId);
   if (!customer) {
@@ -1118,16 +1175,27 @@ export async function assignCustomerFieldAgent(
     }
   }
 
+  const nextRouteId = await resolveAssignmentRouteId(
+    tenantId,
+    customer,
+    assignedFieldAgentId,
+    explicitRouteId
+  );
+
   const updated = customerSchema.parse({
     ...customer,
-    assignedFieldAgentId: assignedFieldAgentId ?? undefined
+    assignedFieldAgentId: assignedFieldAgentId ?? undefined,
+    routeId: nextRouteId ?? undefined
   });
 
   const supabase = getSupabaseAdminClient();
   if (supabase) {
     const { error } = await supabase
       .from("customers")
-      .update({ assigned_field_agent_id: assignedFieldAgentId })
+      .update({
+        assigned_field_agent_id: assignedFieldAgentId,
+        route_id: nextRouteId
+      })
       .eq("tenant_id", tenantId)
       .eq("id", customerId);
 

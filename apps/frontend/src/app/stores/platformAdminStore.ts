@@ -30,7 +30,7 @@ function tenantsSnapshotKey(tenants: TenantRecord[]): string {
   return tenants
     .map(
       (t) =>
-        `${t.id}:${t.subscriptionStatus}:${(t.subscribedModules ?? []).join(",")}:${(t.subscribedAddons ?? []).join(",")}:${t.subdomain ?? ""}:${t.name}`
+        `${t.id}:${t.subscriptionStatus}:${t.billingStatus ?? ""}:${t.periodEnd ?? ""}:${(t.subscribedModules ?? []).join(",")}:${(t.subscribedAddons ?? []).join(",")}:${t.subdomain ?? ""}:${t.name}`
     )
     .join("|");
 }

@@ -29,6 +29,10 @@ const envSchema = z.object({
   ARKESEL_API_KEY: z.string().min(1).optional(),
   ARKESEL_SENDER_ID: z.string().min(1).max(11).optional(),
   ARKESEL_SMS_BASE_URL: z.string().url().default("https://sms.arkesel.com"),
+  /** MoMo number companies pay subscription fees to (platform owner). */
+  PLATFORM_MOMO_NUMBER: z.string().min(1).optional(),
+  PLATFORM_MOMO_ACCOUNT_NAME: z.string().min(1).optional(),
+  PLATFORM_MOMO_NETWORK: z.string().min(1).default("MTN"),
   SMTP_HOST: z.string().min(1).optional(),
   SMTP_PORT: z.coerce.number().int().positive().default(587),
   SMTP_USER: z.string().min(1).optional(),
@@ -61,6 +65,7 @@ const fallbackEnv: Env = {
   OLLAMA_BASE_URL: "http://127.0.0.1:11434",
   OLLAMA_MODEL: "llama3.2:3b",
   ARKESEL_SMS_BASE_URL: "https://sms.arkesel.com",
+  PLATFORM_MOMO_NETWORK: "MTN",
   SMTP_PORT: 587,
   SMTP_SECURE: false,
   ALLOW_HEADER_AUTH: false

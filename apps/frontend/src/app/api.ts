@@ -54,6 +54,10 @@ export type TenantRecord = {
   reportsAnalytics?: boolean;
   subdomain?: string;
   createdAt?: string;
+  planId?: string | null;
+  periodStart?: string | null;
+  periodEnd?: string | null;
+  billingStatus?: "none" | "active" | "due_soon" | "grace" | "suspended";
 };
 
 export type CommissionPolicy = {
@@ -3068,6 +3072,209 @@ export async function updateTenantSubscription(
   return response.json() as Promise<TenantRecord>;
 }
 
+export type SubscriptionPlanDto = {
+  id: string;
+  name: string;
+  description: string;
+  interval: "month" | "year";
+  priceGhs: number;
+  setupFeeGhs: number;
+  packageTier: "entry" | "growing" | "multi_product" | "institution" | "enterprise" | "standard";
+  modules: TenantProductModule[];
+  addons: TenantAddon[];
+  featureBullets: string[];
+  maxBranches?: number | null;
+  maxStaff?: number | null;
+  maxFieldAgents?: number | null;
+  maxActiveCustomers?: number | null;
+  isCustom: boolean;
+  isActive: boolean;
+  sortOrder: number;
+};
+
+export type PlatformBillingSettingsDto = {
+  momoNumber: string;
+  momoAccountName: string;
+  momoNetwork: string;
+  reminderDaysBefore: number;
+  graceDays: number;
+};
+
+export type SubscriptionPaymentClaimDto = {
+  id: string;
+  tenantId: string;
+  planId: string;
+  amountGhs: number;
+  momoReference: string;
+  payerName: string;
+  payerNumber: string;
+  notes: string;
+  status: "pending" | "approved" | "rejected";
+  rejectReason?: string | null;
+  submittedBy?: string | null;
+  reviewedBy?: string | null;
+  reviewedAt?: string | null;
+  createdAt: string;
+  tenantName?: string;
+  planName?: string;
+};
+
+export type TenantSubscriptionSnapshotDto = {
+  tenantId: string;
+  tenantName: string;
+  subscriptionStatus: "active" | "inactive";
+  billingStatus: "none" | "active" | "due_soon" | "grace" | "suspended";
+  plan: SubscriptionPlanDto | null;
+  periodStart: string | null;
+  periodEnd: string | null;
+  daysRemaining: number | null;
+  daysOverdue: number | null;
+  graceDay: number | null;
+  payInstructions: PlatformBillingSettingsDto;
+  claims: SubscriptionPaymentClaimDto[];
+  subscribedModules: TenantProductModule[];
+  subscribedAddons: TenantAddon[];
+  bannerMessage: string | null;
+};
+
+export async function getMySubscription(): Promise<TenantSubscriptionSnapshotDto> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/tenant/subscription/me`, {
+    headers: authHeaders()
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? "Failed to load subscription");
+  }
+  return response.json() as Promise<TenantSubscriptionSnapshotDto>;
+}
+
+export async function listTenantSubscriptionPlans(): Promise<SubscriptionPlanDto[]> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/tenant/subscription/plans`, {
+    headers: authHeaders()
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? "Failed to list plans");
+  }
+  return response.json() as Promise<SubscriptionPlanDto[]>;
+}
+
+export async function submitMySubscriptionPaymentClaim(payload: {
+  planId: string;
+  momoReference: string;
+  payerName: string;
+  payerNumber: string;
+  notes?: string;
+}): Promise<SubscriptionPaymentClaimDto> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/tenant/subscription/claims`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? "Failed to submit payment claim");
+  }
+  return response.json() as Promise<SubscriptionPaymentClaimDto>;
+}
+
+export async function getPlatformBillingSettings(): Promise<PlatformBillingSettingsDto> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/platform/billing/settings`, {
+    headers: authHeaders()
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? "Failed to load billing settings");
+  }
+  return response.json() as Promise<PlatformBillingSettingsDto>;
+}
+
+export async function updatePlatformBillingSettings(payload: {
+  momoNumber: string;
+  momoAccountName: string;
+  momoNetwork?: string;
+  reminderDaysBefore?: number;
+  graceDays?: number;
+}): Promise<PlatformBillingSettingsDto> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/platform/billing/settings`, {
+    method: "PUT",
+    headers: authHeaders(),
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? "Failed to save billing settings");
+  }
+  return response.json() as Promise<PlatformBillingSettingsDto>;
+}
+
+export async function listPlatformBillingPlans(): Promise<SubscriptionPlanDto[]> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/platform/billing/plans`, {
+    headers: authHeaders()
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? "Failed to list plans");
+  }
+  return response.json() as Promise<SubscriptionPlanDto[]>;
+}
+
+export async function listPlatformPendingBillingClaims(): Promise<SubscriptionPaymentClaimDto[]> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/platform/billing/claims`, {
+    headers: authHeaders()
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? "Failed to list payment claims");
+  }
+  return response.json() as Promise<SubscriptionPaymentClaimDto[]>;
+}
+
+export async function approvePlatformBillingClaim(claimId: string): Promise<SubscriptionPaymentClaimDto> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/platform/billing/claims/${claimId}/approve`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({})
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? "Failed to approve claim");
+  }
+  return response.json() as Promise<SubscriptionPaymentClaimDto>;
+}
+
+export async function rejectPlatformBillingClaim(
+  claimId: string,
+  reason: string
+): Promise<SubscriptionPaymentClaimDto> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/platform/billing/claims/${claimId}/reject`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ reason })
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? "Failed to reject claim");
+  }
+  return response.json() as Promise<SubscriptionPaymentClaimDto>;
+}
+
+export async function assignPlatformTenantPlan(
+  tenantId: string,
+  payload: { planId: string; periodStart?: string; activate?: boolean }
+): Promise<TenantSubscriptionSnapshotDto> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/platform/tenants/${tenantId}/billing/assign-plan`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? "Failed to assign plan");
+  }
+  return response.json() as Promise<TenantSubscriptionSnapshotDto>;
+}
+
 export async function updateTenantModules(
   tenantId: string,
   subscribedModules: TenantProductModule[]
@@ -3165,12 +3372,19 @@ export async function rejectCustomer(customerId: string, reason?: string): Promi
 
 export async function assignCustomerFieldAgent(
   customerId: string,
-  assignedFieldAgentId: string | null
+  assignedFieldAgentId: string | null,
+  options?: { routeId?: string | null }
 ): Promise<Customer> {
+  const body: { assignedFieldAgentId: string | null; routeId?: string | null } = {
+    assignedFieldAgentId
+  };
+  if (options && "routeId" in options) {
+    body.routeId = options.routeId ?? null;
+  }
   return fetchJson<Customer>(`${API_BASE_URL}/api/v1/customers/${customerId}/assignment`, {
     method: "PATCH",
     headers: authHeaders(),
-    body: JSON.stringify({ assignedFieldAgentId })
+    body: JSON.stringify(body)
   });
 }
 

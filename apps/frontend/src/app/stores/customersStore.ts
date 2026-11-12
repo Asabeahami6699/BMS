@@ -22,6 +22,7 @@ type CustomersState = {
   refreshSilent: () => Promise<void>;
   startLiveSync: () => void;
   stopLiveSync: () => void;
+  upsertCustomer: (customer: Customer) => void;
 };
 
 let fetchInFlight: Promise<void> | null = null;
@@ -33,7 +34,7 @@ function bootstrapSnapshotKey(customers: Customer[], branches: Branch[]): string
   const customerSig = customers
     .map(
       (c) =>
-        `${c.id}\t${c.status}\t${c.fullName}\t${c.phone}\t${c.accountNumber ?? ""}\t${c.accountBalance ?? ""}\t${c.withdrawableBalance ?? ""}\t${c.loanReserveAmount ?? ""}\t${c.loanCollateralLocked ?? ""}\t${c.loanQualificationBadge ?? ""}\t${c.assignedFieldAgentId ?? ""}\t${c.assignedFieldAgentName ?? ""}`
+        `${c.id}\t${c.status}\t${c.fullName}\t${c.phone}\t${c.accountNumber ?? ""}\t${c.accountBalance ?? ""}\t${c.withdrawableBalance ?? ""}\t${c.loanReserveAmount ?? ""}\t${c.loanCollateralLocked ?? ""}\t${c.loanQualificationBadge ?? ""}\t${c.assignedFieldAgentId ?? ""}\t${c.assignedFieldAgentName ?? ""}\t${c.routeId ?? ""}`
     )
     .join("\n");
   const branchSig = branches.map((b) => `${b.id}\t${b.status}\t${b.name}`).join("\n");
@@ -139,5 +140,18 @@ export const useCustomersStore = create<CustomersState>((set, get) => ({
     liveSync.stop();
     silentScheduler.clear();
     set({ liveSyncActive: false });
+  },
+
+  upsertCustomer: (customer) => {
+    lastSnapshotKey = "";
+    set((state) => {
+      const idx = state.customers.findIndex((c) => c.id === customer.id);
+      if (idx < 0) {
+        return { customers: [customer, ...state.customers] };
+      }
+      const next = state.customers.slice();
+      next[idx] = { ...state.customers[idx], ...customer };
+      return { customers: next };
+    });
   }
 }));

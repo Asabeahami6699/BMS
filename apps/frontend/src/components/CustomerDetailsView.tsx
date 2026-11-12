@@ -8,6 +8,8 @@ import {
   selectLedgerForCustomer,
   useCustomerLedgerStore
 } from "../app/stores/customerLedgerStore";
+import { useCustomersStore } from "../app/stores/customersStore";
+import { useRoutesStore } from "../app/stores/routesStore";
 import { downloadCustomerLedgerCsv } from "../lib/customerLedgerCsv";
 import { formatFieldAgent } from "../lib/formatFieldAgent";
 import { useAuth } from "../auth/AuthContext";
@@ -127,12 +129,33 @@ export function CustomerDetailsView({
   const [susuTransactionId, setSusuTransactionId] = useState<string | null>(null);
   const [ledgerVisibleCount, setLedgerVisibleCount] = useState(LEDGER_PAGE_SIZE);
 
+  const liveCustomer = useCustomersStore((s) =>
+    s.customers.find((c) => c.id === customerProp.id)
+  );
+  const routes = useRoutesStore((s) => s.routes);
   const detail = useCustomerLedgerStore((s) => selectCustomerDetail(s, customerProp.id));
-  // Merge so list bootstrap fields (DOB, occupation, etc.) stay visible while detail adds photos.
-  const customer = detail ? { ...customerProp, ...detail } : customerProp;
+  // Prefer store customer so Branch & servicing updates after agent/route transfers.
+  const customer = {
+    ...customerProp,
+    ...(liveCustomer ?? {}),
+    ...(detail ?? {})
+  };
+  const routeLabel = customer.routeId
+    ? (routes.find((r) => r.id === customer.routeId)?.name ?? "Assigned route")
+    : "—";
+  const liveAgentLabel =
+    agentLabel ??
+    customer.assignedFieldAgentName ??
+    formatFieldAgent(customer);
   const ledger = useCustomerLedgerStore((s) => selectLedgerForCustomer(s, customerProp.id));
   const ledgerLoading = useCustomerLedgerStore((s) => Boolean(s.loadingByCustomer[customerProp.id]));
   const ledgerError = useCustomerLedgerStore((s) => s.errorByCustomer[customerProp.id] ?? null);
+
+  useEffect(() => {
+    if (customerProp.routeId || liveCustomer?.routeId) {
+      useRoutesStore.getState().hydrate();
+    }
+  }, [customerProp.routeId, liveCustomer?.routeId]);
 
   useEffect(() => {
     void useCustomerLedgerStore.getState().ensureDetail(customerProp.id);
@@ -488,7 +511,7 @@ export function CustomerDetailsView({
             <div className="cif-metric" role="listitem">
               <span className="cif-metric__label">Field agent</span>
               <strong className="cif-metric__value cif-metric__value--truncate">
-                {agentLabel ?? formatFieldAgent(customer)}
+                {liveAgentLabel}
               </strong>
             </div>
           </div>
@@ -623,7 +646,8 @@ export function CustomerDetailsView({
             >
               <div className="cif-grid">
                 <InfoRow label="Home branch" value={branchLabel ?? "—"} fullWidth />
-                <InfoRow label="Assigned agent" value={agentLabel ?? formatFieldAgent(customer)} fullWidth />
+                <InfoRow label="Assigned agent" value={liveAgentLabel} fullWidth />
+                <InfoRow label="Collection route" value={routeLabel} fullWidth />
                 {customer.createdByFieldAgentName &&
                 customer.createdByFieldAgentName !== customer.assignedFieldAgentName ? (
                   <InfoRow label="Registered by" value={customer.createdByFieldAgentName} fullWidth />

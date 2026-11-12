@@ -209,7 +209,15 @@ export const assignCustomerFieldAgentSchema = z.object({
 
   /** Set to a field agent user id, or null to unassign from any agent. */
 
-  assignedFieldAgentId: z.string().min(1).nullable()
+  assignedFieldAgentId: z.string().min(1).nullable(),
+
+  /**
+   * Route membership for the customer.
+   * - omit: auto-sync (attach to the target agent's sole active route on the home branch, or clear)
+   * - null: clear route membership
+   * - uuid: set that route (must match home branch; agent should own it when assigning)
+   */
+  routeId: z.string().uuid().nullable().optional()
 
 });
 

@@ -16,6 +16,16 @@ import {
   listCustomers,
   resetCustomerAccount
 } from "../services/customerService.js";
+import {
+  approveSubscriptionPaymentClaim,
+  assignTenantSubscriptionPlan,
+  getPlatformBillingSettings,
+  getTenantSubscriptionSnapshot,
+  listPendingPaymentClaims,
+  listSubscriptionPlans,
+  rejectSubscriptionPaymentClaim,
+  updatePlatformBillingSettings
+} from "../services/subscriptionBillingService.js";
 import { requirePermission } from "../middleware/requirePermission.js";
 
 const subscriptionUpdateSchema = z.object({
@@ -159,6 +169,92 @@ platformRouter.delete(
       res.status(400).json({
         error: error instanceof Error ? error.message : "Failed to terminate company"
       });
+    }
+  }
+);
+
+platformRouter.get("/billing/settings", requirePermission("platform.tenants.read"), async (_req, res) => {
+  try {
+    res.json(await getPlatformBillingSettings());
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : "Failed to load billing settings" });
+  }
+});
+
+platformRouter.put("/billing/settings", requirePermission("platform.tenants.update"), async (req, res) => {
+  try {
+    res.json(await updatePlatformBillingSettings(req.body));
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : "Failed to save billing settings" });
+  }
+});
+
+platformRouter.get("/billing/plans", requirePermission("platform.tenants.read"), async (_req, res) => {
+  try {
+    res.json(await listSubscriptionPlans(false));
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : "Failed to list plans" });
+  }
+});
+
+platformRouter.get("/billing/claims", requirePermission("platform.tenants.read"), async (_req, res) => {
+  try {
+    res.json(await listPendingPaymentClaims());
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : "Failed to list claims" });
+  }
+});
+
+platformRouter.post(
+  "/billing/claims/:claimId/approve",
+  requirePermission("platform.tenants.update"),
+  async (req, res) => {
+    try {
+      const reviewedBy = req.userContext?.userId ?? "super_admin";
+      res.json(await approveSubscriptionPaymentClaim(String(req.params.claimId), reviewedBy));
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : "Failed to approve claim" });
+    }
+  }
+);
+
+platformRouter.post(
+  "/billing/claims/:claimId/reject",
+  requirePermission("platform.tenants.update"),
+  async (req, res) => {
+    try {
+      const reviewedBy = req.userContext?.userId ?? "super_admin";
+      res.json(await rejectSubscriptionPaymentClaim(String(req.params.claimId), reviewedBy, req.body));
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : "Failed to reject claim" });
+    }
+  }
+);
+
+platformRouter.get(
+  "/tenants/:tenantId/billing",
+  requirePermission("platform.tenants.read"),
+  async (req, res) => {
+    try {
+      res.json(await getTenantSubscriptionSnapshot(String(req.params.tenantId)));
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : "Failed to load tenant billing" });
+    }
+  }
+);
+
+platformRouter.post(
+  "/tenants/:tenantId/billing/assign-plan",
+  requirePermission("platform.tenants.update"),
+  async (req, res) => {
+    try {
+      res.json(
+        await assignTenantSubscriptionPlan(String(req.params.tenantId), req.body, {
+          reviewedBy: req.userContext?.userId
+        })
+      );
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : "Failed to assign plan" });
     }
   }
 );

@@ -12,7 +12,13 @@ export const tenantRecordSchema = z.object({
   subscribedModules: z.array(tenantProductModuleSchema),
   subscribedAddons: z.array(tenantAddonSchema).optional(),
   reportsAnalytics: z.boolean().optional(),
-  createdAt: z.string().optional()
+  createdAt: z.string().optional(),
+  planId: z.string().nullable().optional(),
+  periodStart: z.string().nullable().optional(),
+  periodEnd: z.string().nullable().optional(),
+  billingStatus: z
+    .enum(["none", "active", "due_soon", "grace", "suspended"])
+    .optional()
 });
 
 export type TenantRecord = z.infer<typeof tenantRecordSchema>;

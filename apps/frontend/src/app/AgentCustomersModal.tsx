@@ -3,6 +3,7 @@ import type { Customer, FieldAgentOption, FieldAgentRosterRow } from "./api";
 import { assignCustomerFieldAgent, listFieldAgents } from "./api";
 import { useAgentsStore } from "./stores/agentsStore";
 import { useCustomersStore } from "./stores/customersStore";
+import { useRoutesStore } from "./stores/routesStore";
 import { filterRowsBySearch } from "../components/AdminDataTable";
 import { Modal } from "../components/Modal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -42,20 +43,25 @@ export function AgentCustomersModal({ agent, open, onClose, onUpdated }: Props) 
   const { confirm, dialogProps } = useConfirmDialog();
   const allCustomers = useCustomersStore((s) => s.customers);
   const customersLoading = useCustomersStore((s) => s.loading);
+  const upsertCustomer = useCustomersStore((s) => s.upsertCustomer);
   const agentsRoster = useAgentsStore((s) => s.roster);
+  const routes = useRoutesStore((s) => s.routes);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [transferTo, setTransferTo] = useState<Record<string, string>>({});
+  const [transferRoute, setTransferRoute] = useState<Record<string, string>>({});
   const [agentsFallback, setAgentsFallback] = useState<FieldAgentOption[]>([]);
 
   useEffect(() => {
     if (!open || !agent) {
       setSearch("");
       setTransferTo({});
+      setTransferRoute({});
       return;
     }
     useCustomersStore.getState().hydrate();
     useAgentsStore.getState().hydrate();
+    useRoutesStore.getState().hydrate();
     if (agentsRoster.length === 0) {
       void listFieldAgents()
         .then((rows) => setAgentsFallback(rows))
@@ -98,20 +104,50 @@ export function AgentCustomersModal({ agent, open, onClose, onUpdated }: Props) 
     [customers, search]
   );
 
+  function routesForAgent(agentId: string, homeBranchId: string) {
+    return routes.filter(
+      (r) =>
+        r.status === "active" &&
+        r.assignedFieldAgentId === agentId &&
+        r.branchId === homeBranchId
+    );
+  }
+
   async function handleTransfer(customer: Customer) {
     const targetId = transferTo[customer.id];
     if (!targetId) {
       showToast("Choose an agent to transfer to", "error");
       return;
     }
+    const agentRoutes = routesForAgent(targetId, customer.homeBranchId);
+    const pickedRoute = transferRoute[customer.id];
+    let routeId: string | null | undefined;
+    if (pickedRoute) {
+      routeId = pickedRoute;
+    } else if (agentRoutes.length === 1) {
+      routeId = agentRoutes[0]!.id;
+    } else if (agentRoutes.length === 0) {
+      routeId = null;
+    } else {
+      showToast("Pick a destination route for this agent", "error");
+      return;
+    }
+
     setBusyId(customer.id);
     try {
-      await assignCustomerFieldAgent(customer.id, targetId);
+      const updated = await assignCustomerFieldAgent(customer.id, targetId, { routeId });
+      upsertCustomer(updated);
       const label =
         transferTargets.find((a) => a.userId === targetId)?.fullName ?? "agent";
       showToast(`${customer.fullName} transferred to ${label}`, "success");
       void useCustomersStore.getState().refreshSilent();
+      void useRoutesStore.getState().refreshSilent();
       setTransferTo((prev) => {
+        const next = { ...prev };
+        delete next[customer.id];
+        return next;
+      });
+      setTransferRoute((prev) => {
         const next = { ...prev };
         delete next[customer.id];
         return next;
@@ -136,9 +172,11 @@ export function AgentCustomersModal({ agent, open, onClose, onUpdated }: Props) 
     }
     setBusyId(customer.id);
     try {
-      await assignCustomerFieldAgent(customer.id, null);
+      const updated = await assignCustomerFieldAgent(customer.id, null, { routeId: null });
+      upsertCustomer(updated);
       showToast(`${customer.fullName} unassigned`, "success");
       void useCustomersStore.getState().refreshSilent();
+      void useRoutesStore.getState().refreshSilent();
       onUpdated();
     } catch (error) {
       showToast(toUserFacingError(error, "Unassign failed"), "error");
@@ -211,12 +249,18 @@ export function AgentCustomersModal({ agent, open, onClose, onUpdated }: Props) 
                       <select
                         value={transferTo[customer.id] ?? ""}
                         disabled={isBusy || transferTargets.length === 0}
-                        onChange={(e) =>
+                        onChange={(e) => {
+                          const agentId = e.target.value;
                           setTransferTo((prev) => ({
                             ...prev,
-                            [customer.id]: e.target.value
-                          }))
-                        }
+                            [customer.id]: agentId
+                          }));
+                          setTransferRoute((prev) => {
+                            const next = { ...prev };
+                            delete next[customer.id];
+                            return next;
+                          });
+                        }}
                       >
                         <option value="">Transfer to…</option>
                         {transferTargets.map((target) => (
@@ -226,6 +270,37 @@ export function AgentCustomersModal({ agent, open, onClose, onUpdated }: Props) 
                         ))}
                       </select>
                     </label>
+                    {(() => {
+                      const targetId = transferTo[customer.id];
+                      const destRoutes = targetId
+                        ? routesForAgent(targetId, customer.homeBranchId)
+                        : [];
+                      if (destRoutes.length <= 1) {
+                        return null;
+                      }
+                      return (
+                        <label className="field agent-customers-modal__transfer-field">
+                          <span className="sr-only">Destination route</span>
+                          <select
+                            value={transferRoute[customer.id] ?? ""}
+                            disabled={isBusy}
+                            onChange={(e) =>
+                              setTransferRoute((prev) => ({
+                                ...prev,
+                                [customer.id]: e.target.value
+                              }))
+                            }
+                          >
+                            <option value="">Pick route…</option>
+                            {destRoutes.map((r) => (
+                              <option key={r.id} value={r.id}>
+                                {r.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      );
+                    })()}
                     <button
                       type="button"
                       className="button secondary"

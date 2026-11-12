@@ -38,6 +38,7 @@ import { useTillFloatAdminStore } from "./stores/tillFloatAdminStore";
 import { useTellerTillDaybookStore } from "./stores/tellerTillDaybookStore";
 import { useWithdrawalsStore } from "./stores/withdrawalsStore";
 import { useUsersStore } from "./stores/usersStore";
+import { useSubscriptionBillingStore } from "./stores/subscriptionBillingStore";
 
 function appPath(pathname: string): string {
   if (pathname.startsWith("/platform")) {
@@ -173,6 +174,9 @@ function settingsWorkspaceLoading(path: string): boolean {
       s.messageLogLoading ||
       s.savingNotifications
     );
+  }
+  if (path === "settings/subscription") {
+    return useSubscriptionBillingStore.getState().loading || useSubscriptionBillingStore.getState().submitting;
   }
   return any(
     s.section.approvalWorkflow.loading,
@@ -447,6 +451,7 @@ const WATCHED_STORES: StoreLike[] = [
   useAuditLogsStore,
   usePlatformAdminStore,
   useSettingsWorkspaceStore,
+  useSubscriptionBillingStore,
   useUsersStore
 ];
 

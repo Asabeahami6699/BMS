@@ -44,6 +44,7 @@ import { loanQualificationRouter } from "./routes/loanQualification.routes.js";
 import { siteManualRouter } from "./routes/siteManual.routes.js";
 import { emailSettingsRouter } from "./routes/emailSettings.routes.js";
 import { notificationPlatformRouter } from "./routes/notificationPlatform.routes.js";
+import { subscriptionRouter } from "./routes/subscription.routes.js";
 
 export function createApp() {
   const app = express();
@@ -93,6 +94,7 @@ export function createApp() {
   app.use("/api/v1/tenant/notifications", notificationPlatformRouter);
   app.use("/api/v1/tenant/loan-qualification", adminMutationRateLimit, loanQualificationRouter);
   app.use("/api/v1/tenant/site-manual", siteManualRouter);
+  app.use("/api/v1/tenant/subscription", adminMutationRateLimit, subscriptionRouter);
 
   return app;
 }

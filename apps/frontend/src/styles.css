@@ -2372,6 +2372,207 @@ html {
   gap: 1rem;
 }
 
+.settings-subscription-workspace,
+.subscription-platform-workspace {
+  display: grid;
+  gap: 1.1rem;
+}
+
+.settings-subscription-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.subscription-banner {
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius-md, 10px);
+  border: 1px solid var(--border);
+  font-size: 0.95rem;
+}
+
+.subscription-banner--info {
+  background: color-mix(in srgb, var(--accent, #2563eb) 12%, transparent);
+  border-color: color-mix(in srgb, var(--accent, #2563eb) 35%, var(--border));
+}
+
+.subscription-banner--warn {
+  background: color-mix(in srgb, #d97706 14%, transparent);
+  border-color: color-mix(in srgb, #d97706 40%, var(--border));
+}
+
+.subscription-banner--danger {
+  background: color-mix(in srgb, #dc2626 14%, transparent);
+  border-color: color-mix(in srgb, #dc2626 40%, var(--border));
+}
+
+.subscription-empty {
+  margin-top: 1rem;
+  padding: 1rem 1.1rem;
+  border-radius: var(--radius-md, 10px);
+  border: 1px dashed var(--border);
+  background: color-mix(in srgb, var(--bg-muted, #f3f4f6) 55%, transparent);
+  display: grid;
+  gap: 0.35rem;
+}
+
+.subscription-momo-box {
+  margin: 1rem 0 0;
+  padding: 0.95rem 1rem;
+  border-radius: var(--radius-md, 10px);
+  border: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--primary, #0f766e) 6%, var(--bg-surface));
+}
+
+.subscription-momo-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.subscription-momo-grid > div {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.subscription-momo-number {
+  font-size: 1.2rem;
+  letter-spacing: 0.02em;
+  word-break: break-all;
+}
+
+.subscription-step-label {
+  margin: 0 0 0.65rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim, var(--text-muted));
+}
+
+.subscription-claim-form {
+  margin-top: 1.15rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-soft);
+}
+
+.subscription-plan-picker {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0.35rem 0 0.25rem;
+}
+
+.subscription-plan-option {
+  display: grid;
+  gap: 0.2rem;
+  text-align: left;
+  padding: 0.75rem 0.85rem;
+  border-radius: var(--radius-sm, 8px);
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.subscription-plan-option:hover {
+  border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
+}
+
+.subscription-plan-option.is-selected {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-soft);
+  background: color-mix(in srgb, var(--primary) 7%, var(--bg-surface));
+}
+
+.subscription-plan-option strong {
+  font-size: 1rem;
+}
+
+.subscription-plan-tier {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-dim, var(--text-muted));
+}
+
+.subscription-plan-price {
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.subscription-plan-setup {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.subscription-plan-bullets {
+  margin: 0.35rem 0 0;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 0.2rem;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  line-height: 1.35;
+  text-align: left;
+}
+
+.subscription-sms-note,
+.subscription-amount-breakdown {
+  margin: 0.35rem 0 0.75rem;
+  font-size: 0.82rem;
+}
+
+.subscription-claim-row {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.subscription-claim-actions {
+  margin-top: 1rem;
+}
+
+.subscription-pending-note {
+  margin-top: 1rem;
+  padding: 0.9rem 1rem;
+  border-radius: var(--radius-sm, 8px);
+  border: 1px solid color-mix(in srgb, #d97706 35%, var(--border));
+  background: color-mix(in srgb, #d97706 12%, transparent);
+  display: grid;
+  gap: 0.25rem;
+}
+
+@media (max-width: 720px) {
+  .subscription-momo-grid,
+  .subscription-claim-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.subscription-addon-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.subscription-addon-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.55rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.kpi-value--sm {
+  font-size: 1.15rem;
+  line-height: 1.25;
+}
+
 .settings-section-title {
   margin: 1rem 0 0.5rem;
   font-size: 1rem;
@@ -10323,6 +10524,90 @@ button.cif-ledger__row:hover {
 
 .agents-page__branch-filter {
   max-width: 320px;
+}
+
+.routes-workspace__tabs {
+  margin: 0.25rem 0 0.5rem;
+}
+
+.routes-workspace__panel {
+  padding: 1.15rem 1.25rem 1.35rem;
+  display: grid;
+  gap: 1rem;
+}
+
+.routes-workspace__panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.routes-workspace__panel-head h3 {
+  margin: 0 0 0.25rem;
+}
+
+.routes-workspace__panel-head p {
+  margin: 0;
+  max-width: 42rem;
+}
+
+.routes-workspace__picker,
+.routes-workspace__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  align-items: flex-end;
+}
+
+.routes-workspace__picker .field,
+.routes-workspace__filters .field {
+  min-width: 220px;
+  flex: 1;
+}
+
+.routes-workspace__search {
+  min-width: 240px;
+}
+
+.routes-transfer-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.65rem;
+}
+
+.routes-transfer-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  padding: 0.85rem 0.95rem;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--bg-input);
+}
+
+.routes-transfer-row__main {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.routes-transfer-row__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.routes-transfer-row__actions .field {
+  margin: 0;
+  min-width: 160px;
 }
 
 .bank-products-page__tabs {

@@ -10,13 +10,16 @@ import { useToast } from "../components/Toast";
 import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { useRoutesLiveSync } from "./hooks/useRoutesLiveSync";
 import { useBranchesStore } from "./stores/branchesStore";
+import { useCustomersStore } from "./stores/customersStore";
 import { useRoutesStore } from "./stores/routesStore";
 import { RouteAssignAgentModal } from "./RouteAssignAgentModal";
 import { RouteFormModal } from "./RouteFormModal";
 import { RouteMembersModal } from "./RouteMembersModal";
+import { RouteTransfersPanel } from "./RouteTransfersPanel";
 import { formatBranchLabel } from "./branchDisplay";
 
 type Props = { role: AppRole };
+type WorkspaceTab = "routes" | "create" | "assign" | "members" | "transfers";
 
 function branchLabel(route: FieldRoute): string {
   return formatBranchLabel(route.branchId, [], route.branchName, route.branchCode);
@@ -119,6 +122,58 @@ function RouteDetailModal({
   );
 }
 
+function RoutePickerPanel({
+  title,
+  description,
+  routes,
+  selectedId,
+  onSelect,
+  actionLabel,
+  onAction,
+  emptyHint
+}: {
+  title: string;
+  description: string;
+  routes: FieldRoute[];
+  selectedId: string;
+  onSelect: (id: string) => void;
+  actionLabel: string;
+  onAction: () => void;
+  emptyHint: string;
+}) {
+  return (
+    <section className="card routes-workspace__panel">
+      <header className="routes-workspace__panel-head">
+        <div>
+          <h3>{title}</h3>
+          <p className="muted">{description}</p>
+        </div>
+      </header>
+      {routes.length === 0 ? (
+        <p className="muted">{emptyHint}</p>
+      ) : (
+        <div className="routes-workspace__picker">
+          <label className="field">
+            <span>Route</span>
+            <select value={selectedId} onChange={(e) => onSelect(e.target.value)}>
+              <option value="">Select a route…</option>
+              {routes.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name} · {branchLabel(r)}
+                  {r.assignedFieldAgentName ? ` · ${r.assignedFieldAgentName}` : " · No agent"}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button type="button" className="button" disabled={!selectedId} onClick={onAction}>
+            {actionLabel}
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function RoutesPage({ role }: Props) {
   useRoutesLiveSync();
   const { showToast } = useToast();
@@ -136,6 +191,7 @@ export function RoutesPage({ role }: Props) {
   const refreshSilent = useRoutesStore((s) => s.refreshSilent);
   const removeRoute = useRoutesStore((s) => s.removeRoute);
 
+  const [tab, setTab] = useState<WorkspaceTab>("routes");
   const [search, setSearch] = useState("");
   const [branchFilter, setBranchFilter] = useState("");
   const [formOpen, setFormOpen] = useState(false);
@@ -144,6 +200,8 @@ export function RoutesPage({ role }: Props) {
   const [detailRoute, setDetailRoute] = useState<FieldRoute | null>(null);
   const [membersRoute, setMembersRoute] = useState<FieldRoute | null>(null);
   const [assignAgentRoute, setAssignAgentRoute] = useState<FieldRoute | null>(null);
+  const [assignPickId, setAssignPickId] = useState("");
+  const [membersPickId, setMembersPickId] = useState("");
 
   const initialLoad = loading && lastFetchedAt == null;
 
@@ -194,6 +252,11 @@ export function RoutesPage({ role }: Props) {
     }
   }
 
+  function afterMembershipChange() {
+    void refreshSilent();
+    void useCustomersStore.getState().refreshSilent();
+  }
+
   async function handleUnassignAgent(route: FieldRoute) {
     const agentLabel = route.assignedFieldAgentName ?? "the assigned agent";
     const ok = await confirm({
@@ -229,7 +292,14 @@ export function RoutesPage({ role }: Props) {
     }
     items.push(
       { label: "Edit", onClick: () => openEdit(row) },
-      { label: "Manage members", onClick: () => setMembersRoute(row) },
+      {
+        label: "Manage members",
+        onClick: () => {
+          setMembersRoute(row);
+          setTab("members");
+          setMembersPickId(row.id);
+        }
+      },
       { label: "Delete", onClick: () => void handleDelete(row), danger: true }
     );
     return items;
@@ -255,13 +325,22 @@ export function RoutesPage({ role }: Props) {
     }
   }
 
+  const tabs: Array<{ id: WorkspaceTab; label: string; manageOnly?: boolean }> = [
+    { id: "routes", label: "Routes" },
+    { id: "create", label: "Create", manageOnly: true },
+    { id: "assign", label: "Assign agent", manageOnly: true },
+    { id: "members", label: "Members", manageOnly: true },
+    { id: "transfers", label: "Transfers" }
+  ];
+
   return (
-    <div className="agents-page">
+    <div className="agents-page routes-workspace">
       <header className="agents-page__header">
         <div>
           <h2>Routes</h2>
           <p className="muted">
-            Collection areas by branch, assigned agent, and member customers.
+            Create routes, assign agents, manage members, and transfer customers — membership and
+            Branch &amp; servicing stay in sync.
             {error ? ` ${error}` : ""}
           </p>
         </div>
@@ -272,7 +351,14 @@ export function RoutesPage({ role }: Props) {
             </Link>
           ) : null}
           {canManage ? (
-            <button type="button" className="button" onClick={openCreate}>
+            <button
+              type="button"
+              className="button"
+              onClick={() => {
+                setTab("create");
+                openCreate();
+              }}
+            >
               Add route
             </button>
           ) : null}
@@ -305,91 +391,175 @@ export function RoutesPage({ role }: Props) {
         </article>
       </div>
 
-      {branches.length > 0 ? (
-        <label className="field agents-page__branch-filter">
-          <span>Filter by branch</span>
-          <select value={branchFilter} onChange={(e) => setBranchFilter(e.target.value)}>
-            <option value="">All branches</option>
-            {branches.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.name} ({b.code})
-              </option>
-            ))}
-          </select>
-        </label>
+      <nav className="bank-products-page__tabs routes-workspace__tabs" aria-label="Routes workspace">
+        {tabs
+          .filter((t) => !t.manageOnly || canManage)
+          .map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              className={`bank-products-page__tab${tab === t.id ? " is-active" : ""}`}
+              onClick={() => {
+                setTab(t.id);
+                if (t.id === "create" && canManage) {
+                  openCreate();
+                }
+              }}
+            >
+              {t.label}
+            </button>
+          ))}
+      </nav>
+
+      {tab === "routes" ? (
+        <>
+          {branches.length > 0 ? (
+            <label className="field agents-page__branch-filter">
+              <span>Filter by branch</span>
+              <select value={branchFilter} onChange={(e) => setBranchFilter(e.target.value)}>
+                <option value="">All branches</option>
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name} ({b.code})
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+
+          <section className="card agents-page__table-card">
+            <AdminDataTable
+              columns={[
+                {
+                  key: "name",
+                  label: "Route",
+                  render: (row) => (
+                    <div>
+                      <strong>{row.name}</strong>
+                      <small className="muted" style={{ display: "block" }}>
+                        {row.area}
+                      </small>
+                    </div>
+                  )
+                },
+                { key: "branch", label: "Branch", render: (row) => branchLabel(row) },
+                {
+                  key: "agent",
+                  label: "Agent",
+                  render: (row) => row.assignedFieldAgentName ?? <span className="muted">—</span>
+                },
+                {
+                  key: "members",
+                  label: "Members",
+                  render: (row) => (
+                    <button
+                      type="button"
+                      className="agents-table-customers-btn"
+                      onClick={() => {
+                        setMembersRoute(row);
+                        setMembersPickId(row.id);
+                        setTab("members");
+                      }}
+                    >
+                      <strong>{row.memberCount ?? 0}</strong>
+                    </button>
+                  )
+                },
+                {
+                  key: "status",
+                  label: "Status",
+                  render: (row) => (
+                    <span
+                      className={`status-pill status-pill--${row.status === "active" ? "active" : "inactive"}`}
+                    >
+                      {row.status}
+                    </span>
+                  )
+                }
+              ]}
+              rows={filtered}
+              rowKey={(row) => row.id}
+              search={search}
+              onSearchChange={setSearch}
+              searchPlaceholder="Search route, area, branch, agent…"
+              emptyMessage={initialLoad ? "Loading routes…" : "No routes yet. Add one to get started."}
+              actions={(row) => (
+                <div className="platform-actions-buttons">
+                  <button
+                    type="button"
+                    className="button secondary"
+                    onClick={() => setDetailRoute(row)}
+                  >
+                    Details
+                  </button>
+                  {canManage ? (
+                    <RowActionsMenu
+                      ariaLabel={`Actions for ${row.name}`}
+                      items={buildRouteActionItems(row)}
+                    />
+                  ) : null}
+                </div>
+              )}
+            />
+          </section>
+        </>
       ) : null}
 
-      <section className="card agents-page__table-card">
-        <AdminDataTable
-          columns={[
-            {
-              key: "name",
-              label: "Route",
-              render: (row) => (
-                <div>
-                  <strong>{row.name}</strong>
-                  <small className="muted" style={{ display: "block" }}>
-                    {row.area}
-                  </small>
-                </div>
-              )
-            },
-            { key: "branch", label: "Branch", render: (row) => branchLabel(row) },
-            {
-              key: "agent",
-              label: "Agent",
-              render: (row) => row.assignedFieldAgentName ?? <span className="muted">—</span>
-            },
-            {
-              key: "members",
-              label: "Members",
-              render: (row) => (
-                <button
-                  type="button"
-                  className="agents-table-customers-btn"
-                  onClick={() => setMembersRoute(row)}
-                >
-                  <strong>{row.memberCount ?? 0}</strong>
-                </button>
-              )
-            },
-            {
-              key: "status",
-              label: "Status",
-              render: (row) => (
-                <span
-                  className={`status-pill status-pill--${row.status === "active" ? "active" : "inactive"}`}
-                >
-                  {row.status}
-                </span>
-              )
-            }
-          ]}
-          rows={filtered}
-          rowKey={(row) => row.id}
-          search={search}
-          onSearchChange={setSearch}
-          searchPlaceholder="Search route, area, branch, agent…"
-          emptyMessage={initialLoad ? "Loading routes…" : "No routes yet. Add one to get started."}
-          actions={(row) => (
-            <div className="platform-actions-buttons">
-              <button
-                type="button"
-                className="button secondary"
-                onClick={() => setDetailRoute(row)}
-              >
-                Details
-              </button>
-              {canManage ? (
-                <RowActionsMenu
-                  ariaLabel={`Actions for ${row.name}`}
-                  items={buildRouteActionItems(row)}
-                />
-              ) : null}
+      {tab === "create" && canManage ? (
+        <section className="card routes-workspace__panel">
+          <header className="routes-workspace__panel-head">
+            <div>
+              <h3>Create route</h3>
+              <p className="muted">
+                Add a collection area for a branch, then assign a field agent in the next step.
+              </p>
             </div>
-          )}
+            <button type="button" className="button" onClick={openCreate}>
+              Open create form
+            </button>
+          </header>
+        </section>
+      ) : null}
+
+      {tab === "assign" && canManage ? (
+        <RoutePickerPanel
+          title="Assign agent"
+          description="Pick a route, then choose or reassign its field agent. Members sync to that agent."
+          routes={routes}
+          selectedId={assignPickId}
+          onSelect={setAssignPickId}
+          actionLabel="Assign / reassign"
+          onAction={() => {
+            const route = routes.find((r) => r.id === assignPickId);
+            if (route) {
+              openAssignAgent(route);
+            }
+          }}
+          emptyHint="Create a route first, then assign an agent."
         />
-      </section>
+      ) : null}
+
+      {tab === "members" && canManage ? (
+        <RoutePickerPanel
+          title="Route members"
+          description="Choose which customers belong on a route. Saving syncs the route agent when one is set."
+          routes={routes}
+          selectedId={membersPickId}
+          onSelect={setMembersPickId}
+          actionLabel="Manage members"
+          onAction={() => {
+            const route = routes.find((r) => r.id === membersPickId);
+            if (route) {
+              setMembersRoute(route);
+            }
+          }}
+          emptyHint="Create a route first, then add members."
+        />
+      ) : null}
+
+      {tab === "transfers" ? (
+        <RouteTransfersPanel canManage={canManage} onTransferred={afterMembershipChange} />
+      ) : null}
 
       {canManage ? (
         <RouteFormModal
@@ -398,7 +568,10 @@ export function RoutesPage({ role }: Props) {
           route={editingRoute}
           branches={branches}
           onClose={() => setFormOpen(false)}
-          onSaved={() => void refreshSilent()}
+          onSaved={() => {
+            void refreshSilent();
+            setTab("routes");
+          }}
         />
       ) : null}
 
@@ -408,6 +581,7 @@ export function RoutesPage({ role }: Props) {
         onClose={() => setAssignAgentRoute(null)}
         onSaved={() => {
           const routeId = assignAgentRoute?.id;
+          afterMembershipChange();
           void refreshSilent().then(() => {
             if (routeId) {
               syncDetailRouteFromStore(routeId);
@@ -424,7 +598,9 @@ export function RoutesPage({ role }: Props) {
         onManageMembers={() => {
           if (detailRoute) {
             setMembersRoute(detailRoute);
+            setMembersPickId(detailRoute.id);
             setDetailRoute(null);
+            setTab("members");
           }
         }}
         onAssignAgent={() => {
@@ -448,7 +624,7 @@ export function RoutesPage({ role }: Props) {
         route={membersRoute}
         open={membersRoute !== null}
         onClose={() => setMembersRoute(null)}
-        onUpdated={() => void refreshSilent()}
+        onUpdated={afterMembershipChange}
       />
 
       <ConfirmDialog {...dialogProps} />

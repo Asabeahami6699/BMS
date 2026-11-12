@@ -856,6 +856,7 @@ export function TenantApp() {
           element={
             <TenantSettingsRoute route="settings/subscription" role={role} permissions={permissions}>
               <SettingsSubscriptionPage
+                key="settings-subscription-v2"
                 subscribedModules={modules}
                 subscribedAddons={addons}
                 reportsAnalytics={reportsAnalytics}

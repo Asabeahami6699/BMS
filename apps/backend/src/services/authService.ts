@@ -478,7 +478,7 @@ export async function listPlatformTenants() {
 
   const { data: rows, error } = await supabase
     .from("tenants")
-    .select("id, name, subscription_status, created_at, subdomain")
+    .select("id, name, subscription_status, created_at, subdomain, plan_id, period_start, period_end, billing_status")
     .neq("id", "platform")
     .order("name");
   let tenantRows = rows as Array<{
@@ -487,8 +487,21 @@ export async function listPlatformTenants() {
     subscription_status: string;
     created_at?: string;
     subdomain?: string | null;
+    plan_id?: string | null;
+    period_start?: string | null;
+    period_end?: string | null;
+    billing_status?: string | null;
   }> | null;
   let listError = error;
+  if (listError && /plan_id|period_start|billing_status/i.test(listError.message)) {
+    const retry = await supabase
+      .from("tenants")
+      .select("id, name, subscription_status, created_at, subdomain")
+      .neq("id", "platform")
+      .order("name");
+    tenantRows = (retry.data ?? null) as typeof tenantRows;
+    listError = retry.error;
+  }
   if (listError && /subdomain/i.test(listError.message)) {
     const retry = await supabase
       .from("tenants")
@@ -514,6 +527,14 @@ export async function listPlatformTenants() {
         : isTenantSubdomain(row.id)
           ? row.id.toLowerCase()
           : undefined;
+    const billingStatus =
+      row.billing_status === "active" ||
+      row.billing_status === "due_soon" ||
+      row.billing_status === "grace" ||
+      row.billing_status === "suspended" ||
+      row.billing_status === "none"
+        ? row.billing_status
+        : undefined;
     const tenant: StoredTenant = {
       id: row.id,
       name: row.name,
@@ -521,7 +542,11 @@ export async function listPlatformTenants() {
       subscribedModules: modules,
       subscribedAddons: addons,
       subdomain,
-      createdAt: row.created_at ?? new Date().toISOString()
+      createdAt: row.created_at ?? new Date().toISOString(),
+      planId: row.plan_id ?? null,
+      periodStart: row.period_start ?? null,
+      periodEnd: row.period_end ?? null,
+      billingStatus
     };
     upsertTenantInStore(tenant);
     result.push(toTenantRecord(tenant));

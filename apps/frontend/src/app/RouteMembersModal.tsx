@@ -77,6 +77,7 @@ export function RouteMembersModal({ route, open, onClose, onUpdated }: Props) {
     try {
       await setRouteMembers(route.id, members);
       showToast(`${members.length} member(s) on route`, "success");
+      void useCustomersStore.getState().refreshSilent();
       onUpdated();
       onClose();
     } catch (error) {
