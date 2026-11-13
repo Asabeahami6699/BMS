@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { requirePermission } from "../middleware/requirePermission.js";
 import {
+  activateFreeSubscriptionPlan,
   getTenantSubscriptionSnapshot,
   listSubscriptionPlans,
   submitSubscriptionPaymentClaim
@@ -40,5 +41,18 @@ subscriptionRouter.post("/claims", requirePermission("users.update"), async (req
     res.status(201).json(claim);
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : "Failed to submit claim" });
+  }
+});
+
+subscriptionRouter.post("/activate-free", requirePermission("users.update"), async (req, res) => {
+  try {
+    const tenantId = req.userContext?.tenantId;
+    if (!tenantId) {
+      res.status(400).json({ error: "Tenant context required" });
+      return;
+    }
+    res.json(await activateFreeSubscriptionPlan(tenantId));
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : "Failed to start free plan" });
   }
 });

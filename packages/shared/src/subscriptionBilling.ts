@@ -26,6 +26,7 @@ export const subscriptionReminderKindSchema = z.enum([
 export type SubscriptionReminderKind = z.infer<typeof subscriptionReminderKindSchema>;
 
 export const subscriptionPackageTierSchema = z.enum([
+  "free",
   "entry",
   "growing",
   "multi_product",
@@ -36,6 +37,7 @@ export const subscriptionPackageTierSchema = z.enum([
 export type SubscriptionPackageTier = z.infer<typeof subscriptionPackageTierSchema>;
 
 export const SUBSCRIPTION_PACKAGE_TIER_LABELS: Record<SubscriptionPackageTier, string> = {
+  free: "Free plan",
   entry: "Entry package",
   growing: "Growing business",
   multi_product: "Multi-product package",
@@ -43,6 +45,8 @@ export const SUBSCRIPTION_PACKAGE_TIER_LABELS: Record<SubscriptionPackageTier, s
   enterprise: "Custom contract",
   standard: "Package"
 };
+
+export const FREE_SUBSCRIPTION_PLAN_ID = "pkg-free";
 
 export const subscriptionPlanSchema = z.object({
   id: z.string().min(1),
@@ -66,6 +70,19 @@ export const subscriptionPlanSchema = z.object({
   sortOrder: z.number().int()
 });
 export type SubscriptionPlan = z.infer<typeof subscriptionPlanSchema>;
+
+export function isFreeSubscriptionPlan(
+  plan: Pick<SubscriptionPlan, "priceGhs" | "setupFeeGhs" | "packageTier" | "id"> | null | undefined
+): boolean {
+  if (!plan) {
+    return false;
+  }
+  return (
+    plan.id === FREE_SUBSCRIPTION_PLAN_ID ||
+    plan.packageTier === "free" ||
+    (plan.priceGhs <= 0 && (plan.setupFeeGhs ?? 0) <= 0)
+  );
+}
 
 export const platformBillingSettingsSchema = z.object({
   momoNumber: z.string(),

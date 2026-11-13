@@ -5,6 +5,7 @@ import type {
   TenantSubscriptionSnapshotDto
 } from "../api";
 import {
+  activateMyFreeSubscription,
   getMySubscription,
   listTenantSubscriptionPlans,
   submitMySubscriptionPaymentClaim
@@ -32,6 +33,7 @@ type SubscriptionBillingState = {
     payerNumber: string;
     notes?: string;
   }) => Promise<SubscriptionPaymentClaimDto>;
+  activateFree: () => Promise<TenantSubscriptionSnapshotDto>;
 };
 
 let fetchInFlight: Promise<void> | null = null;
@@ -139,6 +141,20 @@ export const useSubscriptionBillingStore = create<SubscriptionBillingState>((set
       return claim;
     } catch (error) {
       const message = toUserFacingError(error, "Failed to submit payment claim");
+      set({ submitting: false, error: message });
+      throw new Error(message);
+    }
+  },
+
+  activateFree: async () => {
+    set({ submitting: true, error: null });
+    try {
+      const snapshot = await activateMyFreeSubscription();
+      set({ snapshot, submitting: false, lastFetchedAt: Date.now() });
+      await get().refreshSilent();
+      return snapshot;
+    } catch (error) {
+      const message = toUserFacingError(error, "Failed to start free plan");
       set({ submitting: false, error: message });
       throw new Error(message);
     }

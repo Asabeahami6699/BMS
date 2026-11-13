@@ -3079,7 +3079,7 @@ export type SubscriptionPlanDto = {
   interval: "month" | "year";
   priceGhs: number;
   setupFeeGhs: number;
-  packageTier: "entry" | "growing" | "multi_product" | "institution" | "enterprise" | "standard";
+  packageTier: "free" | "entry" | "growing" | "multi_product" | "institution" | "enterprise" | "standard";
   modules: TenantProductModule[];
   addons: TenantAddon[];
   featureBullets: string[];
@@ -3176,6 +3176,19 @@ export async function submitMySubscriptionPaymentClaim(payload: {
     throw new Error(body.error ?? "Failed to submit payment claim");
   }
   return response.json() as Promise<SubscriptionPaymentClaimDto>;
+}
+
+export async function activateMyFreeSubscription(): Promise<TenantSubscriptionSnapshotDto> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/tenant/subscription/activate-free`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({})
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? "Failed to start free plan");
+  }
+  return response.json() as Promise<TenantSubscriptionSnapshotDto>;
 }
 
 export async function getPlatformBillingSettings(): Promise<PlatformBillingSettingsDto> {

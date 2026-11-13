@@ -3,6 +3,8 @@ import {
   assignTenantSubscriptionPlanSchema,
   daysBetweenUtcDates,
   rejectSubscriptionPaymentClaimSchema,
+  FREE_SUBSCRIPTION_PLAN_ID,
+  isFreeSubscriptionPlan,
   subscriptionClaimAmountGhs,
   submitSubscriptionPaymentClaimSchema,
   todayUtcDate,
@@ -69,6 +71,33 @@ type SettingsRow = {
 };
 
 const memoryPlans: SubscriptionPlan[] = [
+  {
+    id: FREE_SUBSCRIPTION_PLAN_ID,
+    name: "BMS Free",
+    description:
+      "Free one-month access to core Susu site resources. No package or setup fee — you only pay SMS usage when you send messages. Capacity limits apply for the free month.",
+    interval: "month",
+    priceGhs: 0,
+    setupFeeGhs: 0,
+    packageTier: "free",
+    modules: ["susu_management"],
+    addons: ["email_notifications", "sms_notifications"],
+    featureBullets: [
+      "1 branch",
+      "10 staff / users",
+      "10 mobilizers (field agents)",
+      "1,000 active customers",
+      "Unlimited platform usage for one month within those limits",
+      "Pay only for SMS usage (Arkesel) — no monthly package fee"
+    ],
+    maxBranches: 1,
+    maxStaff: 10,
+    maxFieldAgents: 10,
+    maxActiveCustomers: 1000,
+    isCustom: false,
+    isActive: true,
+    sortOrder: 5
+  },
   {
     id: "pkg-susu-starter",
     name: "BMS Susu Starter",
@@ -230,6 +259,7 @@ const memoryPlans: SubscriptionPlan[] = [
 
 function parsePackageTier(value: string | null | undefined): SubscriptionPackageTier {
   if (
+    value === "free" ||
     value === "entry" ||
     value === "growing" ||
     value === "multi_product" ||
@@ -706,6 +736,28 @@ export async function assignTenantSubscriptionPlan(
   return getTenantSubscriptionSnapshot(tenantId);
 }
 
+/** Tenant self-serve: start the free one-month package (no MoMo claim). */
+export async function activateFreeSubscriptionPlan(tenantId: string): Promise<TenantSubscriptionSnapshot> {
+  const plan = await getSubscriptionPlan(FREE_SUBSCRIPTION_PLAN_ID);
+  if (!plan || !plan.isActive || !isFreeSubscriptionPlan(plan)) {
+    throw new Error("Free plan is not available");
+  }
+  const row = await loadTenantBillingRow(tenantId);
+  const today = todayUtcDate();
+  if (
+    row?.planId === FREE_SUBSCRIPTION_PLAN_ID &&
+    row.periodEnd &&
+    row.periodEnd >= today &&
+    row.subscriptionStatus === "active"
+  ) {
+    throw new Error("Your free month is already active");
+  }
+  return assignTenantSubscriptionPlan(tenantId, {
+    planId: FREE_SUBSCRIPTION_PLAN_ID,
+    activate: true
+  });
+}
+
 export async function submitSubscriptionPaymentClaim(
   tenantId: string,
   userId: string | undefined,
@@ -718,6 +770,9 @@ export async function submitSubscriptionPaymentClaim(
   const plan = await getSubscriptionPlan(parsed.data.planId);
   if (!plan || !plan.isActive) {
     throw new Error("Select a valid subscription plan");
+  }
+  if (isFreeSubscriptionPlan(plan)) {
+    throw new Error("Free plan does not need MoMo payment. Use Start free month instead.");
   }
   const settings = await getPlatformBillingSettings();
   if (!settings.momoNumber) {

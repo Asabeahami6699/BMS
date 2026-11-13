@@ -4,6 +4,7 @@ import {
   MODULE_LABELS,
   SUBSCRIPTION_PACKAGE_TIER_LABELS,
   TENANT_BILLING_STATUS_LABELS,
+  isFreeSubscriptionPlan,
   subscriptionClaimAmountGhs,
   type TenantAddon,
   type TenantProductModule
@@ -35,6 +36,7 @@ export function SettingsSubscriptionPage({
   const error = useSubscriptionBillingStore((s) => s.error);
   const hydrate = useSubscriptionBillingStore((s) => s.hydrate);
   const submitClaim = useSubscriptionBillingStore((s) => s.submitClaim);
+  const activateFree = useSubscriptionBillingStore((s) => s.activateFree);
 
   const [planId, setPlanId] = useState("");
   const [momoReference, setMomoReference] = useState("");
@@ -78,12 +80,26 @@ export function SettingsSubscriptionPage({
   const includeSetupFee =
     !snapshot?.periodStart ||
     !(snapshot?.claims ?? []).some((claim) => claim.status === "approved");
+  const selectedIsFree = isFreeSubscriptionPlan(selectedPlan);
   const payableAmount = selectedPlan
     ? subscriptionClaimAmountGhs(selectedPlan, { includeSetupFee })
     : null;
 
+  async function handleStartFreeMonth() {
+    try {
+      await activateFree();
+      showToast("Free month started — you only pay SMS usage", "success");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Could not start free plan", "error");
+    }
+  }
+
   async function handleSubmitClaim(e: React.FormEvent) {
     e.preventDefault();
+    if (selectedIsFree) {
+      await handleStartFreeMonth();
+      return;
+    }
     if (!momoReady) {
       showToast("MoMo pay-to details are not configured yet", "error");
       return;
@@ -225,13 +241,29 @@ export function SettingsSubscriptionPage({
             approval.
           </p>
 
-          {!momoReady ? (
+          {!momoReady && !selectedIsFree ? (
             <div className="subscription-empty" role="status">
               <strong>MoMo pay-to is not set up yet</strong>
               <p className="muted">
                 Ask platform support to save the MoMo number under Platform → Subscription management.
-                You can submit a payment claim after that.
+                You can still start the free plan below, or submit a paid claim after MoMo is configured.
               </p>
+              {plans.some((plan) => isFreeSubscriptionPlan(plan)) ? (
+                <div className="subscription-claim-actions">
+                  <button
+                    type="button"
+                    className="button primary"
+                    disabled={submitting}
+                    onClick={() => {
+                      const free = plans.find((plan) => isFreeSubscriptionPlan(plan));
+                      if (free) setPlanId(free.id);
+                      void handleStartFreeMonth();
+                    }}
+                  >
+                    {submitting ? "Starting…" : "Start free month"}
+                  </button>
+                </div>
+              ) : null}
             </div>
           ) : pendingClaim ? (
             <div className="subscription-pending-note" role="status">
@@ -272,12 +304,14 @@ export function SettingsSubscriptionPage({
                           <span className="subscription-plan-tier">{tierLabel}</span>
                           <strong>{plan.name}</strong>
                           <span className="subscription-plan-price">
-                            {plan.isCustom ? "from " : ""}
-                            {formatMoney(plan.priceGhs)} / {plan.interval}
+                            {isFreeSubscriptionPlan(plan)
+                              ? "Free for 1 month"
+                              : `${plan.isCustom ? "from " : ""}${formatMoney(plan.priceGhs)} / ${plan.interval}`}
                           </span>
                           <span className="subscription-plan-setup">
-                            Setup fee: {plan.isCustom ? "from " : ""}
-                            {formatMoney(plan.setupFeeGhs ?? 0)}
+                            {isFreeSubscriptionPlan(plan)
+                              ? "No setup fee · SMS usage paid separately"
+                              : `Setup fee: ${plan.isCustom ? "from " : ""}${formatMoney(plan.setupFeeGhs ?? 0)}`}
                           </span>
                           {bullets.length > 0 ? (
                             <ul className="subscription-plan-bullets">
@@ -291,70 +325,93 @@ export function SettingsSubscriptionPage({
                     })}
                 </div>
 
-                <div className="subscription-momo-box">
-                  <p className="subscription-step-label">2. Send MoMo</p>
-                  <div className="subscription-momo-grid">
-                    <div>
-                      <span className="muted">Pay to</span>
-                      <strong>{pay?.momoAccountName || "Platform MoMo"}</strong>
-                    </div>
-                    <div>
-                      <span className="muted">Number</span>
-                      <strong className="subscription-momo-number">{pay?.momoNumber}</strong>
-                    </div>
-                    <div>
-                      <span className="muted">Network</span>
-                      <strong>{pay?.momoNetwork || "MTN"}</strong>
-                    </div>
-                    <div>
-                      <span className="muted">Pay now</span>
-                      <strong>{payableAmount != null ? formatMoney(payableAmount) : "—"}</strong>
+                {selectedIsFree ? (
+                  <div className="subscription-momo-box">
+                    <p className="subscription-step-label">2. Start free month</p>
+                    <p className="muted subscription-amount-breakdown">
+                      No MoMo package payment. You get 1 branch, 10 users, 10 mobilizers, and 1,000
+                      active customers with unlimited platform use for one month. SMS is billed only
+                      when you send messages.
+                    </p>
+                    <div className="subscription-claim-actions">
+                      <button
+                        type="button"
+                        className="button primary"
+                        disabled={submitting}
+                        onClick={() => void handleStartFreeMonth()}
+                      >
+                        {submitting ? "Starting…" : "Start free month"}
+                      </button>
                     </div>
                   </div>
-                  {selectedPlan ? (
-                    <p className="muted subscription-amount-breakdown">
-                      {includeSetupFee
-                        ? `First enrollment: ${formatMoney(selectedPlan.priceGhs)} package + ${formatMoney(selectedPlan.setupFeeGhs ?? 0)} setup`
-                        : `Renewal: ${formatMoney(selectedPlan.priceGhs)} monthly package only`}
-                    </p>
-                  ) : null}
-                </div>
+                ) : (
+                  <>
+                    <div className="subscription-momo-box">
+                      <p className="subscription-step-label">2. Send MoMo</p>
+                      <div className="subscription-momo-grid">
+                        <div>
+                          <span className="muted">Pay to</span>
+                          <strong>{pay?.momoAccountName || "Platform MoMo"}</strong>
+                        </div>
+                        <div>
+                          <span className="muted">Number</span>
+                          <strong className="subscription-momo-number">{pay?.momoNumber}</strong>
+                        </div>
+                        <div>
+                          <span className="muted">Network</span>
+                          <strong>{pay?.momoNetwork || "MTN"}</strong>
+                        </div>
+                        <div>
+                          <span className="muted">Pay now</span>
+                          <strong>{payableAmount != null ? formatMoney(payableAmount) : "—"}</strong>
+                        </div>
+                      </div>
+                      {selectedPlan ? (
+                        <p className="muted subscription-amount-breakdown">
+                          {includeSetupFee
+                            ? `First enrollment: ${formatMoney(selectedPlan.priceGhs)} package + ${formatMoney(selectedPlan.setupFeeGhs ?? 0)} setup`
+                            : `Renewal: ${formatMoney(selectedPlan.priceGhs)} monthly package only`}
+                        </p>
+                      ) : null}
+                    </div>
 
-                <p className="subscription-step-label">3. Confirm payment</p>
+                    <p className="subscription-step-label">3. Confirm payment</p>
 
-                <label className="field">
-                  <span>MoMo transaction ID / reference</span>
-                  <input
-                    value={momoReference}
-                    onChange={(e) => setMomoReference(e.target.value)}
-                    placeholder="e.g. 1234567890"
-                    required
-                  />
-                </label>
-                <div className="subscription-claim-row">
-                  <label className="field">
-                    <span>Payer name</span>
-                    <input value={payerName} onChange={(e) => setPayerName(e.target.value)} required />
-                  </label>
-                  <label className="field">
-                    <span>MoMo number used</span>
-                    <input
-                      value={payerNumber}
-                      onChange={(e) => setPayerNumber(e.target.value)}
-                      placeholder="0244…"
-                      required
-                    />
-                  </label>
-                </div>
-                <label className="field">
-                  <span>Notes (optional)</span>
-                  <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
-                </label>
-                <div className="subscription-claim-actions">
-                  <button type="submit" className="button primary" disabled={submitting || !planId}>
-                    {submitting ? "Submitting…" : "Submit payment claim"}
-                  </button>
-                </div>
+                    <label className="field">
+                      <span>MoMo transaction ID / reference</span>
+                      <input
+                        value={momoReference}
+                        onChange={(e) => setMomoReference(e.target.value)}
+                        placeholder="e.g. 1234567890"
+                        required
+                      />
+                    </label>
+                    <div className="subscription-claim-row">
+                      <label className="field">
+                        <span>Payer name</span>
+                        <input value={payerName} onChange={(e) => setPayerName(e.target.value)} required />
+                      </label>
+                      <label className="field">
+                        <span>MoMo number used</span>
+                        <input
+                          value={payerNumber}
+                          onChange={(e) => setPayerNumber(e.target.value)}
+                          placeholder="0244…"
+                          required
+                        />
+                      </label>
+                    </div>
+                    <label className="field">
+                      <span>Notes (optional)</span>
+                      <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
+                    </label>
+                    <div className="subscription-claim-actions">
+                      <button type="submit" className="button primary" disabled={submitting || !planId}>
+                        {submitting ? "Submitting…" : "Submit payment claim"}
+                      </button>
+                    </div>
+                  </>
+                )}
               </form>
             </>
           )}
