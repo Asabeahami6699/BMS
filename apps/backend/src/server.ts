@@ -3,6 +3,7 @@ import { getSuperAdminCredentials, hasSupabaseConfig } from "./config/env.js";
 import { startCustomerInactivityJob } from "./services/customerInactivityJob.js";
 import { startLoanAutoDebitJob } from "./services/loanAutoDebitJob.js";
 import { startLoanQualificationJob } from "./services/loanQualificationService.js";
+import { startSmsMonthlyChargeJob } from "./services/smsMonthlyChargeJob.js";
 import { startSubscriptionBillingJob } from "./services/subscriptionBillingJob.js";
 import { bootstrapSupabaseSeed } from "./services/supabaseBootstrap.js";
 
@@ -26,6 +27,7 @@ async function main() {
   startLoanAutoDebitJob();
   startLoanQualificationJob();
   startSubscriptionBillingJob();
+  startSmsMonthlyChargeJob();
 
   const server = app.listen(port, () => {
     console.log(`API running on http://localhost:${port}`);

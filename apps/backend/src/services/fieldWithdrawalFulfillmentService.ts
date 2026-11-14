@@ -11,6 +11,7 @@ export type FieldWithdrawalFulfillmentLine = {
   amount: number;
   fulfilledAt: string;
   status: string;
+  agentDeliveredAt?: string;
 };
 
 export type FieldWithdrawalFulfillmentRow = {
@@ -21,6 +22,7 @@ export type FieldWithdrawalFulfillmentRow = {
   totalRequested: number;
   totalApproved: number;
   totalFulfilled: number;
+  totalDelivered: number;
   customerCount: number;
   lines: FieldWithdrawalFulfillmentLine[];
 };
@@ -108,6 +110,7 @@ export async function listFieldWithdrawalFulfillment(
     requested_at: string;
     approved_at: string | null;
     paid_at: string | null;
+    agent_delivered_at: string | null;
   };
 
   let disclosures: DisclosureRow[] = [];
@@ -116,7 +119,7 @@ export async function listFieldWithdrawalFulfillment(
     let query = supabase
       .from("customer_balance_disclosures")
       .select(
-        "id, customer_id, field_agent_id, status, withdrawal_amount, requested_at, approved_at, paid_at"
+        "id, customer_id, field_agent_id, status, withdrawal_amount, requested_at, approved_at, paid_at, agent_delivered_at"
       )
       .eq("tenant_id", tenantId)
       .eq("request_type", "withdrawal")
@@ -177,6 +180,7 @@ export async function listFieldWithdrawalFulfillment(
       totalRequested: 0,
       totalApproved: 0,
       totalFulfilled: 0,
+      totalDelivered: 0,
       customerCount: 0,
       lines: []
     };
@@ -186,13 +190,17 @@ export async function listFieldWithdrawalFulfillment(
     if (FULFILLED_STATUSES.has(String(row.status))) {
       existing.totalApproved += amount;
     }
+    if (row.agent_delivered_at) {
+      existing.totalDelivered += amount;
+    }
 
     const line: FieldWithdrawalFulfillmentLine = {
       customerId: String(row.customer_id),
       disclosureId: String(row.id),
       amount,
       fulfilledAt: String(row.paid_at ?? row.approved_at ?? row.requested_at),
-      status: String(row.status)
+      status: row.agent_delivered_at ? "delivered" : String(row.status),
+      agentDeliveredAt: row.agent_delivered_at ? String(row.agent_delivered_at) : undefined
     };
     line.customerName = await customerName(line.customerId);
     existing.lines.push(line);
@@ -234,6 +242,7 @@ export async function listFieldWithdrawalFulfillment(
         totalRequested: 0,
         totalApproved: 0,
         totalFulfilled: 0,
+        totalDelivered: 0,
         customerCount: 0,
         lines: []
       };

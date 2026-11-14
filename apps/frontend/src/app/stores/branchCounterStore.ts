@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { TenantBankProduct } from "@bms/shared";
 import type {
+  BalanceDisclosure,
   Branch,
   BranchCounterStatement,
   BranchFloatSession,
@@ -16,7 +17,8 @@ import {
   getCustomerLedger,
   getRuntimeBranchId,
   getTenantId,
-  setRuntimeBranchId
+  setRuntimeBranchId,
+  paySusuFieldWithdrawal
 } from "../api";
 import { toUserFacingError } from "../../lib/networkError";
 import {
@@ -51,6 +53,7 @@ type BranchCounterState = {
   floatSession: BranchFloatSession | null;
   floatSummary: BranchFloatSummary;
   pendingFloatRequests: BranchFloatSession[];
+  pendingFieldPayouts: BalanceDisclosure[];
   statementBranchId: string;
   statementDate: string;
   transactionBranchId: string;
@@ -62,6 +65,7 @@ type BranchCounterState = {
   statementLoading: boolean;
   ledgerLoading: boolean;
   posting: boolean;
+  payingPayoutId: string | null;
   error: string | null;
   sessionExpired: boolean;
   lastFetchedAt: number | null;
@@ -79,6 +83,7 @@ type BranchCounterState = {
   selectCustomer: (customerId: string) => void;
   loadLedger: (customerId: string, options?: { silent?: boolean; force?: boolean }) => Promise<void>;
   postTransaction: (payload: PostPayload) => Promise<Transaction>;
+  payFieldPayout: (disclosureId: string) => Promise<void>;
   initBranchScope: (isHeadOfficeRole: boolean) => void;
 };
 
@@ -149,6 +154,7 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
   floatSession: null,
   floatSummary: null,
   pendingFloatRequests: [],
+  pendingFieldPayouts: [],
   statementBranchId: getRuntimeBranchId(),
   statementDate: todayIso(),
   transactionBranchId: getRuntimeBranchId(),
@@ -160,6 +166,7 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
   statementLoading: false,
   ledgerLoading: false,
   posting: false,
+  payingPayoutId: null,
   error: null,
   sessionExpired: false,
   lastFetchedAt: null,
@@ -228,6 +235,7 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
           floatSession: data.floatSession,
           floatSummary: data.floatSummary,
           pendingFloatRequests: data.pendingFloatRequests,
+          pendingFieldPayouts: data.pendingFieldPayouts ?? [],
           ...branchPatch,
           lastFetchedAt: now,
           sessionExpired: false,
@@ -294,6 +302,7 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
             floatSession: data.floatSession,
             floatSummary: data.floatSummary,
             pendingFloatRequests: data.pendingFloatRequests,
+            pendingFieldPayouts: data.pendingFieldPayouts ?? [],
             ...branchPatch,
             lastFetchedAt: now,
             sessionExpired: false,
@@ -311,6 +320,7 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
             floatSession: data.floatSession,
             floatSummary: data.floatSummary,
             pendingFloatRequests: data.pendingFloatRequests,
+            pendingFieldPayouts: data.pendingFieldPayouts ?? [],
             lastFetchedAt: Date.now(),
             sessionExpired: false,
             error: null
@@ -339,6 +349,7 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
         "customers",
         "branch_float_sessions",
         "branch_float_movements",
+        "customer_balance_disclosures",
         "agent_notifications"
       ],
       // Float approvals must show on the till immediately — short debounce.
@@ -453,6 +464,7 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
             floatSession: data.floatSession,
             floatSummary: data.floatSummary,
             pendingFloatRequests: data.pendingFloatRequests,
+            pendingFieldPayouts: data.pendingFieldPayouts ?? [],
             lastFetchedAt: Date.now()
           });
         } catch {
@@ -468,6 +480,24 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
     })();
     postInFlight = flight;
     return flight.promise;
+  },
+
+  payFieldPayout: async (disclosureId) => {
+    set({ payingPayoutId: disclosureId, error: null });
+    try {
+      const pending = get().pendingFieldPayouts.find((row) => row.id === disclosureId);
+      const customerId = pending?.customerId;
+      await paySusuFieldWithdrawal(disclosureId);
+      await get().refreshSilent();
+      if (customerId) {
+        await get().loadLedger(customerId, { silent: true, force: true });
+      }
+    } catch (error) {
+      set({ error: toUserFacingError(error, "Pay now failed") });
+      throw error;
+    } finally {
+      set({ payingPayoutId: null });
+    }
   }
 }));
 

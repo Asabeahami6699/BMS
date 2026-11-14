@@ -1,5 +1,6 @@
 import { formatAccountAmount } from "@bms/shared";
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { getFieldAgentDashboard, type FieldAgentDashboard } from "../app/api";
 import { isOfflineOrNetworkError } from "../lib/useNetworkStatus";
@@ -175,6 +176,16 @@ export function AgentProfileDrawer({ open, onClose, onLogout }: Props) {
               </details>
             </>
           ) : null}
+
+          <div className="agent-drawer-links">
+            <Link
+              to="/app/agent/withdrawals"
+              className="agent-drawer-link"
+              onClick={onClose}
+            >
+              Withdrawal activity
+            </Link>
+          </div>
 
           <div className="agent-drawer-signout">
             <button

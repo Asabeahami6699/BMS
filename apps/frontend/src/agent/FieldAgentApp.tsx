@@ -16,9 +16,11 @@ import { AgentCallOverPage } from "./pages/AgentCallOverPage";
 import { AgentCollectPage } from "./pages/AgentCollectPage";
 import { AgentCustomersPage } from "./pages/AgentCustomersPage";
 import { AgentHomePage } from "./pages/AgentHomePage";
+import { AgentWithdrawalsPage } from "./pages/AgentWithdrawalsPage";
 import { useNotificationsStore } from "../app/stores/notificationsStore";
 import { useAgentBalanceStore } from "./stores/agentBalanceStore";
 import { useAgentCustomerStore } from "./stores/agentCustomerStore";
+import { useAgentWithdrawalActivityStore } from "./stores/agentWithdrawalActivityStore";
 
 export function FieldAgentApp() {
   const { user, logout } = useAuth();
@@ -79,6 +81,7 @@ export function FieldAgentApp() {
         .catch(() => undefined);
       void useAgentCollectionStore.getState().refreshToday();
       void useAgentBalanceStore.getState().refreshSilent();
+      void useAgentWithdrawalActivityStore.getState().refreshSilent();
     }
   }, [online]);
 
@@ -138,6 +141,7 @@ export function FieldAgentApp() {
         />
         <Route path="callover" element={<AgentCallOverPage />} />
         <Route path="alerts" element={<AgentAlertsPage />} />
+        <Route path="withdrawals" element={<AgentWithdrawalsPage />} />
         <Route path="*" element={<Navigate to="home" replace />} />
       </Routes>
     </FieldAgentShell>

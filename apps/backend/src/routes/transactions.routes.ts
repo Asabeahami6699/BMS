@@ -1,7 +1,11 @@
 import { createTransactionInputSchema } from "@bms/shared";
-import { Router } from "express";
+import { Router, type Request } from "express";
 import { requireIdempotencyKey } from "../middleware/idempotency.js";
-import { PERMISSION_DENIED_MESSAGE, requirePermission } from "../middleware/requirePermission.js";
+import {
+  PERMISSION_DENIED_MESSAGE,
+  requireAnyPermission,
+  requirePermission
+} from "../middleware/requirePermission.js";
 import { requireTransactionStepUp } from "../middleware/requireTransactionStepUp.js";
 import { validateBody } from "../middleware/validateBody.js";
 import { resolveBranchId } from "../services/branchService.js";
@@ -11,7 +15,12 @@ import {
   listBranchCounterStatement,
   summarizeBranchCounterStatement
 } from "../services/branchCounterStatementService.js";
-import { listTransactions, createTransaction } from "../services/transactionService.js";
+import {
+  listTransactions,
+  createTransaction,
+  type TransactionRequestContext
+} from "../services/transactionService.js";
+import { tellerPayWithdrawal } from "../services/agencyBankingService.js";
 import { getSusuCollectionDetail, listSusuReversals, reverseSusuCollection } from "../services/susuReversalService.js";
 import {
   allocateBranchFloat,
@@ -34,6 +43,45 @@ import {
 } from "../services/tellerTillCashVarianceService.js";
 
 export const transactionsRouter = Router();
+
+function toTxContext(context: NonNullable<Request["userContext"]>): TransactionRequestContext {
+  return {
+    userId: context.userId,
+    tenantId: context.tenantId,
+    role: context.role,
+    scopeType: context.scopeType,
+    branchId: context.branchId,
+    permissions: context.permissions
+  };
+}
+
+/**
+ * Susu Branch counter Pay now — works without the Banking product module.
+ * Debits customer ledger and till cash for coordinator-approved field withdrawals.
+ */
+transactionsRouter.post(
+  "/field-withdrawals/:disclosureId/pay-cash",
+  requireAnyPermission("agency.withdrawals.pay", "transactions.create.withdrawal"),
+  requireTransactionStepUp,
+  async (req, res) => {
+    const context = req.userContext;
+    if (!context) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    const disclosureId = Array.isArray(req.params.disclosureId)
+      ? req.params.disclosureId[0]
+      : req.params.disclosureId;
+    try {
+      const result = await tellerPayWithdrawal(toTxContext(context), disclosureId);
+      res.json(result);
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Cash payout failed"
+      });
+    }
+  }
+);
 
 transactionsRouter.get("/branch-counter-bootstrap", requirePermission("transactions.read"), async (req, res) => {
   const context = req.userContext;

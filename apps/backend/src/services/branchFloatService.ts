@@ -35,6 +35,8 @@ export type BranchFloatSession = {
   variance: number | null;
   totalDeposits: number;
   totalWithdrawals: number;
+  /** Subset of totalWithdrawals: field-agent Pay now payouts (same drawer). */
+  totalFieldWithdrawals: number;
   totalDailySusu: number;
   transactionCount: number;
   requestedAt: string;
@@ -121,6 +123,7 @@ function rowToSession(row: Record<string, unknown>): BranchFloatSession {
     variance: row.variance != null ? Number(row.variance) : null,
     totalDeposits: Number(row.total_deposits ?? 0),
     totalWithdrawals: Number(row.total_withdrawals ?? 0),
+    totalFieldWithdrawals: Number(row.total_field_withdrawals ?? 0),
     totalDailySusu: Number(row.total_daily_susu ?? 0),
     transactionCount: Number(row.transaction_count ?? 0),
     requestedAt: String(row.requested_at),
@@ -160,6 +163,7 @@ function sessionToRow(session: BranchFloatSession): Record<string, unknown> {
     variance: session.variance,
     total_deposits: session.totalDeposits,
     total_withdrawals: session.totalWithdrawals,
+    total_field_withdrawals: session.totalFieldWithdrawals,
     total_daily_susu: session.totalDailySusu,
     transaction_count: session.transactionCount,
     requested_at: session.requestedAt,
@@ -346,6 +350,7 @@ export async function requestBranchFloat(
     variance: null,
     totalDeposits: 0,
     totalWithdrawals: 0,
+    totalFieldWithdrawals: 0,
     totalDailySusu: 0,
     transactionCount: 0,
     requestedAt: new Date().toISOString(),
@@ -555,6 +560,7 @@ export async function pushBranchFloat(
       variance: null,
       totalDeposits: 0,
       totalWithdrawals: 0,
+      totalFieldWithdrawals: 0,
       totalDailySusu: 0,
       transactionCount: 0,
       requestedAt: new Date().toISOString(),
@@ -793,6 +799,19 @@ export async function assertOpenFloatForTransaction(
   return session;
 }
 
+/** Field-agent Pay now / agency teller payout — still till cash, shown separately from walk-ins. */
+export function isFieldAgentTillPayout(transaction: Transaction): boolean {
+  if (transaction.type !== "withdrawal") {
+    return false;
+  }
+  const notes = (transaction.notes ?? "").toLowerCase();
+  return (
+    notes.includes("teller cash payout") ||
+    notes.includes("agency withdrawal") ||
+    notes.includes("teller payout")
+  );
+}
+
 export async function applyTransactionToFloat(
   context: ActorContext,
   transaction: Transaction
@@ -822,6 +841,9 @@ export async function applyTransactionToFloat(
 
   if (transaction.type === "withdrawal") {
     session.totalWithdrawals += transaction.amount;
+    if (isFieldAgentTillPayout(transaction)) {
+      session.totalFieldWithdrawals += transaction.amount;
+    }
   } else if (transaction.type === "daily_susu") {
     session.totalDailySusu += transaction.amount;
   } else if (transaction.type === "deposit") {
@@ -857,6 +879,12 @@ export async function reverseTransactionFromFloat(
 
   if (transaction.type === "withdrawal") {
     session.totalWithdrawals = Math.max(0, session.totalWithdrawals - transaction.amount);
+    if (isFieldAgentTillPayout(transaction)) {
+      session.totalFieldWithdrawals = Math.max(
+        0,
+        session.totalFieldWithdrawals - transaction.amount
+      );
+    }
   } else if (transaction.type === "daily_susu") {
     session.totalDailySusu = Math.max(0, session.totalDailySusu - transaction.amount);
   } else if (transaction.type === "deposit") {
@@ -906,6 +934,8 @@ export function floatSessionSummary(session: BranchFloatSession | null): {
   dayCapital: number;
   totalDeposits: number;
   totalWithdrawals: number;
+  totalFieldWithdrawals: number;
+  totalWalkInWithdrawals: number;
   totalDailySusu: number;
   remainingOpeningFloat: number;
   lowFloatThreshold: number;
@@ -919,6 +949,8 @@ export function floatSessionSummary(session: BranchFloatSession | null): {
   const expected = expectedCash(session);
   const floatBalance = remainingFloatBalance(session);
   const capital = dayCapital(session);
+  const fieldWithdrawals = Math.max(0, session.totalFieldWithdrawals ?? 0);
+  const walkInWithdrawals = Math.max(0, session.totalWithdrawals - fieldWithdrawals);
   const lowFloatThreshold = Math.max(50, session.openingFloat * 0.2);
   const statusLabels: Record<FloatSessionStatus, string> = {
     requested: "Awaiting float release",
@@ -943,6 +975,8 @@ export function floatSessionSummary(session: BranchFloatSession | null): {
     dayCapital: capital,
     totalDeposits: session.totalDeposits,
     totalWithdrawals: session.totalWithdrawals,
+    totalFieldWithdrawals: fieldWithdrawals,
+    totalWalkInWithdrawals: walkInWithdrawals,
     totalDailySusu: session.totalDailySusu,
     remainingOpeningFloat: floatBalance,
     lowFloatThreshold,

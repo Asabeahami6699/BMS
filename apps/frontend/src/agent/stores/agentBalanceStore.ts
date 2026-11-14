@@ -18,7 +18,51 @@ export function isBalanceVisible(d: BalanceDisclosure | undefined): boolean {
 }
 
 export function isWithdrawalApproved(d: BalanceDisclosure | undefined): boolean {
-  return Boolean(d && d.requestType === "withdrawal" && d.status === "approved");
+  if (!d || d.requestType !== "withdrawal") {
+    return false;
+  }
+  return (
+    d.status === "approved" ||
+    d.status === "cs_approved" ||
+    d.status === "bank_executed" ||
+    d.status === "completed"
+  );
+}
+
+export function isCashFulfillment(mode?: string): boolean {
+  return mode !== "momo";
+}
+
+/** Cash the agent should collect from the office (teller already paid, not yet delivered). */
+export function isOfficeCashReady(d: BalanceDisclosure | undefined): boolean {
+  return Boolean(
+    d &&
+      d.requestType === "withdrawal" &&
+      isCashFulfillment(d.fulfillmentMode) &&
+      d.status === "completed" &&
+      !isAgentDelivered(d)
+  );
+}
+
+export function isAgentDelivered(d: BalanceDisclosure | undefined): boolean {
+  if (!d || (d.requestType && d.requestType !== "withdrawal")) {
+    return false;
+  }
+  const deliveredAt =
+    d.agentDeliveredAt ||
+    (d as BalanceDisclosure & { agent_delivered_at?: string }).agent_delivered_at;
+  return Boolean(deliveredAt);
+}
+
+/** Agent can confirm the customer received the cash (or MoMo). */
+export function canConfirmDelivery(d: BalanceDisclosure | undefined): boolean {
+  if (!d || d.requestType !== "withdrawal" || isAgentDelivered(d)) {
+    return false;
+  }
+  if (isCashFulfillment(d.fulfillmentMode) && d.status === "completed") {
+    return true;
+  }
+  return d.fulfillmentMode === "momo" && d.status === "approved";
 }
 
 export function balanceExpiresLabel(expiresAt: string): string {
@@ -38,10 +82,10 @@ export function fulfillmentLabel(mode?: string): string {
   if (mode === "momo") {
     return "MoMo sent";
   }
-  if (mode === "agent_next_day") {
-    return "Agent brings cash";
+  if (mode === "agent_next_day" || mode === "next_day_cash") {
+    return "Cash · deliver next visit";
   }
-  return "Cash next day";
+  return "Cash";
 }
 
 type State = {

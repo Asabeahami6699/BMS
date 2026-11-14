@@ -5,14 +5,34 @@ export function isNetworkError(error: unknown): boolean {
   }
   if (error instanceof Error) {
     const msg = error.message.toLowerCase();
-    return msg.includes("no internet connection") || msg.includes("network");
+    return (
+      msg.includes("no internet connection") ||
+      msg.includes("cannot reach the api") ||
+      msg.includes("network")
+    );
   }
   return false;
 }
 
+function isLocalDevHost(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  const host = window.location.hostname;
+  return host === "localhost" || host === "127.0.0.1" || host === "::1";
+}
+
 export function toUserFacingError(error: unknown, fallback: string): string {
-  if (isNetworkError(error) || (typeof navigator !== "undefined" && !navigator.onLine)) {
+  const offline = typeof navigator !== "undefined" && !navigator.onLine;
+  if (offline) {
     return "No internet connection. Check your network and try again.";
+  }
+  if (isNetworkError(error)) {
+    // Local Vite → API is usually http://localhost:4000; a dead API is not "no internet".
+    if (isLocalDevHost()) {
+      return "Cannot reach the API server on localhost:4000. Start the backend (npm run dev in apps/backend) and try again.";
+    }
+    return "Cannot reach the server. Check your connection and try again.";
   }
   if (error instanceof Error && error.message) {
     return error.message;

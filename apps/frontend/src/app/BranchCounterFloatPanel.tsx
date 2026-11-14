@@ -234,7 +234,13 @@ export function BranchCounterFloatPanel({
 
   async function handleAllocate(session: BranchFloatSession) {
     const releaseAmount = Number(allocateAmount[session.id] ?? pendingFloatAmount(session));
-    const cash = Number(allocateInitialCash[session.id] ?? "0");
+    // Match the input display: fall back to the requested session cash, not "0".
+    // Untouched controlled inputs leave allocateInitialCash[id] undefined.
+    const cashRaw = allocateInitialCash[session.id];
+    const cash =
+      cashRaw != null && String(cashRaw).trim() !== ""
+        ? Number(cashRaw)
+        : Number(session.initialCash ?? 0);
     setBusy(true);
     try {
       await allocateBranchFloat(
@@ -464,7 +470,24 @@ export function BranchCounterFloatPanel({
                     </strong>
                   </div>
                   <div>
-                    <span>Withdrawals</span>
+                    <span>Walk-in withdrawals</span>
+                    <strong>
+                      {formatMoney(
+                        floatSummary.totalWalkInWithdrawals ??
+                          Math.max(
+                            0,
+                            floatSummary.totalWithdrawals -
+                              (floatSummary.totalFieldWithdrawals ?? 0)
+                          )
+                      )}
+                    </strong>
+                  </div>
+                  <div>
+                    <span>Field Pay now</span>
+                    <strong>{formatMoney(floatSummary.totalFieldWithdrawals ?? 0)}</strong>
+                  </div>
+                  <div>
+                    <span>Withdrawals (total)</span>
                     <strong>{formatMoney(floatSummary.totalWithdrawals)}</strong>
                   </div>
                 </div>
@@ -536,7 +559,27 @@ export function BranchCounterFloatPanel({
                 </strong>
               </div>
               <div>
-                <span className="muted">Cash out (withdrawals)</span>
+                <span className="muted">Walk-in withdrawals</span>
+                <strong>
+                  {formatMoney(
+                    floatSummary?.totalWalkInWithdrawals ??
+                      Math.max(
+                        0,
+                        floatSession.totalWithdrawals - (floatSession.totalFieldWithdrawals ?? 0)
+                      )
+                  )}
+                </strong>
+              </div>
+              <div>
+                <span className="muted">Field Pay now</span>
+                <strong>
+                  {formatMoney(
+                    floatSummary?.totalFieldWithdrawals ?? floatSession.totalFieldWithdrawals ?? 0
+                  )}
+                </strong>
+              </div>
+              <div>
+                <span className="muted">Cash out (all withdrawals)</span>
                 <strong>{formatMoney(floatSession.totalWithdrawals)}</strong>
               </div>
               <div>

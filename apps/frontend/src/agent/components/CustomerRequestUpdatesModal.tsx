@@ -49,20 +49,57 @@ function RequestDetail({ label, disclosure }: { label: string; disclosure: Balan
     );
   }
 
-  if (disclosure.requestType === "withdrawal" && disclosure.status === "approved") {
-    return (
-      <div className="agent-request-update-block agent-request-update-block--approved">
-        <strong>{label} — approved</strong>
-        <p>
-          {formatMoney(disclosure.withdrawalAmount ?? 0)} · {fulfillmentLabel(disclosure.fulfillmentMode)}
-        </p>
-        {disclosure.fulfillmentMode === "momo" && disclosure.generatedReceiptImage ? (
-          <div className="agent-receipt-thumb">
-            <img src={disclosure.generatedReceiptImage} alt="MoMo receipt" />
-          </div>
-        ) : null}
-      </div>
-    );
+  if (disclosure.requestType === "withdrawal") {
+    if (disclosure.status === "cs_approved" || disclosure.status === "bank_executed") {
+      return (
+        <div className="agent-request-update-block agent-request-update-block--approved">
+          <strong>{label} — approved</strong>
+          <p>
+            {formatMoney(disclosure.withdrawalAmount ?? 0)} · {fulfillmentLabel(disclosure.fulfillmentMode)}
+          </p>
+          <p className="muted">Awaiting office till payout — collect after Pay now.</p>
+        </div>
+      );
+    }
+    if (disclosure.agentDeliveredAt) {
+      return (
+        <div className="agent-request-update-block agent-request-update-block--approved">
+          <strong>{label} — delivered</strong>
+          <p>
+            {formatMoney(disclosure.withdrawalAmount ?? 0)} · {fulfillmentLabel(disclosure.fulfillmentMode)}
+          </p>
+          <p className="muted">Customer received cash. Process complete.</p>
+        </div>
+      );
+    }
+    if (disclosure.status === "completed") {
+      return (
+        <div className="agent-request-update-block agent-request-update-block--approved">
+          <strong>{label} — cash ready at office</strong>
+          <p>
+            {formatMoney(disclosure.withdrawalAmount ?? 0)} · {fulfillmentLabel(disclosure.fulfillmentMode)}
+          </p>
+          <p className="muted">
+            Collect from the office, deliver on your next visit, then mark delivered on Withdrawals.
+          </p>
+        </div>
+      );
+    }
+    if (disclosure.status === "approved") {
+      return (
+        <div className="agent-request-update-block agent-request-update-block--approved">
+          <strong>{label} — approved</strong>
+          <p>
+            {formatMoney(disclosure.withdrawalAmount ?? 0)} · {fulfillmentLabel(disclosure.fulfillmentMode)}
+          </p>
+          {disclosure.fulfillmentMode === "momo" && disclosure.generatedReceiptImage ? (
+            <div className="agent-receipt-thumb">
+              <img src={disclosure.generatedReceiptImage} alt="MoMo receipt" />
+            </div>
+          ) : null}
+        </div>
+      );
+    }
   }
 
   if (disclosure.status === "approved" && disclosure.requestType === "balance") {

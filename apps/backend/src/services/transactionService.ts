@@ -186,6 +186,7 @@ export async function postWithdrawalForApprovedDisclosure(params: {
   notes: string;
 }): Promise<string> {
   const idempotencyTag = `${DISCLOSURE_WITHDRAWAL_NOTE_TAG}${params.disclosureId}`;
+  const reqTag = `req ${params.disclosureId.slice(0, 8)}`;
   const fullNotes = params.notes.includes(idempotencyTag)
     ? params.notes
     : `${params.notes} · ${idempotencyTag}`;
@@ -200,23 +201,31 @@ export async function postWithdrawalForApprovedDisclosure(params: {
   const balanceBefore = await computeCustomerBalance(params.tenantId, params.customerId);
   const transactionId = randomUUID();
   const supabase = getSupabaseAdminClient();
+  const { hasLedgerDebitForTransaction } = await import("./ledgerService.js");
 
   if (supabase) {
-    const { data: existing, error: existingError } = await supabase
+    const { data: priorRows, error: existingError } = await supabase
       .from("customer_transactions")
-      .select("id")
+      .select("id, notes")
       .eq("tenant_id", params.tenantId)
       .eq("customer_id", params.customerId)
       .eq("type", "withdrawal")
-      .like("notes", `%${idempotencyTag}%`)
-      .limit(1)
-      .maybeSingle();
+      .order("created_at", { ascending: false })
+      .limit(40);
 
     if (existingError) {
       throw new Error(`Failed to check prior withdrawal post: ${existingError.message}`);
     }
-    if (existing?.id) {
-      return String(existing.id);
+
+    for (const row of priorRows ?? []) {
+      const notes = String(row.notes ?? "");
+      if (!notes.includes(idempotencyTag) && !notes.includes(reqTag)) {
+        continue;
+      }
+      const priorId = String(row.id);
+      if (await hasLedgerDebitForTransaction(params.tenantId, priorId)) {
+        return priorId;
+      }
     }
 
     const { error: rpcError } = await supabase.rpc("post_customer_transaction_atomic", {
@@ -263,7 +272,9 @@ export async function postWithdrawalForApprovedDisclosure(params: {
   }
 
   const transactions = getTenantTransactions(params.tenantId);
-  const prior = transactions.find((t) => t.notes?.includes(idempotencyTag));
+  const prior = transactions.find(
+    (t) => t.notes?.includes(idempotencyTag) || t.notes?.includes(reqTag)
+  );
   if (prior) {
     return prior.id;
   }
@@ -307,7 +318,7 @@ export async function postWithdrawalForApprovedDisclosure(params: {
   return transactionId;
 }
 
-/** Backfill ledger debits for approved agent withdrawal requests that never posted a transaction. */
+/** Backfill ledger debits for approved/paid agent withdrawals that never posted a ledger row. */
 export async function reconcileCustomerApprovedWithdrawalDebits(
   tenantId: string,
   customerId: string
@@ -325,36 +336,62 @@ export async function reconcileCustomerApprovedWithdrawalDebits(
   const { data: rows, error } = await supabase
     .from("customer_balance_disclosures")
     .select(
-      "id, withdrawal_amount, fulfillment_mode, payout_reference, field_agent_id, approved_by"
+      "id, status, withdrawal_amount, fulfillment_mode, payout_reference, field_agent_id, approved_by, teller_paid_by, linked_transaction_id"
     )
     .eq("tenant_id", tenantId)
     .eq("customer_id", customerId)
     .eq("request_type", "withdrawal")
-    .eq("status", "approved");
+    .in("status", ["approved", "completed"]);
 
   if (error || !rows?.length) {
     return;
   }
+
+  const { hasLedgerDebitForTransaction } = await import("./ledgerService.js");
 
   for (const row of rows) {
     const amount = Number(row.withdrawal_amount ?? 0);
     if (amount <= 0) {
       continue;
     }
+
+    const status = String(row.status);
+    // Completed teller Pay now: only backfill when linked tx is missing a ledger debit.
+    if (status === "completed") {
+      const linkedId = row.linked_transaction_id ? String(row.linked_transaction_id) : null;
+      if (linkedId && (await hasLedgerDebitForTransaction(tenantId, linkedId))) {
+        continue;
+      }
+      // MoMo completed-as-approved uses status approved; skip pure bank_executed→completed
+      // agency rows that already have a debit under a non-disclosure note by checking tags below.
+    }
+
     const mode = row.fulfillment_mode as string | null;
     const ref = row.payout_reference as string | null;
-    const notes = `Field agent withdrawal approved (${mode ?? "cash"}) · req ${String(row.id).slice(0, 8)}${ref?.trim() ? ` · Ref ${ref.trim()}` : ""}`;
+    const notes =
+      status === "completed"
+        ? `Teller cash payout · field agent · req ${String(row.id).slice(0, 8)}`
+        : `Field agent withdrawal approved (${mode ?? "cash"}) · req ${String(row.id).slice(0, 8)}${ref?.trim() ? ` · Ref ${ref.trim()}` : ""}`;
     try {
-      await postWithdrawalForApprovedDisclosure({
+      const transactionId = await postWithdrawalForApprovedDisclosure({
         tenantId,
         customerId,
         homeBranchId: customer.homeBranchId,
         amount,
         disclosureId: String(row.id),
-        recordedByUserId: String(row.approved_by ?? row.field_agent_id),
+        recordedByUserId: String(
+          row.teller_paid_by ?? row.approved_by ?? row.field_agent_id
+        ),
         fieldAgentId: String(row.field_agent_id),
         notes
       });
+      if (status === "completed" && transactionId && transactionId !== row.linked_transaction_id) {
+        await supabase
+          .from("customer_balance_disclosures")
+          .update({ linked_transaction_id: transactionId })
+          .eq("id", row.id)
+          .eq("tenant_id", tenantId);
+      }
     } catch (reconcileError) {
       console.warn(
         `[transaction] Withdrawal reconcile skipped for disclosure ${row.id}:`,

@@ -32,6 +32,7 @@ export type AgentNotificationKind =
   | "back_office_ecash_approved"
   | "withdrawal_cs_approved"
   | "withdrawal_ready_for_teller"
+  | "withdrawal_agent_delivered"
   | "susu_collection_reversed"
   | "loan_repayment_reserved"
   | "loan_auto_repayment"

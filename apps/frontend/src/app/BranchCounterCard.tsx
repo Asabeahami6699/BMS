@@ -4,6 +4,7 @@ import { useShallow } from "zustand/react/shallow";
 import { SAVINGS_INITIAL_DEPOSIT_GHS, bankProductDisplayLabel, bankProductsForSubscription, type Permission, type TenantProductModule, formatAccountAmount } from "@bms/shared";
 import type { AppRole } from "./api";
 import { BranchCounterFloatPanel } from "./BranchCounterFloatPanel";
+import { BranchCounterPayoutQueue } from "./BranchCounterPayoutQueue";
 import { BranchCounterCashCalculator } from "./BranchCounterCashCalculator";
 import { BranchCounterStatementPanel } from "./BranchCounterStatement";
 import { SusuReversalDialog } from "./SusuReversalDialog";
@@ -491,6 +492,8 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
           onUpdated={() => void refresh()}
         />
       ) : null}
+
+      {!sessionExpired ? <BranchCounterPayoutQueue permissions={permissions} /> : null}
 
       <div className="branch-counter__workspace">
         <section className="branch-counter__find card">

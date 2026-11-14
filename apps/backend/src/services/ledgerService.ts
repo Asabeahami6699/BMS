@@ -39,6 +39,34 @@ export async function computeCustomerBalance(tenantId: string, customerId: strin
   }, 0);
 }
 
+/** True when a debit ledger row exists for this customer transaction. */
+export async function hasLedgerDebitForTransaction(
+  tenantId: string,
+  transactionId: string
+): Promise<boolean> {
+  const supabase = getSupabaseAdminClient();
+  if (!supabase) {
+    return tenantEntries(tenantId).some(
+      (entry) => entry.transactionId === transactionId && entry.entryType === "debit"
+    );
+  }
+
+  const { data, error } = await supabase
+    .from("ledger_entries")
+    .select("id")
+    .eq("tenant_id", tenantId)
+    .eq("transaction_id", transactionId)
+    .eq("entry_type", "debit")
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to check ledger debit: ${error.message}`);
+  }
+
+  return Boolean(data?.id);
+}
+
 export async function addLedgerEntry(input: {
   tenantId: string;
   customerId: string;

@@ -208,7 +208,13 @@ export const useTillFloatAdminStore = create<TillFloatAdminState>((set, get) => 
 
   allocate: async (session) => {
     const amount = Number(get().allocateAmount[session.id] ?? pendingFloatAmount(session));
-    const initialCash = Number(get().allocateInitialCash[session.id] ?? "0");
+    // Match the input display: fall back to the requested session cash, not "0".
+    // Untouched controlled inputs leave allocateInitialCash[id] undefined.
+    const cashRaw = get().allocateInitialCash[session.id];
+    const initialCash =
+      cashRaw != null && String(cashRaw).trim() !== ""
+        ? Number(cashRaw)
+        : Number(session.initialCash ?? 0);
     set({ busy: true, error: null });
     try {
       await allocateBranchFloat(

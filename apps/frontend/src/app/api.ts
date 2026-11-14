@@ -279,7 +279,13 @@ export type BalanceDisclosure = {
   customerId: string;
   fieldAgentId: string;
   customerName?: string;
+  /** Registered phone for coordinator call-back before approve. */
+  customerPhone?: string;
+  /** Account number for teller Pay now display. */
+  customerAccountNumber?: string;
   fieldAgentName?: string;
+  /** Field-agent Susu request — coordinator → teller; not Customer Service. */
+  isFieldAgentRequest?: boolean;
   requestType: CustomerRequestType;
   status:
     | "pending"
@@ -303,6 +309,11 @@ export type BalanceDisclosure = {
   transactionProofImage?: string;
   generatedReceiptImage?: string;
   paidAt?: string;
+  tellerPaidBy?: string;
+  tellerPaidAt?: string;
+  /** Field agent confirmed cash was delivered to the customer. */
+  agentDeliveredBy?: string;
+  agentDeliveredAt?: string;
 };
 
 export type RequestCustomerApprovalInput =
@@ -356,6 +367,7 @@ export type AgentNotification = {
     | "back_office_ecash_approved"
     | "withdrawal_cs_approved"
     | "withdrawal_ready_for_teller"
+    | "withdrawal_agent_delivered"
     | "loan_repayment_reserved"
     | "loan_auto_repayment"
     | "loan_auto_repayment_failed";
@@ -1247,6 +1259,9 @@ export type TenantSmsSettings = {
   notifyDeposit: boolean;
   notifyWithdrawal: boolean;
   notifyDailySusu: boolean;
+  /** Debit active customers this amount once per calendar month. */
+  smsChargesEnabled: boolean;
+  smsChargeAmountGhs: number;
   senderId?: string;
   updatedAt?: string;
   updatedBy?: string;
@@ -1266,7 +1281,15 @@ export async function getTenantSmsSettings(): Promise<TenantSmsSettings> {
 
 export async function updateTenantSmsSettings(
   body: Partial<
-    Pick<TenantSmsSettings, "enabled" | "notifyDeposit" | "notifyWithdrawal" | "notifyDailySusu">
+    Pick<
+      TenantSmsSettings,
+      | "enabled"
+      | "notifyDeposit"
+      | "notifyWithdrawal"
+      | "notifyDailySusu"
+      | "smsChargesEnabled"
+      | "smsChargeAmountGhs"
+    >
   > & { senderId?: string | null }
 ): Promise<TenantSmsSettings> {
   return fetchJson<TenantSmsSettings>(`${API_BASE_URL}/api/v1/tenant/sms-settings`, {
@@ -1661,6 +1684,36 @@ export async function listAgentBalanceDisclosures(): Promise<BalanceDisclosure[]
   return fetchJson<BalanceDisclosure[]>(
     `${API_BASE_URL}/api/v1/field-agents/me/balance-disclosures`,
     { headers: authHeaders() }
+  );
+}
+
+/** Full withdrawal history for the field-agent activity tracker. */
+export async function listAgentWithdrawalActivity(): Promise<BalanceDisclosure[]> {
+  return fetchJson<BalanceDisclosure[]>(
+    `${API_BASE_URL}/api/v1/field-agents/me/withdrawal-activity`,
+    { headers: authHeaders() }
+  );
+}
+
+export async function markAgentWithdrawalDelivered(
+  disclosureId: string
+): Promise<BalanceDisclosure> {
+  return fetchJson<BalanceDisclosure>(
+    `${API_BASE_URL}/api/v1/field-agents/me/withdrawals/${encodeURIComponent(disclosureId)}/delivered`,
+    { method: "POST", headers: authHeaders() }
+  );
+}
+
+export async function markAgentWithdrawalsDeliveredBulk(
+  disclosureIds?: string[]
+): Promise<BalanceDisclosure[]> {
+  return fetchJson<BalanceDisclosure[]>(
+    `${API_BASE_URL}/api/v1/field-agents/me/withdrawals/delivered-bulk`,
+    {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify(disclosureIds?.length ? { disclosureIds } : {})
+    }
   );
 }
 
@@ -2479,6 +2532,7 @@ export type BranchFloatSession = {
   variance: number | null;
   totalDeposits: number;
   totalWithdrawals: number;
+  totalFieldWithdrawals?: number;
   totalDailySusu: number;
   transactionCount: number;
   requestedAt: string;
@@ -2515,6 +2569,8 @@ export type BranchFloatSummary = {
   dayCapital: number;
   totalDeposits: number;
   totalWithdrawals: number;
+  totalFieldWithdrawals?: number;
+  totalWalkInWithdrawals?: number;
   totalDailySusu: number;
   remainingOpeningFloat: number;
   lowFloatThreshold: number;
@@ -2531,6 +2587,7 @@ export type BranchCounterBootstrapResponse = {
   floatSession: BranchFloatSession | null;
   floatSummary: BranchFloatSummary;
   pendingFloatRequests: BranchFloatSession[];
+  pendingFieldPayouts?: BalanceDisclosure[];
 };
 
 export async function requestBranchFloat(payload: {
@@ -2841,6 +2898,7 @@ export type FieldWithdrawalFulfillmentLine = {
   amount: number;
   fulfilledAt: string;
   status: string;
+  agentDeliveredAt?: string;
 };
 
 export type FieldWithdrawalFulfillmentRow = {
@@ -2851,6 +2909,7 @@ export type FieldWithdrawalFulfillmentRow = {
   totalRequested: number;
   totalApproved: number;
   totalFulfilled: number;
+  totalDelivered: number;
   customerCount: number;
   lines: FieldWithdrawalFulfillmentLine[];
 };
@@ -4226,6 +4285,19 @@ export async function tellerPayAgencyWithdrawal(disclosureId: string): Promise<B
       method: "POST",
       headers: authHeaders(transactionAuthToken || undefined)
     })
+  );
+}
+
+/** Susu Branch counter Pay now — does not require the Banking product module. */
+export async function paySusuFieldWithdrawal(disclosureId: string): Promise<BalanceDisclosure> {
+  return withTransactionStepUp((transactionAuthToken) =>
+    fetchJson(
+      `${API_BASE_URL}/api/v1/transactions/field-withdrawals/${encodeURIComponent(disclosureId)}/pay-cash`,
+      {
+        method: "POST",
+        headers: authHeaders(transactionAuthToken || undefined)
+      }
+    )
   );
 }
 

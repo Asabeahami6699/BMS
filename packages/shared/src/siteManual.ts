@@ -317,6 +317,46 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
     ]
   },
   {
+    id: "agent-withdrawal-pay-now",
+    department: "susu",
+    title: "Field agent cash withdrawal (Pay now)",
+    howTo: "How remote customer cash withdrawals work",
+    keywords: [
+      "withdrawal",
+      "pay now",
+      "field agent",
+      "teller",
+      "coordinator",
+      "registration phone"
+    ],
+    modules: ["susu_management"],
+    body: [
+      "Field agent requests cash withdrawal (customer is far from the office; agent will deliver next visit).",
+      "Coordinator reviews the request, calls the customer on the registration phone, then Approves.",
+      "Customer Service is not in the field-agent cash path (agency walk-in withdrawals still use CS → teller).",
+      "Approve does not debit the account and does not move vault cash — it queues Branch counter → Pay now.",
+      "Teller opens till with enough physical cash (use Extra cash from vault if needed), then Pay now.",
+      "Pay now debits the customer and reduces till cash (shown separately from walk-in withdrawals on EOD).",
+      "Agent collects the cash from the office and delivers on the next visit.",
+      "MoMo stays separate: coordinator pays outside the till with proof.",
+      "Vault closing does not count Pay now again as a field withdrawal — cash already left via cash issued to till."
+    ]
+  },
+  {
+    id: "susu-till-eod-split",
+    department: "susu",
+    title: "Teller expected cash (walk-in vs field Pay now)",
+    howTo: "How till EOD splits withdrawals",
+    keywords: ["till", "eod", "walk-in", "field withdrawal", "pay now"],
+    modules: ["susu_management"],
+    body: [
+      "Expected cash = initial cash + extra cash + deposits − walk-in withdrawals − field Pay now − expenses.",
+      "Both withdrawal lines leave the same drawer; the split is for clarity only.",
+      "Count physical cash once and close the till. Variance opens a Branch till OS case."
+    ]
+  },
+
+  {
     id: "settings-sms",
     department: "settings",
     title: "Turn on customer SMS alerts",

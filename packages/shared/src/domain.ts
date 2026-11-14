@@ -414,7 +414,16 @@ export const balanceDisclosureSchema = z.object({
   customerId: z.string().min(1),
   fieldAgentId: z.string().min(1),
   customerName: z.string().optional(),
+  /** Registered customer phone — for coordinator call-back before approve. Not agent-editable. */
+  customerPhone: z.string().optional(),
+  /** Customer account number — shown to teller on Pay now. */
+  customerAccountNumber: z.string().optional(),
   fieldAgentName: z.string().optional(),
+  /**
+   * True when the requester is a field agent (Susu remote withdrawal).
+   * Those cash requests are coordinator → teller Pay now — not Customer Service.
+   */
+  isFieldAgentRequest: z.boolean().optional(),
   requestType: customerRequestTypeSchema.default("balance"),
   status: balanceDisclosureStatusSchema,
   balanceAmount: z.number().optional(),
@@ -443,6 +452,9 @@ export const balanceDisclosureSchema = z.object({
 
   bankLabel: z.string().optional(),
   tellerPaidAt: z.string().optional(),
+  /** Field agent confirmed cash was delivered to the customer. */
+  agentDeliveredBy: z.string().optional(),
+  agentDeliveredAt: z.string().optional(),
 
   workflowData: z.record(z.string(), z.unknown()).optional()
 });

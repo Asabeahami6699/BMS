@@ -113,8 +113,7 @@ import { useBranchContextSync } from "./hooks/useBranchContextSync";
 import { FieldAgentApp } from "../agent/FieldAgentApp";
 import { OverviewPage } from "./OverviewPage";
 import { TenantDashboardPage } from "./TenantDashboardPage";
-import { PendingApprovalsCard } from "./PendingApprovalsCard";
-import { PendingBalanceApprovalsCard } from "./PendingBalanceApprovalsCard";
+import { PendingApprovalsPage } from "./PendingApprovalsPage";
 import { CustomerOnboardingPage } from "./CustomerOnboardingPage";
 import { SusuClosingBalancesPage } from "./SusuClosingBalancesPage";
 
@@ -353,8 +352,7 @@ export function TenantApp() {
           path="/susu/pending-approvals"
           element={
             <TenantSusuRoute route="susu/pending-approvals" modules={modules} role={role} permissions={permissions} susuNavVisibility={user?.susuNavVisibility}>
-              <PendingBalanceApprovalsCard />
-              <PendingApprovalsCard />
+              <PendingApprovalsPage />
             </TenantSusuRoute>
           }
         />

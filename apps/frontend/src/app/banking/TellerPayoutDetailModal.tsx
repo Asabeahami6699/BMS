@@ -22,8 +22,10 @@ type Props = {
 
 function fulfillmentLabel(mode?: BalanceDisclosure["fulfillmentMode"]): string {
   if (mode === "momo") return "MoMo";
-  if (mode === "agent_next_day") return "Agent cash";
-  return "Cash at branch";
+  if (mode === "agent_next_day" || mode === "next_day_cash") {
+    return "Cash · agent next visit";
+  }
+  return "Cash";
 }
 
 function customerCategoryLabel(row: TellerPayoutRow): string {

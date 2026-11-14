@@ -20,8 +20,8 @@ import { getSupabaseAdminClient } from "../config/supabaseClient.js";
 import { assertBranchAccess } from "../middleware/branchScope.js";
 import { applyTransactionToFloat, adjustDepositAmountOnFloat, reverseTransactionFromFloat } from "./branchFloatService.js";
 import { getCustomerById, getCustomerWithdrawableBalance, listCustomers } from "./customerService.js";
-import { addLedgerEntry } from "./ledgerService.js";
-import { notifyTenantStaff } from "./notificationService.js";
+import { addLedgerEntry, hasLedgerDebitForTransaction } from "./ledgerService.js";
+import { createAgentNotification, notifyTenantStaff } from "./notificationService.js";
 import type { TransactionRequestContext } from "./transactionService.js";
 import {
   enrichTransactionsWithBankProducts,
@@ -435,6 +435,7 @@ async function loadDisclosuresByStatus(
 
   const customers = await listCustomers(tenantId);
   const customerById = new Map(customers.map((c) => [c.id, c]));
+  const { isFieldAgentRequester } = await import("./balanceDisclosureService.js");
 
   const mapped = rows.map((row) => {
     const workflowData =
@@ -458,6 +459,9 @@ async function loadDisclosuresByStatus(
       customerId: row.customer_id,
       fieldAgentId: row.field_agent_id,
       customerName,
+      customerPhone: linkedCustomer?.phone,
+      customerAccountNumber: linkedCustomer?.accountNumber,
+      isFieldAgentRequest: isFieldAgentRequester(String(row.field_agent_id)),
       requestType: "withdrawal",
       status: row.status,
       withdrawalAmount: row.withdrawal_amount != null ? Number(row.withdrawal_amount) : undefined,
@@ -485,19 +489,24 @@ function isAgencyCashWithdrawal(fulfillmentMode: string | null | undefined): boo
   return fulfillmentMode !== "momo";
 }
 
-/** Cash withdrawal requests awaiting Customer Service verification. */
+/** Cash withdrawal requests awaiting Customer Service verification (agency walk-ins only). */
 async function loadWithdrawalsPendingCsVerify(
   tenantId: string,
   branchId?: string
 ): Promise<BalanceDisclosure[]> {
+  const { isFieldAgentRequester } = await import("./balanceDisclosureService.js");
   const pending = await loadDisclosuresByStatus(tenantId, "pending", branchId);
   return pending.filter(
-    (row) => isAgencyCashWithdrawal(row.fulfillmentMode) && !isManualPartnerWithdrawal(row)
+    (row) =>
+      isAgencyCashWithdrawal(row.fulfillmentMode) &&
+      !isManualPartnerWithdrawal(row) &&
+      // Field-agent Susu cash is coordinator → teller, not CS.
+      !isFieldAgentRequester(row.fieldAgentId)
   );
 }
 
-/** Cash withdrawals ready for teller payout (CS verified, or legacy bank_executed). */
-async function loadWithdrawalsPendingTellerPay(
+/** Cash withdrawals ready for teller payout (CS/coordinator verified, or legacy bank_executed). */
+export async function loadWithdrawalsPendingTellerPay(
   tenantId: string,
   branchId?: string
 ): Promise<BalanceDisclosure[]> {
@@ -512,6 +521,46 @@ async function loadWithdrawalsPendingTellerPay(
     }
   }
   return [...byId.values()];
+}
+
+async function findExistingWithdrawalTxForDisclosure(
+  tenantId: string,
+  customerId: string,
+  disclosureId: string
+): Promise<string | null> {
+  const supabase = getSupabaseAdminClient();
+  if (!supabase) {
+    return null;
+  }
+
+  const reqTag = `req ${disclosureId.slice(0, 8)}`;
+  const disclosureTag = `disclosure:${disclosureId}`;
+
+  const { data, error } = await supabase
+    .from("customer_transactions")
+    .select("id, notes")
+    .eq("tenant_id", tenantId)
+    .eq("customer_id", customerId)
+    .eq("type", "withdrawal")
+    .order("created_at", { ascending: false })
+    .limit(40);
+
+  if (error) {
+    throw new Error(`Failed to check prior withdrawal post: ${error.message}`);
+  }
+
+  for (const row of data ?? []) {
+    const notes = String(row.notes ?? "");
+    if (!notes.includes(disclosureTag) && !notes.includes(reqTag)) {
+      continue;
+    }
+    const txId = String(row.id);
+    if (await hasLedgerDebitForTransaction(tenantId, txId)) {
+      return txId;
+    }
+  }
+
+  return null;
 }
 
 async function postAgencyWithdrawalLedgerDebit(
@@ -529,10 +578,13 @@ async function postAgencyWithdrawalLedgerDebit(
   }
 ): Promise<string> {
   const supabase = getSupabaseAdminClient();
-  const transactionId = randomUUID();
-  const notes = `Agency withdrawal · ${params.notesSuffix} · req ${params.disclosureId.slice(0, 8)}`;
 
-  if (supabase && params.skipCustomerLedgerDebit) {
+  if (params.skipCustomerLedgerDebit) {
+    if (!supabase) {
+      throw new Error("Database unavailable — cannot record partner withdrawal");
+    }
+    const transactionId = randomUUID();
+    const notes = `Agency withdrawal · ${params.notesSuffix} · req ${params.disclosureId.slice(0, 8)} · partner bank (no aabanker debit)`;
     const { error: insertError } = await supabase.from("customer_transactions").insert({
       id: transactionId,
       tenant_id: context.tenantId,
@@ -543,7 +595,7 @@ async function postAgencyWithdrawalLedgerDebit(
       home_branch_id: params.homeBranchId,
       recorded_by_user_id: context.userId,
       field_agent_id: params.fieldAgentId,
-      notes: `${notes} · partner bank (no aabanker debit)`,
+      notes,
       execution_status: "completed",
       bank_product_id: params.bankProductId ?? null
     });
@@ -553,32 +605,18 @@ async function postAgencyWithdrawalLedgerDebit(
     return transactionId;
   }
 
-  if (supabase) {
-    const { error: rpcError } = await supabase.rpc("post_customer_transaction_atomic", {
-      p_transaction_id: transactionId,
-      p_tenant_id: context.tenantId,
-      p_customer_id: params.customerId,
-      p_type: "withdrawal",
-      p_amount: params.amount,
-      p_transaction_branch_id: params.homeBranchId,
-      p_home_branch_id: params.homeBranchId,
-      p_recorded_by_user_id: context.userId,
-      p_field_agent_id: params.fieldAgentId,
-      p_notes: notes
-    });
-    if (rpcError) {
-      throw new Error(
-        `Failed to post withdrawal debit: ${rpcError.message}. Apply Supabase migrations (including 084) — non-atomic fallback is disabled.`
-      );
-    } else if (params.bankProductId) {
-      await supabase
-        .from("customer_transactions")
-        .update({ bank_product_id: params.bankProductId })
-        .eq("id", transactionId);
-    }
-  }
-
-  return transactionId;
+  // Susu / aabanker cash: verified ledger debit (same guarantees as MoMo / field approval).
+  const { postWithdrawalForApprovedDisclosure } = await import("./transactionService.js");
+  return postWithdrawalForApprovedDisclosure({
+    tenantId: context.tenantId,
+    customerId: params.customerId,
+    homeBranchId: params.homeBranchId,
+    amount: params.amount,
+    disclosureId: params.disclosureId,
+    recordedByUserId: context.userId,
+    fieldAgentId: params.fieldAgentId,
+    notes: `Teller cash payout · field agent · ${params.notesSuffix}`
+  });
 }
 
 export async function getAgencyBootstrap(
@@ -965,6 +1003,7 @@ export async function customerServiceApproveWithdrawal(
     customerId: row.customer_id,
     fieldAgentId: row.field_agent_id,
     customerName: customer?.fullName,
+    customerPhone: customer?.phone,
     requestType: "withdrawal",
     status: "cs_approved",
     withdrawalAmount: amount,
@@ -1137,25 +1176,59 @@ export async function tellerPayWithdrawal(
   const amount = Number(row.withdrawal_amount ?? 0);
   let transactionId = (row.linked_transaction_id as string | null) ?? null;
 
-  if (!transactionId) {
-    if (!manualPartner) {
-      const withdrawable = await getCustomerWithdrawableBalance(context.tenantId, row.customer_id);
-      if (withdrawable < amount) {
-        throw new Error(
-          `Insufficient withdrawable balance. Available: GHS ${formatAccountAmount(withdrawable)}`
-        );
+  if (manualPartner) {
+    if (!transactionId) {
+      transactionId = await postAgencyWithdrawalLedgerDebit(context, {
+        disclosureId,
+        customerId: row.customer_id,
+        fieldAgentId: row.field_agent_id,
+        amount,
+        homeBranchId: customer.homeBranchId,
+        bankProductId: row.bank_product_id ?? null,
+        notesSuffix: "partner walk-in payout",
+        skipCustomerLedgerDebit: true
+      });
+    }
+  } else {
+    const linkedHasDebit =
+      Boolean(transactionId) &&
+      (await hasLedgerDebitForTransaction(context.tenantId, String(transactionId)));
+    if (!linkedHasDebit) {
+      const prior = await findExistingWithdrawalTxForDisclosure(
+        context.tenantId,
+        row.customer_id,
+        disclosureId
+      );
+      if (prior) {
+        transactionId = prior;
+      } else {
+        transactionId = await postAgencyWithdrawalLedgerDebit(context, {
+          disclosureId,
+          customerId: row.customer_id,
+          fieldAgentId: row.field_agent_id,
+          amount,
+          homeBranchId: customer.homeBranchId,
+          bankProductId: row.bank_product_id ?? null,
+          notesSuffix: "teller payout",
+          skipCustomerLedgerDebit: false
+        });
       }
     }
-    transactionId = await postAgencyWithdrawalLedgerDebit(context, {
-      disclosureId,
-      customerId: row.customer_id,
-      fieldAgentId: row.field_agent_id,
-      amount,
-      homeBranchId: customer.homeBranchId,
-      bankProductId: row.bank_product_id ?? null,
-      notesSuffix: manualPartner ? "partner walk-in payout" : "teller payout",
-      skipCustomerLedgerDebit: manualPartner
-    });
+  }
+
+  if (!transactionId) {
+    throw new Error("Failed to post withdrawal debit to customer ledger");
+  }
+
+  // Attach bank product on Susu debit when present (RPC path does not set it).
+  if (!manualPartner && row.bank_product_id) {
+    const supabaseForProduct = getSupabaseAdminClient();
+    if (supabaseForProduct) {
+      await supabaseForProduct
+        .from("customer_transactions")
+        .update({ bank_product_id: row.bank_product_id })
+        .eq("id", transactionId);
+    }
   }
 
   const payoutTx = transactionSchema.parse({
@@ -1169,7 +1242,7 @@ export async function tellerPayWithdrawal(
     recordedByUserId: context.userId,
     fieldAgentId: row.field_agent_id,
     createdAt: new Date().toISOString(),
-    notes: `Teller cash payout · req ${disclosureId.slice(0, 8)}`,
+    notes: `Teller cash payout · field agent · req ${disclosureId.slice(0, 8)}`,
     executionStatus: "completed"
   });
 
@@ -1189,15 +1262,30 @@ export async function tellerPayWithdrawal(
       .eq("id", disclosureId);
   }
 
+  try {
+    await createAgentNotification({
+      tenantId: context.tenantId,
+      userId: row.field_agent_id,
+      customerId: row.customer_id,
+      kind: "withdrawal_request_approved",
+      title: "Office cash ready to deliver",
+      body: `${customer.fullName}: GHS ${formatAccountAmount(amount)} paid at till. Collect and deliver on your next visit.`
+    });
+  } catch {
+    // Non-blocking
+  }
+
   return balanceDisclosureSchema.parse({
     id: row.id,
     tenantId: row.tenant_id,
     customerId: row.customer_id,
     fieldAgentId: row.field_agent_id,
     customerName: customer.fullName,
+    customerPhone: customer.phone,
     requestType: "withdrawal",
     status: "completed",
     withdrawalAmount: amount,
+    fulfillmentMode: row.fulfillment_mode ?? undefined,
     tellerPaidBy: context.userId,
     tellerPaidAt: now,
     paidAt: now,

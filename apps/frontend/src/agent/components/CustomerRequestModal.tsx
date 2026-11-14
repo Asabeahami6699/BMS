@@ -13,13 +13,8 @@ const FULFILLMENT_OPTIONS: {
 }[] = [
   {
     id: "next_day_cash",
-    label: "Cash next day",
-    hint: "Default in the field — you pay the customer the next working day"
-  },
-  {
-    id: "agent_next_day",
-    label: "Agent brings cash",
-    hint: "You collect from the office and deliver to the customer next day"
+    label: "Cash — deliver next visit",
+    hint: "Coordinator approves and calls the customer; office teller pays cash; you deliver on your next visit"
   },
   {
     id: "momo",

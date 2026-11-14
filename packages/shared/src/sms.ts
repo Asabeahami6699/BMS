@@ -10,12 +10,22 @@ export const smsEventTypeSchema = z.enum([
 ]);
 export type SmsEventType = z.infer<typeof smsEventTypeSchema>;
 
+/** Maximum monthly SMS service charge an admin may set (GHS). */
+export const MAX_SMS_MONTHLY_CHARGE_GHS = 5;
+
 export const tenantSmsSettingsSchema = z.object({
   tenantId: z.string().min(1),
   enabled: z.boolean(),
   notifyDeposit: z.boolean(),
   notifyWithdrawal: z.boolean(),
   notifyDailySusu: z.boolean(),
+  /** Debit active customers this amount once per calendar month. */
+  smsChargesEnabled: z.boolean().default(false),
+  smsChargeAmountGhs: z
+    .number()
+    .min(0, "SMS charge cannot be negative")
+    .max(MAX_SMS_MONTHLY_CHARGE_GHS, `SMS charge cannot exceed GHS ${MAX_SMS_MONTHLY_CHARGE_GHS}`)
+    .default(0),
   senderId: z.string().max(11).optional(),
   updatedAt: z.string().optional(),
   updatedBy: z.string().optional()
@@ -23,13 +33,32 @@ export const tenantSmsSettingsSchema = z.object({
 
 export type TenantSmsSettings = z.infer<typeof tenantSmsSettingsSchema>;
 
-export const updateTenantSmsSettingsSchema = z.object({
-  enabled: z.boolean().optional(),
-  notifyDeposit: z.boolean().optional(),
-  notifyWithdrawal: z.boolean().optional(),
-  notifyDailySusu: z.boolean().optional(),
-  senderId: z.string().max(11).optional().nullable()
-});
+export const updateTenantSmsSettingsSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    notifyDeposit: z.boolean().optional(),
+    notifyWithdrawal: z.boolean().optional(),
+    notifyDailySusu: z.boolean().optional(),
+    smsChargesEnabled: z.boolean().optional(),
+    smsChargeAmountGhs: z
+      .number()
+      .min(0, "SMS charge cannot be negative")
+      .max(MAX_SMS_MONTHLY_CHARGE_GHS, `SMS charge cannot exceed GHS ${MAX_SMS_MONTHLY_CHARGE_GHS}`)
+      .optional(),
+    senderId: z.string().max(11).optional().nullable()
+  })
+  .superRefine((value, ctx) => {
+    if (value.smsChargesEnabled === true) {
+      const amount = value.smsChargeAmountGhs;
+      if (amount == null || !(amount > 0)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["smsChargeAmountGhs"],
+          message: "Enter an SMS charge greater than zero when charges are enabled"
+        });
+      }
+    }
+  });
 
 export type UpdateTenantSmsSettingsInput = z.infer<typeof updateTenantSmsSettingsSchema>;
 
@@ -49,7 +78,9 @@ export function defaultTenantSmsSettings(tenantId: string): TenantSmsSettings {
     enabled: true,
     notifyDeposit: true,
     notifyWithdrawal: true,
-    notifyDailySusu: true
+    notifyDailySusu: true,
+    smsChargesEnabled: false,
+    smsChargeAmountGhs: 0
   };
 }
 

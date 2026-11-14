@@ -91,7 +91,15 @@ type SettingsWorkspaceState = {
   setSmsSettings: (settings: TenantSmsSettings | null) => void;
   saveSmsSettings: (
     payload: Partial<
-      Pick<TenantSmsSettings, "enabled" | "notifyDeposit" | "notifyWithdrawal" | "notifyDailySusu">
+      Pick<
+        TenantSmsSettings,
+        | "enabled"
+        | "notifyDeposit"
+        | "notifyWithdrawal"
+        | "notifyDailySusu"
+        | "smsChargesEnabled"
+        | "smsChargeAmountGhs"
+      >
     > & { senderId?: string | null }
   ) => Promise<TenantSmsSettings>;
 

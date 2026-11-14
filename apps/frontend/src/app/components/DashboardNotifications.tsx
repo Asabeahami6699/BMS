@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "../../auth/AuthContext";
 import type { AgentNotification } from "../api";
 import { notificationTargetPath } from "../notificationRoutes";
 import {
@@ -26,6 +27,7 @@ type Props = {
 
 export function DashboardNotifications({ enabled }: Props) {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [open, setOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -61,7 +63,7 @@ export function DashboardNotifications({ enabled }: Props) {
 
   async function handleNotificationClick(notification: AgentNotification) {
     await markRead(notification.id);
-    const target = notificationTargetPath(notification);
+    const target = notificationTargetPath(notification, user?.role);
     setOpen(false);
     if (target) {
       navigate(target);
@@ -105,7 +107,7 @@ export function DashboardNotifications({ enabled }: Props) {
               <p className="muted">You&apos;re all caught up — no notifications yet.</p>
             ) : null}
             {items.map((n) => {
-              const target = notificationTargetPath(n);
+              const target = notificationTargetPath(n, user?.role);
               return (
                 <button
                   key={n.id}

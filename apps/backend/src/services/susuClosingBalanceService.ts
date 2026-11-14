@@ -157,7 +157,16 @@ function isBranchCounterPost(tx: Transaction, userMeta: Map<string, UserMeta>): 
 }
 
 function isFieldAgentChannelPost(tx: Transaction, userMeta: Map<string, UserMeta>): boolean {
-  if (tx.notes?.toLowerCase().includes("batch")) {
+  const notes = (tx.notes ?? "").toLowerCase();
+  // Teller Pay now / agency cash payouts leave via till — never vault field withdrawals.
+  if (
+    notes.includes("teller cash payout") ||
+    notes.includes("agency withdrawal") ||
+    notes.includes("teller payout")
+  ) {
+    return false;
+  }
+  if (notes.includes("batch")) {
     return true;
   }
   if (tx.notes?.includes(DISCLOSURE_WITHDRAWAL_NOTE_TAG)) {

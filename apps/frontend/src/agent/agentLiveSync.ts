@@ -3,6 +3,7 @@ import { useNotificationsStore } from "../app/stores/notificationsStore";
 import { useAgentBalanceStore } from "./stores/agentBalanceStore";
 import { useAgentCollectionStore } from "./stores/agentCollectionStore";
 import { useAgentCustomerStore } from "./stores/agentCustomerStore";
+import { useAgentWithdrawalActivityStore } from "./stores/agentWithdrawalActivityStore";
 
 /** Tables that affect agent customers, requests, and alerts. */
 export const AGENT_LIVE_TABLES = [
@@ -31,6 +32,7 @@ let debounceTimer: ReturnType<typeof setTimeout> | undefined;
 export function refreshAgentLiveData(): void {
   void useAgentCustomerStore.getState().refreshSilent();
   void useAgentBalanceStore.getState().refreshSilent();
+  void useAgentWithdrawalActivityStore.getState().refreshSilent();
   void useAgentCollectionStore.getState().refreshToday();
   void useNotificationsStore.getState().refreshSilent();
   if (typeof window !== "undefined") {

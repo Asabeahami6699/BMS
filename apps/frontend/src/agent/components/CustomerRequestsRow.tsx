@@ -67,7 +67,7 @@ export function CustomerRequestsRow({ customerId, customerName, compact }: Props
       balance?.status === "approved" ||
       withdrawal?.status === "pending" ||
       withdrawal?.status === "rejected" ||
-      withdrawal?.status === "approved"
+      isWithdrawalApproved(withdrawal)
   );
   const pendingAny =
     balance?.status === "pending" || withdrawal?.status === "pending";

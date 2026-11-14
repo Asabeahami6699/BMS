@@ -14,11 +14,20 @@ import {
   listCustomers
 } from "./customerService.js";
 import { computeCustomerBalance } from "./ledgerService.js";
+import { findUserById } from "./authStore.js";
 import { createAgentNotification, notifyTenantStaff } from "./notificationService.js";
 import {
   postWithdrawalForApprovedDisclosure,
   type TransactionRequestContext
 } from "./transactionService.js";
+
+/** Susu field-agent app requests — coordinator reviews; teller Pay now. CS is not in this path. */
+export function isFieldAgentRequester(userId: string | null | undefined): boolean {
+  if (!userId) {
+    return false;
+  }
+  return findUserById(userId)?.role === "field_agent";
+}
 
 const DEFAULT_VISIBLE_HOURS = 6;
 
@@ -60,10 +69,12 @@ type DisclosureRow = {
   transaction_proof_image: string | null;
   generated_receipt_image: string | null;
   paid_at: string | null;
+  agent_delivered_by: string | null;
+  agent_delivered_at: string | null;
 };
 
 const DISCLOSURE_COLUMNS =
-  "id, tenant_id, customer_id, field_agent_id, request_type, status, balance_amount, withdrawal_amount, fulfillment_mode, requested_at, approved_at, expires_at, approved_by, request_reason, rejected_reason, momo_number, momo_account_name, payout_reference, transaction_proof_image, generated_receipt_image, paid_at";
+  "id, tenant_id, customer_id, field_agent_id, request_type, status, balance_amount, withdrawal_amount, fulfillment_mode, requested_at, approved_at, expires_at, approved_by, request_reason, rejected_reason, momo_number, momo_account_name, payout_reference, transaction_proof_image, generated_receipt_image, paid_at, agent_delivered_by, agent_delivered_at";
 
 const memoryDisclosures = new Map<string, DisclosureRow[]>();
 
@@ -91,9 +102,14 @@ function disclosureDbError(action: string, message: string): Error {
   ) {
     return new Error(`${action}: run Supabase migration 020_momo_withdrawal_receipts.sql.`);
   }
+  if (lower.includes("agent_delivered")) {
+    return new Error(
+      `${action}: run Supabase migration 092_agent_withdrawal_delivered.sql.`
+    );
+  }
   if (lower.includes("agent_notifications_kind_check")) {
     return new Error(
-      `${action}: re-run migration 017, 019, or 020 for notification kinds in Supabase.`
+      `${action}: re-run migration 017, 019, 020, or 092 for notification kinds in Supabase.`
     );
   }
   return new Error(`${action}: ${message}`);
@@ -113,15 +129,23 @@ function setMemoryList(tenantId: string, rows: DisclosureRow[]): void {
 
 function mapRow(
   row: DisclosureRow,
-  extras?: { customerName?: string; fieldAgentName?: string }
+  extras?: {
+    customerName?: string;
+    customerPhone?: string;
+    customerAccountNumber?: string;
+    fieldAgentName?: string;
+  }
 ): BalanceDisclosure {
-  return balanceDisclosureSchema.parse({
+  const parsed = balanceDisclosureSchema.parse({
     id: row.id,
     tenantId: row.tenant_id,
     customerId: row.customer_id,
     fieldAgentId: row.field_agent_id,
     customerName: extras?.customerName,
+    customerPhone: extras?.customerPhone,
+    customerAccountNumber: extras?.customerAccountNumber,
     fieldAgentName: extras?.fieldAgentName,
+    isFieldAgentRequest: isFieldAgentRequester(row.field_agent_id),
     requestType: row.request_type ?? "balance",
     status: row.status,
     balanceAmount: row.balance_amount != null ? Number(row.balance_amount) : undefined,
@@ -138,8 +162,49 @@ function mapRow(
     payoutReference: row.payout_reference ?? undefined,
     transactionProofImage: row.transaction_proof_image ?? undefined,
     generatedReceiptImage: row.generated_receipt_image ?? undefined,
-    paidAt: row.paid_at ?? undefined
+    paidAt: row.paid_at ?? undefined,
+    agentDeliveredBy: row.agent_delivered_by ?? undefined,
+    agentDeliveredAt: row.agent_delivered_at ?? undefined
   });
+  // Ensure delivery fields survive even if an older @bms/shared schema strips them.
+  return {
+    ...parsed,
+    agentDeliveredBy: row.agent_delivered_by ?? parsed.agentDeliveredBy,
+    agentDeliveredAt: row.agent_delivered_at ?? parsed.agentDeliveredAt
+  };
+}
+
+function asDisclosureRow(data: Record<string, unknown>): DisclosureRow {
+  return {
+    ...(data as unknown as DisclosureRow),
+    request_type: ((data.request_type as CustomerRequestType | undefined) ?? "balance") as CustomerRequestType,
+    agent_delivered_by:
+      data.agent_delivered_by != null ? String(data.agent_delivered_by) : null,
+    agent_delivered_at:
+      data.agent_delivered_at != null ? String(data.agent_delivered_at) : null
+  };
+}
+
+function isCashFulfillmentMode(mode: string | null | undefined): boolean {
+  return mode !== "momo";
+}
+
+function canMarkAgentDelivered(row: DisclosureRow): boolean {
+  if (row.request_type !== "withdrawal") {
+    return false;
+  }
+  if (row.agent_delivered_at) {
+    return false;
+  }
+  // Cash: teller Pay now completed → agent delivers to customer.
+  if (isCashFulfillmentMode(row.fulfillment_mode) && row.status === "completed") {
+    return true;
+  }
+  // MoMo: agent may confirm customer received the transfer.
+  if (row.fulfillment_mode === "momo" && row.status === "approved") {
+    return true;
+  }
+  return false;
 }
 
 function isVisibleBalanceApproval(row: DisclosureRow, now = Date.now()): boolean {
@@ -153,7 +218,17 @@ function isVisibleBalanceApproval(row: DisclosureRow, now = Date.now()): boolean
 }
 
 function isActiveWithdrawalApproval(row: DisclosureRow): boolean {
-  return row.request_type === "withdrawal" && row.status === "approved";
+  if (row.request_type !== "withdrawal") {
+    return false;
+  }
+  // Susu cash: cs_approved (awaiting teller) → completed (office cash ready).
+  // MoMo / legacy: approved.
+  return (
+    row.status === "approved" ||
+    row.status === "cs_approved" ||
+    row.status === "bank_executed" ||
+    row.status === "completed"
+  );
 }
 
 async function expireStaleBalanceRows(tenantId: string): Promise<void> {
@@ -201,10 +276,7 @@ async function fetchRowsForAgent(tenantId: string, fieldAgentId: string): Promis
     if (error) {
       throw disclosureDbError("Failed to load customer requests", error.message);
     }
-    return (data ?? []).map((r) => ({
-      ...r,
-      request_type: (r.request_type ?? "balance") as CustomerRequestType
-    })) as DisclosureRow[];
+    return (data ?? []).map((r) => asDisclosureRow(r as Record<string, unknown>));
   }
 
   return getMemoryList(tenantId).filter((r) => r.field_agent_id === fieldAgentId);
@@ -246,10 +318,7 @@ async function getRowById(tenantId: string, id: string): Promise<DisclosureRow |
     if (!data) {
       return undefined;
     }
-    return {
-      ...data,
-      request_type: (data.request_type ?? "balance") as CustomerRequestType
-    } as DisclosureRow;
+    return asDisclosureRow(data as Record<string, unknown>);
   }
 
   return getMemoryList(tenantId).find((r) => r.id === id);
@@ -299,6 +368,8 @@ async function enrichDisclosures(
     result.push(
       mapRow(row, {
         customerName: customer?.fullName,
+        customerPhone: customer?.phone,
+        customerAccountNumber: customer?.accountNumber,
         fieldAgentName: customer?.assignedFieldAgentName ?? customer?.createdByFieldAgentName
       })
     );
@@ -396,7 +467,9 @@ export async function requestCustomerApproval(
     payout_reference: null,
     transaction_proof_image: null,
     generated_receipt_image: null,
-    paid_at: null
+    paid_at: null,
+    agent_delivered_by: null,
+    agent_delivered_at: null
   };
 
   const supabase = getSupabaseAdminClient();
@@ -431,12 +504,14 @@ export async function requestCustomerApproval(
       ? ` GHS ${formatAccountAmount(payload.amount)}`
       : "";
   try {
+    // Field-agent cash: coordinator (+ admin) only — not Customer Service.
+    // MoMo: coordinator can pay; CS may assist. Balance visibility: coordinator/admin.
     const staffRoles =
       payload.type === "withdrawal"
         ? payload.fulfillmentMode === "momo"
-          ? (["customer_service", "coordinator", "admin"] as const)
-          : (["customer_service", "admin"] as const)
-        : (["customer_service", "admin"] as const);
+          ? (["coordinator", "admin", "customer_service"] as const)
+          : (["coordinator", "admin"] as const)
+        : (["coordinator", "admin"] as const);
     await notifyTenantStaff({
       tenantId,
       roles: [...staffRoles],
@@ -445,14 +520,18 @@ export async function requestCustomerApproval(
       title: pendingTitle,
       body:
         payload.type === "withdrawal" && payload.fulfillmentMode !== "momo"
-          ? `${customer.fullName}${amountLine} — Customer Service verifies under Susu → Withdrawals.`
+          ? `${customer.fullName}${amountLine} — Coordinator: call registration phone, then approve. Teller Pay now next.`
           : `${customer.fullName}${amountLine} — review in Pending approvals.`
     });
   } catch {
     // Non-blocking
   }
 
-  return mapRow(row, { customerName: customer.fullName });
+  return mapRow(row, {
+    customerName: customer.fullName,
+    customerPhone: customer.phone,
+    customerAccountNumber: customer.accountNumber
+  });
 }
 
 /** @deprecated Use requestCustomerApproval */
@@ -495,6 +574,20 @@ export async function listAgentBalanceDisclosures(
     return isActiveWithdrawalApproval(r);
   });
   return enrichDisclosures(tenantId, visibleOrActionable);
+}
+
+/** Full withdrawal history for the field agent activity tracker (not latest-only). */
+export async function listAgentWithdrawalActivity(
+  tenantId: string,
+  fieldAgentId: string,
+  limit = 120
+): Promise<BalanceDisclosure[]> {
+  const rows = await fetchRowsForAgent(tenantId, fieldAgentId);
+  const withdrawals = rows
+    .filter((r) => r.request_type === "withdrawal")
+    .sort((a, b) => new Date(b.requested_at).getTime() - new Date(a.requested_at).getTime())
+    .slice(0, Math.max(1, Math.min(limit, 300)));
+  return enrichDisclosures(tenantId, withdrawals);
 }
 
 export async function listPendingBalanceDisclosures(tenantId: string): Promise<BalanceDisclosure[]> {
@@ -544,6 +637,8 @@ function enrichWithdrawalsLight(
     const customer = customerById.get(row.customer_id);
     return mapRow(row, {
       customerName: customer?.fullName,
+      customerPhone: customer?.phone,
+      customerAccountNumber: customer?.accountNumber,
       fieldAgentName:
         agentNameById.get(row.field_agent_id) ??
         customer?.assignedFieldAgentName ??
@@ -653,8 +748,18 @@ export async function approveBalanceDisclosure(
     }
 
     const isMomo = row.fulfillment_mode === "momo";
+    const fieldAgentRequest = isFieldAgentRequester(row.field_agent_id);
     const hasCsApproval = context.permissions?.includes("agency.withdrawals.approve");
-    const postsDirectly = !hasCsApproval;
+    // Field-agent Susu cash: always coordinator/admin → teller queue (never CS agency path).
+    const postsDirectly = fieldAgentRequest || !hasCsApproval;
+
+    if (!isMomo && fieldAgentRequest) {
+      if (context.role !== "admin" && context.role !== "coordinator") {
+        throw new Error(
+          "Field agent cash withdrawals are approved by a coordinator (after calling the customer), then paid by the teller. Customer Service is not in this path."
+        );
+      }
+    }
 
     if (isMomo && postsDirectly) {
       if (!approvalPayload.transactionProofImage?.trim()) {
@@ -717,28 +822,23 @@ export async function approveBalanceDisclosure(
         imageUrl: patch.generated_receipt_image ?? undefined
       });
 
-      return mapRow(updated, { customerName: customer.fullName });
+      return mapRow(updated, {
+        customerName: customer.fullName,
+        customerPhone: customer.phone,
+        customerAccountNumber: customer.accountNumber
+      });
     }
 
     if (!isMomo && postsDirectly) {
-      await postWithdrawalForApprovedDisclosure({
-        tenantId,
-        customerId: row.customer_id,
-        homeBranchId: customer.homeBranchId,
-        amount,
-        disclosureId,
-        recordedByUserId: coordinatorId,
-        fieldAgentId: row.field_agent_id,
-        notes: withdrawalApprovalNotes(disclosureId, row.fulfillment_mode, null)
-      });
-
-      const balanceAfterWithdrawal = await computeCustomerBalance(tenantId, row.customer_id);
-
+      // Cash: authorize only — teller Pay now debits ledger and till. No vault field withdrawal.
+      const approvedAtIso = approvedAt.toISOString();
       const patch = {
-        status: "approved" as const,
-        balance_amount: balanceAfterWithdrawal,
-        approved_at: approvedAt.toISOString(),
-        approved_by: coordinatorId
+        status: "cs_approved" as const,
+        balance_amount: ledgerBalance,
+        approved_at: approvedAtIso,
+        approved_by: coordinatorId,
+        cs_approved_by: coordinatorId,
+        cs_approved_at: approvedAtIso
       };
 
       const supabase = getSupabaseAdminClient();
@@ -755,18 +855,35 @@ export async function approveBalanceDisclosure(
         Object.assign(row, patch);
       }
 
-      const updated: DisclosureRow = { ...row, ...patch, status: "approved" };
+      const updated: DisclosureRow = { ...row, ...patch, status: "cs_approved" };
 
       await createAgentNotification({
         tenantId,
         userId: row.field_agent_id,
         customerId: row.customer_id,
         kind: "withdrawal_request_approved",
-        title: "Withdrawal approved",
-        body: `${customer.fullName}: GHS ${formatAccountAmount(amount)} approved by coordinator.`
+        title: "Withdrawal approved — awaiting office cash",
+        body: `${customer.fullName}: GHS ${formatAccountAmount(amount)} approved. Collect from the office after teller Pay now, then deliver next visit.`
       });
 
-      return mapRow(updated, { customerName: customer.fullName });
+      try {
+        await notifyTenantStaff({
+          tenantId,
+          roles: ["teller", "admin"],
+          kind: "withdrawal_ready_for_teller",
+          customerId: row.customer_id,
+          title: "Field withdrawal ready — Pay now",
+          body: `${customer.fullName}: GHS ${formatAccountAmount(amount)} — pay from Branch counter till, then agent delivers next visit.`
+        });
+      } catch {
+        // Non-blocking
+      }
+
+      return mapRow(updated, {
+        customerName: customer.fullName,
+        customerPhone: customer.phone,
+        customerAccountNumber: customer.accountNumber
+      });
     }
 
     if (!isMomo) {
@@ -895,4 +1012,117 @@ export async function rejectBalanceDisclosure(
   });
 
   return mapRow(updated, { customerName: customer?.fullName });
+}
+
+export async function markAgentWithdrawalDelivered(
+  tenantId: string,
+  fieldAgentId: string,
+  disclosureId: string
+): Promise<BalanceDisclosure> {
+  const row = await getRowById(tenantId, disclosureId);
+  if (!row || row.request_type !== "withdrawal") {
+    throw new Error("Withdrawal request not found");
+  }
+  if (row.field_agent_id !== fieldAgentId) {
+    throw new Error("You can only confirm delivery for your own withdrawal requests");
+  }
+  if (row.agent_delivered_at) {
+    const customer = await getCustomerById(tenantId, row.customer_id);
+    return mapRow(row, {
+      customerName: customer?.fullName,
+      customerPhone: customer?.phone,
+      customerAccountNumber: customer?.accountNumber
+    });
+  }
+  if (!canMarkAgentDelivered(row)) {
+    throw new Error(
+      "Delivery can be confirmed after office cash Pay now (or MoMo approval). Collect office cash first if needed."
+    );
+  }
+
+  const now = new Date().toISOString();
+  const patch = {
+    agent_delivered_by: fieldAgentId,
+    agent_delivered_at: now
+  };
+
+  const supabase = getSupabaseAdminClient();
+  if (supabase) {
+    const { data: updatedRows, error } = await supabase
+      .from("customer_balance_disclosures")
+      .update(patch)
+      .eq("tenant_id", tenantId)
+      .eq("id", disclosureId)
+      .eq("field_agent_id", fieldAgentId)
+      .select(DISCLOSURE_COLUMNS);
+    if (error) {
+      throw disclosureDbError("Failed to confirm delivery", error.message);
+    }
+    const saved = updatedRows?.[0] as Record<string, unknown> | undefined;
+    if (!saved?.agent_delivered_at) {
+      throw new Error(
+        "Delivery was not saved. Apply Supabase migration 092_agent_withdrawal_delivered.sql and retry."
+      );
+    }
+    Object.assign(row, asDisclosureRow(saved));
+  } else {
+    Object.assign(row, patch);
+  }
+
+  const customer = await getCustomerById(tenantId, row.customer_id);
+  const amount = Number(row.withdrawal_amount ?? 0);
+  const customerLabel = customer?.fullName ?? "Customer";
+
+  try {
+    await notifyTenantStaff({
+      tenantId,
+      roles: ["admin", "coordinator"],
+      kind: "withdrawal_agent_delivered",
+      customerId: row.customer_id,
+      title: "Field agent delivered cash",
+      body: `${customerLabel}: GHS ${formatAccountAmount(amount)} delivered by field agent. Withdrawal process complete.`
+    });
+  } catch {
+    try {
+      await notifyTenantStaff({
+        tenantId,
+        roles: ["admin", "coordinator"],
+        kind: "workspace_activity",
+        customerId: row.customer_id,
+        title: "Field agent delivered cash",
+        body: `${customerLabel}: GHS ${formatAccountAmount(amount)} delivered by field agent. Withdrawal process complete.`
+      });
+    } catch {
+      // Non-blocking
+    }
+  }
+
+  return mapRow(row, {
+    customerName: customer?.fullName,
+    customerPhone: customer?.phone,
+    customerAccountNumber: customer?.accountNumber
+  });
+}
+
+export async function markAgentWithdrawalsDeliveredBulk(
+  tenantId: string,
+  fieldAgentId: string,
+  disclosureIds?: string[]
+): Promise<BalanceDisclosure[]> {
+  const rows = await fetchRowsForAgent(tenantId, fieldAgentId);
+  const targets = rows.filter((row) => {
+    if (!canMarkAgentDelivered(row)) {
+      return false;
+    }
+    if (disclosureIds?.length) {
+      return disclosureIds.includes(row.id);
+    }
+    return true;
+  });
+
+  const results: BalanceDisclosure[] = [];
+  for (const row of targets) {
+    results.push(await markAgentWithdrawalDelivered(tenantId, fieldAgentId, row.id));
+  }
+  return results;
 }

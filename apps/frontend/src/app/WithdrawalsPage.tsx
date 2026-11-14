@@ -31,34 +31,37 @@ type Props = {
   variant?: "susu" | "agency";
 };
 
-function statusLabel(status: BalanceDisclosure["status"]): string {
-  if (status === "cs_approved") {
-    return "CS verified";
+function statusLabel(row: BalanceDisclosure): string {
+  if (row.agentDeliveredAt) {
+    return "Agent delivered";
   }
-  if (status === "bank_executed") {
+  if (row.status === "cs_approved") {
+    return "Awaiting Pay now";
+  }
+  if (row.status === "bank_executed") {
     return "Bank debited";
   }
-  if (status === "completed") {
-    return "Paid out";
+  if (row.status === "completed") {
+    return "Paid out — await delivery";
   }
-  return status.replace(/_/g, " ");
+  return row.status.replace(/_/g, " ");
 }
 
 function fulfillmentLabel(mode?: BalanceDisclosure["fulfillmentMode"]): string {
   if (mode === "momo") {
     return "MoMo";
   }
-  if (mode === "agent_next_day") {
-    return "Agent cash";
+  if (mode === "agent_next_day" || mode === "next_day_cash") {
+    return "Cash · agent next visit";
   }
-  return "Cash next day";
+  return "Cash";
 }
 
-function statusPillClass(status: BalanceDisclosure["status"]): string {
-  if (status === "approved") {
+function statusPillClass(row: BalanceDisclosure): string {
+  if (row.agentDeliveredAt || row.status === "approved") {
     return "active";
   }
-  if (status === "rejected") {
+  if (row.status === "rejected") {
     return "inactive";
   }
   return "pending";
@@ -197,6 +200,12 @@ export function WithdrawalsPage({ role, variant = "susu" }: Props) {
 
   const filtered = useMemo(() => {
     let list = dateScopedWithdrawals;
+    // Susu/agency withdrawals desk: field-agent cash is coordinator → teller, not CS.
+    if (isAgency || user?.role === "customer_service") {
+      list = list.filter(
+        (r) => !(r.isFieldAgentRequest && r.fulfillmentMode !== "momo" && r.status === "pending")
+      );
+    }
     if (statusFilter) {
       list = list.filter((r) => r.status === statusFilter);
     }
@@ -207,7 +216,7 @@ export function WithdrawalsPage({ role, variant = "susu" }: Props) {
       "momoNumber",
       "momoAccountName"
     ] as (keyof BalanceDisclosure)[]);
-  }, [dateScopedWithdrawals, search, statusFilter]);
+  }, [dateScopedWithdrawals, search, statusFilter, isAgency, user?.role]);
 
   function handleApprove(row: BalanceDisclosure) {
     if (row.fulfillmentMode === "momo") {
@@ -264,7 +273,8 @@ export function WithdrawalsPage({ role, variant = "susu" }: Props) {
           <div>
             <h2>Withdrawals</h2>
             <p className="muted">
-              Agent requests → Customer Service verifies cash or MoMo → teller pays cash. {updatedLabel}
+              Agent requests → coordinator/CS approves (call registration phone) → teller Pay now.
+              Cash debits only when paid. {updatedLabel}
               {error ? ` · ${error}` : ""}
             </p>
           </div>
@@ -394,6 +404,11 @@ export function WithdrawalsPage({ role, variant = "susu" }: Props) {
               render: (row) => (
                 <div>
                   <strong>{row.customerName ?? "—"}</strong>
+                  {row.customerPhone ? (
+                    <small style={{ display: "block" }}>
+                      <a href={`tel:${row.customerPhone}`}>{row.customerPhone}</a>
+                    </small>
+                  ) : null}
                   <small className="muted" style={{ display: "block" }}>
                     {formatDate(row.requestedAt)}
                   </small>
@@ -421,10 +436,22 @@ export function WithdrawalsPage({ role, variant = "susu" }: Props) {
               key: "status",
               label: "Status",
               render: (row) => (
-                <span className={`status-pill status-pill--${statusPillClass(row.status)}`}>
-                  {statusLabel(row.status)}
+                <span className={`status-pill status-pill--${statusPillClass(row)}`}>
+                  {statusLabel(row)}
                 </span>
               )
+            },
+            {
+              key: "delivery",
+              label: "Delivery",
+              render: (row) =>
+                row.agentDeliveredAt ? (
+                  <span className="muted">{formatDate(row.agentDeliveredAt)}</span>
+                ) : row.status === "completed" && row.fulfillmentMode !== "momo" ? (
+                  <span className="status-pill status-pill--pending">Awaiting agent</span>
+                ) : (
+                  <span className="muted">—</span>
+                )
             },
             ...(withdrawalProducts.length > 0
               ? [
@@ -564,8 +591,8 @@ export function WithdrawalsPage({ role, variant = "susu" }: Props) {
             <div>
               <h3>Field agent daily withdrawal fulfillment</h3>
               <p className="muted">
-                Tracks coordinator-approved field withdrawals and what was actually debited from
-                customer accounts through each field agent.
+                Tracks requests, office payouts, and when the field agent confirms cash was delivered
+                to the customer.
               </p>
             </div>
             <label className="field agents-page__branch-filter">
@@ -592,6 +619,7 @@ export function WithdrawalsPage({ role, variant = "susu" }: Props) {
                     <th>Requested</th>
                     <th>Approved</th>
                     <th>Fulfilled (debited)</th>
+                    <th>Delivered</th>
                     <th>Customers</th>
                   </tr>
                 </thead>
@@ -607,6 +635,7 @@ export function WithdrawalsPage({ role, variant = "susu" }: Props) {
                       <td>
                         <strong>GHS {formatAccountAmount(row.totalFulfilled)}</strong>
                       </td>
+                      <td>GHS {formatAccountAmount(row.totalDelivered ?? 0)}</td>
                       <td>{row.customerCount}</td>
                     </tr>
                   ))}
@@ -624,6 +653,7 @@ export function WithdrawalsPage({ role, variant = "susu" }: Props) {
                         <th>Amount</th>
                         <th>Status</th>
                         <th>Fulfilled at</th>
+                        <th>Delivered at</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -635,6 +665,9 @@ export function WithdrawalsPage({ role, variant = "susu" }: Props) {
                             <td>GHS {formatAccountAmount(line.amount)}</td>
                             <td>{line.status.replace(/_/g, " ")}</td>
                             <td>{formatDate(line.fulfilledAt)}</td>
+                            <td>
+                              {line.agentDeliveredAt ? formatDate(line.agentDeliveredAt) : "—"}
+                            </td>
                           </tr>
                         ))
                       )}

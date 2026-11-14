@@ -4,6 +4,9 @@ import { requirePermission } from "../middleware/requirePermission.js";
 import { validateBody } from "../middleware/validateBody.js";
 import {
   listAgentBalanceDisclosures,
+  listAgentWithdrawalActivity,
+  markAgentWithdrawalDelivered,
+  markAgentWithdrawalsDeliveredBulk,
   requestCustomerApproval,
   requestCustomerBalanceDisclosure
 } from "../services/balanceDisclosureService.js";
@@ -119,6 +122,74 @@ fieldAgentsRouter.get("/me/balance-disclosures", requirePermission("customers.re
     });
   }
 });
+
+fieldAgentsRouter.get("/me/withdrawal-activity", requirePermission("customers.read"), async (req, res) => {
+  const context = req.userContext;
+  if (!context) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  if (context.role !== "field_agent") {
+    res.status(403).json({ error: "Field agent access only" });
+    return;
+  }
+
+  try {
+    res.json(await listAgentWithdrawalActivity(context.tenantId, context.userId));
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "Failed to load withdrawal activity"
+    });
+  }
+});
+
+fieldAgentsRouter.post("/me/withdrawals/delivered-bulk", requirePermission("customers.read"), async (req, res) => {
+  const context = req.userContext;
+  if (!context) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  if (context.role !== "field_agent") {
+    res.status(403).json({ error: "Field agent access only" });
+    return;
+  }
+  const ids = Array.isArray(req.body?.disclosureIds)
+    ? (req.body.disclosureIds as unknown[]).filter((id): id is string => typeof id === "string")
+    : undefined;
+  try {
+    res.json(await markAgentWithdrawalsDeliveredBulk(context.tenantId, context.userId, ids));
+  } catch (error) {
+    res.status(400).json({
+      error: error instanceof Error ? error.message : "Could not confirm deliveries"
+    });
+  }
+});
+
+fieldAgentsRouter.post(
+  "/me/withdrawals/:disclosureId/delivered",
+  requirePermission("customers.read"),
+  async (req, res) => {
+    const context = req.userContext;
+    if (!context) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    if (context.role !== "field_agent") {
+      res.status(403).json({ error: "Field agent access only" });
+      return;
+    }
+    const disclosureId = Array.isArray(req.params.disclosureId)
+      ? req.params.disclosureId[0]
+      : req.params.disclosureId;
+    try {
+      res.json(await markAgentWithdrawalDelivered(context.tenantId, context.userId, disclosureId));
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Could not confirm delivery"
+      });
+    }
+  }
+);
 
 async function handleCustomerRequest(req: Request, res: Response): Promise<void> {
   const context = req.userContext;

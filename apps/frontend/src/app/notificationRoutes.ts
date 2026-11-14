@@ -1,7 +1,19 @@
 import type { AgentNotification } from "./api";
 
-/** Resolve in-app navigation target for a staff notification. */
-export function notificationTargetPath(notification: AgentNotification): string | null {
+type NotificationRole = string | undefined;
+
+/**
+ * Resolve in-app navigation target for a staff notification.
+ * Field-agent Susu cash/balance requests go to Pending approvals (coordinator),
+ * not the agency banking withdrawals desk.
+ */
+export function notificationTargetPath(
+  notification: AgentNotification,
+  role?: NotificationRole
+): string | null {
+  const isTellerLike = role === "teller";
+  const isCoordinatorLike = role === "coordinator" || role === "admin";
+
   switch (notification.kind) {
     case "deposit_pending_bank":
     case "deposit_pending_accountant":
@@ -11,13 +23,27 @@ export function notificationTargetPath(notification: AgentNotification): string 
       return "/app/banking/back-office/deposits";
     case "withdrawal_ready_for_teller":
     case "withdrawal_cs_approved":
-      return "/app/banking/teller";
+      // Susu field Pay now lives on Branch counter; banking tellers keep desk home.
+      if (isTellerLike || isCoordinatorLike || role === "admin") {
+        const hay = `${notification.title} ${notification.body}`.toLowerCase();
+        if (
+          hay.includes("branch counter") ||
+          hay.includes("field withdrawal") ||
+          hay.includes("pay now") ||
+          hay.includes("next visit")
+        ) {
+          return "/app/susu/collections";
+        }
+      }
+      return isTellerLike ? "/app/banking/teller" : "/app/susu/collections";
     case "withdrawal_request_pending":
     case "balance_request_pending":
+      // Coordinator review queue (call customer → approve → teller Pay now).
+      return "/app/susu/pending-approvals";
     case "withdrawal_momo_sent":
-      return "/app/banking/withdrawals";
+      return "/app/susu/pending-approvals";
     case "registration_pending":
-      return "/app/susu/group-savings";
+      return "/app/susu/pending-approvals";
     case "registration_approved":
     case "registration_rejected":
       return notification.customerId
@@ -28,6 +54,7 @@ export function notificationTargetPath(notification: AgentNotification): string 
       return "/app/susu/withdrawals";
     case "withdrawal_request_approved":
     case "withdrawal_request_rejected":
+      // Staff: fulfillment / history. (Field agents use the agent app alerts.)
       return "/app/susu/withdrawals";
     case "float_requested":
     case "float_allocated":
@@ -59,20 +86,30 @@ export function notificationTargetPath(notification: AgentNotification): string 
   }
 
   const haystack = `${notification.title} ${notification.body}`.toLowerCase();
+  if (haystack.includes("pending approval") || haystack.includes("registration phone")) {
+    return "/app/susu/pending-approvals";
+  }
+  if (
+    haystack.includes("pay now") ||
+    haystack.includes("branch counter") ||
+    (haystack.includes("teller") && haystack.includes("field"))
+  ) {
+    return "/app/susu/collections";
+  }
   if (haystack.includes("teller") || haystack.includes("pay cash") || haystack.includes("payout")) {
-    return "/app/banking/teller";
+    return role === "teller" ? "/app/banking/teller" : "/app/susu/collections";
   }
   if (haystack.includes("back office") || haystack.includes("bank execution") || haystack.includes("deposit")) {
     return "/app/banking/back-office/deposits";
   }
-  if (haystack.includes("withdrawal") || haystack.includes("customer service")) {
-    return "/app/banking/withdrawals";
+  if (haystack.includes("withdrawal") || haystack.includes("balance request")) {
+    return "/app/susu/pending-approvals";
   }
   if (haystack.includes("float")) {
     return "/app/susu/till-float";
   }
   if (haystack.includes("registration")) {
-    return "/app/susu/group-savings";
+    return "/app/susu/pending-approvals";
   }
   return null;
 }

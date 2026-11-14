@@ -130,8 +130,8 @@ export function SettingsSubscriptionPage({
         <div className="role-workspace__hero-head">
           <div>
             <p className="eyebrow">Billing</p>
-            <h2>Product subscription</h2>
-            <p className="muted">
+        <h2>Product subscription</h2>
+        <p className="muted">
               Plan, renewal dates, and MoMo payment for your company workspace.
             </p>
           </div>
@@ -207,16 +207,16 @@ export function SettingsSubscriptionPage({
         <article className="card" id="subscription-products">
           <h2>Included products</h2>
           <p className="muted">Products and add-ons on your current subscription.</p>
-          <div className="module-pills">
-            {products.map((m) => (
-              <span className="module-pill" key={m}>
-                {MODULE_LABELS[m]}
-              </span>
-            ))}
-            {reportsAnalytics !== false && (
-              <span className="module-pill module-pill--universal">Reports &amp; Analytics</span>
-            )}
-          </div>
+        <div className="module-pills">
+          {products.map((m) => (
+            <span className="module-pill" key={m}>
+              {MODULE_LABELS[m]}
+            </span>
+          ))}
+          {reportsAnalytics !== false && (
+            <span className="module-pill module-pill--universal">Reports &amp; Analytics</span>
+          )}
+        </div>
           {products.length === 0 ? <p className="muted">No product modules assigned yet.</p> : null}
 
           <h3 className="settings-section-title">Feature add-ons</h3>
@@ -232,7 +232,7 @@ export function SettingsSubscriptionPage({
               ))}
             </ul>
           )}
-        </article>
+      </article>
 
         <article className="card" id="subscription-renew">
           <h2>Renew with MoMo</h2>
@@ -244,7 +244,7 @@ export function SettingsSubscriptionPage({
           {!momoReady && !selectedIsFree ? (
             <div className="subscription-empty" role="status">
               <strong>MoMo pay-to is not set up yet</strong>
-              <p className="muted">
+        <p className="muted">
                 Ask platform support to save the MoMo number under Platform → Subscription management.
                 You can still start the free plan below, or submit a paid claim after MoMo is configured.
               </p>

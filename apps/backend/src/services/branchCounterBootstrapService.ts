@@ -1,4 +1,4 @@
-import type { Customer, TenantBankProduct } from "@bms/shared";
+import type { BalanceDisclosure, Customer, TenantBankProduct } from "@bms/shared";
 import { isMissingSupabaseResource } from "../lib/supabaseSchema.js";
 import { listBranches, resolveBranchId } from "./branchService.js";
 import { listBankProducts } from "./bankProductService.js";
@@ -14,6 +14,7 @@ import {
   listPendingFloatRequests,
   type BranchFloatSession
 } from "./branchFloatService.js";
+import { loadWithdrawalsPendingTellerPay } from "./agencyBankingService.js";
 
 type BranchRow = Awaited<ReturnType<typeof listBranches>>[number];
 
@@ -28,6 +29,8 @@ export type BranchCounterBootstrap = {
   floatSession: BranchFloatSession | null;
   floatSummary: ReturnType<typeof floatSessionSummary>;
   pendingFloatRequests: BranchFloatSession[];
+  /** Coordinator/CS-approved field cash withdrawals awaiting teller Pay now. */
+  pendingFieldPayouts: BalanceDisclosure[];
 };
 
 export async function getBranchCounterBootstrap(
@@ -92,6 +95,12 @@ export async function getBranchCounterBootstrap(
       ? await listPendingFloatRequests(tenantId)
       : [];
 
+    const pendingFieldPayouts = resolvedBranchId
+      ? await loadWithdrawalsPendingTellerPay(tenantId, resolvedBranchId).catch(
+          () => [] as BalanceDisclosure[]
+        )
+      : [];
+
     return {
       customers: [],
       branches: [],
@@ -99,7 +108,8 @@ export async function getBranchCounterBootstrap(
       statement,
       floatSession,
       floatSummary: floatSessionSummary(floatSession),
-      pendingFloatRequests
+      pendingFloatRequests,
+      pendingFieldPayouts
     };
   }
 
@@ -164,6 +174,16 @@ export async function getBranchCounterBootstrap(
     (p) => !p.isCompanyBankAccount
   );
 
+  const payoutBranchId = options.branchId
+    ? await resolveBranchId(tenantId, options.branchId)
+    : undefined;
+  const pendingFieldPayouts =
+    !options.minimal && payoutBranchId
+      ? await loadWithdrawalsPendingTellerPay(tenantId, payoutBranchId).catch(
+          () => [] as BalanceDisclosure[]
+        )
+      : [];
+
   return {
     customers,
     branches,
@@ -171,6 +191,7 @@ export async function getBranchCounterBootstrap(
     statement,
     floatSession,
     floatSummary: floatSessionSummary(floatSession),
-    pendingFloatRequests
+    pendingFloatRequests,
+    pendingFieldPayouts
   };
 }

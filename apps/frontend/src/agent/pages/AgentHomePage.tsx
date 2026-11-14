@@ -29,21 +29,25 @@ export function AgentHomePage() {
       <AgentCashVariancePanel />
 
       <div className="agent-action-grid">
-        <Link to="customers" className="agent-action-card agent-action-card--primary">
+        <Link to="/app/agent/customers" className="agent-action-card agent-action-card--primary">
           <strong>Customers</strong>
           <p className="muted">Browse, collect, and create new accounts</p>
         </Link>
-        <Link to="collect" className="agent-action-card">
+        <Link to="/app/agent/collect" className="agent-action-card">
           <strong>Daily collection</strong>
           <p className="muted">Record collections and sync when online</p>
         </Link>
-        <Link to="callover" className="agent-action-card">
+        <Link to="/app/agent/callover" className="agent-action-card">
           <strong>Call over</strong>
           <p className="muted">Check cash vs system — report only differences</p>
         </Link>
-        <Link to="alerts" className="agent-action-card">
+        <Link to="/app/agent/alerts" className="agent-action-card">
           <strong>Alerts</strong>
           <p className="muted">Approval and rejection updates</p>
+        </Link>
+        <Link to="/app/agent/withdrawals" className="agent-action-card">
+          <strong>Withdrawals</strong>
+          <p className="muted">Requested, approved, and cash from office</p>
         </Link>
       </div>
     </div>

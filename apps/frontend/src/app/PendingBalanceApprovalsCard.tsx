@@ -19,10 +19,10 @@ function fulfillmentLabel(mode?: BalanceDisclosure["fulfillmentMode"]): string {
   if (mode === "momo") {
     return "MoMo (instant)";
   }
-  if (mode === "agent_next_day") {
-    return "Agent brings cash";
+  if (mode === "agent_next_day" || mode === "next_day_cash") {
+    return "Cash · agent delivers next visit";
   }
-  return "Cash next day";
+  return "Cash";
 }
 
 export function PendingBalanceApprovalsCard() {
@@ -34,6 +34,7 @@ export function PendingBalanceApprovalsCard() {
   const { showToast } = useToast();
   const pending = useCoordinatorStore((s) => s.pendingRequests);
   const loading = useCoordinatorStore((s) => s.loading);
+  const refresh = useCoordinatorStore((s) => s.refresh);
   const refreshSilent = useCoordinatorStore((s) => s.refreshSilent);
   const removePendingRequest = useCoordinatorStore((s) => s.removePendingRequest);
 
@@ -41,9 +42,23 @@ export function PendingBalanceApprovalsCard() {
   const [momoRequest, setMomoRequest] = useState<BalanceDisclosure | null>(null);
   const [balanceApproveTarget, setBalanceApproveTarget] = useState<BalanceDisclosure | null>(null);
   const [declineTarget, setDeclineTarget] = useState<BalanceDisclosure | null>(null);
-  const visible = pending.filter((row) =>
-    row.requestType === "withdrawal" ? canApproveWithdrawal : canReviewBalance
-  );
+  const visible = pending.filter((row) => {
+    if (row.requestType === "withdrawal") {
+      if (!canApproveWithdrawal) {
+        return false;
+      }
+      // Field-agent cash: coordinator/admin only — CS uses agency walk-in desk instead.
+      if (
+        row.fulfillmentMode !== "momo" &&
+        row.isFieldAgentRequest &&
+        user?.role === "customer_service"
+      ) {
+        return false;
+      }
+      return true;
+    }
+    return canReviewBalance;
+  });
   if (!canApproveWithdrawal && !canReviewBalance) {
     return null;
   }
@@ -58,7 +73,9 @@ export function PendingBalanceApprovalsCard() {
       removePendingRequest(row.id);
       if (approved.requestType === "withdrawal") {
         showToast(
-          `Withdrawal approved — ${approved.customerName ?? "Customer"}: ${approved.withdrawalAmount != null ? formatGhs(approved.withdrawalAmount) : "—"} (${fulfillmentLabel(approved.fulfillmentMode)})`,
+          approved.fulfillmentMode === "momo"
+            ? `MoMo withdrawal completed — ${approved.customerName ?? "Customer"}: ${approved.withdrawalAmount != null ? formatGhs(approved.withdrawalAmount) : "—"}`
+            : `Approved — teller Pay now next. Call ${approved.customerPhone ?? "customer"} if not already verified. ${approved.customerName ?? "Customer"}: ${approved.withdrawalAmount != null ? formatGhs(approved.withdrawalAmount) : "—"}`,
           "success"
         );
       } else {
@@ -108,11 +125,22 @@ export function PendingBalanceApprovalsCard() {
   return (
     <>
       <article className="card">
-        <h2>Agent requests (balance & withdrawal)</h2>
+        <div className="platform-actions-buttons" style={{ justifyContent: "space-between", marginBottom: "0.5rem" }}>
+          <h2 style={{ margin: 0 }}>Pending withdrawals &amp; balance requests</h2>
+          <button
+            type="button"
+            className="button secondary"
+            disabled={loading}
+            onClick={() => void refresh()}
+            title="Refresh pending requests"
+          >
+            {loading ? "Refreshing…" : "↻ Refresh"}
+          </button>
+        </div>
         <p className="muted">
-          Approve balance requests (set how long the agent can view the balance) or withdrawals. For MoMo,
-          upload the transaction
-          screenshot — a receipt is sent to the agent&apos;s alerts.
+          Field-agent cash: call the customer on their registration phone, then approve. That queues
+          teller Pay now (no ledger yet) — Customer Service is not in this path. For MoMo, upload the
+          transaction screenshot — a receipt goes to the agent&apos;s alerts.
         </p>
         {loading && visible.length === 0 ? <p className="muted">Loading…</p> : null}
         <div className="lines">
@@ -144,6 +172,15 @@ export function PendingBalanceApprovalsCard() {
                           : "—"}{" "}
                         · {fulfillmentLabel(row.fulfillmentMode)}
                       </small>
+                      {row.customerPhone ? (
+                        <small>
+                          Call customer before approve:{" "}
+                          <a href={`tel:${row.customerPhone}`}>{row.customerPhone}</a>
+                          <span className="muted"> (registration phone)</span>
+                        </small>
+                      ) : (
+                        <small className="muted">No registration phone on file — verify carefully.</small>
+                      )}
                       {row.fulfillmentMode === "momo" ? (
                         <small>
                           MoMo: {row.momoAccountName} · {row.momoNumber}

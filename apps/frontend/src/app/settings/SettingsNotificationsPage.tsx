@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { hasTenantAddon, type TenantAddon } from "@bms/shared";
+import {
+  formatAccountAmount,
+  hasTenantAddon,
+  MAX_SMS_MONTHLY_CHARGE_GHS,
+  type TenantAddon
+} from "@bms/shared";
 import { sendTenantTestSms, type MessageLogItem, type TenantSmsSettings } from "../api";
 import { useToast } from "../../components/Toast";
 import { useSettingsWorkspaceStore } from "../stores/settingsWorkspaceStore";
@@ -55,6 +60,17 @@ function formatWhen(iso: string): string {
     hour: "numeric",
     minute: "2-digit"
   });
+}
+
+function withSmsChargeDefaults(settings: TenantSmsSettings): TenantSmsSettings {
+  return {
+    ...settings,
+    smsChargesEnabled: Boolean(settings.smsChargesEnabled),
+    smsChargeAmountGhs: Math.min(
+      MAX_SMS_MONTHLY_CHARGE_GHS,
+      Math.max(0, Number(settings.smsChargeAmountGhs) || 0)
+    )
+  };
 }
 
 export function SettingsNotificationsPage({ subscribedAddons }: Props) {
@@ -121,22 +137,38 @@ export function SettingsNotificationsPage({ subscribedAddons }: Props) {
     if (!settings) {
       return;
     }
-    setSmsSettings({ ...settings, ...patch });
+    setSmsSettings(withSmsChargeDefaults({ ...settings, ...patch }));
   }
 
   async function handleSave() {
-    if (!settings) {
+    if (!smsSettings) {
       return;
+    }
+    const chargeAmount = Number(smsSettings.smsChargeAmountGhs ?? 0);
+    if (smsSettings.smsChargesEnabled) {
+      if (!(chargeAmount > 0)) {
+        showToast("Enter an SMS charge greater than zero", "error");
+        return;
+      }
+      if (chargeAmount > MAX_SMS_MONTHLY_CHARGE_GHS) {
+        showToast(`SMS charge cannot exceed GHS ${formatAccountAmount(MAX_SMS_MONTHLY_CHARGE_GHS)}`, "error");
+        return;
+      }
     }
     try {
       const updated = await saveSmsSettings({
-        enabled: settings.enabled,
-        notifyDeposit: settings.notifyDeposit,
-        notifyWithdrawal: settings.notifyWithdrawal,
-        notifyDailySusu: settings.notifyDailySusu,
-        senderId: settings.senderId?.trim() || undefined
+        enabled: smsSettings.enabled,
+        notifyDeposit: smsSettings.notifyDeposit,
+        notifyWithdrawal: smsSettings.notifyWithdrawal,
+        notifyDailySusu: smsSettings.notifyDailySusu,
+        smsChargesEnabled: Boolean(smsSettings.smsChargesEnabled),
+        smsChargeAmountGhs: Math.min(
+          MAX_SMS_MONTHLY_CHARGE_GHS,
+          Math.max(0, chargeAmount)
+        ),
+        senderId: smsSettings.senderId?.trim() || undefined
       });
-      setSmsSettings(updated);
+      setSmsSettings(withSmsChargeDefaults(updated));
       showToast("SMS settings saved", "success");
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to save SMS settings", "error");
@@ -161,6 +193,7 @@ export function SettingsNotificationsPage({ subscribedAddons }: Props) {
   }
 
   const smsLoading = hasSms && loading && lastFetchedAt == null;
+  const smsSettings = settings ? withSmsChargeDefaults(settings) : null;
 
   return (
     <article className="card">
@@ -178,7 +211,7 @@ export function SettingsNotificationsPage({ subscribedAddons }: Props) {
             <p>Contact platform support to add SMS notifications to your subscription.</p>
           ) : smsLoading ? (
             <p className="muted">Loading SMS settings…</p>
-          ) : settings ? (
+          ) : smsSettings ? (
             <>
               {smsReady === false ? (
                 <p className="muted">
@@ -195,7 +228,7 @@ export function SettingsNotificationsPage({ subscribedAddons }: Props) {
               <label className="checkbox-row">
                 <input
                   type="checkbox"
-                  checked={settings.enabled}
+                  checked={smsSettings.enabled}
                   onChange={(e) => updateSettings({ enabled: e.target.checked })}
                 />
                 <span>Enable customer SMS alerts</span>
@@ -204,8 +237,8 @@ export function SettingsNotificationsPage({ subscribedAddons }: Props) {
               <label className="checkbox-row">
                 <input
                   type="checkbox"
-                  checked={settings.notifyDeposit}
-                  disabled={!settings.enabled}
+                  checked={smsSettings.notifyDeposit}
+                  disabled={!smsSettings.enabled}
                   onChange={(e) => updateSettings({ notifyDeposit: e.target.checked })}
                 />
                 <span>Deposit credited</span>
@@ -214,8 +247,8 @@ export function SettingsNotificationsPage({ subscribedAddons }: Props) {
               <label className="checkbox-row">
                 <input
                   type="checkbox"
-                  checked={settings.notifyWithdrawal}
-                  disabled={!settings.enabled}
+                  checked={smsSettings.notifyWithdrawal}
+                  disabled={!smsSettings.enabled}
                   onChange={(e) => updateSettings({ notifyWithdrawal: e.target.checked })}
                 />
                 <span>Withdrawal debited</span>
@@ -224,12 +257,60 @@ export function SettingsNotificationsPage({ subscribedAddons }: Props) {
               <label className="checkbox-row">
                 <input
                   type="checkbox"
-                  checked={settings.notifyDailySusu}
-                  disabled={!settings.enabled}
+                  checked={smsSettings.notifyDailySusu}
+                  disabled={!smsSettings.enabled}
                   onChange={(e) => updateSettings({ notifyDailySusu: e.target.checked })}
                 />
                 <span>Daily susu collection posted</span>
               </label>
+
+              <div className="settings-sms-charges">
+                <strong>Monthly SMS charges</strong>
+                <p className="muted">
+                  When enabled, every active customer is automatically debited this fee from their account
+                  once each calendar month (maximum GHS {formatAccountAmount(MAX_SMS_MONTHLY_CHARGE_GHS)}).
+                </p>
+                <label className="checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(smsSettings.smsChargesEnabled)}
+                    onChange={(e) =>
+                      updateSettings({
+                        smsChargesEnabled: e.target.checked,
+                        smsChargeAmountGhs: e.target.checked
+                          ? Math.max(Number(smsSettings.smsChargeAmountGhs) || 0, 0)
+                          : Number(smsSettings.smsChargeAmountGhs) || 0
+                      })
+                    }
+                  />
+                  <span>Enable SMS charges</span>
+                </label>
+                <label>
+                  <span>Monthly charge (GHS)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={MAX_SMS_MONTHLY_CHARGE_GHS}
+                    step="0.01"
+                    disabled={!smsSettings.smsChargesEnabled}
+                    value={smsSettings.smsChargeAmountGhs ?? 0}
+                    onChange={(e) => {
+                      const raw = Number(e.target.value);
+                      const next = Number.isFinite(raw) ? raw : 0;
+                      updateSettings({
+                        smsChargeAmountGhs: Math.min(
+                          MAX_SMS_MONTHLY_CHARGE_GHS,
+                          Math.max(0, next)
+                        )
+                      });
+                    }}
+                  />
+                  <p className="muted">
+                    Admin cannot set more than GHS {formatAccountAmount(MAX_SMS_MONTHLY_CHARGE_GHS)}. Customers with
+                    insufficient balance are skipped until funds are available.
+                  </p>
+                </label>
+              </div>
 
               <label>
                 <span>Sender ID</span>
@@ -237,7 +318,7 @@ export function SettingsNotificationsPage({ subscribedAddons }: Props) {
                   type="text"
                   maxLength={11}
                   placeholder="Evans Susu"
-                  value={settings.senderId ?? ""}
+                  value={smsSettings.senderId ?? ""}
                   onChange={(e) => updateSettings({ senderId: e.target.value })}
                 />
                 <p className="muted">
