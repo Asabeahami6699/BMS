@@ -32,6 +32,31 @@ function canAccessOsFallback(role: Role | undefined, permissions: Permission[] |
   ]);
 }
 
+/** Cycle fees page — separate from agent commissions; heal stale tenant nav matrices. */
+function canAccessCycleFeesFallback(
+  role: Role | undefined,
+  permissions: Permission[] | undefined
+): boolean {
+  if (role !== "admin" && role !== "accountant" && role !== "coordinator") {
+    return false;
+  }
+  return hasAnyPermission(permissions, [
+    "commission_policy.read",
+    "income.read",
+    "income.read.daily"
+  ]);
+}
+
+function canAccessSusuIncomeFallback(
+  role: Role | undefined,
+  permissions: Permission[] | undefined
+): boolean {
+  if (role !== "admin" && role !== "accountant" && role !== "coordinator") {
+    return false;
+  }
+  return hasAnyPermission(permissions, ["income.read", "income.read.daily"]);
+}
+
 export function SusuPermissionGate({
   role,
   permissions,
@@ -40,9 +65,12 @@ export function SusuPermissionGate({
   denied,
   children
 }: Props) {
+  const path = normalizeRoute(route);
   const allowed =
     canAccessSusuRoute(role, permissions, route, susuNavVisibility) ||
-    (normalizeRoute(route) === "susu/overages-shortages" && canAccessOsFallback(role, permissions));
+    (path === "susu/overages-shortages" && canAccessOsFallback(role, permissions)) ||
+    (path === "susu/cycle-commission" && canAccessCycleFeesFallback(role, permissions)) ||
+    (path === "susu/income" && canAccessSusuIncomeFallback(role, permissions));
   if (!allowed) {
     return <>{denied}</>;
   }

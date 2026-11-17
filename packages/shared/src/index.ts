@@ -20,6 +20,8 @@ export * from "./loanQualification.js";
 export * from "./siteManual.js";
 export * from "./tellerOps.js";
 export * from "./treasury.js";
+export * from "./institutionalIncome.js";
+export * from "./susuCycleCommission.js";
 export * from "./agencyBanking.js";
 export * from "./amountInWords.js";
 export * from "./money.js";

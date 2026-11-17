@@ -49,16 +49,92 @@ export async function applySavingsInitialDepositOnApproval(
     if (rpcError) {
       throw new Error(`Failed to post savings initial deposit: ${rpcError.message}`);
     }
+    await supabase
+      .from("customers")
+      .update({
+        savings_opening_fee_collected: true,
+        savings_opening_fee_recovered: amount
+      })
+      .eq("tenant_id", tenantId)
+      .eq("id", customer.id);
+    await postSavingsOpeningFeeIncome({
+      tenantId,
+      customerId: customer.id,
+      branchId: customer.homeBranchId,
+      amount,
+      transactionId,
+      recordedByUserId,
+      businessDate: new Date().toISOString().slice(0, 10)
+    });
     return;
   }
 
+  const memoryTxId = randomUUID();
   customer.lockedBalance = amount;
   await addLedgerEntry({
     tenantId,
     customerId: customer.id,
-    transactionId: randomUUID(),
+    transactionId: memoryTxId,
     entryType: "credit",
     amount,
     transactionBranchId: customer.homeBranchId
+  });
+  await postSavingsOpeningFeeIncome({
+    tenantId,
+    customerId: customer.id,
+    branchId: customer.homeBranchId,
+    amount,
+    transactionId: memoryTxId,
+    recordedByUserId,
+    businessDate: new Date().toISOString().slice(0, 10)
+  });
+}
+
+/** Institutional income for savings opening fee (idempotent per customer). */
+export async function postSavingsOpeningFeeIncome(options: {
+  tenantId: string;
+  customerId: string;
+  branchId: string;
+  amount: number;
+  transactionId?: string;
+  recordedByUserId: string;
+  businessDate?: string;
+  notes?: string;
+  /** When true, surface posting errors (report backfill). Default swallows for approval path. */
+  throwOnError?: boolean;
+}): Promise<void> {
+  if (!(options.amount > 0) || !options.branchId) {
+    return;
+  }
+  const { postInstitutionalIncome } = await import("./institutionalIncomeService.js");
+  const { listBranches } = await import("./branchService.js");
+  const branches = await listBranches(options.tenantId).catch(() => []);
+  const branchName =
+    branches.find((b) => String(b.id) === String(options.branchId))?.name ?? "Branch";
+  const run = postInstitutionalIncome(
+    {
+      userId: options.recordedByUserId,
+      tenantId: options.tenantId,
+      role: "system"
+    },
+    {
+      branchId: String(options.branchId),
+      source: "savings_fee",
+      amount: options.amount,
+      customerId: options.customerId,
+      transactionId: options.transactionId,
+      businessDate: options.businessDate,
+      notes: options.notes ?? "Savings opening fee (locked initial deposit)",
+      // Stable per customer so locked + recovered paths never double-post.
+      idempotencyKey: `savings_fee:opening:${options.customerId}`
+    },
+    { branchName }
+  );
+  if (options.throwOnError) {
+    await run;
+    return;
+  }
+  await run.catch(() => {
+    /* income tracking must not block account approval */
   });
 }

@@ -46,6 +46,7 @@ export const permissionsByRole: Record<Role, Permission[]> = {
     "treasury.read",
     "treasury.cash.move",
     "treasury.reconcile",
+    "income.read",
     "agency.withdrawals.approve",
     "agency.bank.execute",
     "agency.withdrawals.pay",
@@ -76,6 +77,7 @@ export const permissionsByRole: Record<Role, Permission[]> = {
     "payroll.read",
     "commission_policy.read",
     "treasury.read",
+    "income.read.daily",
     "workspace.notifications",
     "workspace.manual.read"
   ],
@@ -211,6 +213,14 @@ export function resolveRolePermissions(
     !resolved.includes("transactions.reverse.daily_susu")
   ) {
     resolved.push("transactions.reverse.daily_susu");
+  }
+  // Newer institutional-income duties must reach tenants with saved role overrides
+  // that were snapshotted before these permissions existed.
+  if (role === "admin" && !resolved.includes("income.read")) {
+    resolved.push("income.read");
+  }
+  if (role === "coordinator" && !resolved.includes("income.read.daily")) {
+    resolved.push("income.read.daily");
   }
   return resolved;
 }

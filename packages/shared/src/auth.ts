@@ -258,6 +258,8 @@ export const permissionSchema = z.enum([
   "treasury.read",
   "treasury.cash.move",
   "treasury.reconcile",
+  "income.read",
+  "income.read.daily",
   "agency.withdrawals.approve",
   "agency.bank.execute",
   "agency.withdrawals.pay",

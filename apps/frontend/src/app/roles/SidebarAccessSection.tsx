@@ -9,6 +9,7 @@ import {
   PERMISSION_CATALOG,
   SETTINGS_ROUTE_VISIBILITY,
   TREASURY_NAV_VISIBILITY,
+  INCOME_NAV_VISIBILITY,
   hasTenantModule
 } from "@bms/shared";
 import type { SusuNavVisibilityConfigItem } from "../api";
@@ -90,6 +91,15 @@ export function SidebarAccessSection({
   const treasuryRows: ReferenceSidebarRow[] = useMemo(
     () =>
       TREASURY_NAV_VISIBILITY.map((row) => ({
+        label: row.label,
+        anyPermissions: row.anyPermissions
+      })),
+    []
+  );
+
+  const incomeRows: ReferenceSidebarRow[] = useMemo(
+    () =>
+      INCOME_NAV_VISIBILITY.map((row) => ({
         label: row.label,
         anyPermissions: row.anyPermissions
       })),
@@ -292,9 +302,12 @@ export function SidebarAccessSection({
                     <>
                       <p className="muted roles-page__sidebar-intro">
                         {MODULE_LABELS.treasury} menus appear when staff hold treasury permissions. Cash
-                        movements require <code>treasury.cash.move</code>.
+                        movements require <code>treasury.cash.move</code>. Susu income sits under Susu
+                        management; multi-product tenants also get top-level Institutional income (
+                        <code>income.read</code> / <code>income.read.daily</code>).
                       </p>
                       <ReferenceSidebarMatrix rows={treasuryRows} permissionOnly />
+                      <ReferenceSidebarMatrix rows={incomeRows} permissionOnly />
                     </>
                   ) : (
                     <>

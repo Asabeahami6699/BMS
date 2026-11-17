@@ -14,6 +14,7 @@ export type PermissionGroupId =
   | "reports"
   | "payroll"
   | "commission"
+  | "income"
   | "audit"
   | "loans"
   | "investments"
@@ -34,6 +35,7 @@ export const PERMISSION_GROUP_PRODUCT: Record<PermissionGroupId, PermissionProdu
   reports: "core",
   payroll: "susu_management",
   commission: "susu_management",
+  income: "core",
   audit: "core",
   loans: "loans_credit",
   investments: "investment_management",
@@ -54,6 +56,7 @@ export const PERMISSION_GROUP_ORDER: PermissionGroupId[] = [
   "reports",
   "payroll",
   "commission",
+  "income",
   "audit",
   "workspace"
 ];
@@ -72,6 +75,7 @@ export const PERMISSION_GROUP_LABELS: Record<PermissionGroupId, string> = {
   reports: "Reports",
   payroll: "Payroll",
   commission: "Commission",
+  income: "Institutional income",
   audit: "Audit",
   workspace: "Workspace"
 };
@@ -297,6 +301,19 @@ export const PERMISSION_CATALOG: PermissionCatalogEntry[] = [
     description: "Change commission percentages and rules.",
     group: "commission",
     requires: ["commission_policy.read"]
+  },
+  {
+    id: "income.read",
+    label: "View institutional income (full)",
+    description:
+      "See company fee income by branch for daily, weekly, monthly, and yearly periods (Susu, savings, current fees).",
+    group: "income"
+  },
+  {
+    id: "income.read.daily",
+    label: "View daily institutional income",
+    description: "See only today’s accumulated institutional income by branch (limited coordinator view).",
+    group: "income"
   },
   {
     id: "audit.read",
@@ -697,10 +714,26 @@ export const SUSU_NAV_VISIBILITY: SusuNavVisibilityRow[] = [
   },
   {
     navPath: "susu/commissions",
-    label: "Commissions",
-    description: "Commission policy and payouts.",
+    label: "Agent commissions",
+    description: "Field agent and coordinator payroll commission on collections.",
     anyPermissions: ["commission_policy.read"],
     roles: ["admin", "accountant"]
+  },
+  {
+    navPath: "susu/cycle-commission",
+    label: "Susu cycle fees",
+    description:
+      "Customer Susu contribution cycles and institutional commission (first-day, maturity, or withdrawal).",
+    anyPermissions: ["commission_policy.read", "income.read", "income.read.daily"],
+    roles: ["admin", "accountant", "coordinator"]
+  },
+  {
+    navPath: "susu/income",
+    label: "Susu income",
+    description:
+      "Company fee income by branch for this tenant only — Susu cycle fees and savings opening fees.",
+    anyPermissions: ["income.read", "income.read.daily"],
+    roles: ["admin", "accountant", "coordinator"]
   },
   {
     navPath: "susu/payroll",
@@ -849,9 +882,27 @@ export function canAccessSusuRoute(
   routePath: string,
   susuNavVisibility?: SusuNavVisibilityRow[]
 ): boolean {
+  const normalized = normalizeAppRoute(routePath);
   const row = resolveSusuNavRow(routePath, susuNavVisibility);
   if (!row || !role) {
     return false;
+  }
+  // Susu cycle fees / Susu income must remain reachable for company staff even when a
+  // tenant's saved Susu nav matrix predates these pages.
+  if (normalized === "susu/cycle-commission" || normalized === "susu/income") {
+    const roleOk =
+      !isBuiltinRole(role) ||
+      role === "admin" ||
+      role === "accountant" ||
+      role === "coordinator" ||
+      row.roles.includes(role);
+    const permOk = hasAnyPermission(permissions, [
+      ...row.anyPermissions,
+      ...(normalized === "susu/cycle-commission"
+        ? (["commission_policy.read", "income.read", "income.read.daily"] as Permission[])
+        : (["income.read", "income.read.daily"] as Permission[]))
+    ]);
+    return roleOk && permOk;
   }
   if (isBuiltinRole(role) && !row.roles.includes(role)) {
     return false;
@@ -986,6 +1037,30 @@ export const TREASURY_NAV_VISIBILITY: TreasuryNavVisibilityRow[] = [
     anyPermissions: ["treasury.read"]
   }
 ];
+
+/** Institutional / Susu income pages — admin full report; coordinator daily-only when permitted. */
+export const INCOME_NAV_VISIBILITY: Array<{
+  navPath: string;
+  label: string;
+  anyPermissions: Permission[];
+}> = [
+  {
+    navPath: "susu/income",
+    label: "Susu income",
+    anyPermissions: ["income.read", "income.read.daily"]
+  },
+  {
+    navPath: "income",
+    label: "Institutional income",
+    anyPermissions: ["income.read", "income.read.daily"]
+  }
+];
+
+export function resolveIncomeRoutePermissions(routePath: string): Permission[] {
+  const normalized = routePath.replace(/^\/+/, "").replace(/^app\//, "");
+  const row = INCOME_NAV_VISIBILITY.find((r) => r.navPath === normalized);
+  return row?.anyPermissions ?? ["income.read", "income.read.daily"];
+}
 
 /** Agency banking transactional routes (permission gates). */
 export const AGENCY_NAV_VISIBILITY: Array<{

@@ -10,6 +10,7 @@ import { getCompanyProfile, type AppRole, type AuthMe, type CompanyProfile } fro
 import { BranchManagementCard } from "./BranchManagementCard";
 import { AccountNumberPolicyCard } from "./AccountNumberPolicyCard";
 import { CommissionPolicyCard } from "./CommissionPolicyCard";
+import { SusuCycleCommissionPage } from "./SusuCycleCommissionPage";
 import { CustomerOpsCard } from "./CustomerOpsCard";
 import { DashboardShell } from "./DashboardShell";
 import { SettingsApprovalWorkflowsPage } from "./settings/SettingsApprovalWorkflowsPage";
@@ -63,9 +64,11 @@ import {
   TenantLoansRoute,
   TenantSettingsRoute,
   TenantSusuRoute,
-  TenantTreasuryRoute
+  TenantTreasuryRoute,
+  TenantIncomeRoute
 } from "./tenantRouteGates";
 import { TreasuryPage } from "./TreasuryPage";
+import { InstitutionalIncomePage } from "./InstitutionalIncomePage";
 import { AgencyDepositsPage } from "./banking/AgencyDepositsPage";
 import { AgencyAccountOpeningPage } from "./banking/AgencyAccountOpeningPage";
 import { AgencyInitiateWithdrawalPage } from "./banking/AgencyInitiateWithdrawalPage";
@@ -361,6 +364,25 @@ export function TenantApp() {
         <Route path="/susu/till-float" element={<TenantSusuRoute route="susu/till-float" modules={modules} role={role} permissions={permissions} susuNavVisibility={user?.susuNavVisibility}><BranchFloatAdminPage role={role} /></TenantSusuRoute>} />
         <Route path="/susu/collections" element={<TenantSusuRoute route="susu/collections" modules={modules} role={role} permissions={permissions} susuNavVisibility={user?.susuNavVisibility}><BranchCounterCard role={role} permissions={permissions} modules={modules} /></TenantSusuRoute>} />
         <Route path="/susu/commissions" element={<TenantSusuRoute route="susu/commissions" modules={modules} role={role} permissions={permissions} susuNavVisibility={user?.susuNavVisibility}><CommissionPolicyCard role={role} /></TenantSusuRoute>} />
+        <Route path="/susu/cycle-commission" element={<TenantSusuRoute route="susu/cycle-commission" modules={modules} role={role} permissions={permissions} susuNavVisibility={user?.susuNavVisibility}><SusuCycleCommissionPage role={role} /></TenantSusuRoute>} />
+        <Route
+          path="/susu/income"
+          element={
+            <TenantSusuRoute
+              route="susu/income"
+              modules={modules}
+              role={role}
+              permissions={permissions}
+              susuNavVisibility={user?.susuNavVisibility}
+            >
+              <InstitutionalIncomePage
+                permissions={permissions}
+                susuOnly
+                defaultBranchId={activeBranchFilter}
+              />
+            </TenantSusuRoute>
+          }
+        />
         <Route path="/susu/payroll" element={<TenantSusuRoute route="susu/payroll" modules={modules} role={role} permissions={permissions} susuNavVisibility={user?.susuNavVisibility}><PayslipCard role={role} /></TenantSusuRoute>} />
         <Route path="/susu/agents" element={<TenantSusuRoute route="susu/agents" modules={modules} role={role} permissions={permissions} susuNavVisibility={user?.susuNavVisibility}><FieldAgentsPage role={role} /></TenantSusuRoute>} />
         <Route path="/susu/coordinators" element={<TenantSusuRoute route="susu/coordinators" modules={modules} role={role} permissions={permissions} susuNavVisibility={user?.susuNavVisibility}><CoordinatorsPage /></TenantSusuRoute>} />
@@ -829,6 +851,25 @@ export function TenantApp() {
         <Route
           path="/treasury/trial-balance"
           element={<Navigate to="/app/banking/accountant/trial-balance" replace />}
+        />
+        <Route
+          path="/income"
+          element={
+            modules?.includes("susu_management") &&
+            !modules?.includes("banking") &&
+            !modules?.includes("treasury") &&
+            !modules?.includes("loans_credit") ? (
+              <Navigate to="/app/susu/income" replace />
+            ) : (
+              <TenantIncomeRoute permissions={permissions}>
+                <InstitutionalIncomePage
+                  permissions={permissions}
+                  susuOnly={false}
+                  defaultBranchId={activeBranchFilter}
+                />
+              </TenantIncomeRoute>
+            )
+          }
         />
 
         {/* Settings */}

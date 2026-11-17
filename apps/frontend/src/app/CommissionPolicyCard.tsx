@@ -136,7 +136,7 @@ export function CommissionPolicyCard({ role }: Props) {
       <div className="agents-page">
         <header className="agents-page__header">
           <div>
-            <h2>Commissions</h2>
+            <h2>Agent commissions</h2>
             <p className="muted">Loading policy…</p>
           </div>
         </header>
@@ -149,7 +149,7 @@ export function CommissionPolicyCard({ role }: Props) {
       <div className="agents-page">
         <header className="agents-page__header">
           <div>
-            <h2>Commissions</h2>
+            <h2>Agent commissions</h2>
             <p className="muted">{error ?? "Commission policy could not be loaded."}</p>
             <button type="button" className="button secondary" onClick={() => void refresh()}>
               Retry
@@ -164,10 +164,10 @@ export function CommissionPolicyCard({ role }: Props) {
     <div className="agents-page commissions-page">
       <header className="agents-page__header">
         <div>
-          <h2>Commissions</h2>
+          <h2>Agent commissions</h2>
           <p className="muted">
-            Configure how field agents and coordinators earn commission on collections. Used on agent
-            profiles, payroll, and performance views.
+            Configure how field agents and coordinators earn payroll commission on collections.
+            Customer Susu cycle fees are configured separately under Susu cycle fees.
           </p>
         </div>
         <div className="agents-page__header-actions">

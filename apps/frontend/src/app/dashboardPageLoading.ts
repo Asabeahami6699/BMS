@@ -8,6 +8,7 @@ import { useBackOfficeStore } from "./stores/backOfficeStore";
 import { useBankProductsStore } from "./stores/bankProductsStore";
 import { useBranchCounterStore } from "./stores/branchCounterStore";
 import { useCommissionStore } from "./stores/commissionStore";
+import { useSusuCycleCommissionStore } from "./stores/susuCycleCommissionStore";
 import { useCoordinatorStore } from "./stores/coordinatorStore";
 import { useCoordinatorsStore } from "./stores/coordinatorsStore";
 import { useCustomersStore } from "./stores/customersStore";
@@ -30,6 +31,7 @@ import { useRoleWorkspaceStore } from "./stores/roleWorkspaceStore";
 import { useRoutesStore } from "./stores/routesStore";
 import { useTellerReconciliationStore } from "./stores/tellerReconciliationStore";
 import { useTreasuryStore } from "./stores/treasuryStore";
+import { useInstitutionalIncomeStore } from "./stores/institutionalIncomeStore";
 import { useUniversalOpsStore } from "./stores/universalOpsStore";
 import { useCalloverBatchesStore } from "./stores/calloverBatchesStore";
 import { useOveragesShortagesStore } from "./stores/overagesShortagesStore";
@@ -215,8 +217,17 @@ export function computeDashboardPageLoading(pathname: string): boolean {
     return branchCounterLoading();
   }
 
+  if (path === "susu/cycle-commission") {
+    return useSusuCycleCommissionStore.getState().loading || useSusuCycleCommissionStore.getState().saving;
+  }
+
   if (path === "susu/commissions") {
     return useCommissionStore.getState().loading;
+  }
+
+  if (path === "susu/cycle-commission") {
+    const s = useSusuCycleCommissionStore.getState();
+    return s.loading || s.saving;
   }
 
   if (path === "susu/payroll") {
@@ -404,6 +415,10 @@ export function computeDashboardPageLoading(pathname: string): boolean {
     return s.loading || s.posting;
   }
 
+  if (path === "income" || path.startsWith("income/") || path === "susu/income") {
+    return useInstitutionalIncomeStore.getState().loading;
+  }
+
   return false;
 }
 
@@ -422,6 +437,7 @@ const WATCHED_STORES: StoreLike[] = [
   useRoutesStore,
   useCustomersStore,
   useCommissionStore,
+  useSusuCycleCommissionStore,
   usePayrollStore,
   useBranchCounterStore,
   useAgencyStore,
@@ -441,6 +457,7 @@ const WATCHED_STORES: StoreLike[] = [
   useSiteManualStore,
   useInvestmentStore,
   useTreasuryStore,
+  useInstitutionalIncomeStore,
   useBankProductsStore,
   useSusuClosingBalancesStore,
   useCalloverBatchesStore,

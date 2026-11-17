@@ -13749,6 +13749,730 @@ button.cif-ledger__row:hover {
   font-size: 1.15rem;
 }
 
+.income-page,
+.cycle-fees-page {
+  display: grid;
+  gap: 1rem;
+}
+
+.income-page--susu {
+  gap: 1.1rem;
+}
+
+.income-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1.25rem;
+  align-items: end;
+  padding: 1.35rem 1.4rem 1.25rem;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-soft);
+  background:
+    radial-gradient(120% 80% at 0% 0%, color-mix(in srgb, var(--success) 14%, transparent), transparent 55%),
+    linear-gradient(180deg, color-mix(in srgb, var(--bg-surface) 92%, var(--success) 8%), var(--bg-surface));
+}
+
+.income-hero__eyebrow {
+  margin: 0 0 0.4rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--success) 75%, var(--text-muted));
+}
+
+.income-hero h1 {
+  margin: 0 0 0.4rem;
+  font-size: clamp(1.45rem, 2.4vw, 1.85rem);
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+
+.income-hero__lede {
+  margin: 0;
+  max-width: 36rem;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
+.income-hero__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.95rem;
+}
+
+.income-meta-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.28rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 650;
+  border: 1px solid color-mix(in srgb, var(--success) 28%, var(--border-soft));
+  background: color-mix(in srgb, var(--success) 10%, var(--bg-surface));
+  color: var(--text);
+}
+
+.income-meta-pill--quiet {
+  border-color: var(--border-soft);
+  background: var(--bg-input);
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.income-hero__total {
+  display: grid;
+  justify-items: end;
+  gap: 0.2rem;
+  min-width: 10.5rem;
+}
+
+.income-hero__total-label {
+  font-size: 0.78rem;
+  font-weight: 650;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.income-hero__total-value {
+  font-size: clamp(1.55rem, 3vw, 2rem);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+}
+
+.income-hero__refresh {
+  margin-top: 0.55rem;
+}
+
+.income-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.85rem 1.1rem;
+  align-items: flex-end;
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-soft);
+  background: var(--bg-surface);
+}
+
+.income-controls__branch {
+  display: grid;
+  gap: 0.3rem;
+  min-width: min(200px, 100%);
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 650;
+  color: var(--text-muted);
+}
+
+.income-controls__branch select {
+  min-height: 2.35rem;
+}
+
+.income-controls__note {
+  margin: 0;
+  flex: 1 1 100%;
+  font-size: 0.84rem;
+  color: var(--text-muted);
+}
+
+.income-hero-banner,
+.cycle-fees-hero {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.25rem 1.35rem;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-soft);
+  box-shadow: var(--shadow-card);
+}
+
+.cycle-fees-hero {
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--primary) 12%, transparent) 0%, transparent 55%),
+    var(--bg-surface);
+}
+
+.cycle-fees-hero h1 {
+  margin: 0 0 0.35rem;
+  font-size: 1.45rem;
+  font-weight: 700;
+}
+
+.cycle-fees-hero__eyebrow {
+  margin: 0 0 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--primary);
+}
+
+.cycle-fees-hero__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.cycle-fees-hero__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  align-items: center;
+  margin: 0.75rem 0 0;
+}
+
+.cycle-fees-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 650;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-muted);
+}
+
+.cycle-fees-pill.is-on {
+  border-color: color-mix(in srgb, var(--success) 45%, var(--border));
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.income-period-seg {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  border-radius: 0.7rem;
+  border: 1px solid var(--border-soft);
+  background: var(--bg-input);
+}
+
+.income-period-seg__btn {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-weight: 650;
+  font-size: 0.86rem;
+  padding: 0.45rem 0.85rem;
+  border-radius: 0.55rem;
+  cursor: pointer;
+}
+
+.income-period-seg__btn.is-active {
+  background: var(--bg-surface);
+  color: var(--text);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+}
+
+.income-period-seg__btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.income-loading {
+  margin: 0;
+}
+
+.income-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0.75rem;
+}
+
+.income-kpi {
+  display: grid;
+  gap: 0.25rem;
+  padding: 1rem 1.1rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-soft);
+  background: var(--bg-surface);
+  border-left: 3px solid var(--border);
+}
+
+.income-kpi__label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-weight: 650;
+}
+
+.income-kpi__value {
+  font-size: 1.35rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.income-kpi__hint {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.income-kpi--susu {
+  border-left-color: var(--primary);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--primary) 8%, transparent), transparent 60%),
+    var(--bg-surface);
+}
+
+.income-kpi--savings {
+  border-left-color: var(--success);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--success) 10%, transparent), transparent 60%),
+    var(--bg-surface);
+}
+
+.income-kpi--current {
+  border-left-color: var(--accent-teal, #00bfa5);
+}
+
+.income-kpi--meba {
+  border-left-color: #5b6b7c;
+}
+
+.income-kpi--other,
+.income-kpi--empty {
+  border-left-color: var(--warning);
+}
+
+.income-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.15fr);
+  gap: 0.85rem;
+  align-items: start;
+}
+
+.income-panel {
+  padding: 1.05rem 1.15rem 1.15rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-soft);
+  background: var(--bg-surface);
+}
+
+.income-panel__head {
+  margin-bottom: 0.9rem;
+}
+
+.income-panel__head h2 {
+  margin: 0 0 0.2rem;
+  font-size: 1.02rem;
+  letter-spacing: -0.01em;
+}
+
+.income-panel__head .muted {
+  margin: 0;
+  font-size: 0.84rem;
+}
+
+.income-empty {
+  margin: 0;
+  padding: 1.25rem 0.25rem;
+  text-align: center;
+}
+
+.income-branch-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.65rem;
+}
+
+.income-branch-row {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.85rem 0.9rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--bg-input) 55%, var(--bg-surface));
+}
+
+.income-branch-row__identity {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: baseline;
+}
+
+.income-branch-row__identity strong {
+  font-size: 0.95rem;
+}
+
+.income-branch-row__figures {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.35rem 0.75rem;
+  align-items: baseline;
+}
+
+.income-branch-row__period {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  font-size: 1.02rem;
+}
+
+.income-branch-row__bar {
+  height: 0.35rem;
+  border-radius: 999px;
+  background: var(--bg-input);
+  overflow: hidden;
+}
+
+.income-branch-row__bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--success) 75%, var(--primary));
+}
+
+.income-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.income-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 0.45rem;
+  font-size: 0.74rem;
+  font-weight: 600;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-soft);
+  color: var(--text-muted);
+}
+
+.income-chip em {
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.income-ledger {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0;
+}
+
+.income-ledger__row {
+  display: grid;
+  grid-template-columns: minmax(6.5rem, 0.85fr) minmax(0, 1.4fr) auto;
+  gap: 0.75rem 1rem;
+  align-items: start;
+  padding: 0.85rem 0.15rem;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.income-ledger__row:last-child {
+  border-bottom: none;
+  padding-bottom: 0.15rem;
+}
+
+.income-ledger__when {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.income-ledger__when time {
+  font-weight: 650;
+  font-size: 0.9rem;
+}
+
+.income-ledger__what {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.income-ledger__what strong {
+  font-size: 0.92rem;
+}
+
+.income-ledger__what .muted {
+  font-size: 0.82rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.income-ledger__amt {
+  display: grid;
+  justify-items: end;
+  gap: 0.3rem;
+}
+
+.income-ledger__amt strong {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.98rem;
+}
+
+.income-status {
+  display: inline-flex;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+
+.income-status--posted {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.income-status--reversed {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.income-status--reversal {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+@media (max-width: 900px) {
+  .income-hero {
+    grid-template-columns: 1fr;
+  }
+
+  .income-hero__total {
+    justify-items: start;
+    padding-top: 0.35rem;
+    border-top: 1px dashed var(--border-soft);
+  }
+
+  .income-body {
+    grid-template-columns: 1fr;
+  }
+
+  .income-ledger__row {
+    grid-template-columns: 1fr auto;
+  }
+
+  .income-ledger__what {
+    grid-column: 1 / -1;
+  }
+}
+
+.cycle-fees-kpis {
+  margin: 0;
+}
+
+.cycle-fees-layout {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: 1fr;
+  align-items: start;
+}
+
+.cycle-fees-lifecycle {
+  display: grid;
+  gap: 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding: 0;
+  overflow: hidden;
+}
+
+.cycle-fees-lifecycle__col {
+  display: grid;
+  gap: 0.75rem;
+  align-content: start;
+  padding: 1rem 1.1rem;
+  border-right: 1px solid var(--border-soft);
+}
+
+.cycle-fees-lifecycle__col:last-child {
+  border-right: none;
+}
+
+.cycle-fees-fields--stack,
+.cycle-fees-choice-grid--stack {
+  grid-template-columns: 1fr;
+}
+
+@media (max-width: 1100px) {
+  .cycle-fees-lifecycle {
+    grid-template-columns: 1fr;
+  }
+
+  .cycle-fees-lifecycle__col {
+    border-right: none;
+    border-bottom: 1px solid var(--border-soft);
+  }
+
+  .cycle-fees-lifecycle__col:last-child {
+    border-bottom: none;
+  }
+}
+
+.cycle-fees-panel,
+.cycle-fees-preview {
+  display: grid;
+  gap: 0.85rem;
+  padding: 1.15rem 1.25rem;
+}
+
+.cycle-fees-lifecycle .cycle-fees-preview {
+  position: static;
+  padding: 1rem 1.1rem;
+  background:
+    linear-gradient(165deg, color-mix(in srgb, var(--primary) 8%, transparent), transparent 55%),
+    transparent;
+}
+
+.cycle-fees-panel__head h2 {
+  margin: 0 0 0.25rem;
+  font-size: 1.05rem;
+}
+
+.cycle-fees-panel__head .muted {
+  margin: 0;
+  font-size: 0.86rem;
+}
+
+.cycle-fees-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-soft);
+  background: var(--bg-input);
+}
+
+.cycle-fees-toggle span {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.cycle-fees-toggle small {
+  font-size: 0.8rem;
+}
+
+.cycle-fees-fields {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+
+.cycle-fees-choice-grid {
+  display: grid;
+  gap: 0.65rem;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+
+.cycle-fees-choice {
+  position: relative;
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.85rem 0.95rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-soft);
+  background: var(--bg-input);
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.cycle-fees-choice input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.cycle-fees-choice strong {
+  font-size: 0.92rem;
+}
+
+.cycle-fees-choice p {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.cycle-fees-choice.is-active {
+  border-color: color-mix(in srgb, var(--primary) 55%, var(--border));
+  background: color-mix(in srgb, var(--primary) 10%, var(--bg-surface));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--primary) 25%, transparent);
+}
+
+.cycle-fees-choice:hover {
+  border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
+}
+
+.cycle-fees-footnote {
+  margin: 0;
+  font-size: 0.86rem;
+  line-height: 1.4;
+}
+
+.cycle-fees-preview {
+  position: sticky;
+  top: 1rem;
+  background:
+    linear-gradient(165deg, color-mix(in srgb, var(--primary) 8%, transparent), transparent 55%),
+    var(--bg-surface);
+}
+
+.cycle-fees-preview__steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.65rem;
+}
+
+.cycle-fees-preview__steps li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: baseline;
+  padding-bottom: 0.55rem;
+  border-bottom: 1px dashed var(--border-soft);
+  font-size: 0.9rem;
+}
+
+.cycle-fees-preview__steps li:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.cycle-fees-preview__fee {
+  color: var(--warning);
+}
+
+.cycle-fees-preview__net strong {
+  color: var(--success);
+  font-size: 1.05rem;
+}
+
+.cycle-fees-preview__timing {
+  margin: 0;
+  font-size: 0.82rem;
+}
+
+.cycle-fees-viewonly {
+  font-size: 0.9rem;
+}
+
 .hub-card-link {
   display: flex;
   flex-direction: column;

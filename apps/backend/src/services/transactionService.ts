@@ -191,10 +191,43 @@ export async function postWithdrawalForApprovedDisclosure(params: {
     ? params.notes
     : `${params.notes} · ${idempotencyTag}`;
 
+  const customer = await getCustomerById(params.tenantId, params.customerId);
+  let commission = 0;
+  let commissionNote = "";
+  if (customer?.accountType === "susu") {
+    const { resolveSusuWithdrawalCommission } = await import("./susuCycleCommissionService.js");
+    const resolved = await resolveSusuWithdrawalCommission(
+      {
+        userId: params.recordedByUserId,
+        tenantId: params.tenantId,
+        role: "system",
+        branchId: params.homeBranchId
+      },
+      {
+        customerId: params.customerId,
+        branchId: params.homeBranchId,
+        requestedWithdrawalAmount: params.amount,
+        disclosureId: params.disclosureId
+      }
+    );
+    if (resolved.blocked) {
+      throw new Error(resolved.blockReason ?? "Withdrawal blocked by Susu cycle policy");
+    }
+    commission = resolved.commissionToCollect;
+    if (commission > 0) {
+      commissionNote = ` · Susu commission GHS ${formatAccountAmount(commission)} deducted`;
+    }
+  }
+
+  const ledgerDebit = Math.round((params.amount + commission) * 100) / 100;
   const withdrawable = await getCustomerWithdrawableBalance(params.tenantId, params.customerId);
-  if (withdrawable < params.amount) {
+  if (withdrawable < ledgerDebit) {
     throw new Error(
-      `Insufficient withdrawable balance. Available: GHS ${formatAccountAmount(withdrawable)}`
+      `Insufficient withdrawable balance. Available: GHS ${formatAccountAmount(withdrawable)}${
+        commission > 0
+          ? ` (includes Susu commission GHS ${formatAccountAmount(commission)})`
+          : ""
+      }`
     );
   }
 
@@ -202,6 +235,7 @@ export async function postWithdrawalForApprovedDisclosure(params: {
   const transactionId = randomUUID();
   const supabase = getSupabaseAdminClient();
   const { hasLedgerDebitForTransaction } = await import("./ledgerService.js");
+  const notesWithCommission = `${fullNotes}${commissionNote}`;
 
   if (supabase) {
     const { data: priorRows, error: existingError } = await supabase
@@ -233,12 +267,12 @@ export async function postWithdrawalForApprovedDisclosure(params: {
       p_tenant_id: params.tenantId,
       p_customer_id: params.customerId,
       p_type: "withdrawal",
-      p_amount: params.amount,
+      p_amount: ledgerDebit,
       p_transaction_branch_id: params.homeBranchId,
       p_home_branch_id: params.homeBranchId,
       p_recorded_by_user_id: params.recordedByUserId,
       p_field_agent_id: params.fieldAgentId,
-      p_notes: fullNotes
+      p_notes: notesWithCommission
     });
 
     if (rpcError) {
@@ -248,7 +282,7 @@ export async function postWithdrawalForApprovedDisclosure(params: {
     }
 
     const balanceAfter = await computeCustomerBalance(params.tenantId, params.customerId);
-    const expected = Math.round((balanceBefore - params.amount) * 100) / 100;
+    const expected = Math.round((balanceBefore - ledgerDebit) * 100) / 100;
     if (Math.abs(balanceAfter - expected) > 0.01) {
       throw new Error(
         `Withdrawal debit did not update the customer ledger (expected GHS ${formatAccountAmount(expected)}, actual GHS ${formatAccountAmount(balanceAfter)}). Apply Supabase migrations 002 and 021.`
@@ -290,7 +324,7 @@ export async function postWithdrawalForApprovedDisclosure(params: {
     recordedByUserId: params.recordedByUserId,
     fieldAgentId: params.fieldAgentId,
     createdAt: new Date().toISOString(),
-    notes: fullNotes
+    notes: notesWithCommission
   });
   setTenantTransactions(params.tenantId, [...transactions, transaction]);
   await addLedgerEntry({
@@ -298,7 +332,7 @@ export async function postWithdrawalForApprovedDisclosure(params: {
     customerId: params.customerId,
     transactionId,
     entryType: "debit",
-    amount: params.amount,
+    amount: ledgerDebit,
     transactionBranchId: params.homeBranchId
   });
 
@@ -475,10 +509,99 @@ export async function createTransaction(
         )
       : null;
 
-  const ledgerAmount = feeDeduction ? feeDeduction.creditAmount : payload.amount;
-  const noteParts = [payload.notes, feeDeduction ? openingFeeNote(feeDeduction) : undefined].filter(
-    Boolean
-  );
+  // Susu cycle commission (customer fee) — susu accounts only; separate from agent payroll.
+  let susuAllocation: {
+    savingsCredit: number;
+    commissionCollectNow: number;
+    grossContribution: number;
+    note?: string;
+  } | null = null;
+  const transactionIdEarly = randomUUID();
+  if (payload.type === "daily_susu" && customer.accountType === "susu") {
+    const { applySusuCollectionToCycle } = await import("./susuCycleCommissionService.js");
+    const branchId =
+      payload.transactionBranchId ?? customer.homeBranchId ?? context.branchId ?? "";
+    if (branchId) {
+      susuAllocation = await applySusuCollectionToCycle(
+        {
+          userId: context.userId,
+          tenantId: context.tenantId,
+          role: context.role,
+          permissions: context.permissions,
+          branchId: context.branchId
+        },
+        {
+          customerId: payload.customerId,
+          branchId,
+          paymentAmount: payload.amount,
+          dailyContributionAmount: customer.dailyContributionAmount,
+          transactionId: transactionIdEarly
+        }
+      );
+    }
+  }
+
+  let withdrawalCommission = 0;
+  if (payload.type === "withdrawal" && customer.accountType === "susu") {
+    const { resolveSusuWithdrawalCommission } = await import("./susuCycleCommissionService.js");
+    const branchId =
+      payload.transactionBranchId ?? customer.homeBranchId ?? context.branchId ?? "";
+    const resolved = await resolveSusuWithdrawalCommission(
+      {
+        userId: context.userId,
+        tenantId: context.tenantId,
+        role: context.role,
+        permissions: context.permissions,
+        branchId: context.branchId
+      },
+      {
+        customerId: payload.customerId,
+        branchId,
+        requestedWithdrawalAmount: payload.amount,
+        transactionId: transactionIdEarly
+      }
+    );
+    if (resolved.blocked) {
+      throw new Error(resolved.blockReason ?? "Withdrawal blocked by Susu cycle policy");
+    }
+    withdrawalCommission = resolved.commissionToCollect;
+    if (withdrawalCommission > 0) {
+      const withdrawable = await getCustomerWithdrawableBalance(
+        context.tenantId,
+        payload.customerId
+      );
+      if (withdrawable < payload.amount + withdrawalCommission) {
+        // Allow withdrawing net of commission when requesting full-ish balance
+        if (withdrawable < withdrawalCommission + 0.01) {
+          throw new Error(
+            `Insufficient balance to cover Susu commission (GHS ${formatAccountAmount(withdrawalCommission)}).`
+          );
+        }
+        if (payload.amount + withdrawalCommission > withdrawable) {
+          throw new Error(
+            `Insufficient withdrawable balance after Susu commission of GHS ${formatAccountAmount(withdrawalCommission)}. Available for payout: GHS ${formatAccountAmount(Math.max(0, withdrawable - withdrawalCommission))}.`
+          );
+        }
+      }
+    }
+  }
+
+  // Withdrawals: ledger debit = cash out + Susu commission (customer balance falls by both).
+  const ledgerAmount = feeDeduction
+    ? feeDeduction.creditAmount
+    : susuAllocation
+      ? susuAllocation.savingsCredit
+      : payload.type === "withdrawal"
+        ? Math.round((payload.amount + withdrawalCommission) * 100) / 100
+        : payload.amount;
+  const noteParts = [
+    payload.notes,
+    feeDeduction ? openingFeeNote(feeDeduction) : undefined,
+    susuAllocation?.note,
+    withdrawalCommission > 0
+      ? `Susu commission GHS ${formatAccountAmount(withdrawalCommission)} deducted`
+      : undefined
+  ].filter(Boolean);
   const combinedNotes = noteParts.length > 0 ? noteParts.join(" · ") : undefined;
 
   const bankProductId = await resolveBankProductForTransaction(
@@ -503,11 +626,18 @@ export async function createTransaction(
   }
 
   const transaction = transactionSchema.parse({
-    id: randomUUID(),
+    id: transactionIdEarly,
     tenantId: context.tenantId,
     customerId: payload.customerId,
     type: payload.type,
-    amount: ledgerAmount > 0 ? ledgerAmount : payload.amount,
+    amount:
+      payload.type === "withdrawal"
+        ? payload.amount
+        : ledgerAmount > 0
+          ? ledgerAmount
+          : susuAllocation
+            ? susuAllocation.grossContribution
+            : payload.amount,
     transactionBranchId: payload.transactionBranchId,
     homeBranchId: customer.homeBranchId,
     recordedByUserId: context.userId,
@@ -525,9 +655,50 @@ export async function createTransaction(
       feeDeduction.feeRetained,
       feeDeduction.feeSettled
     );
+    // Recognize the full opening fee as institutional income once it is fully recovered.
+    if (feeDeduction.feeSettled && feeDeduction.feeRetained > 0) {
+      const { postInstitutionalIncome } = await import("./institutionalIncomeService.js");
+      const { listBranches } = await import("./branchService.js");
+      const incomeBranchId =
+        transaction.transactionBranchId ?? customer.homeBranchId ?? context.branchId ?? "";
+      if (incomeBranchId) {
+        const branches = await listBranches(context.tenantId).catch(() => []);
+        const branchName =
+          branches.find((b) => String(b.id) === String(incomeBranchId))?.name ?? "Branch";
+        const fullFee =
+          (customer.savingsOpeningFeeRecovered ?? 0) + feeDeduction.feeRetained;
+        await postInstitutionalIncome(
+          {
+            userId: context.userId,
+            tenantId: context.tenantId,
+            role: context.role,
+            permissions: context.permissions
+          },
+          {
+            branchId: String(incomeBranchId),
+            source: "savings_fee",
+            amount: fullFee > 0 ? fullFee : feeDeduction.feeRetained,
+            customerId: payload.customerId,
+            transactionId: transaction.id,
+            notes: openingFeeNote(feeDeduction),
+            idempotencyKey: `savings_fee:opening:${payload.customerId}`
+          },
+          { branchName }
+        ).catch(() => {
+          // Income posting must not block customer collection; ops can reconcile later.
+        });
+      }
+    }
     if (ledgerAmount <= 0) {
       return enrichTransactionProduct(context.tenantId, transaction);
     }
+  }
+
+  // First-day Susu commission may consume the entire collection — still record the txn.
+  if (susuAllocation && ledgerAmount <= 0 && payload.type === "daily_susu") {
+    const transactions = getTenantTransactions(context.tenantId);
+    setTenantTransactions(context.tenantId, [...transactions, transaction]);
+    return enrichTransactionProduct(context.tenantId, transaction);
   }
 
   if (

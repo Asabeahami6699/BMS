@@ -110,26 +110,93 @@ function buildSusuChildren(susuNav?: SusuNavVisibilityRow[]): NavChildDef[] {
       anyPermissions: OVERAGES_SHORTAGES_NAV_CHILD.anyPermissions ?? ["transactions.read"]
     });
   }
+  // Hard guarantee Susu cycle fees (institutional commission) for every Susu tenant.
+  const CYCLE_FEES_PATH = "susu/cycle-commission";
+  if (!byPath.has(CYCLE_FEES_PATH)) {
+    byPath.set(CYCLE_FEES_PATH, {
+      navPath: CYCLE_FEES_PATH,
+      label: "Susu cycle fees",
+      description:
+        "Customer Susu contribution cycles and institutional commission (first-day, maturity, or withdrawal).",
+      roles: ["admin", "accountant", "coordinator"],
+      anyPermissions: ["commission_policy.read", "income.read", "income.read.daily"]
+    });
+  }
+  const SUSU_INCOME_PATH = "susu/income";
+  if (!byPath.has(SUSU_INCOME_PATH)) {
+    byPath.set(SUSU_INCOME_PATH, {
+      navPath: SUSU_INCOME_PATH,
+      label: "Susu income",
+      description:
+        "Company fee income by branch for this tenant only — Susu cycle fees and savings opening fees.",
+      roles: ["admin", "accountant", "coordinator"],
+      anyPermissions: ["income.read", "income.read.daily"]
+    });
+  }
   const order = [
     ...SUSU_NAV_VISIBILITY.map((r) => r.navPath),
     ...(byPath.has(OVERAGES_SHORTAGES_NAV_CHILD.to) &&
     !SUSU_NAV_VISIBILITY.some((r) => r.navPath === OVERAGES_SHORTAGES_NAV_CHILD.to)
       ? [OVERAGES_SHORTAGES_NAV_CHILD.to]
+      : []),
+    ...(byPath.has(CYCLE_FEES_PATH) &&
+    !SUSU_NAV_VISIBILITY.some((r) => r.navPath === CYCLE_FEES_PATH)
+      ? [CYCLE_FEES_PATH]
+      : []),
+    ...(byPath.has(SUSU_INCOME_PATH) &&
+    !SUSU_NAV_VISIBILITY.some((r) => r.navPath === SUSU_INCOME_PATH)
+      ? [SUSU_INCOME_PATH]
       : [])
   ];
   const rows = [...new Set(order)]
     .map((path) => byPath.get(path))
     .filter((row): row is SusuNavVisibilityRow => Boolean(row));
-  return rows.map((row) =>
-    row.navPath === OVERAGES_SHORTAGES_NAV_CHILD.to
-      ? OVERAGES_SHORTAGES_NAV_CHILD
-      : {
-          to: row.navPath,
-          label: row.label,
-          roleCheck: (r) => !isBuiltinRole(r) || row.roles.includes(r as AppRole),
-          anyPermissions: row.anyPermissions
-        }
-  );
+  return rows.map((row) => {
+    if (row.navPath === OVERAGES_SHORTAGES_NAV_CHILD.to) {
+      return OVERAGES_SHORTAGES_NAV_CHILD;
+    }
+    if (row.navPath === CYCLE_FEES_PATH) {
+      return {
+        to: row.navPath,
+        label: row.label || "Susu cycle fees",
+        roleCheck: (r) =>
+          !isBuiltinRole(r) ||
+          r === "admin" ||
+          r === "accountant" ||
+          r === "coordinator" ||
+          row.roles.includes(r as AppRole),
+        anyPermissions: [
+          ...new Set<Permission>([
+            ...(row.anyPermissions ?? []),
+            "commission_policy.read",
+            "income.read",
+            "income.read.daily"
+          ])
+        ]
+      };
+    }
+    if (row.navPath === SUSU_INCOME_PATH) {
+      return {
+        to: row.navPath,
+        label: row.label || "Susu income",
+        roleCheck: (r) =>
+          !isBuiltinRole(r) ||
+          r === "admin" ||
+          r === "accountant" ||
+          r === "coordinator" ||
+          row.roles.includes(r as AppRole),
+        anyPermissions: [
+          ...new Set<Permission>([...(row.anyPermissions ?? []), "income.read", "income.read.daily"])
+        ]
+      };
+    }
+    return {
+      to: row.navPath,
+      label: row.label,
+      roleCheck: (r) => !isBuiltinRole(r) || row.roles.includes(r as AppRole),
+      anyPermissions: row.anyPermissions
+    };
+  });
 }
 
 function buildSusuNavChildren(susuNav?: SusuNavVisibilityRow[]): NavChildDef[] {
@@ -367,6 +434,25 @@ export function buildTenantNav(
   );
   if (treasury) {
     items.push(treasury);
+  }
+
+  // Susu income lives under Susu management. Keep a top-level Institutional income
+  // link only for multi-product tenants (banking / treasury / loans).
+  const canSeeIncome =
+    hasAnyPermission(permissions, ["income.read", "income.read.daily"]) ||
+    role === "admin" ||
+    role === "coordinator";
+  const hasSusu = hasTenantModule(subscribedModules, "susu_management");
+  const multiProduct =
+    hasTenantModule(subscribedModules, "banking") ||
+    hasTenantModule(subscribedModules, "treasury") ||
+    hasTenantModule(subscribedModules, "loans_credit");
+  if (hasAnyProduct(subscribedModules) && canSeeIncome && (!hasSusu || multiProduct)) {
+    items.push({
+      kind: "link",
+      to: "income",
+      label: "Institutional income"
+    });
   }
 
   if (reportsAnalytics !== false && hasAnyProduct(subscribedModules)) {

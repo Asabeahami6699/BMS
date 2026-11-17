@@ -117,6 +117,18 @@ export async function resolvePermissionsForTenantUser(
   role: string,
   userId?: string
 ): Promise<Permission[]> {
+  // Heal customized builtin overrides with newly added default duties (e.g. income.read)
+  // whenever the user authenticates — otherwise Susu income / cycle fees stay hidden.
+  try {
+    const { loadTenantModules } = await import("./tenantModuleService.js");
+    const modules = await loadTenantModules(tenantId);
+    if (modules.length > 0) {
+      await syncBuiltinRolePermissionsForModules(tenantId, modules);
+    }
+  } catch {
+    /* permission resolve must not fail login */
+  }
+
   const [base, custom] = await Promise.all([
     isBuiltinRole(role)
       ? loadOverrideRow(tenantId, role).then((row) => resolveRolePermissions(role, row?.duties ?? null))
@@ -196,13 +208,22 @@ async function syncLoadedRoleOverrides(
   modules: TenantProductModule[],
   overrides: Map<Role, { duties: Permission[] }>
 ): Promise<void> {
-  const modulePermissions = new Set<Permission>();
+  const eligiblePermissions = new Set<Permission>();
   for (const module of modules) {
     for (const permission of permissionsForProductModule(module)) {
-      modulePermissions.add(permission);
+      eligiblePermissions.add(permission);
     }
   }
-  if (modulePermissions.size === 0) {
+  // Core duties (e.g. income.read) are not product-scoped, so module sync alone
+  // never backfilled them into saved role overrides — Susu income stayed hidden.
+  if (modules.length > 0) {
+    for (const entry of PERMISSION_CATALOG) {
+      if (PERMISSION_GROUP_PRODUCT[entry.group] === "core") {
+        eligiblePermissions.add(entry.id);
+      }
+    }
+  }
+  if (eligiblePermissions.size === 0) {
     return;
   }
 
@@ -213,7 +234,7 @@ async function syncLoadedRoleOverrides(
       continue;
     }
     const defaults = getPermissionsForRole(role);
-    const toAdd = [...modulePermissions].filter(
+    const toAdd = [...eligiblePermissions].filter(
       (permission) => defaults.includes(permission) && !row.duties.includes(permission)
     );
     if (toAdd.length === 0) {

@@ -123,6 +123,12 @@ const ACTIVITY_RULES: ActivityRule[] = [
   { methods: ["PUT"], pattern: /^\/payroll\/role-defaults\/[^/]+$/i, action: "Updated payroll role defaults" },
 
   { methods: ["PUT"], pattern: /^\/tenant\/commission-policy$/i, action: "Updated commission policy" },
+  {
+    methods: ["PUT"],
+    pattern: /^\/tenant\/susu-cycle-commission\/policy$/i,
+    action: "Published Susu cycle fee policy"
+  },
+  { methods: ["POST"], pattern: /^\/income\/reverse$/i, action: "Reversed institutional income entry" },
   { methods: ["PUT"], pattern: /^\/tenant\/account-number-policy$/i, action: "Updated account number policy" },
 
   { methods: ["POST"], pattern: /^\/platform\/tenants$/i, action: "Created tenant company" },

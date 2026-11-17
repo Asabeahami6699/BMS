@@ -19,9 +19,15 @@ export function computeOpeningFeeDeduction(
     return null;
   }
 
-  const recovered = customer.savingsOpeningFeeRecovered ?? 0;
+  // Locked opening deposit already secured the fee on approval — do not also
+  // withhold from later deposits (that would double-count institutional income).
   const locked = customer.lockedBalance ?? 0;
-  const target = locked > 0 ? locked : openingFeeGhs;
+  if (locked > 0) {
+    return null;
+  }
+
+  const recovered = customer.savingsOpeningFeeRecovered ?? 0;
+  const target = openingFeeGhs;
   const remaining = Math.max(0, target - recovered);
   if (remaining <= 0) {
     return null;

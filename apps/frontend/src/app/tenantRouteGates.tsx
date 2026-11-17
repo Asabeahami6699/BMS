@@ -185,3 +185,21 @@ export function TenantTreasuryRoute({ route, modules, permissions, children }: T
     </TenantModuleGate>
   );
 }
+
+type IncomeRouteProps = {
+  route?: string;
+  permissions?: Permission[];
+  children: ReactNode;
+};
+
+export function TenantIncomeRoute({ permissions, children }: IncomeRouteProps) {
+  return (
+    <PermissionGate
+      permissions={permissions}
+      anyOf={["income.read", "income.read.daily"]}
+      denied={<AccessDenied />}
+    >
+      {children}
+    </PermissionGate>
+  );
+}

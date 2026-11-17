@@ -1182,6 +1182,24 @@ export async function updateCommissionPolicy(body: CommissionPolicy): Promise<Co
   return response.json() as Promise<CommissionPolicy>;
 }
 
+export async function getSusuCycleCommissionPolicy(): Promise<
+  import("@bms/shared").SusuCommissionPolicy
+> {
+  return fetchJson(`${API_BASE_URL}/api/v1/tenant/susu-cycle-commission/policy`, {
+    headers: authHeaders()
+  });
+}
+
+export async function updateSusuCycleCommissionPolicy(
+  body: import("@bms/shared").UpdateSusuCommissionPolicyInput
+): Promise<import("@bms/shared").SusuCommissionPolicy> {
+  return fetchJson(`${API_BASE_URL}/api/v1/tenant/susu-cycle-commission/policy`, {
+    method: "PUT",
+    headers: authHeaders(),
+    body: JSON.stringify(body)
+  });
+}
+
 export type CompanyProfile = {
   tenantId: string;
   name: string;
@@ -3830,6 +3848,23 @@ export async function postCashMovement(payload: CreateCashMovementInput): Promis
     method: "POST",
     headers: authHeaders(),
     body: JSON.stringify(payload)
+  });
+}
+
+export async function getInstitutionalIncomeReport(options?: {
+  period?: import("@bms/shared").IncomeReportPeriod;
+  branchId?: string;
+}): Promise<import("@bms/shared").InstitutionalIncomeReport> {
+  const params = new URLSearchParams();
+  if (options?.period) {
+    params.set("period", options.period);
+  }
+  if (options?.branchId?.trim()) {
+    params.set("branchId", options.branchId.trim());
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return fetchJson(`${API_BASE_URL}/api/v1/income/report${suffix}`, {
+    headers: authHeaders()
   });
 }
 

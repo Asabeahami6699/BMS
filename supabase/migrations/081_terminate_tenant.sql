@@ -46,6 +46,10 @@ declare
     'teller_till_journal_entries',
     'cash_movements',
     'branch_cash_accounts',
+    'institutional_income_entries',
+    'branch_income_accounts',
+    'susu_customer_cycles',
+    'susu_commission_policies',
     -- Back office / agency
     'back_office_ecash_requests',
     'back_office_account_opening',

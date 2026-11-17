@@ -6,6 +6,7 @@ export const API_PATH_MODULE: Array<{ prefix: string; modules: TenantProductModu
   { prefix: "/api/v1/transactions", modules: ["susu_management"] },
   { prefix: "/api/v1/ledger", modules: ["susu_management"] },
   { prefix: "/api/v1/tenant/commission-policy", modules: ["susu_management"] },
+  { prefix: "/api/v1/tenant/susu-cycle-commission", modules: ["susu_management"] },
   { prefix: "/api/v1/tenant/account-number-policy", modules: ["susu_management"] },
   { prefix: "/api/v1/payroll", modules: ["susu_management"] },
   { prefix: "/api/v1/routes", modules: ["susu_management"] },
@@ -15,6 +16,8 @@ export const API_PATH_MODULE: Array<{ prefix: string; modules: TenantProductModu
   { prefix: "/api/v1/agency/till-journal", modules: ["banking", "susu_management"] },
   { prefix: "/api/v1/agency", modules: ["banking"] },
   { prefix: "/api/v1/treasury", modules: ["treasury"] },
+  /** Fee income spans Susu, savings, and banking products. */
+  { prefix: "/api/v1/income", modules: ["susu_management", "banking", "treasury"] },
   { prefix: "/api/v1/investments", modules: ["investment_management"] }
 ];
 
