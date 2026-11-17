@@ -5788,6 +5788,37 @@ select:disabled {
   font-size: 0.86rem;
 }
 
+.login-install {
+  margin-top: 1rem;
+  display: flex;
+  justify-content: center;
+}
+
+.login-install .install-app-button {
+  width: 100%;
+}
+
+.install-app {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  align-items: stretch;
+}
+
+.install-app__hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.agent-drawer-install {
+  margin: 0.75rem 0 0;
+}
+
+.agent-drawer-install .install-app-button {
+  width: 100%;
+}
+
 .login-card__title-row {
   display: inline-flex;
   align-items: center;

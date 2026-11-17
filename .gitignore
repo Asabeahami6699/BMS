@@ -10,6 +10,7 @@ node_modules/
 dist/
 build/
 *.tsbuildinfo
+apps/frontend/dev-dist/
 
 # Logs & debug
 *.log

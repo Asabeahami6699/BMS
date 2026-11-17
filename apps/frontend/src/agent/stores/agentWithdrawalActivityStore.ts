@@ -11,7 +11,8 @@ import {
   isAgentDelivered,
   isCashFulfillment,
   isOfficeCashReady,
-  isWithdrawalApproved
+  isWithdrawalApproved,
+  useAgentBalanceStore
 } from "./agentBalanceStore";
 
 const STORAGE_KEY = "bms.agent.withdrawal-activity.v1";
@@ -175,6 +176,9 @@ export const useAgentWithdrawalActivityStore = create<State>()(
             items: upsertItems(s.items, [confirmed]),
             deliveringId: null
           }));
+          // Customer page should clear the finished request and allow a new one.
+          useAgentBalanceStore.getState().clearWithdrawal(confirmed.customerId);
+          void useAgentBalanceStore.getState().refreshSilent();
           return confirmed;
         } catch (error) {
           set({
@@ -202,6 +206,11 @@ export const useAgentWithdrawalActivityStore = create<State>()(
             items: upsertItems(s.items, confirmed),
             deliveringBulk: false
           }));
+          const balanceStore = useAgentBalanceStore.getState();
+          for (const row of confirmed) {
+            balanceStore.clearWithdrawal(row.customerId);
+          }
+          void balanceStore.refreshSilent();
           return confirmed.length;
         } catch (error) {
           set({

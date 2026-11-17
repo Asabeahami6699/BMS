@@ -7,6 +7,7 @@ import { parseTenantSubdomain } from "@bms/shared";
 import { BmsBrandIcon } from "../components/BmsBrandIcon";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { toUserFacingError } from "../lib/networkError";
+import { InstallAppButton } from "../pwa/InstallAppButton";
 
 export function LoginPage() {
   const { login, user } = useAuth();
@@ -187,6 +188,10 @@ export function LoginPage() {
         </form>
 
         {status ? <p className="login-status login-status--error">{status}</p> : null}
+
+        <div className="login-install">
+          <InstallAppButton variant="button" />
+        </div>
       </section>
     </main>
   );

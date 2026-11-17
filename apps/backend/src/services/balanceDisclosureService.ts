@@ -221,6 +221,10 @@ function isActiveWithdrawalApproval(row: DisclosureRow): boolean {
   if (row.request_type !== "withdrawal") {
     return false;
   }
+  // Delivered to customer — process complete; allow a new withdrawal request.
+  if (row.agent_delivered_at) {
+    return false;
+  }
   // Susu cash: cs_approved (awaiting teller) → completed (office cash ready).
   // MoMo / legacy: approved.
   return (

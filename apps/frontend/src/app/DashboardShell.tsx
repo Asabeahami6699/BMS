@@ -8,6 +8,7 @@ import { GlobalSearch } from "./components/GlobalSearch";
 import { DashboardNotifications } from "./components/DashboardNotifications";
 import { DashboardLoadingBar } from "./components/DashboardLoadingBar";
 import { ThemeToggle } from "../components/ThemeToggle";
+import { InstallAppButton } from "../pwa/InstallAppButton";
 import { useDashboardPageLoading } from "./hooks/useDashboardPageLoading";
 import { brandColorStyle } from "./brandColor";
 
@@ -380,6 +381,10 @@ export function DashboardShell({
                     <span aria-hidden>⚙</span> Role &amp; permissions
                   </button>
                   <ThemeToggle className="theme-toggle theme-toggle--menu" showLabel />
+                  <InstallAppButton
+                    variant="menu"
+                    onInstalled={() => setProfileOpen(false)}
+                  />
                   <div className="dash-profile-panel__divider" role="separator" />
                   <button
                     type="button"

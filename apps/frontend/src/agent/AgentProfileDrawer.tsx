@@ -5,6 +5,7 @@ import { useAuth } from "../auth/AuthContext";
 import { getFieldAgentDashboard, type FieldAgentDashboard } from "../app/api";
 import { isOfflineOrNetworkError } from "../lib/useNetworkStatus";
 import { toUserFacingError } from "../lib/networkError";
+import { InstallAppButton } from "../pwa/InstallAppButton";
 
 type Props = {
   open: boolean;
@@ -185,6 +186,10 @@ export function AgentProfileDrawer({ open, onClose, onLogout }: Props) {
             >
               Withdrawal activity
             </Link>
+          </div>
+
+          <div className="agent-drawer-install">
+            <InstallAppButton variant="button" onInstalled={onClose} />
           </div>
 
           <div className="agent-drawer-signout">

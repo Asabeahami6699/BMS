@@ -21,6 +21,10 @@ export function isWithdrawalApproved(d: BalanceDisclosure | undefined): boolean 
   if (!d || d.requestType !== "withdrawal") {
     return false;
   }
+  // After field-agent delivery confirmation the process is done — allow a new request.
+  if (isAgentDelivered(d)) {
+    return false;
+  }
   return (
     d.status === "approved" ||
     d.status === "cs_approved" ||
@@ -103,6 +107,8 @@ type State = {
     payload: RequestCustomerApprovalInput
   ) => Promise<BalanceDisclosure>;
   upsert: (d: BalanceDisclosure) => void;
+  /** Clear a finished withdrawal from the customer card (after agent delivery). */
+  clearWithdrawal: (customerId: string) => void;
   getForCustomer: (customerId: string, type: CustomerRequestType) => BalanceDisclosure | undefined;
 };
 
@@ -137,9 +143,30 @@ export const useAgentBalanceStore = create<State>()(
 
       upsert(d) {
         const key = requestKey(d.customerId, d.requestType ?? "balance");
+        // Delivered withdrawals are finished — drop them so Request opens again.
+        if (d.requestType === "withdrawal" && isAgentDelivered(d)) {
+          set((s) => {
+            const next = { ...s.byKey };
+            delete next[key];
+            return { byKey: next };
+          });
+          return;
+        }
         set((s) => ({
           byKey: { ...s.byKey, [key]: d }
         }));
+      },
+
+      clearWithdrawal(customerId) {
+        const key = requestKey(customerId, "withdrawal");
+        set((s) => {
+          if (!s.byKey[key]) {
+            return s;
+          }
+          const next = { ...s.byKey };
+          delete next[key];
+          return { byKey: next };
+        });
       },
 
       async refreshSilent() {
@@ -149,8 +176,12 @@ export const useAgentBalanceStore = create<State>()(
         refreshInFlight = (async () => {
           try {
             const list = await listAgentBalanceDisclosures();
+            // Drop delivered rows if an older API still returns them.
+            const actionable = list.filter(
+              (d) => !(d.requestType === "withdrawal" && isAgentDelivered(d))
+            );
             set({
-              byKey: indexRequests(list),
+              byKey: indexRequests(actionable),
               lastFetchedAt: new Date().toISOString(),
               error: ""
             });
