@@ -13,6 +13,8 @@ import { applyTheme, getStoredTheme } from "./theme/themeStore";
 
 applyTheme(getStoredTheme());
 
+// Service worker (vite-plugin-pwa → /sw.js). Required for full Chrome installability
+// alongside public/manifest.webmanifest; also enables future push if wired later.
 registerSW({ immediate: true });
 
 // Prefer the public BMS favicon used by the PWA manifest / Chrome install.
