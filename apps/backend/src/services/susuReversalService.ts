@@ -266,6 +266,27 @@ export async function reverseSusuCollection(
     }
   }
 
+  // Keep Susu passbook boxes and institutional commission income in sync after reversal.
+  try {
+    const { reverseSusuCollectionFromCycles } = await import("./susuCycleCommissionService.js");
+    await reverseSusuCollectionFromCycles(
+      {
+        userId: context.userId,
+        tenantId: context.tenantId,
+        role: context.role,
+        permissions: context.permissions,
+        branchId: context.branchId
+      },
+      {
+        customerId: existing.customerId,
+        transactionId: existing.id,
+        reason
+      }
+    );
+  } catch {
+    // Reversal is already committed in the ledger; passbook recomputes from non-reversed transactions.
+  }
+
   const detail = await getSusuCollectionDetail(context, existing.id);
   try {
     await notifyTenantStaff({

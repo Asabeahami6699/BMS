@@ -1,7 +1,10 @@
 import { useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { formatAccountAmount } from "@bms/shared";
+import type { Customer } from "../../app/api";
+import { Modal } from "../../components/Modal";
 import { RowActionsMenu } from "../../components/RowActionsMenu";
+import { SusuPassbookCard } from "../../components/SusuPassbookCard";
 import { CustomerRequestsRow } from "../components/CustomerRequestsRow";
 import { RegistrationModal } from "../RegistrationModal";
 import {
@@ -69,6 +72,7 @@ export function AgentCustomersPage({
   const requestsUpdatedAt = useAgentBalanceStore((s) => s.lastFetchedAt);
 
   const [registerOpenLocal, setRegisterOpenLocal] = useState(false);
+  const [passbookCustomer, setPassbookCustomer] = useState<Customer | null>(null);
 
   const registerOpen = registerOpenProp ?? registerOpenLocal;
   function setRegisterOpen(open: boolean) {
@@ -207,10 +211,45 @@ export function AgentCustomersPage({
               <p className="agent-customer-amount muted">
                 Daily plan: GHS {formatAccountAmount(customer.dailyContributionAmount)}
               </p>
+              {customer.status === "active" && customer.accountType === "susu" ? (
+                <div className="agent-customer-card-actions">
+                  <button
+                    type="button"
+                    className="button secondary btn-sm"
+                    onClick={() => setPassbookCustomer(customer)}
+                  >
+                    Susu passbook
+                  </button>
+                </div>
+              ) : null}
             </article>
           ))
         )}
       </div>
+
+      <Modal
+        open={passbookCustomer !== null}
+        title={passbookCustomer ? `Susu passbook — ${passbookCustomer.fullName}` : "Susu passbook"}
+        subtitle={passbookCustomer?.accountNumber ? `Acct ${passbookCustomer.accountNumber}` : undefined}
+        onClose={() => setPassbookCustomer(null)}
+        footer={
+          <button
+            type="button"
+            className="button secondary"
+            onClick={() => setPassbookCustomer(null)}
+          >
+            Close
+          </button>
+        }
+      >
+        {passbookCustomer ? (
+          <SusuPassbookCard
+            customerId={passbookCustomer.id}
+            customerName={passbookCustomer.fullName}
+            compact
+          />
+        ) : null}
+      </Modal>
 
       <RegistrationModal
         open={registerOpen}

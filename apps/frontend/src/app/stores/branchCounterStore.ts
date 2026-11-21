@@ -452,6 +452,11 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
         postRetry = null;
         const customerId = payload.customerId;
         await get().loadLedger(customerId, { silent: true, force: true });
+        void import("./susuCycleCommissionStore").then(({ useSusuCycleCommissionStore }) => {
+          const passbookStore = useSusuCycleCommissionStore.getState();
+          passbookStore.invalidateCustomerPassbook(customerId);
+          void passbookStore.refreshCustomerPassbookSilent(customerId);
+        });
         // Hot slice only — keep cached customer catalog.
         const statementDate = get().statementDate;
         const scopedBranchId = resolveStatementBranchId(get().statementBranchId);

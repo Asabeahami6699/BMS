@@ -337,13 +337,21 @@ export function InitiateAgencyWithdrawalPanel({ onInitiated }: Props) {
                           <span className="branch-counter__pick-main">
                             <strong>{customer.fullName}</strong>
                             <span className="branch-counter__pick-acct">
-                              {customer.accountNumber ?? "Pending acct"}
+                              <span>{customer.accountNumber ?? "Pending acct"}</span>
+                              {customer.accountType ? (
+                                <span
+                                  className={`branch-counter__pick-type branch-counter__pick-type--${customer.accountType}`}
+                                >
+                                  {customer.accountType === "meba_daakye"
+                                    ? "Meba Daakye"
+                                    : customer.accountType.charAt(0).toUpperCase() +
+                                      customer.accountType.slice(1).replace(/_/g, " ")}
+                                </span>
+                              ) : null}
                             </span>
                           </span>
                           <span className="muted branch-counter__pick-phone">
-                            {hasSusu
-                              ? `${isSusuCustomer(customer) ? "Susu" : "Savings"} · ${customer.phone}`
-                              : customer.phone}
+                            {customer.phone}
                           </span>
                         </button>
                       </li>

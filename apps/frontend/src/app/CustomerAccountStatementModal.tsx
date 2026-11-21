@@ -9,6 +9,7 @@ import {
 import { downloadCustomerLedgerCsv } from "../lib/customerLedgerCsv";
 import { useAuth } from "../auth/AuthContext";
 import { Modal } from "../components/Modal";
+import { SusuPassbookCard } from "../components/SusuPassbookCard";
 import { useToast } from "../components/Toast";
 
 type Props = {
@@ -177,6 +178,13 @@ export function CustomerAccountStatementModal({ open, customer, onClose }: Props
               </strong>
             </div>
           </div>
+
+          {activeCustomer.accountType === "susu" ? (
+            <SusuPassbookCard
+              customerId={activeCustomer.id}
+              customerName={activeCustomer.fullName}
+            />
+          ) : null}
 
           {ledgerError ? (
             <p className="cif-empty muted" role="status">

@@ -57,6 +57,19 @@ const TX_LABELS: Record<TxType, string> = {
   daily_susu: "Daily Susu"
 };
 
+function formatAccountTypeLabel(accountType?: string | null): string {
+  if (!accountType) {
+    return "";
+  }
+  const normalized = accountType.toLowerCase();
+  if (normalized === "susu") return "Susu";
+  if (normalized === "savings") return "Savings";
+  if (normalized === "current") return "Current";
+  if (normalized === "group") return "Group";
+  if (normalized === "meba_daakye") return "Meba Daakye";
+  return accountType.replace(/_/g, " ").replace(/\b\w/g, (ch) => ch.toUpperCase());
+}
+
 const QUICK_AMOUNTS = [20, 50, 100, 200, 500];
 
 function allowedTransactionTypes(role: AppRole, _permissions: Permission[] | undefined): TxType[] {
@@ -537,7 +550,14 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
                       <span className="branch-counter__pick-main">
                         <strong>{c.fullName}</strong>
                         <span className="branch-counter__pick-acct">
-                          {c.accountNumber ?? "Pending acct"}
+                          <span>{c.accountNumber ?? "Pending acct"}</span>
+                          {c.accountType ? (
+                            <span
+                              className={`branch-counter__pick-type branch-counter__pick-type--${c.accountType}`}
+                            >
+                              {formatAccountTypeLabel(c.accountType)}
+                            </span>
+                          ) : null}
                         </span>
                       </span>
                       <span className="muted branch-counter__pick-phone">{c.phone}</span>

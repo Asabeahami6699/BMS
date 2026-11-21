@@ -10,9 +10,11 @@ import {
 } from "../app/stores/customerLedgerStore";
 import { useCustomersStore } from "../app/stores/customersStore";
 import { useRoutesStore } from "../app/stores/routesStore";
+import { useSusuCycleCommissionStore } from "../app/stores/susuCycleCommissionStore";
 import { downloadCustomerLedgerCsv } from "../lib/customerLedgerCsv";
 import { formatFieldAgent } from "../lib/formatFieldAgent";
 import { useAuth } from "../auth/AuthContext";
+import { SusuPassbookCard } from "./SusuPassbookCard";
 import { useToast } from "./Toast";
 
 const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
@@ -349,6 +351,10 @@ export function CustomerDetailsView({
                     GHS {formatAccountAmount(loanReserveAmount)} is held for the next loan installment and
                     cannot be withdrawn while the loan is open (Susu↔Loans bridge).
                   </p>
+                ) : null}
+
+                {customer.accountType === "susu" ? (
+                  <SusuPassbookCard customerId={customer.id} customerName={customer.fullName} />
                 ) : null}
 
                 {ledgerError ? (
@@ -736,6 +742,9 @@ export function CustomerDetailsView({
           const store = useCustomerLedgerStore.getState();
           store.invalidate(customerProp.id);
           void store.ensureLedger(customerProp.id, { force: true });
+          const passbookStore = useSusuCycleCommissionStore.getState();
+          passbookStore.invalidateCustomerPassbook(customerProp.id);
+          void passbookStore.ensureCustomerPassbook(customerProp.id, { force: true });
         }}
       />
     </>

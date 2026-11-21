@@ -403,6 +403,14 @@ export function OveragesShortagesPage({ role }: Props) {
                             <option key={c.id} value={c.id}>
                               {c.fullName}
                               {c.accountNumber ? ` · ${c.accountNumber}` : ""}
+                              {c.accountType
+                                ? ` (${
+                                    c.accountType === "meba_daakye"
+                                      ? "Meba Daakye"
+                                      : c.accountType.charAt(0).toUpperCase() +
+                                        c.accountType.slice(1).replace(/_/g, " ")
+                                  })`
+                                : ""}
                             </option>
                           ))}
                         </select>

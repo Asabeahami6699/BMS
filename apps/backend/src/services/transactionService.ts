@@ -510,6 +510,8 @@ export async function createTransaction(
       : null;
 
   // Susu cycle commission (customer fee) — susu accounts only; separate from agent payroll.
+  // Applies to both field-agent daily_susu and walk-in branch counter deposits on Susu accounts
+  // (excluding agency manual partner bank deposits).
   let susuAllocation: {
     savingsCredit: number;
     commissionCollectNow: number;
@@ -517,7 +519,15 @@ export async function createTransaction(
     note?: string;
   } | null = null;
   const transactionIdEarly = randomUUID();
-  if (payload.type === "daily_susu" && customer.accountType === "susu") {
+  const isAgencyManualPartnerDeposit =
+    payload.type === "deposit" &&
+    usesAgencyDepositFlow(context) &&
+    Boolean(payload.manualPartnerAccount);
+  const isSusuContribution =
+    customer.accountType === "susu" &&
+    (payload.type === "daily_susu" ||
+      (payload.type === "deposit" && !isAgencyManualPartnerDeposit));
+  if (isSusuContribution) {
     const { applySusuCollectionToCycle } = await import("./susuCycleCommissionService.js");
     const branchId =
       payload.transactionBranchId ?? customer.homeBranchId ?? context.branchId ?? "";
@@ -694,13 +704,6 @@ export async function createTransaction(
     }
   }
 
-  // First-day Susu commission may consume the entire collection — still record the txn.
-  if (susuAllocation && ledgerAmount <= 0 && payload.type === "daily_susu") {
-    const transactions = getTenantTransactions(context.tenantId);
-    setTenantTransactions(context.tenantId, [...transactions, transaction]);
-    return enrichTransactionProduct(context.tenantId, transaction);
-  }
-
   if (
     payload.type === "deposit" &&
     usesAgencyDepositFlow(context) &&
@@ -743,7 +746,13 @@ export async function createTransaction(
     });
   }
 
-  await applyTransactionToFloat(context, transaction);
+  // Teller till cash & float must reflect the full physical cash handed over (payload.amount),
+  // even when Susu Box 1 commission splits part or all of the deposit into institutional income.
+  const floatTransaction =
+    susuAllocation && (transaction.type === "deposit" || transaction.type === "daily_susu")
+      ? { ...transaction, amount: payload.amount }
+      : transaction;
+  await applyTransactionToFloat(context, floatTransaction);
 
   if (QUALIFYING_TX_TYPES.has(transaction.type)) {
     void touchCustomerQualifyingActivity(context.tenantId, transaction.customerId).catch(() => {
@@ -761,7 +770,7 @@ export async function createTransaction(
       customerId: transaction.customerId,
       transactionId: transaction.id,
       type: transaction.type,
-      amount: ledgerAmount,
+      amount: ledgerAmount > 0 ? ledgerAmount : payload.amount,
       subscribedAddons: context.subscribedAddons
     }).catch((error) => {
       console.warn(

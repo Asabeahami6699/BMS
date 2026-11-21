@@ -33,7 +33,8 @@ export const SITE_MANUAL_DEPARTMENTS: {
   {
     id: "susu",
     label: "Susu Management",
-    description: "Collections, branch till, call-over, overages/shortages, and customer accounts."
+    description:
+      "Onboarding, Susu passbook, daily collections, call-over, reversals, cycle fees, Susu income, branch counter, tills, withdrawals, vault close, and team operations."
   },
   {
     id: "loans",
@@ -76,6 +77,166 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
     ]
   },
   {
+    id: "susu-onboarding-accounts",
+    department: "susu",
+    title: "Customer onboarding, account types, and pending approvals",
+    howTo: "How to register and approve Susu customers",
+    keywords: [
+      "susu",
+      "onboarding",
+      "register",
+      "customer",
+      "pending approvals",
+      "account type",
+      "savings",
+      "daily contribution",
+      "meba daakye",
+      "activation"
+    ],
+    modules: ["susu_management"],
+    body: [
+      "New customers can be registered in the office under Susu → Customer Onboarding or in the field via the Field agent mobile app.",
+      "Supported account types include Susu, Savings (which can carry an opening fee and minimum locked balance), Group, and Meba Daakye.",
+      "Set the customer’s agreed daily contribution amount during onboarding (for example GHS 20/day). The Susu passbook and first-day Susu cycle fee both use this registered daily plan.",
+      "Every new registration lands in Susu → Pending Approvals. Admin or coordinator verifies the customer details, confirms the registration phone number, and approves or rejects the account.",
+      "Once approved, the account becomes Active, receives an account number, and appears in Susu → Customers for deposits, collections, statements, and passbook tracking."
+    ]
+  },
+  {
+    id: "susu-passbook",
+    department: "susu",
+    title: "Susu passbook (virtual 31-box contribution pages) & account statements",
+    howTo: "How the Susu passbook works",
+    keywords: [
+      "susu passbook",
+      "passbook",
+      "page",
+      "pages",
+      "boxes",
+      "31",
+      "checked boxes",
+      "partial",
+      "overflow",
+      "page switcher",
+      "statement",
+      "account statement",
+      "pdf",
+      "csv"
+    ],
+    modules: ["susu_management"],
+    body: [
+      "Every Susu account includes a virtual Susu passbook showing its contribution boxes (dynamic to your company’s cycle length, e.g. 31 boxes per page).",
+      "Where to find it: open any Susu customer’s Account statement (Susu → Customers → Actions → Account statement), open Customer Details, or tap Susu passbook on an active Susu customer card in the Field agent app.",
+      "Automatic box counting (1 real ledger transaction): both Field agent Daily Susu collections (posted via Callover) and walk-in Branch counter deposits on Susu accounts convert into checked boxes using gross contribution ÷ daily contribution plan. Example: on a GHS 20/day plan, a GHS 100 payment records 1 transaction and auto-checks 5 boxes (Box 1 = institution Fee, Boxes 2–5 = customer savings). A later GHS 60 payment auto-checks Boxes 6, 7, and 8. Loan disbursements credited via the Susu↔Loans bridge are excluded so they never distort passbook boxes.",
+      "Partial boxes (non-multiples): if a customer pays GHS 30 on a GHS 20 plan, 1 full box checks off and the next box shows a progress fill of 10 / 20 (partial) until the remaining GHS 10 is paid.",
+      "Overflow into the next page: if a customer is at Box 29 (28 boxes filled) and pays GHS 100 (5 boxes), Boxes 29, 30, and 31 complete Page #1 (marked Completed) and the remaining GHS 40 automatically opens Page #2 and checks Boxes 1 and 2 (collecting Page #2’s Box 1 fee if first-collection timing is enabled).",
+      "Visual cues: Box 1 is badged Fee under first-collection timing (or the final box, e.g. Box 31, under cycle-maturity timing). Checked boxes show a green tick, date, and amount; partial boxes show a progress bar.",
+      "Page switcher: use Page #1, Page #2, etc. at the top of the Susu passbook to inspect past completed pages as well as the current active page.",
+      "Account statements also let staff filter by date range, print a PDF statement, or download the full ledger as CSV."
+    ]
+  },
+  {
+    id: "susu-callover-batches",
+    department: "susu",
+    title: "Callover batches (reviewing and posting field agent daily Susu)",
+    howTo: "How to approve callover batches",
+    keywords: [
+      "callover",
+      "call over",
+      "batch",
+      "daily susu",
+      "field agent",
+      "coordinator",
+      "post",
+      "collections",
+      "cash handover"
+    ],
+    modules: ["susu_management"],
+    body: [
+      "Field agents collect Daily Susu in the mobile app and submit their batch via Call over (Daily Susu is not posted directly at Branch counter).",
+      "Go to Susu → Callover batches to review pending agent submissions for your branch.",
+      "Count the physical cash handed over by the agent and compare it against the batch total.",
+      "Approve and post the batch: each customer’s account is credited, their Susu passbook boxes check off automatically, Susu cycle commission is applied per policy, and customer SMS receipts fire if enabled.",
+      "If physical cash handed over differs from the submitted batch total, the difference automatically creates a Field agent case under Susu → Overages/Shortages."
+    ]
+  },
+  {
+    id: "susu-reversal",
+    department: "susu",
+    title: "Reversing a Daily Susu collection (and unchecking passbook boxes)",
+    howTo: "How to reverse a Susu collection",
+    keywords: [
+      "reverse",
+      "reversal",
+      "undo",
+      "mistake",
+      "wrong amount",
+      "uncheck",
+      "passbook",
+      "daily susu"
+    ],
+    modules: ["susu_management"],
+    body: [
+      "If a posted Daily Susu collection had the wrong amount or customer, authorized staff can reverse it from Susu → Customers → open customer details → find the Daily Susu entry in the ledger → Reverse.",
+      "Enter a clear reason for the reversal. The system posts an auditable reversal entry rather than deleting history.",
+      "Reversing a Daily Susu transaction automatically reverses any institutional Susu commission tied to it and unchecks the exact boxes that payment filled on the customer’s Susu passbook.",
+      "If the reversed payment had overflowed into a new page (e.g. Page #2), the passbook rolls back cleanly to the prior open page."
+    ]
+  },
+  {
+    id: "susu-cycle-commission",
+    department: "susu",
+    title: "Susu cycle fees (institutional commission setup)",
+    howTo: "How to configure Susu cycle fees",
+    keywords: [
+      "susu cycle fees",
+      "cycle commission",
+      "commission",
+      "first day",
+      "maturity",
+      "withdrawal fee",
+      "31 days",
+      "fee box",
+      "early withdrawal",
+      "rollover",
+      "policy"
+    ],
+    modules: ["susu_management"],
+    body: [
+      "Go to Susu → Susu cycle fees to configure how your institution earns Susu commission on customer cycles.",
+      "Cycle length: choose the number of contribution boxes per page (standard Susu is 31 days/boxes).",
+      "Commission basis: pick Customer’s registered daily amount (1 day’s contribution — e.g. GHS 20 on a GHS 20 plan), a Fixed amount for everyone, a Percentage of total cycle contributions, or No commission.",
+      "Deduction timing: choose First collection(s) (deducted upfront on Box 1 so customer savings ledger receives the net credit while the passbook tracks full gross boxes), Cycle maturity (deducted when the page completes at Box 31), or Customer withdrawal (deducted when the customer withdraws).",
+      "Partial-payment allocation (for first-collection timing): decide whether an underpayment satisfies Commission first, Savings first, or Proportional.",
+      "Early withdrawal policy: choose whether withdrawing before a page matures will Deduct full fee, Deduct pro-rata (based on contribution boxes completed), Waive the fee, or Block early withdrawal.",
+      "Changes apply cleanly as a versioned policy; earned commission posts automatically to Susu → Susu income."
+    ]
+  },
+  {
+    id: "susu-income",
+    department: "susu",
+    title: "Susu income (company fee revenue by branch)",
+    howTo: "How to track Susu fee income",
+    keywords: [
+      "susu income",
+      "institutional income",
+      "fee income",
+      "revenue",
+      "opening fee",
+      "savings opening fee",
+      "cycle commission",
+      "branch income",
+      "backfill"
+    ],
+    modules: ["susu_management"],
+    body: [
+      "Go to Susu → Susu income to view institutional fee revenue earned by your company (strictly isolated to your tenant’s branches and never mixed with customer deposits).",
+      "Two automatic income streams are tracked: Susu cycle fees (earned from customer Susu cycles) and Savings opening fees (recorded for the branch when new savings accounts activate).",
+      "Filter by branch, date range, and income source to review daily or period totals, branch breakdowns, and any reversed fee entries.",
+      "Note: Susu income tracks revenue earned by the institution from customer fees. Staff payroll commissions paid to field agents are managed separately under Susu → Agent commissions."
+    ]
+  },
+  {
     id: "susu-collect",
     department: "susu",
     title: "Post a walk-in deposit at branch counter",
@@ -87,7 +248,8 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
       "Go to Susu → Branch counter.",
       "Search and select the customer account.",
       "Choose Deposit only (Daily Susu is not posted on branch counter — use Field agent Collect and Callover).",
-      "Enter the amount and post. Deposits increase physical cash in till and consume float capacity.",
+      "Enter the amount and post. Deposits increase physical cash in till (by the full gross cash received, even if Susu Box 1 commission applies) and consume float capacity.",
+      "For Susu accounts, walk-in counter deposits also check off boxes on the customer’s Susu passbook and apply your Susu cycle fee policy automatically so the passbook stays aligned with contributions.",
       "Withdrawable balance already excludes savings minimum and any loan reserves."
     ]
   },
@@ -103,7 +265,22 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
       "Check Withdrawable (not full account balance).",
       "Withdrawals need physical cash in the till — float alone is not cash. If cash is short, use Till movement → Extra cash (needs approval).",
       "Post a withdrawal only up to the withdrawable amount and available till cash.",
-      "If a loan reserve or passbook lien is active, that amount cannot be withdrawn."
+      "If your Susu cycle fee timing is set to Withdrawal (or an early-withdrawal fee applies), the system evaluates the active Susu cycle automatically.",
+      "If a savings opening minimum, loan reserve, or passbook lien is active, that locked amount cannot be withdrawn."
+    ]
+  },
+  {
+    id: "susu-withdrawal-gate-momo",
+    department: "susu",
+    title: "Withdrawal gate (MoMo & remote withdrawal approvals)",
+    howTo: "How to approve MoMo withdrawals",
+    keywords: ["withdrawal gate", "momo", "mobile money", "payout", "customer service", "proof"],
+    modules: ["susu_management"],
+    body: [
+      "Go to Susu → Withdrawal gate to review pending MoMo withdrawal requests.",
+      "Verify the customer’s available withdrawable balance, phone number, and payout details before approving.",
+      "MoMo payouts are settled outside the branch cash till with payout proof/reference recorded on the request.",
+      "Remote field-agent cash withdrawals follow the separate Coordinator → Branch counter (Pay now) flow so physical drawer cash stays accurate."
     ]
   },
   {
@@ -189,6 +366,53 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
       "Enter cash to bank (Susu worksheet only — Banking Treasury post comes later), optional vault count, and save.",
       "Expected closing vault = opening − issued to tills + field deposits − field withdrawals + returned closed tills − cash to bank − extra branch expenses.",
       "Teller drawer OS remains on Overages/Shortages → Branch till."
+    ]
+  },
+  {
+    id: "susu-group-savings",
+    department: "susu",
+    title: "Group Savings accounts",
+    howTo: "How to manage Group Savings",
+    keywords: ["group savings", "group", "members", "susu", "collective"],
+    modules: ["susu_management"],
+    body: [
+      "Go to Susu → Group Savings to create and manage group savings accounts and member rosters.",
+      "Track group contributions, member participation, and balances in one place.",
+      "When Loans is also enabled, eligible groups can apply for group loans directly from Loans → Apply."
+    ]
+  },
+  {
+    id: "susu-routes-team",
+    department: "susu",
+    title: "Routes, field agents, and coordinators",
+    howTo: "How to organize Susu routes and staff",
+    keywords: ["routes", "agents", "field agents", "coordinators", "territory", "assign"],
+    modules: ["susu_management"],
+    body: [
+      "Go to Susu → Routes to define collection routes/zones and assign field agents to territories.",
+      "Use Susu → Agents to view your field agent roster, branch assignment, active customers, and collection activity.",
+      "Use Susu → Coordinators (admin) to oversee coordinator accounts and branch approval workloads."
+    ]
+  },
+  {
+    id: "susu-agent-commissions-payroll",
+    department: "susu",
+    title: "Agent commissions, payroll, and Susu performance",
+    howTo: "How agent commissions and payroll work",
+    keywords: [
+      "agent commissions",
+      "payroll",
+      "performance",
+      "leaderboard",
+      "kpi",
+      "staff commission",
+      "salary"
+    ],
+    modules: ["susu_management"],
+    body: [
+      "Susu → Agent commissions configures payroll commission rates paid to field agents and coordinators based on collections (separate from company revenue in Susu → Susu cycle fees and Susu → Susu income).",
+      "Susu → Payroll lets admins and accountants prepare and review staff payroll runs incorporating earned commissions.",
+      "Susu → Performance provides read-only KPIs and leaderboards showing branch and agent collection volume, active savers, and growth."
     ]
   },
   {
@@ -305,15 +529,16 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
   {
     id: "agent-collect",
     department: "field_agent",
-    title: "Field agent daily collection",
+    title: "Field agent daily collection & Susu passbook",
     howTo: "How field agents collect",
-    keywords: ["field agent", "collect", "offline", "sync", "daily susu"],
+    keywords: ["field agent", "collect", "offline", "sync", "daily susu", "passbook", "susu passbook"],
     modules: ["susu_management"],
     body: [
       "Open the Field agent app → Collect.",
-      "Select the customer, enter the daily Susu amount, and save. (Branch counter does not post Daily Susu.)",
-      "Offline collections queue and sync when the phone is online.",
-      "Use Call over to submit the day's batch for coordinator approval and posting."
+      "Select the customer, enter the daily Susu amount (single day, multi-day, or partial payment), and save. (Branch counter does not post Daily Susu.)",
+      "Offline collections queue on the device and sync automatically when the phone is back online.",
+      "Use Call over to submit the day's batch for coordinator approval and posting.",
+      "Tap Susu passbook on any active Susu customer card under Customers to show the customer their checked boxes, partial progress, Fee box, and past completed pages."
     ]
   },
   {

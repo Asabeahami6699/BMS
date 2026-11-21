@@ -1200,6 +1200,17 @@ export async function updateSusuCycleCommissionPolicy(
   });
 }
 
+export async function getCustomerSusuCycleSummary(
+  customerId: string
+): Promise<import("@bms/shared").SusuCustomerCycleSummary> {
+  return fetchJson(
+    `${API_BASE_URL}/api/v1/tenant/susu-cycle-commission/customers/${encodeURIComponent(customerId)}/cycle`,
+    {
+      headers: authHeaders()
+    }
+  );
+}
+
 export type CompanyProfile = {
   tenantId: string;
   name: string;

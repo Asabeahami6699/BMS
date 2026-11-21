@@ -169,13 +169,14 @@ body {
   color: var(--text);
 }
 
+/* Base root size +15% platform-wide (15px → 17.25px). Tenant font steps still add on top. */
 html {
-  font-size: calc(15px + var(--font-step, 0px));
+  font-size: calc(17.25px + var(--font-step, 0px));
 }
 
 @media (min-width: 1440px) {
   html {
-    font-size: calc(14px + var(--font-step, 0px));
+    font-size: calc(16.1px + var(--font-step, 0px));
   }
 }
 
@@ -10267,19 +10268,27 @@ button.cif-ledger__row:hover {
   margin: 0;
   padding: 0;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.4rem;
   max-height: 280px;
   overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.branch-counter__pick-list > li {
+  min-width: 0;
 }
 
 .branch-counter__pick {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: 0.35rem;
   width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   text-align: left;
-  padding: 0.6rem 0.7rem;
+  padding: 0.55rem 0.6rem;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-soft);
   background: var(--bg-input);
@@ -10302,22 +10311,85 @@ button.cif-ledger__row:hover {
 .branch-counter__pick-main {
   display: flex;
   flex-direction: column;
+  flex: 1 1 0;
   gap: 0.1rem;
   min-width: 0;
+  overflow: hidden;
 }
 
 .branch-counter__pick-main strong {
-  font-size: 0.9rem;
+  font-size: 0.88rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .branch-counter__pick-acct {
-  font-size: 0.75rem;
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.22rem;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 0.7rem;
+  line-height: 1.2;
   color: var(--text-dim);
   font-variant-numeric: tabular-nums;
 }
 
+.branch-counter__pick-acct > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.branch-counter__pick-type {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  white-space: nowrap;
+  padding: 0 0.22rem;
+  border-radius: 4px;
+  font-size: 0.54rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+  background: var(--surface-hover);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+.branch-counter__pick-type--susu {
+  background: var(--success-soft);
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 35%, transparent);
+}
+
+.branch-counter__pick-type--savings {
+  background: var(--primary-soft);
+  color: var(--primary-hover);
+  border-color: color-mix(in srgb, var(--primary) 35%, transparent);
+}
+
+[data-theme="light"] .branch-counter__pick-type--savings {
+  color: var(--primary);
+}
+
+.branch-counter__pick-type--current {
+  background: var(--warning-soft);
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 35%, transparent);
+}
+
+[data-theme="light"] .branch-counter__pick-type--current {
+  color: #b45309;
+}
+
 .branch-counter__pick-phone {
-  font-size: 0.78rem;
+  font-size: 0.72rem;
+  white-space: nowrap;
   flex-shrink: 0;
 }
 
@@ -18018,4 +18090,483 @@ button.cif-ledger__row:hover {
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
+}
+
+/* Susu passbook virtual card (adapts natively to dark & [data-theme="light"]) */
+.susu-passbook {
+  display: grid;
+  gap: 0.9rem;
+  padding: 1rem 1.15rem;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--primary) 6%, var(--bg-surface-elevated)) 0%,
+    var(--bg-card) 42%
+  );
+  color: var(--text);
+  box-shadow: var(--shadow-card);
+}
+
+[data-theme="light"] .susu-passbook {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--primary) 4%, var(--bg-surface-elevated)) 0%,
+    var(--bg-card) 42%
+  );
+}
+
+.susu-passbook.is-compact {
+  padding: 0.85rem;
+  gap: 0.72rem;
+  box-shadow: none;
+}
+
+.susu-passbook-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.65rem 1rem;
+}
+
+.susu-passbook-title-group {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.susu-passbook-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.susu-passbook-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.susu-passbook-sub {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.susu-passbook-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.16rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.susu-passbook-status.is-open {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.susu-passbook-status.is-matured {
+  background: var(--primary-soft);
+  color: var(--primary-hover);
+}
+
+[data-theme="light"] .susu-passbook-status.is-matured {
+  color: var(--primary);
+}
+
+.susu-passbook-status.is-closed {
+  background: var(--surface-hover);
+  color: var(--text-muted);
+}
+
+.susu-passbook-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.susu-passbook-refresh {
+  padding: 0.32rem 0.7rem;
+  font-size: 0.78rem;
+  min-height: 0;
+}
+
+.susu-passbook-switcher {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.susu-passbook-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.susu-passbook-tab:hover {
+  border-color: var(--primary);
+  background: var(--surface-hover);
+}
+
+.susu-passbook-tab.is-active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #ffffff;
+}
+
+.susu-passbook-tab-count {
+  font-size: 0.72rem;
+  opacity: 0.85;
+  font-variant-numeric: tabular-nums;
+}
+
+.susu-passbook-card-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.26rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.susu-passbook-progress {
+  display: grid;
+  gap: 0.38rem;
+}
+
+.susu-passbook-progress-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.35rem 0.75rem;
+  font-size: 0.82rem;
+  color: var(--text);
+}
+
+.susu-passbook-partial-note {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.susu-passbook-progress-track {
+  height: 7px;
+  border-radius: 999px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-soft);
+  overflow: hidden;
+}
+
+.susu-passbook-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--success), color-mix(in srgb, var(--success) 75%, #86efac));
+  transition: width 0.25s ease;
+}
+
+.susu-passbook-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.susu-passbook-stat {
+  display: grid;
+  gap: 0.16rem;
+  padding: 0.58rem 0.75rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-soft);
+  background: var(--bg-input);
+}
+
+.susu-passbook-stat span {
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.susu-passbook-stat strong {
+  font-size: 0.9rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.susu-passbook-stat strong small {
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.susu-passbook-tally {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 0.65rem;
+  padding: 0.45rem 0.7rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-soft);
+  background: var(--bg-input);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.susu-passbook-tally strong {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.susu-passbook-tally-eq strong {
+  color: var(--primary-hover);
+}
+
+[data-theme="light"] .susu-passbook-tally-eq strong {
+  color: var(--primary);
+}
+
+.susu-passbook-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: 0.44rem;
+}
+
+.susu-passbook-grid.is-compact {
+  grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
+  gap: 0.34rem;
+}
+
+.susu-passbook-box {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 62px;
+  padding: 0.38rem 0.44rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text);
+  transition: transform 0.12s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.susu-passbook-grid.is-compact .susu-passbook-box {
+  min-height: 54px;
+  padding: 0.3rem 0.36rem;
+}
+
+.susu-passbook-box.is-checked {
+  border-color: color-mix(in srgb, var(--success) 52%, var(--border));
+  background: var(--success-soft);
+}
+
+.susu-passbook-box.is-partial {
+  border-color: color-mix(in srgb, var(--warning) 58%, var(--border));
+  background: var(--warning-soft);
+}
+
+.susu-passbook-box.is-empty {
+  border-style: dashed;
+  border-color: var(--border);
+  background: var(--bg-input);
+}
+
+.susu-passbook-box.is-fee {
+  border-color: color-mix(in srgb, var(--primary) 58%, var(--border));
+  background: color-mix(in srgb, var(--primary-soft) 65%, var(--bg-input));
+}
+
+.susu-passbook-box.is-fee.is-checked {
+  background: linear-gradient(
+    145deg,
+    var(--primary-soft) 0%,
+    var(--success-soft) 100%
+  );
+}
+
+.susu-passbook-box-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.2rem;
+}
+
+.susu-passbook-box-num {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.susu-passbook-box.is-checked .susu-passbook-box-num {
+  color: var(--success);
+}
+
+.susu-passbook-fee-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.06rem 0.32rem;
+  border-radius: 4px;
+  background: var(--primary-soft);
+  color: var(--primary-hover);
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+[data-theme="light"] .susu-passbook-fee-badge {
+  color: var(--primary);
+}
+
+.susu-passbook-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--success);
+  color: #ffffff;
+  flex-shrink: 0;
+}
+
+.susu-passbook-box-body {
+  display: grid;
+  gap: 0.14rem;
+  margin-top: 0.22rem;
+}
+
+.susu-passbook-box-body.is-empty {
+  align-items: center;
+  justify-items: center;
+  padding-bottom: 0.1rem;
+}
+
+.susu-passbook-box-checked-row {
+  display: flex;
+  align-items: center;
+  gap: 0.22rem;
+}
+
+.susu-passbook-box-amt {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.susu-passbook-box-date {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.susu-passbook-box-partial {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--warning);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+[data-theme="light"] .susu-passbook-box-partial {
+  color: #b45309;
+}
+
+.susu-passbook-box-bar {
+  height: 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--warning) 24%, var(--bg-input));
+  overflow: hidden;
+}
+
+.susu-passbook-box-bar span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--warning);
+}
+
+.susu-passbook-box-empty-dash {
+  font-size: 0.76rem;
+  color: var(--text-dim);
+  opacity: 0.55;
+}
+
+.susu-passbook-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.9rem;
+  padding-top: 0.2rem;
+  border-top: 1px solid var(--border-soft);
+  font-size: 0.74rem;
+  color: var(--text-muted);
+}
+
+.susu-passbook-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.32rem;
+}
+
+.susu-passbook-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+}
+
+.susu-passbook-dot.is-checked {
+  background: var(--success);
+}
+
+.susu-passbook-dot.is-partial {
+  background: var(--warning);
+}
+
+.susu-passbook-dot.is-fee {
+  background: var(--primary);
+}
+
+.susu-passbook-dot.is-empty {
+  border: 1px dashed var(--text-dim);
+  background: var(--bg-input);
+}
+
+.agent-customer-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.45rem;
+}
+
+@media (max-width: 640px) {
+  .susu-passbook-stats {
+    grid-template-columns: 1fr;
+  }
 }

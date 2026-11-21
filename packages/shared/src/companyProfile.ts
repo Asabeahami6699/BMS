@@ -2,7 +2,7 @@ import { z } from "zod";
 
 const hexColor = z.string().regex(/^#[0-9A-Fa-f]{6}$/, "Choose a brand color");
 
-/** 0 keeps the app’s current size. Each step adds 2px on the root font. */
+/** 0 keeps the app’s current size (17.25px root / +15% platform default). Each step adds 2px on the root font. */
 export const FONT_SIZE_STEP_MAX = 3;
 export const FONT_SIZE_STEP_PX = 2;
 export const fontSizeStepSchema = z.number().int().min(0).max(FONT_SIZE_STEP_MAX);

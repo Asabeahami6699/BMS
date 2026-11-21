@@ -57,6 +57,18 @@ susuCycleCommissionRouter.get(
     try {
       const context = req.userContext!;
       const customerId = String(req.params.customerId ?? "");
+      if (context.role === "field_agent") {
+        const { getCustomerById } = await import("../services/customerService.js");
+        const customer = await getCustomerById(context.tenantId, customerId);
+        if (
+          !customer ||
+          (customer.assignedFieldAgentId !== context.userId &&
+            customer.createdByFieldAgentId !== context.userId)
+        ) {
+          res.status(403).json({ error: "You can only view the Susu passbook for your customers." });
+          return;
+        }
+      }
       res.json(await getCustomerSusuCycleSummary(context.tenantId, customerId));
     } catch (error) {
       next(error);
