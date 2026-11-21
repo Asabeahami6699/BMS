@@ -17,6 +17,7 @@ import {
   type ScopeType,
   type UserJobTitle
 } from "@bms/shared";
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { z } from "zod";
 import { getSupabaseJwtSecret } from "../config/env.js";
 import { getPermissionsForRole } from "../config/permissions.js";
@@ -853,6 +854,7 @@ export async function createAuthUser(input: {
     if (profileError) {
       throw new Error(`Failed to create user profile: ${profileError.message}`);
     }
+    await saveUserPasswordReference(parsed.data.tenantId, userId, parsed.data.password);
   } else {
     saveAuthUser({
       id: userId,
@@ -868,6 +870,7 @@ export async function createAuthUser(input: {
       createdBy: parsed.data.createdBy,
       createdAt: new Date().toISOString()
     });
+    await saveUserPasswordReference(parsed.data.tenantId, userId, parsed.data.password);
     await seedTransactionPinResetForNewUser(userId, parsed.data.tenantId, parsed.data.role);
   }
 
@@ -1150,6 +1153,120 @@ export async function changeOwnPassword(
   });
 }
 
+const memoryPasswordRefs = new Map<string, { password: string; updatedAt: string }>();
+
+function passwordRefKey(tenantId: string, userId: string): string {
+  return `${tenantId}:${userId}`;
+}
+
+function getPasswordRefCipherKey(): Buffer {
+  const secret =
+    process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() ||
+    getSupabaseJwtSecret()?.trim() ||
+    process.env.JWT_SECRET?.trim() ||
+    "bms-local-password-ref-key";
+  return createHash("sha256").update(secret).digest();
+}
+
+function encryptPasswordReference(plain: string): string {
+  const key = getPasswordRefCipherKey();
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  const encrypted = Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `v1:${iv.toString("base64")}:${tag.toString("base64")}:${encrypted.toString("base64")}`;
+}
+
+function decryptPasswordReference(encoded: string): string | null {
+  try {
+    const parts = encoded.split(":");
+    if (parts.length !== 4 || parts[0] !== "v1") {
+      return null;
+    }
+    const iv = Buffer.from(parts[1]!, "base64");
+    const tag = Buffer.from(parts[2]!, "base64");
+    const data = Buffer.from(parts[3]!, "base64");
+    const decipher = createDecipheriv("aes-256-gcm", getPasswordRefCipherKey(), iv);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(data), decipher.final()]).toString("utf8");
+  } catch {
+    return null;
+  }
+}
+
+async function saveUserPasswordReference(
+  tenantId: string,
+  userId: string,
+  password: string
+): Promise<void> {
+  const updatedAt = new Date().toISOString();
+  memoryPasswordRefs.set(passwordRefKey(tenantId, userId), { password, updatedAt });
+
+  const supabase = getSupabaseAdminClient();
+  if (!supabase) {
+    return;
+  }
+  const encrypted = encryptPasswordReference(password);
+  const { error } = await supabase
+    .from("users")
+    .update({
+      password_reference_enc: encrypted,
+      password_updated_at: updatedAt
+    })
+    .eq("tenant_id", tenantId)
+    .eq("id", userId);
+  if (error && !/column.*does not exist|schema cache/i.test(error.message)) {
+    console.warn("[auth] failed to persist password reference:", error.message);
+  }
+}
+
+export async function getTenantUserPasswordReference(
+  tenantId: string,
+  userId: string
+): Promise<{
+  userId: string;
+  email: string;
+  fullName?: string;
+  password: string | null;
+  updatedAt: string | null;
+}> {
+  const existing = await getTenantUser(tenantId, userId);
+  if (!existing) {
+    throw new Error("User not found");
+  }
+
+  const supabase = getSupabaseAdminClient();
+  if (supabase) {
+    const { data, error } = await supabase
+      .from("users")
+      .select("password_reference_enc, password_updated_at")
+      .eq("tenant_id", tenantId)
+      .eq("id", userId)
+      .maybeSingle();
+    if (!error && data?.password_reference_enc) {
+      const decrypted = decryptPasswordReference(String(data.password_reference_enc));
+      if (decrypted !== null) {
+        return {
+          userId: existing.userId,
+          email: existing.email,
+          fullName: existing.fullName,
+          password: decrypted,
+          updatedAt: data.password_updated_at ? String(data.password_updated_at) : null
+        };
+      }
+    }
+  }
+
+  const cached = memoryPasswordRefs.get(passwordRefKey(tenantId, userId));
+  return {
+    userId: existing.userId,
+    email: existing.email,
+    fullName: existing.fullName,
+    password: cached?.password ?? null,
+    updatedAt: cached?.updatedAt ?? null
+  };
+}
+
 export async function resetTenantUserPassword(
   tenantId: string,
   userId: string,
@@ -1184,10 +1301,12 @@ export async function resetTenantUserPassword(
     if (error) {
       throw new Error(`Failed to reset password: ${error.message}`);
     }
+    await saveUserPasswordReference(tenantId, userId, parsed.data.password);
     return;
   }
 
   updateStoredAuthUser(userId, { passwordHash: hashPassword(parsed.data.password) });
+  await saveUserPasswordReference(tenantId, userId, parsed.data.password);
 }
 
 /**

@@ -12,6 +12,7 @@ type Props = {
   onCapture: (dataUrl: string, fileName: string) => void;
   guide?: string;
   initialFacingMode?: "environment" | "user";
+  onFallbackNativeCamera?: () => void;
 };
 
 function stopStream(stream: MediaStream | null) {
@@ -52,17 +53,20 @@ export function CameraCaptureModal({
   onClose,
   onCapture,
   guide = "Center the subject in the frame",
-  initialFacingMode = "environment"
+  initialFacingMode = "environment",
+  onFallbackNativeCamera
 }: Props) {
   const { showToast } = useToast();
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const onCloseRef = useRef(onClose);
+  const onFallbackRef = useRef(onFallbackNativeCamera);
   const [starting, setStarting] = useState(false);
   const [ready, setReady] = useState(false);
   const [facingMode, setFacingMode] = useState<"environment" | "user">(initialFacingMode);
 
   onCloseRef.current = onClose;
+  onFallbackRef.current = onFallbackNativeCamera;
 
   useEffect(() => {
     if (!open) {
@@ -89,6 +93,11 @@ export function CameraCaptureModal({
     let cancelled = false;
     async function startCamera() {
       if (!navigator.mediaDevices?.getUserMedia) {
+        if (onFallbackRef.current) {
+          onCloseRef.current();
+          onFallbackRef.current();
+          return;
+        }
         showToast("Camera not supported on this device. Use Upload file instead.", "error");
         onCloseRef.current();
         return;
@@ -96,14 +105,23 @@ export function CameraCaptureModal({
       setStarting(true);
       stopStream(streamRef.current);
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: { ideal: facingMode },
-            width: { ideal: 1280 },
-            height: { ideal: 720 }
-          },
-          audio: false
-        });
+        let stream: MediaStream;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              facingMode: { ideal: facingMode },
+              width: { ideal: 1280 },
+              height: { ideal: 720 }
+            },
+            audio: false
+          });
+        } catch {
+          // Retry with minimal constraint for single-camera or older mobile devices.
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false
+          });
+        }
         if (cancelled) {
           stopStream(stream);
           return;
@@ -116,6 +134,11 @@ export function CameraCaptureModal({
           setReady(true);
         }
       } catch {
+        if (onFallbackRef.current) {
+          onCloseRef.current();
+          onFallbackRef.current();
+          return;
+        }
         showToast("Could not access camera. Allow permission or use Upload file.", "error");
         onCloseRef.current();
       } finally {

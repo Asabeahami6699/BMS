@@ -11,11 +11,21 @@ type Props = {
   title: string;
   fields: CredentialField[];
   shareTitle?: string;
+  shareButtonLabel?: string;
+  footerNote?: string;
+  defaultRevealed?: boolean;
 };
 
-export function CredentialsSharePanel({ title, fields, shareTitle }: Props) {
+export function CredentialsSharePanel({
+  title,
+  fields,
+  shareTitle,
+  shareButtonLabel = "Share with company",
+  footerNote = "Please sign in and change your password after first login.",
+  defaultRevealed = false
+}: Props) {
   const { showToast } = useToast();
-  const [revealed, setRevealed] = useState(false);
+  const [revealed, setRevealed] = useState(defaultRevealed);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   const loginUrl = typeof window !== "undefined" ? `${window.location.origin}/login` : "/login";
@@ -27,7 +37,7 @@ export function CredentialsSharePanel({ title, fields, shareTitle }: Props) {
       ...fields.map((f) => `${f.label}: ${f.value}`),
       `Sign-in URL: ${loginUrl}`,
       "",
-      "Please sign in and change your password after first login."
+      footerNote
     ];
     return lines.join("\n");
   }
@@ -104,7 +114,7 @@ export function CredentialsSharePanel({ title, fields, shareTitle }: Props) {
           Copy all details
         </button>
         <button type="button" className="button" onClick={handleShare}>
-          Share with company
+          {shareButtonLabel}
         </button>
       </div>
     </div>

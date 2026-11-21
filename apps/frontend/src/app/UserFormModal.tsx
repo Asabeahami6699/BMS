@@ -14,8 +14,10 @@ import {
   unassignRole,
   updateUser
 } from "./api";
+import { CredentialsSharePanel } from "../components/CredentialsSharePanel";
 import { Modal } from "../components/Modal";
 import { useToast } from "../components/Toast";
+import { useHrDeskStore } from "./stores/hrDeskStore";
 import { useRoleManagementStore } from "./stores/roleManagementStore";
 
 type Mode = "create" | "edit";
@@ -69,6 +71,13 @@ export function UserFormModal({ open, mode, user, branches, createDefaults, onCl
   const [selectedCustomRoleKeys, setSelectedCustomRoleKeys] = useState<string[]>([]);
   const [initialCustomRoleKeys, setInitialCustomRoleKeys] = useState<string[]>([]);
   const [tellerType, setTellerType] = useState<"" | "1" | "2" | "3" | "4">("");
+  const [createdCredentials, setCreatedCredentials] = useState<{
+    fullName: string;
+    email: string;
+    password: string;
+    roleLabel: string;
+    branchLabel: string;
+  } | null>(null);
 
   const tenantJobTitles = allTenantRoles.filter((role) => role.roleKind === "job_title");
   const extraDutyRoles = allTenantRoles.filter(
@@ -116,6 +125,7 @@ export function UserFormModal({ open, mode, user, branches, createDefaults, onCl
   useEffect(() => {
     if (!open) {
       formSeededRef.current = false;
+      setCreatedCredentials(null);
       return;
     }
     if (formSeededRef.current) {
@@ -179,6 +189,22 @@ export function UserFormModal({ open, mode, user, branches, createDefaults, onCl
     return mode === "edit" ? null : undefined;
   }
 
+  function handleCloseModal() {
+    setCreatedCredentials(null);
+    onClose();
+  }
+
+  function resolveRoleDisplayLabel(roleKey: string, slot: "" | "1" | "2" | "3" | "4"): string {
+    const base = isBuiltinRole(roleKey)
+      ? BUILTIN_ROLE_LABELS[roleKey]
+      : (allTenantRoles.find((r) => r.roleKey === roleKey)?.displayName ??
+        roleKey.replace(/_/g, " "));
+    if (roleKey === "teller" && slot) {
+      return `${base} (${tellerTypeLabel(Number(slot) as 1 | 2 | 3 | 4)})`;
+    }
+    return base;
+  }
+
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     if ((requiresBranch || scopeType === "branch") && !branchId.trim()) {
@@ -218,7 +244,28 @@ export function UserFormModal({ open, mode, user, branches, createDefaults, onCl
         if (selectedCustomRoleKeys.length > 0) {
           await syncCustomRoleAssignments(created.userId, selectedCustomRoleKeys, []);
         }
-        showToast("User created", "success");
+        useHrDeskStore.getState().setUserPasswordReference(
+          { userId: created.userId, email: created.email, fullName: created.fullName ?? fullName },
+          password
+        );
+        const branchMatch =
+          effectiveScope === "branch" && effectiveBranch
+            ? branches.find((b) => b.id === effectiveBranch)
+            : null;
+        setCreatedCredentials({
+          fullName: created.fullName ?? fullName,
+          email: created.email,
+          password,
+          roleLabel: resolveRoleDisplayLabel(userRole, tellerType),
+          branchLabel:
+            effectiveScope === "head_office"
+              ? "Head office"
+              : branchMatch
+                ? `${branchMatch.name} (${branchMatch.code})`
+                : "Branch"
+        });
+        showToast("User created — ready to share login details", "success");
+        onSaved();
       } else if (user) {
         await updateUser(user.userId, {
           email,
@@ -231,9 +278,9 @@ export function UserFormModal({ open, mode, user, branches, createDefaults, onCl
         });
         await syncCustomRoleAssignments(user.userId, selectedCustomRoleKeys, initialCustomRoleKeys);
         showToast("User updated", "success");
+        onSaved();
+        onClose();
       }
-      onSaved();
-      onClose();
     } catch (error) {
       showToast(error instanceof Error ? error.message : "Failed to save user", "error");
     } finally {
@@ -244,29 +291,58 @@ export function UserFormModal({ open, mode, user, branches, createDefaults, onCl
   return (
     <Modal
       open={open}
-      title={mode === "create" ? "Add user" : "Edit user"}
-      subtitle={
-        mode === "create"
-          ? "Set a system job title plus optional custom roles. Field agents must be assigned to a branch."
-          : "Update profile, job title, custom roles, scope, branch, or account status."
+      title={
+        createdCredentials
+          ? "User account created"
+          : mode === "create"
+            ? "Add user"
+            : "Edit user"
       }
-      onClose={onClose}
+      subtitle={
+        createdCredentials
+          ? "Forward the login details directly to this user via Share or Copy."
+          : mode === "create"
+            ? "Set a system job title plus optional custom roles. Field agents must be assigned to a branch."
+            : "Update profile, job title, custom roles, scope, branch, or account status."
+      }
+      onClose={handleCloseModal}
       footer={
-        <>
-          <button type="button" className="button secondary" onClick={onClose}>
-            Cancel
+        createdCredentials ? (
+          <button type="button" className="button" onClick={handleCloseModal}>
+            Done
           </button>
-          <button
-            type="submit"
-            form="user-form"
-            className="button"
-            disabled={submitting || (requiresBranch && activeBranches.length === 0)}
-          >
-            {submitting ? "Saving…" : mode === "create" ? "Create user" : "Save changes"}
-          </button>
-        </>
+        ) : (
+          <>
+            <button type="button" className="button secondary" onClick={handleCloseModal}>
+              Cancel
+            </button>
+            <button
+              type="submit"
+              form="user-form"
+              className="button"
+              disabled={submitting || (requiresBranch && activeBranches.length === 0)}
+            >
+              {submitting ? "Saving…" : mode === "create" ? "Create user" : "Save changes"}
+            </button>
+          </>
+        )
       }
     >
+      {createdCredentials ? (
+        <CredentialsSharePanel
+          title={`Login details for ${createdCredentials.fullName || createdCredentials.email}`}
+          shareTitle={`aabanker login details — ${createdCredentials.fullName || createdCredentials.email}`}
+          shareButtonLabel="Share with user"
+          defaultRevealed
+          fields={[
+            { label: "Full name", value: createdCredentials.fullName || "—" },
+            { label: "Email (login)", value: createdCredentials.email },
+            { label: "Password", value: createdCredentials.password, secret: true },
+            { label: "Job title", value: createdCredentials.roleLabel },
+            { label: "Branch / Scope", value: createdCredentials.branchLabel }
+          ]}
+        />
+      ) : (
       <form id="user-form" className="stack-form" onSubmit={handleSubmit}>
         <label className="field">
           <span>Full name</span>
@@ -412,6 +488,7 @@ export function UserFormModal({ open, mode, user, branches, createDefaults, onCl
           </label>
         ) : null}
       </form>
+      )}
     </Modal>
   );
 }

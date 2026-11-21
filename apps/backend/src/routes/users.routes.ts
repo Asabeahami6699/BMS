@@ -22,6 +22,8 @@ import {
 
   getTenantUser,
 
+  getTenantUserPasswordReference,
+
   listTenantFieldAgents,
 
   resetTenantUserPassword,
@@ -466,6 +468,23 @@ usersRouter.patch("/:userId", requirePermission("users.update"), async (req, res
 });
 
 
+
+usersRouter.get("/:userId/password-reference", requirePermission("users.update"), async (req, res) => {
+  const context = req.userContext;
+  if (!context?.tenantId || context.tenantId === "platform") {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const userId = Array.isArray(req.params.userId) ? req.params.userId[0] : req.params.userId;
+  try {
+    const ref = await getTenantUserPasswordReference(context.tenantId, userId);
+    res.json(ref);
+  } catch (error) {
+    res.status(400).json({
+      error: error instanceof Error ? error.message : "Failed to load password reference"
+    });
+  }
+});
 
 usersRouter.post("/:userId/reset-password", requirePermission("users.update"), async (req, res) => {
 

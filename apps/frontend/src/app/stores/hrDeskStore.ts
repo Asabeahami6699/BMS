@@ -1,11 +1,12 @@
 import { create } from "zustand";
 import type { HrAttendanceRecord, HrLeaveRequest, HrTrainingRecord } from "@bms/shared";
-import type { UserRecord } from "../api";
+import type { UserPasswordReference, UserRecord } from "../api";
 import type { HrPolicies, HrStaffLoan } from "@bms/shared";
 import {
   createHrLeaveRequest,
   createHrTraining,
   getTenantId,
+  getUserPasswordReference,
   listHrAttendance,
   listHrLeaveRequests,
   getHrPolicies,
@@ -64,8 +65,13 @@ type State = {
   staffLoansError: string | null;
   lastStaffLoansAt: number | null;
   liveSyncActive: boolean;
+  passwordRefByUser: Record<string, UserPasswordReference | undefined>;
+  passwordRefLoadingByUser: Record<string, boolean | undefined>;
+  passwordRefErrorByUser: Record<string, string | null | undefined>;
 
   staffOptions: () => StaffOption[];
+  fetchUserPasswordReference: (userId: string, options?: { force?: boolean }) => Promise<UserPasswordReference | null>;
+  setUserPasswordReference: (user: { userId: string; email: string; fullName?: string }, password: string) => void;
   hydrateRoster: (options?: { force?: boolean }) => void;
   refreshRoster: () => Promise<void>;
   refreshRosterSilent: () => Promise<void>;
@@ -556,5 +562,55 @@ export const useHrDeskStore = create<State>((set, get) => ({
     }
     set({ liveSyncActive: false });
     liveSync.stop();
+  },
+
+  passwordRefByUser: {},
+  passwordRefLoadingByUser: {},
+  passwordRefErrorByUser: {},
+
+  fetchUserPasswordReference: async (userId, options) => {
+    if (!userId) {
+      return null;
+    }
+    const existing = get().passwordRefByUser[userId];
+    if (!options?.force && existing) {
+      return existing;
+    }
+    set((state) => ({
+      passwordRefLoadingByUser: { ...state.passwordRefLoadingByUser, [userId]: true },
+      passwordRefErrorByUser: { ...state.passwordRefErrorByUser, [userId]: null }
+    }));
+    try {
+      const ref = await getUserPasswordReference(userId);
+      set((state) => ({
+        passwordRefByUser: { ...state.passwordRefByUser, [userId]: ref },
+        passwordRefLoadingByUser: { ...state.passwordRefLoadingByUser, [userId]: false },
+        passwordRefErrorByUser: { ...state.passwordRefErrorByUser, [userId]: null }
+      }));
+      return ref;
+    } catch (error) {
+      set((state) => ({
+        passwordRefLoadingByUser: { ...state.passwordRefLoadingByUser, [userId]: false },
+        passwordRefErrorByUser: {
+          ...state.passwordRefErrorByUser,
+          [userId]: toUserFacingError(error, "Could not load saved password reference")
+        }
+      }));
+      return null;
+    }
+  },
+
+  setUserPasswordReference: (user, password) => {
+    const ref: UserPasswordReference = {
+      userId: user.userId,
+      email: user.email,
+      fullName: user.fullName,
+      password,
+      updatedAt: new Date().toISOString()
+    };
+    set((state) => ({
+      passwordRefByUser: { ...state.passwordRefByUser, [user.userId]: ref },
+      passwordRefErrorByUser: { ...state.passwordRefErrorByUser, [user.userId]: null }
+    }));
   }
 }));

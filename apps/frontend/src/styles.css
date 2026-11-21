@@ -6427,77 +6427,99 @@ select:disabled {
 }
 
 @media (min-width: 961px) {
+  .admin-mgmt-card--users .admin-table-wrap,
+  .admin-mgmt-card--users .admin-table-scroll {
+    overflow-x: hidden;
+  }
+
   .admin-mgmt-card--users .admin-table {
-    min-width: 1080px;
+    width: 100%;
+    min-width: 0;
     table-layout: fixed;
+    font-size: 0.8rem;
+  }
+
+  .admin-mgmt-card--users .admin-table th,
+  .admin-mgmt-card--users .admin-table td {
+    padding: 0.5rem 0.5rem;
+  }
+
+  .admin-mgmt-card--users .admin-table th {
+    font-size: 0.7rem;
   }
 
   .admin-mgmt-card--users .admin-table-col--hide-desktop {
     display: none;
   }
 
+  .admin-mgmt-card--users .admin-table-name {
+    width: 15%;
+  }
+
   .admin-mgmt-card--users .admin-table-email {
-    width: 16%;
-    min-width: 9.5rem;
-    max-width: 15rem;
+    width: 23%;
     overflow: hidden;
-    vertical-align: top;
   }
 
   .admin-mgmt-card--users .admin-table-email__text {
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
+    display: block;
     overflow: hidden;
-    word-break: break-word;
-    overflow-wrap: anywhere;
-    white-space: normal;
-    line-height: 1.35;
-    font-size: 0.86rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    line-height: 1.3;
+    font-size: 0.8rem;
   }
 
   .admin-mgmt-card--users .admin-table-role {
-    width: 9%;
-    min-width: 6.25rem;
-    max-width: 8rem;
+    width: 13%;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    position: relative;
-    z-index: 0;
-    background: inherit;
+  }
+
+  .admin-mgmt-card--users .admin-table-branch {
+    width: 14%;
+  }
+
+  .admin-mgmt-card--users .admin-table-status {
+    width: 9%;
+  }
+
+  .admin-mgmt-card--users .admin-table-created-by {
+    width: 11%;
+  }
+
+  .admin-mgmt-card--users .admin-table-created {
+    width: 10%;
+    white-space: nowrap;
   }
 
   .admin-mgmt-card--users .admin-table-actions-col,
   .admin-mgmt-card--users .admin-table-actions {
-    position: sticky;
-    right: 0;
-    z-index: 2;
-    background: var(--bg-surface);
-    box-shadow: -6px 0 10px rgba(0, 0, 0, 0.08);
+    width: 5%;
+    min-width: 44px;
+    text-align: right;
     overflow: visible;
   }
+}
 
-  .admin-mgmt-card--users .admin-table thead .admin-table-actions-col {
-    background: rgba(255, 255, 255, 0.02);
-  }
+.admin-mgmt-card--users .admin-table-ellipsis {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .admin-mgmt-card--users .admin-table-email {
   overflow: hidden;
-  max-width: 15rem;
-  vertical-align: top;
 }
 
 .admin-mgmt-card--users .admin-table-email__text {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  display: block;
   overflow: hidden;
-  word-break: break-word;
-  overflow-wrap: anywhere;
-  white-space: normal;
-  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.3;
 }
 
 .admin-mgmt-card--users .admin-table-role {
@@ -11658,7 +11680,7 @@ button.cif-ledger__row:hover {
 }
 
 .camera-capture-backdrop {
-  z-index: 400;
+  z-index: 2400;
 }
 
 .camera-capture-panel {
@@ -18569,4 +18591,86 @@ button.cif-ledger__row:hover {
   .susu-passbook-stats {
     grid-template-columns: 1fr;
   }
+}
+
+/* Individual user password reference inside Reset Password modal */
+.password-ref-box {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.75rem 0.85rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+}
+
+.password-ref-box__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
+}
+
+.password-ref-box__label {
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.password-ref-box__time {
+  font-size: 0.74rem;
+}
+
+.password-ref-box__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.password-ref-box__value {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--text);
+  word-break: break-all;
+}
+
+.password-ref-box__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.password-ref-box__note {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.password-field-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.password-generate-btn {
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: var(--primary-hover);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+[data-theme="light"] .password-generate-btn {
+  color: var(--primary);
+}
+
+.password-generate-btn:hover {
+  text-decoration: underline;
 }

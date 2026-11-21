@@ -25,6 +25,21 @@ function formatDate(value?: string): string {
     return "—";
   }
   try {
+    return new Date(value).toLocaleDateString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric"
+    });
+  } catch {
+    return value;
+  }
+}
+
+function formatDateFull(value?: string): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  try {
     return new Date(value).toLocaleString();
   } catch {
     return value;
@@ -191,7 +206,16 @@ export function UserManagementCard({ role }: Props) {
 
         <AdminDataTable
           columns={[
-            { key: "fullName", label: "Name", render: (row) => row.fullName ?? "—" },
+            {
+              key: "fullName",
+              label: "Name",
+              className: "admin-table-name",
+              render: (row) => (
+                <span className="admin-table-ellipsis" title={row.fullName ?? undefined}>
+                  {row.fullName ?? "—"}
+                </span>
+              )
+            },
             {
               key: "email",
               label: "Email",
@@ -206,27 +230,39 @@ export function UserManagementCard({ role }: Props) {
               key: "role",
               label: "Role",
               className: "admin-table-role",
-              render: (row) => row.role.replace(/_/g, " ")
-            },
-            {
-              key: "tellerType",
-              label: "Teller type",
-              render: (row) =>
-                row.role === "teller" && row.tellerType ? tellerTypeLabel(row.tellerType) : "—"
-            },
-            {
-              key: "scopeType",
-              label: "Scope",
-              render: (row) => (row.scopeType === "head_office" ? "Head office" : "Branch")
+              render: (row) => {
+                const base = row.role.replace(/_/g, " ");
+                const label =
+                  row.role === "teller" && row.tellerType
+                    ? `${base} · ${tellerTypeLabel(row.tellerType)}`
+                    : base;
+                return (
+                  <span className="admin-table-ellipsis" title={label}>
+                    {label}
+                  </span>
+                );
+              }
             },
             {
               key: "branchId",
-              label: "Branch",
-              render: (row) => branchLabel(row.branchId, branches)
+              label: "Branch / Scope",
+              className: "admin-table-branch",
+              render: (row) => {
+                const label =
+                  row.scopeType === "head_office"
+                    ? "Head office"
+                    : branchLabel(row.branchId, branches);
+                return (
+                  <span className="admin-table-ellipsis" title={label}>
+                    {label}
+                  </span>
+                );
+              }
             },
             {
               key: "status",
               label: "Status",
+              className: "admin-table-status",
               render: (row) => (
                 <span className={`status-pill status-pill--${row.status === "active" ? "active" : "inactive"}`}>
                   {row.status}
@@ -237,12 +273,26 @@ export function UserManagementCard({ role }: Props) {
             {
               key: "createdBy",
               label: "Created by",
-              render: (row) => row.createdByName ?? (row.createdBy === "system" ? "System" : row.createdBy)
+              className: "admin-table-created-by",
+              render: (row) => {
+                const label =
+                  row.createdByName ?? (row.createdBy === "system" ? "System" : row.createdBy);
+                return (
+                  <span className="admin-table-ellipsis" title={label}>
+                    {label}
+                  </span>
+                );
+              }
             },
             {
               key: "createdAt",
               label: "Created",
-              render: (row) => formatDate(row.createdAt)
+              className: "admin-table-created",
+              render: (row) => (
+                <span className="admin-table-ellipsis" title={formatDateFull(row.createdAt)}>
+                  {formatDate(row.createdAt)}
+                </span>
+              )
             }
           ]}
           rows={filtered}

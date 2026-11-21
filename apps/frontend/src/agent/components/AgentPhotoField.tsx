@@ -29,6 +29,15 @@ export function AgentPhotoField({
   const { showToast } = useToast();
   const [cameraOpen, setCameraOpen] = useState(false);
   const uploadInputRef = useRef<HTMLInputElement>(null);
+  const nativeCameraInputRef = useRef<HTMLInputElement>(null);
+
+  function handleTakePhotoClick() {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      nativeCameraInputRef.current?.click();
+      return;
+    }
+    setCameraOpen(true);
+  }
 
   function readPhotoFile(file: File) {
     if (!file.type.startsWith("image/")) {
@@ -68,7 +77,7 @@ export function AgentPhotoField({
       </span>
       <p className="muted agent-photo-hint">{hint}</p>
       <div className="agent-photo-actions">
-        <button type="button" className="button secondary" onClick={() => setCameraOpen(true)}>
+        <button type="button" className="button secondary" onClick={handleTakePhotoClick}>
           Take photo
         </button>
         <button type="button" className="button secondary" onClick={() => uploadInputRef.current?.click()}>
@@ -81,6 +90,23 @@ export function AgentPhotoField({
         onCapture={(dataUrl, name) => onPhotoChange(dataUrl, name)}
         guide={captureGuide}
         initialFacingMode={facingMode}
+        onFallbackNativeCamera={() => nativeCameraInputRef.current?.click()}
+      />
+      <input
+        ref={nativeCameraInputRef}
+        type="file"
+        accept="image/*"
+        capture={facingMode ?? "environment"}
+        className="agent-photo-input"
+        aria-hidden
+        tabIndex={-1}
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (file) {
+            readPhotoFile(file);
+          }
+        }}
       />
       <input
         ref={uploadInputRef}

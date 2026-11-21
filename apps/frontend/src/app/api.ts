@@ -2248,6 +2248,28 @@ export async function updateUser(
   return response.json() as Promise<UserRecord>;
 }
 
+export type UserPasswordReference = {
+  userId: string;
+  email: string;
+  fullName?: string;
+  password: string | null;
+  updatedAt: string | null;
+};
+
+export async function getUserPasswordReference(userId: string): Promise<UserPasswordReference> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/users/${encodeURIComponent(userId)}/password-reference`,
+    {
+      headers: authHeaders()
+    }
+  );
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? "Failed to load password reference");
+  }
+  return response.json() as Promise<UserPasswordReference>;
+}
+
 export async function resetUserPassword(userId: string, password: string): Promise<void> {
   const response = await fetch(`${API_BASE_URL}/api/v1/users/${userId}/reset-password`, {
     method: "POST",
