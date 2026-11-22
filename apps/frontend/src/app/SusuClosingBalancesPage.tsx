@@ -390,13 +390,12 @@ export function SusuClosingBalancesPage({ role }: Props) {
 
           <section className="card susu-capital-card">
             <div className="susu-capital-card__head">
-              <div>
+              <div className="susu-capital-card__title">
                 <p className="susu-closing-editor__eyebrow">Owner equity ledger</p>
                 <h3>Business capital &amp; owner drawings</h3>
-                <p className="muted susu-closing-editor__lead">
-                  Track every cedi added to the business by the owner (and any owner drawings).
-                  Entries recorded for <strong>{businessDate}</strong> automatically update
-                  today&apos;s Expected Closing Vault and carry forward to tomorrow.
+                <p className="muted susu-capital-card__lead">
+                  Entries for <strong>{businessDate}</strong> automatically update today&apos;s
+                  Expected Closing Vault and carry forward to tomorrow.
                 </p>
               </div>
               {canManageCapital ? (
@@ -428,117 +427,146 @@ export function SusuClosingBalancesPage({ role }: Props) {
               </p>
             ) : null}
 
-            <div className="susu-closing-formula__grid susu-capital-card__stats">
-              <div>
-                <span className="muted">Total capital added (all branches)</span>
-                <strong>{formatMoney(companyTotalAdded)}</strong>
-              </div>
-              <div>
-                <span className="muted">Total owner drawings</span>
-                <strong>− {formatMoney(companyTotalDrawings)}</strong>
-              </div>
-              <div>
-                <span className="muted">Net owner capital (company)</span>
-                <strong>{formatMoney(companyNetCapital)}</strong>
-              </div>
-              <div>
-                <span className="muted">{branchLabel} net capital</span>
-                <strong>
-                  {formatMoney(branchNetCapital)}
-                  {branchTotalDrawings > 0
-                    ? ` (${formatMoney(branchTotalAdded)} in)`
-                    : ""}
+            <div className="susu-capital-card__stats">
+              <div className="susu-capital-stat">
+                <span className="susu-capital-stat__label">Total capital added</span>
+                <strong className="susu-capital-stat__value susu-capital-stat__value--in">
+                  {formatMoney(companyTotalAdded)}
                 </strong>
+                <span className="susu-capital-stat__meta muted">All branches</span>
+              </div>
+              <div className="susu-capital-stat">
+                <span className="susu-capital-stat__label">Owner drawings</span>
+                <strong className="susu-capital-stat__value susu-capital-stat__value--out">
+                  {companyTotalDrawings > 0
+                    ? `− ${formatMoney(companyTotalDrawings)}`
+                    : formatMoney(0)}
+                </strong>
+                <span className="susu-capital-stat__meta muted">All branches</span>
+              </div>
+              <div className="susu-capital-stat susu-capital-stat--highlight">
+                <span className="susu-capital-stat__label">Net owner capital</span>
+                <strong className="susu-capital-stat__value">
+                  {formatMoney(companyNetCapital)}
+                </strong>
+                <span className="susu-capital-stat__meta muted">Company total</span>
+              </div>
+              <div className="susu-capital-stat">
+                <span className="susu-capital-stat__label">{branchLabel}</span>
+                <strong className="susu-capital-stat__value">
+                  {formatMoney(branchNetCapital)}
+                </strong>
+                <span className="susu-capital-stat__meta muted">
+                  Branch net
+                  {branchTotalDrawings > 0 ? ` · ${formatMoney(branchTotalAdded)} in` : ""}
+                </span>
               </div>
             </div>
 
-            <p className="muted susu-capital-card__hint">
-              Tip: When recording starting capital here on Day 1, keep <strong>Opening vault</strong>{" "}
-              at GHS 0.00 so the same cash is not counted twice.
+            <p className="susu-capital-card__tip">
+              <strong>Day 1 tip:</strong> Record starting owner cash here and keep{" "}
+              <strong>Opening vault</strong> at GHS 0.00 so the same cash is not counted twice.
             </p>
 
             {capitalSummary && capitalSummary.entries.length > 0 ? (
-              <div className="table-wrap susu-capital-card__table-wrap">
-                <table className="data-table susu-capital-card__table">
-                  <thead>
-                    <tr>
-                      <th>Date</th>
-                      <th>Type</th>
-                      <th>Amount</th>
-                      <th>Source / Ref</th>
-                      <th>Recorded by</th>
-                      <th>Notes</th>
-                      {canManageCapital ? <th>Action</th> : null}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {capitalSummary.entries.map((entry) => {
-                      const isVoided = Boolean(entry.voidedAt);
-                      return (
-                        <tr
-                          key={entry.id}
-                          className={isVoided ? "susu-capital-row--voided" : undefined}
-                        >
-                          <td>{entry.businessDate}</td>
-                          <td>
-                            <span
-                              className={`susu-capital-badge ${
+              <div className="admin-table-wrap susu-capital-card__table-wrap">
+                <div className="admin-table-scroll">
+                  <table className="admin-table susu-capital-table">
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>Details</th>
+                        <th className="susu-capital-col--num">Amount</th>
+                        <th>Recorded by</th>
+                        {canManageCapital ? (
+                          <th className="admin-table-actions-col">Action</th>
+                        ) : null}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {capitalSummary.entries.map((entry) => {
+                        const isVoided = Boolean(entry.voidedAt);
+                        const detailNote = isVoided
+                          ? `Voided: ${entry.voidReason ?? "—"}`
+                          : entry.notes;
+                        return (
+                          <tr
+                            key={entry.id}
+                            className={isVoided ? "susu-capital-row--voided" : undefined}
+                          >
+                            <td className="admin-table-mono susu-capital-col--date">
+                              {entry.businessDate}
+                            </td>
+                            <td className="susu-capital-col--details">
+                              <div className="susu-capital-entry__top">
+                                <span
+                                  className={`susu-capital-badge ${
+                                    isVoided
+                                      ? "susu-capital-badge--voided"
+                                      : entry.entryType === "injection"
+                                        ? "susu-capital-badge--in"
+                                        : "susu-capital-badge--out"
+                                  }`}
+                                >
+                                  {isVoided
+                                    ? "Voided"
+                                    : entry.entryType === "injection"
+                                      ? "Capital added"
+                                      : "Owner drawing"}
+                                </span>
+                                <span className="susu-capital-entry__source">
+                                  {entry.source || "Business capital"}
+                                  {entry.reference ? (
+                                    <span className="muted"> · {entry.reference}</span>
+                                  ) : null}
+                                </span>
+                              </div>
+                              {detailNote ? (
+                                <p className="susu-capital-entry__note muted" title={detailNote}>
+                                  {detailNote}
+                                </p>
+                              ) : null}
+                            </td>
+                            <td
+                              className={`susu-capital-col--num ${
                                 isVoided
-                                  ? "susu-capital-badge--voided"
+                                  ? ""
                                   : entry.entryType === "injection"
-                                    ? "susu-capital-badge--in"
-                                    : "susu-capital-badge--out"
+                                    ? "susu-capital-amount--in"
+                                    : "susu-capital-amount--out"
                               }`}
                             >
-                              {isVoided
-                                ? "Voided"
-                                : entry.entryType === "injection"
-                                  ? "Capital added"
-                                  : "Owner drawing"}
-                            </span>
-                          </td>
-                          <td>
-                            <strong>
                               {entry.entryType === "injection" ? "+" : "−"}{" "}
                               {formatMoney(entry.amount)}
-                            </strong>
-                          </td>
-                          <td>
-                            {entry.source || "—"}
-                            {entry.reference ? (
-                              <span className="muted"> · {entry.reference}</span>
-                            ) : null}
-                          </td>
-                          <td>{entry.recordedByName || entry.recordedBy}</td>
-                          <td>
-                            {isVoided
-                              ? `Voided: ${entry.voidReason ?? "—"}`
-                              : entry.notes || "—"}
-                          </td>
-                          {canManageCapital ? (
-                            <td>
-                              {isVoided ? (
-                                <span className="muted">—</span>
-                              ) : (
-                                <button
-                                  type="button"
-                                  className="button secondary button--sm"
-                                  disabled={savingCapital}
-                                  onClick={() => {
-                                    setVoidTarget(entry);
-                                    setVoidReason("");
-                                  }}
-                                >
-                                  Void
-                                </button>
-                              )}
                             </td>
-                          ) : null}
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                            <td className="susu-capital-col--by">
+                              {entry.recordedByName || entry.recordedBy}
+                            </td>
+                            {canManageCapital ? (
+                              <td className="admin-table-actions-col">
+                                {isVoided ? (
+                                  <span className="muted">—</span>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    className="button secondary button--sm"
+                                    disabled={savingCapital}
+                                    onClick={() => {
+                                      setVoidTarget(entry);
+                                      setVoidReason("");
+                                    }}
+                                  >
+                                    Void
+                                  </button>
+                                )}
+                              </td>
+                            ) : null}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             ) : (
               <p className="muted susu-capital-card__empty">
