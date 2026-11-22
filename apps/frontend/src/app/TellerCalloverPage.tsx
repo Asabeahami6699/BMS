@@ -505,14 +505,55 @@ export function TellerCalloverPage({ role }: Props) {
             </p>
           </div>
           <div className="teller-callover-page__toolbar">
-            <input
-              type="search"
-              className="teller-callover-page__search"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search customer or account…"
-              aria-label="Filter transactions by customer or account"
-            />
+            <div className="teller-callover-search" role="search">
+              <svg
+                className="teller-callover-search__icon"
+                viewBox="0 0 20 20"
+                fill="none"
+                aria-hidden="true"
+              >
+                <circle
+                  cx="9"
+                  cy="9"
+                  r="5.75"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                />
+                <path
+                  d="M13.5 13.5L17 17"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                />
+              </svg>
+              <input
+                type="search"
+                className="teller-callover-search__input"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search customer name or account…"
+                aria-label="Filter transactions by customer or account"
+              />
+              {search.trim() ? (
+                <button
+                  type="button"
+                  className="teller-callover-search__clear"
+                  onClick={() => setSearch("")}
+                  aria-label="Clear search"
+                  title="Clear search"
+                >
+                  ×
+                </button>
+              ) : null}
+            </div>
+            {search.trim() ? (
+              <span className="teller-callover-search__matches muted">
+                {callover.visibleDeposits.length + callover.visibleWithdrawals.length} match
+                {callover.visibleDeposits.length + callover.visibleWithdrawals.length === 1
+                  ? ""
+                  : "es"}
+              </span>
+            ) : null}
             <span
               className={`susu-closing-editor__pill ${
                 callover.allItemsChecked
