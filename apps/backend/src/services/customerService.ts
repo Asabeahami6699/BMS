@@ -1255,6 +1255,25 @@ async function clearCustomerFinancialHistory(tenantId: string, customerId: strin
     return;
   }
 
+  // Delete child rows that hold FK references to customer_transactions(id) first.
+  const { error: batchLinesError } = await supabase
+    .from("field_agent_collection_batch_lines")
+    .delete()
+    .eq("tenant_id", tenantId)
+    .eq("customer_id", customerId);
+  if (batchLinesError && !isMissingSupabaseResource(batchLinesError.message)) {
+    throw new Error(`Failed to clear call-over batch lines: ${batchLinesError.message}`);
+  }
+
+  const { error: disclosuresError } = await supabase
+    .from("customer_balance_disclosures")
+    .delete()
+    .eq("tenant_id", tenantId)
+    .eq("customer_id", customerId);
+  if (disclosuresError && !isMissingSupabaseResource(disclosuresError.message)) {
+    throw new Error(`Failed to clear balance/withdrawal disclosures: ${disclosuresError.message}`);
+  }
+
   const { error: ledgerError } = await supabase
     .from("ledger_entries")
     .delete()
@@ -1262,6 +1281,17 @@ async function clearCustomerFinancialHistory(tenantId: string, customerId: strin
     .eq("customer_id", customerId);
   if (ledgerError) {
     throw new Error(`Failed to clear ledger: ${ledgerError.message}`);
+  }
+
+  // Break self-referencing reversal FKs before deleting customer_transactions.
+  const { error: unlinkReversalsError } = await supabase
+    .from("customer_transactions")
+    .update({ reverses_transaction_id: null })
+    .eq("tenant_id", tenantId)
+    .eq("customer_id", customerId)
+    .not("reverses_transaction_id", "is", null);
+  if (unlinkReversalsError && !isMissingSupabaseResource(unlinkReversalsError.message)) {
+    throw new Error(`Failed to unlink reversed transactions: ${unlinkReversalsError.message}`);
   }
 
   const { error: txError } = await supabase
@@ -1273,17 +1303,25 @@ async function clearCustomerFinancialHistory(tenantId: string, customerId: strin
     throw new Error(`Failed to clear transactions: ${txError.message}`);
   }
 
-  await supabase
-    .from("field_agent_collection_batch_lines")
-    .delete()
+  // Also clear Susu cycle history so a reset customer starts cleanly on Card #1.
+  const { error: unlinkCyclesError } = await supabase
+    .from("susu_customer_cycles")
+    .update({ rolled_from_cycle_id: null })
     .eq("tenant_id", tenantId)
-    .eq("customer_id", customerId);
+    .eq("customer_id", customerId)
+    .not("rolled_from_cycle_id", "is", null);
+  if (unlinkCyclesError && !isMissingSupabaseResource(unlinkCyclesError.message)) {
+    throw new Error(`Failed to unlink Susu cycles: ${unlinkCyclesError.message}`);
+  }
 
-  await supabase
-    .from("customer_balance_disclosures")
+  const { error: cyclesError } = await supabase
+    .from("susu_customer_cycles")
     .delete()
     .eq("tenant_id", tenantId)
     .eq("customer_id", customerId);
+  if (cyclesError && !isMissingSupabaseResource(cyclesError.message)) {
+    throw new Error(`Failed to clear Susu cycles: ${cyclesError.message}`);
+  }
 }
 
 const QUALIFYING_TX_TYPES = new Set(["daily_susu", "deposit", "withdrawal"]);
