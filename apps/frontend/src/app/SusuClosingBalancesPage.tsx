@@ -25,6 +25,13 @@ const CAPITAL_DRAWING_TOOLTIP =
 const NET_CAPITAL_TOOLTIP =
   "Net owner capital = Total capital added minus Total owner drawings across all branches.";
 
+const UNSAVED_CHANGES_TOOLTIP =
+  "You have edited fields in this closing form that have not been saved yet. Click Save closing to record them for this date.";
+const RESET_CLOSING_TOOLTIP =
+  "Clears your entered amounts back to the suggested opening vault and blank end-of-day fields (does not change saved records until you click Save closing).";
+const SAVE_CLOSING_TOOLTIP =
+  "Saves today's vault closing figures (opening vault, cash to bank, branch expenses, safe count, and notes) and carries the closing vault forward to tomorrow.";
+
 export function SusuClosingBalancesPage({ role }: Props) {
   const { showToast } = useToast();
   const canEdit = role === "admin" || role === "coordinator" || role === "accountant";
@@ -628,19 +635,29 @@ export function SusuClosingBalancesPage({ role }: Props) {
                 </div>
                 <div className="susu-closing-editor__actions">
                   {dirty ? (
-                    <span className="susu-closing-editor__pill susu-closing-editor__pill--delta">
+                    <span
+                      className="susu-closing-editor__pill susu-closing-editor__pill--delta susu-tooltip susu-tooltip--end"
+                      data-tooltip={UNSAVED_CHANGES_TOOLTIP}
+                      tabIndex={0}
+                    >
                       Unsaved changes
                     </span>
                   ) : null}
                   <button
                     type="button"
-                    className="button secondary"
+                    className="button secondary susu-tooltip susu-tooltip--end"
+                    data-tooltip={RESET_CLOSING_TOOLTIP}
                     disabled={saving}
                     onClick={resetFromSuggestion}
                   >
                     Reset
                   </button>
-                  <button type="submit" className="button" disabled={saving}>
+                  <button
+                    type="submit"
+                    className="button susu-tooltip susu-tooltip--end"
+                    data-tooltip={SAVE_CLOSING_TOOLTIP}
+                    disabled={saving}
+                  >
                     {saving ? "Saving…" : "Save closing"}
                   </button>
                 </div>
