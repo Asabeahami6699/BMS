@@ -215,14 +215,16 @@ async function loadBatchRow(
       createdAt: row.created_at
     }));
 
+    const computedTotal = Math.round(lines.reduce((sum, l) => sum + l.amount, 0) * 100) / 100;
+
     return {
       id: String(batchRow.id),
       tenantId: batchRow.tenant_id,
       fieldAgentId: batchRow.field_agent_id,
       businessDate: String(batchRow.business_date).slice(0, 10),
       status: batchRow.status as CollectionBatchStatus,
-      totalAmount: Number(batchRow.total_amount ?? 0),
-      lineCount: Number(batchRow.line_count ?? lines.length),
+      totalAmount: computedTotal,
+      lineCount: lines.length,
       calloverReportId: batchRow.callover_report_id ?? undefined,
       agentNotes: batchRow.agent_notes ?? undefined,
       submittedAt: batchRow.submitted_at ?? undefined,
@@ -454,7 +456,7 @@ export async function addCollectionBatchLine(
   }
 
   batch.lines.push(line);
-  batch.totalAmount = Math.round((batch.totalAmount + line.amount) * 100) / 100;
+  batch.totalAmount = Math.round(batch.lines.reduce((sum, l) => sum + l.amount, 0) * 100) / 100;
   batch.lineCount = batch.lines.length;
   await persistBatch(batch);
 

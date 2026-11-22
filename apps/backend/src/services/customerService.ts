@@ -1255,6 +1255,17 @@ async function clearCustomerFinancialHistory(tenantId: string, customerId: strin
     return;
   }
 
+  // Capture affected collection batch IDs before deleting this customer's lines so parent
+  // batch totals stay accurate (and empty draft/pending headers do not linger as ghost batches).
+  const { data: affectedLineRows } = await supabase
+    .from("field_agent_collection_batch_lines")
+    .select("batch_id")
+    .eq("tenant_id", tenantId)
+    .eq("customer_id", customerId);
+  const affectedBatchIds = Array.from(
+    new Set((affectedLineRows ?? []).map((r) => String(r.batch_id)).filter(Boolean))
+  );
+
   // Delete child rows that hold FK references to customer_transactions(id) first.
   const { error: batchLinesError } = await supabase
     .from("field_agent_collection_batch_lines")
@@ -1263,6 +1274,37 @@ async function clearCustomerFinancialHistory(tenantId: string, customerId: strin
     .eq("customer_id", customerId);
   if (batchLinesError && !isMissingSupabaseResource(batchLinesError.message)) {
     throw new Error(`Failed to clear call-over batch lines: ${batchLinesError.message}`);
+  }
+
+  // Recompute remaining totals on each affected batch; remove empty unposted batch headers.
+  for (const batchId of affectedBatchIds) {
+    const { data: remainingLines } = await supabase
+      .from("field_agent_collection_batch_lines")
+      .select("amount")
+      .eq("batch_id", batchId);
+    const remainingCount = remainingLines?.length ?? 0;
+    if (remainingCount === 0) {
+      await supabase
+        .from("field_agent_collection_batches")
+        .delete()
+        .eq("tenant_id", tenantId)
+        .eq("id", batchId)
+        .in("status", ["draft", "pending_approval", "rejected"]);
+    } else {
+      const remainingTotal =
+        Math.round(
+          (remainingLines ?? []).reduce((sum, row) => sum + Number(row.amount ?? 0), 0) * 100
+        ) / 100;
+      await supabase
+        .from("field_agent_collection_batches")
+        .update({
+          total_amount: remainingTotal,
+          line_count: remainingCount,
+          updated_at: new Date().toISOString()
+        })
+        .eq("tenant_id", tenantId)
+        .eq("id", batchId);
+    }
   }
 
   const { error: disclosuresError } = await supabase
