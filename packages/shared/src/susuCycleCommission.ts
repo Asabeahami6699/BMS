@@ -306,6 +306,7 @@ export type SusuPassbookCard = z.infer<typeof susuPassbookCardSchema>;
 export const susuCustomerPassbookSchema = z.object({
   customerId: z.string().min(1),
   dailyContributionAmount: money,
+  pendingDailyContributionAmount: z.number().positive().nullable().optional(),
   cycleDays: z.number().int().positive(),
   activeCardNumber: z.number().int().positive(),
   cards: z.array(susuPassbookCardSchema),
@@ -368,6 +369,7 @@ export type SusuPassbookCollectionInput = {
 export function buildSusuCustomerPassbook(input: {
   customerId: string;
   dailyContributionAmount: number;
+  pendingDailyContributionAmount?: number | null;
   policy: SusuCommissionPolicy;
   cycles?: SusuCustomerCycle[];
   collections: SusuPassbookCollectionInput[];
@@ -751,6 +753,9 @@ export function buildSusuCustomerPassbook(input: {
   return {
     customerId: input.customerId,
     dailyContributionAmount: baseDaily,
+    ...(input.pendingDailyContributionAmount && input.pendingDailyContributionAmount > 0
+      ? { pendingDailyContributionAmount: roundMoney(input.pendingDailyContributionAmount) }
+      : {}),
     cycleDays: defaultCycleDays,
     activeCardNumber,
     cards: finalCards,

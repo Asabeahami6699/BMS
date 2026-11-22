@@ -34,6 +34,28 @@ export function buildTransactionAlertMessage(input: {
   };
 }
 
+export const SUSU_COMMISSION_DEBIT_TAG = "susu_comm_tx:";
+export const SUSU_COMMISSION_REFUND_TAG = "susu_comm_refund:";
+
+/** SMS when Susu cycle commission (service charge) is debited after a deposit/collection. */
+export function buildSusuCommissionDebitMessage(input: {
+  brand: string;
+  amount: number;
+  balance: number;
+  accountNumber?: string;
+  cycleNumber?: number;
+}): { text: string; subject: string } {
+  const amt = formatSmsAmount(input.amount);
+  const bal = formatSmsAmount(input.balance);
+  const accountMask = maskAccountNumber(input.accountNumber);
+  const brand = input.brand.slice(0, 40);
+  const cardLabel = input.cycleNumber ? `Susu card #${input.cycleNumber}` : "Susu card";
+  return {
+    subject: `${brand} — ${cardLabel} service charge`,
+    text: `${brand}: GHS ${amt} has been debited from your Account # ${accountMask} as ${cardLabel} service charge (commission). Current balance is: GHS ${bal}`
+  };
+}
+
 /** SMS when a loan repayment is debited from the customer's Susu/savings account. */
 export function buildLoanRepaymentFromSusuMessage(input: {
   brand: string;
@@ -77,6 +99,10 @@ export function ledgerDisplayReason(notes?: string | null): string | undefined {
   const cleaned = notes
     .replace(/\s*·\s*loan_repay:[0-9a-f-]+/gi, "")
     .replace(/\s*loan_repay:[0-9a-f-]+/gi, "")
+    .replace(/\s*·\s*susu_comm_tx:[0-9a-f-]+/gi, "")
+    .replace(/\s*susu_comm_tx:[0-9a-f-]+/gi, "")
+    .replace(/\s*·\s*susu_comm_refund:[0-9a-f-]+/gi, "")
+    .replace(/\s*susu_comm_refund:[0-9a-f-]+/gi, "")
     .replace(/\s+/g, " ")
     .trim();
   return cleaned || undefined;

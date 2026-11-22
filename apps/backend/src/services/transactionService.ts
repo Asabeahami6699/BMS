@@ -1,6 +1,10 @@
-import { createTransactionInputSchema,
+import {
+  createTransactionInputSchema,
+  SUSU_COMMISSION_DEBIT_TAG,
   transactionSchema,
-  type Transaction, formatAccountAmount } from "@bms/shared";
+  type Transaction,
+  formatAccountAmount
+} from "@bms/shared";
 import { randomUUID } from "node:crypto";
 import { getSupabaseAdminClient } from "../config/supabaseClient.js";
 import {
@@ -18,7 +22,10 @@ import {
 import { getSavingsOpeningFeeGhs } from "./tenantProfileService.js";
 import { applyTransactionToFloat } from "./branchFloatService.js";
 import { createAgencyPendingDeposit, usesAgencyDepositFlow } from "./agencyBankingService.js";
-import { notifyCustomerTransaction } from "./customerNotificationService.js";
+import {
+  notifyCustomerTransaction,
+  scheduleCustomerSusuCommissionNotification
+} from "./customerNotificationService.js";
 import {
   getBankProductById,
   resolveBankProductForTransaction
@@ -516,6 +523,7 @@ export async function createTransaction(
     savingsCredit: number;
     commissionCollectNow: number;
     grossContribution: number;
+    cycle?: { cycleNumber: number } | null;
     note?: string;
   } | null = null;
   const transactionIdEarly = randomUUID();
@@ -597,10 +605,12 @@ export async function createTransaction(
   }
 
   // Withdrawals: ledger debit = cash out + Susu commission (customer balance falls by both).
+  // Susu contributions: credit the FULL deposit amount to the customer ledger first, then post
+  // a separate system commission debit so the customer sees full deposit + clear service charge.
   const ledgerAmount = feeDeduction
     ? feeDeduction.creditAmount
     : susuAllocation
-      ? susuAllocation.savingsCredit
+      ? susuAllocation.grossContribution
       : payload.type === "withdrawal"
         ? Math.round((payload.amount + withdrawalCommission) * 100) / 100
         : payload.amount;
@@ -643,10 +653,10 @@ export async function createTransaction(
     amount:
       payload.type === "withdrawal"
         ? payload.amount
-        : ledgerAmount > 0
-          ? ledgerAmount
-          : susuAllocation
-            ? susuAllocation.grossContribution
+        : susuAllocation
+          ? susuAllocation.grossContribution
+          : ledgerAmount > 0
+            ? ledgerAmount
             : payload.amount,
     transactionBranchId: payload.transactionBranchId,
     homeBranchId: customer.homeBranchId,
@@ -746,6 +756,111 @@ export async function createTransaction(
     });
   }
 
+  // Capture balance immediately after the full deposit credit so SMS #1 shows the full deposit balance
+  // before the separate Susu commission debit posts.
+  const hasSeparateSusuCommissionDebit = Boolean(
+    susuAllocation && susuAllocation.commissionCollectNow > 0
+  );
+  const balanceAfterFullDeposit = hasSeparateSusuCommissionDebit
+    ? await computeCustomerBalance(context.tenantId, transaction.customerId)
+    : undefined;
+
+  // Post separate system debit for Susu cycle commission (service charge).
+  // Intentionally NOT applied to teller till float because no physical cash leaves the drawer.
+  let commissionDebitTxId: string | undefined;
+  if (hasSeparateSusuCommissionDebit && susuAllocation) {
+    const commissionAmount = susuAllocation.commissionCollectNow;
+    const cardLabel = susuAllocation.cycle?.cycleNumber
+      ? `Susu card #${susuAllocation.cycle.cycleNumber}`
+      : "Susu card";
+    const commissionNotes = `${cardLabel} service charge (commission) · ${SUSU_COMMISSION_DEBIT_TAG}${transaction.id}`;
+    const commTxId = randomUUID();
+    const SYSTEM_SUSU_COMMISSION_USER_ID = "system:susu-commission";
+
+    if (supabase) {
+      const { error: commRpcError } = await supabase.rpc("post_customer_transaction_atomic", {
+        p_transaction_id: commTxId,
+        p_tenant_id: transaction.tenantId,
+        p_customer_id: transaction.customerId,
+        p_type: "withdrawal",
+        p_amount: commissionAmount,
+        p_transaction_branch_id: transaction.transactionBranchId,
+        p_home_branch_id: transaction.homeBranchId,
+        p_recorded_by_user_id: SYSTEM_SUSU_COMMISSION_USER_ID,
+        p_field_agent_id: transaction.fieldAgentId,
+        p_notes: commissionNotes
+      });
+      if (commRpcError) {
+        // When a customer has loan collateral or savings lock, withdrawable balance may be below
+        // commissionAmount even though the gross deposit was just credited. Fall back to direct
+        // system fee debit so the commission is always deducted from the deposit that just posted.
+        const isLockBlock = /insufficient withdrawable balance/i.test(commRpcError.message);
+        if (isLockBlock && (balanceAfterFullDeposit ?? 0) + 1e-6 >= commissionAmount) {
+          const { error: directTxErr } = await supabase.from("customer_transactions").insert({
+            id: commTxId,
+            tenant_id: transaction.tenantId,
+            customer_id: transaction.customerId,
+            type: "withdrawal",
+            amount: commissionAmount,
+            transaction_branch_id: transaction.transactionBranchId,
+            home_branch_id: transaction.homeBranchId,
+            recorded_by_user_id: SYSTEM_SUSU_COMMISSION_USER_ID,
+            field_agent_id: transaction.fieldAgentId,
+            notes: commissionNotes
+          });
+          if (!directTxErr) {
+            await addLedgerEntry({
+              tenantId: transaction.tenantId,
+              customerId: transaction.customerId,
+              transactionId: commTxId,
+              entryType: "debit",
+              amount: commissionAmount,
+              transactionBranchId: transaction.transactionBranchId
+            });
+            commissionDebitTxId = commTxId;
+          } else {
+            console.warn(
+              "[susu-commission] fallback direct commission debit failed:",
+              directTxErr.message
+            );
+          }
+        } else {
+          console.warn(
+            "[susu-commission] failed to post separate commission debit:",
+            commRpcError.message
+          );
+        }
+      } else {
+        commissionDebitTxId = commTxId;
+      }
+    } else {
+      const commTx = transactionSchema.parse({
+        id: commTxId,
+        tenantId: context.tenantId,
+        customerId: transaction.customerId,
+        type: "withdrawal",
+        amount: commissionAmount,
+        transactionBranchId: transaction.transactionBranchId,
+        homeBranchId: transaction.homeBranchId,
+        recordedByUserId: SYSTEM_SUSU_COMMISSION_USER_ID,
+        fieldAgentId: transaction.fieldAgentId,
+        createdAt: new Date().toISOString(),
+        notes: commissionNotes
+      });
+      const currentTxs = getTenantTransactions(context.tenantId);
+      setTenantTransactions(context.tenantId, [...currentTxs, commTx]);
+      await addLedgerEntry({
+        tenantId: context.tenantId,
+        customerId: transaction.customerId,
+        transactionId: commTx.id,
+        entryType: "debit",
+        amount: commissionAmount,
+        transactionBranchId: transaction.transactionBranchId
+      });
+      commissionDebitTxId = commTx.id;
+    }
+  }
+
   // Teller till cash & float must reflect the full physical cash handed over (payload.amount),
   // even when Susu Box 1 commission splits part or all of the deposit into institutional income.
   const floatTransaction =
@@ -771,12 +886,25 @@ export async function createTransaction(
       transactionId: transaction.id,
       type: transaction.type,
       amount: ledgerAmount > 0 ? ledgerAmount : payload.amount,
+      balanceOverride: balanceAfterFullDeposit,
       subscribedAddons: context.subscribedAddons
     }).catch((error) => {
       console.warn(
         "[notifications] transaction notification skipped:",
         error instanceof Error ? error.message : error
       );
+    });
+  }
+
+  // Send follow-up commission debit alert ~1 minute after the full deposit credit alert.
+  if (commissionDebitTxId && susuAllocation && susuAllocation.commissionCollectNow > 0) {
+    scheduleCustomerSusuCommissionNotification({
+      tenantId: context.tenantId,
+      customerId: transaction.customerId,
+      transactionId: commissionDebitTxId,
+      amount: susuAllocation.commissionCollectNow,
+      cycleNumber: susuAllocation.cycle?.cycleNumber,
+      subscribedAddons: context.subscribedAddons
     });
   }
 

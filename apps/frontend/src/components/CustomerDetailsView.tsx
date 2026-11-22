@@ -1,6 +1,13 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { SAVINGS_INITIAL_DEPOSIT_GHS, formatAccountAmount } from "@bms/shared";
+import {
+  SAVINGS_INITIAL_DEPOSIT_GHS,
+  SUSU_COMMISSION_DEBIT_TAG,
+  SUSU_COMMISSION_REFUND_TAG,
+  formatAccountAmount,
+  ledgerDisplayReason
+} from "@bms/shared";
 import type { AccountType, Customer } from "../app/api";
+import { scheduleCustomerNextCardDailySusu } from "../app/api";
 import { SusuReversalDialog } from "../app/SusuReversalDialog";
 import { printCustomerAccountStatement } from "../app/customerAccountStatement";
 import {
@@ -130,6 +137,9 @@ export function CustomerDetailsView({
   const [statementToDate, setStatementToDate] = useState(() => todayIsoDate());
   const [susuTransactionId, setSusuTransactionId] = useState<string | null>(null);
   const [ledgerVisibleCount, setLedgerVisibleCount] = useState(LEDGER_PAGE_SIZE);
+  const [editingNextDaily, setEditingNextDaily] = useState(false);
+  const [nextDailyInput, setNextDailyInput] = useState("");
+  const [savingNextDaily, setSavingNextDaily] = useState(false);
 
   const liveCustomer = useCustomersStore((s) =>
     s.customers.find((c) => c.id === customerProp.id)
@@ -202,7 +212,61 @@ export function CustomerDetailsView({
 
   useEffect(() => {
     setLedgerVisibleCount(LEDGER_PAGE_SIZE);
+    setEditingNextDaily(false);
+    setNextDailyInput("");
   }, [customerProp.id]);
+
+  const canScheduleDailySusu =
+    customer.accountType === "susu" &&
+    customer.status === "active" &&
+    (user?.role === "admin" ||
+      user?.role === "super_admin" ||
+      user?.role === "coordinator" ||
+      user?.role === "teller" ||
+      user?.role === "customer_service");
+
+  async function handleSaveNextCardDailySusu(amountOverride?: number | null) {
+    const nextValue =
+      amountOverride !== undefined ? amountOverride : Number(nextDailyInput.trim());
+    if (
+      nextValue !== null &&
+      (!Number.isFinite(nextValue) || nextValue <= 0)
+    ) {
+      showToast("Enter a valid daily Susu amount greater than 0", "error");
+      return;
+    }
+    setSavingNextDaily(true);
+    try {
+      const result = await scheduleCustomerNextCardDailySusu(customer.id, nextValue);
+      useCustomersStore.getState().upsertCustomer(result.customer);
+      useCustomerLedgerStore.getState().invalidate(customer.id);
+      void useCustomerLedgerStore.getState().ensureDetail(customer.id, { force: true });
+      useSusuCycleCommissionStore.getState().invalidateCustomerPassbook(customer.id);
+      void useSusuCycleCommissionStore.getState().ensureCustomerPassbook(customer.id, { force: true });
+      setEditingNextDaily(false);
+      setNextDailyInput("");
+      if (result.cancelled) {
+        showToast("Scheduled next-card daily Susu change cleared", "info");
+      } else if (result.appliedImmediately) {
+        showToast(
+          `Daily Susu updated to GHS ${formatAccountAmount(result.customer.dailyContributionAmount)} for Page #${result.effectiveCardNumber}`,
+          "success"
+        );
+      } else {
+        showToast(
+          `Scheduled GHS ${formatAccountAmount(result.customer.pendingDailyContributionAmount ?? nextValue ?? 0)} / day — starts automatically on Page #${result.effectiveCardNumber}`,
+          "success"
+        );
+      }
+    } catch (error) {
+      showToast(
+        error instanceof Error ? error.message : "Could not update daily Susu amount",
+        "error"
+      );
+    } finally {
+      setSavingNextDaily(false);
+    }
+  }
 
   const accountBalance =
     ledger.length > 0 ? ledger[ledger.length - 1]!.balanceAfter : 0;
@@ -434,20 +498,31 @@ export function CustomerDetailsView({
                         const settledShortage = Boolean(
                           entry.notes?.toLowerCase().includes("settled shortage")
                         );
+                        const isSusuCommissionDebit = Boolean(
+                          entry.notes?.toLowerCase().includes(SUSU_COMMISSION_DEBIT_TAG)
+                        );
+                        const isSusuCommissionRefund = Boolean(
+                          entry.notes?.toLowerCase().includes(SUSU_COMMISSION_REFUND_TAG)
+                        );
                         const typeLabel =
                           entry.transactionType === "susu_reversal"
                             ? "Reversal"
-                            : settledShortage
-                              ? "Settled shortage"
-                              : entry.entryType === "credit"
-                                ? "Credit"
-                                : "Debit";
+                            : isSusuCommissionDebit
+                              ? "Susu commission"
+                              : isSusuCommissionRefund
+                                ? "Commission refund"
+                                : settledShortage
+                                  ? "Settled shortage"
+                                  : entry.entryType === "credit"
+                                    ? "Credit"
+                                    : "Debit";
+                        const cleanTitle = ledgerDisplayReason(entry.notes);
                         const cells = (
                           <>
                             <span>{formatLedgerDate(entry.createdAt)}</span>
                             <span
                               className={`cif-ledger__type--${entry.entryType}`}
-                              title={entry.notes ?? undefined}
+                              title={cleanTitle ?? undefined}
                             >
                               {typeLabel}
                               {entry.reversalStatus === "reversed" ? " · Reversed" : ""}
@@ -455,9 +530,15 @@ export function CustomerDetailsView({
                             <span>GHS {formatAccountAmount(entry.amount)}</span>
                             <span
                               className="cif-ledger__by"
-                              title={entry.performedByName ?? entry.recordedByName ?? undefined}
+                              title={
+                                isSusuCommissionDebit || isSusuCommissionRefund
+                                  ? "System · Susu commission"
+                                  : (entry.performedByName ?? entry.recordedByName ?? undefined)
+                              }
                             >
-                              {entry.performedByName ?? entry.recordedByName ?? "—"}
+                              {isSusuCommissionDebit || isSusuCommissionRefund
+                                ? "System"
+                                : (entry.performedByName ?? entry.recordedByName ?? "—")}
                             </span>
                             <span>GHS {formatAccountAmount(entry.balanceAfter)}</span>
                           </>
@@ -588,6 +669,100 @@ export function CustomerDetailsView({
                       : "Not configured"
                   }
                 />
+                {customer.accountType === "susu" && customer.pendingDailyContributionAmount ? (
+                  <InfoRow
+                    label="Next card rate"
+                    fullWidth
+                    value={
+                      <span className="cif-next-daily-pill">
+                        <strong>
+                          GHS {formatAccountAmount(customer.pendingDailyContributionAmount)} / day
+                        </strong>{" "}
+                        <span className="muted">(starts automatically on the next new card)</span>
+                      </span>
+                    }
+                  />
+                ) : null}
+                {canScheduleDailySusu ? (
+                  <div className="cif-row cif-row--full cif-next-daily-box">
+                    {!editingNextDaily ? (
+                      <div className="cif-next-daily-actions">
+                        <button
+                          type="button"
+                          className="button secondary"
+                          disabled={savingNextDaily}
+                          onClick={() => {
+                            setNextDailyInput(
+                              String(
+                                customer.pendingDailyContributionAmount ??
+                                  (customer.dailyContributionAmount > 0
+                                    ? customer.dailyContributionAmount
+                                    : "")
+                              )
+                            );
+                            setEditingNextDaily(true);
+                          }}
+                        >
+                          {customer.pendingDailyContributionAmount
+                            ? "Edit next card daily Susu"
+                            : "Change daily Susu (next card)"}
+                        </button>
+                        {customer.pendingDailyContributionAmount ? (
+                          <button
+                            type="button"
+                            className="button secondary"
+                            disabled={savingNextDaily}
+                            onClick={() => void handleSaveNextCardDailySusu(null)}
+                          >
+                            Cancel scheduled change
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <div className="cif-next-daily-editor">
+                        <p className="muted cif-next-daily-hint">
+                          Current card stays at{" "}
+                          <strong>GHS {formatAccountAmount(customer.dailyContributionAmount)} / box</strong>{" "}
+                          to avoid conflicts. The new amount starts automatically when the next card opens.
+                        </p>
+                        <div className="cif-next-daily-controls">
+                          <label className="field">
+                            <span>New daily Susu (GHS)</span>
+                            <input
+                              type="number"
+                              min="0.01"
+                              step="0.01"
+                              inputMode="decimal"
+                              value={nextDailyInput}
+                              onChange={(e) => setNextDailyInput(e.target.value)}
+                              placeholder="e.g. 10.00"
+                              autoFocus
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            className="button"
+                            disabled={savingNextDaily}
+                            onClick={() => void handleSaveNextCardDailySusu()}
+                          >
+                            {savingNextDaily ? "Saving…" : "Save for next card"}
+                          </button>
+                          <button
+                            type="button"
+                            className="button secondary"
+                            disabled={savingNextDaily}
+                            onClick={() => {
+                              setEditingNextDaily(false);
+                              setNextDailyInput("");
+                            }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : null}
                 {isSavings ? (
                   <>
                     <InfoRow

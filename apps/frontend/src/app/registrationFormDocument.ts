@@ -5,159 +5,249 @@ export type RegistrationFormDocumentOptions = {
   companyName?: string;
   companyPhone?: string;
   companyAddress?: string;
+  companyLogoUrl?: string;
   /** Marks the paper form as the built-in default layout. */
   isDefault?: boolean;
 };
 
-/** Fixed paper labels for account-type checkboxes. */
-const PAPER_ACCOUNT_TYPE_LABELS = ["Susu", "Savings", "Current", "Meba Daakye", "Group"] as const;
+/** Fixed paper labels for account-type checkboxes (single-line bar). */
+const PAPER_ACCOUNT_TYPE_LABELS = ["Susu", "Savings", "Current"] as const;
 
 const DOCUMENT_STYLES = `
   * { box-sizing: border-box; }
   html, body {
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
+    margin: 0;
+    padding: 0;
   }
   @page {
-    size: A4;
-    margin: 10mm;
+    size: A4 portrait;
+    margin: 9mm 10mm;
   }
   body {
     font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-    font-size: 10.5pt;
+    font-size: 9.5pt;
     color: #000;
-    margin: 0;
-    padding: 0;
-    line-height: 1.35;
+    line-height: 1.25;
     background: #fff;
   }
   .reg-doc {
     width: 100%;
+    max-width: 190mm;
+    margin: 0 auto;
     color: #000;
+    background: #fff;
+  }
+  @media screen {
+    body {
+      background: #eef1f5;
+      padding: 12mm 8mm;
+    }
+    .reg-doc {
+      width: 210mm;
+      max-width: 210mm;
+      min-height: 297mm;
+      padding: 9mm 10mm;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
+    }
+  }
+  .reg-doc__masthead {
+    display: grid;
+    grid-template-columns: 1fr 34mm;
+    gap: 4mm;
+    align-items: stretch;
+    margin-bottom: 4mm;
+  }
+  .reg-doc__masthead-left {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    min-width: 0;
+  }
+  .reg-doc__brand {
+    display: flex;
+    align-items: center;
+    gap: 3.5mm;
+    padding-bottom: 2.5mm;
+    border-bottom: 2px solid #000;
+  }
+  .reg-doc__logo {
+    width: 15.5mm;
+    height: 15.5mm;
+    object-fit: contain;
+    flex: 0 0 auto;
+    display: block;
+  }
+  .reg-doc__brand-text {
+    min-width: 0;
+    flex: 1 1 auto;
   }
   .reg-doc__company {
-    text-align: center;
-    margin: 0 0 6px;
-    font-size: 1.3rem;
-    font-weight: 700;
-    letter-spacing: 0.04em;
+    margin: 0;
+    font-size: 13.5pt;
+    font-weight: 800;
+    letter-spacing: 0.03em;
     text-transform: uppercase;
+    line-height: 1.15;
+  }
+  .reg-doc__contact {
+    margin: 1mm 0 0;
+    font-size: 7.5pt;
+    color: #222;
+    line-height: 1.2;
   }
   .reg-doc__title {
-    text-align: center;
-    margin: 0 0 10px;
-    font-size: 1rem;
+    margin: 1.5mm 0 0;
+    font-size: 9.5pt;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.06em;
-    border-bottom: 2px solid #000;
-    padding-bottom: 6px;
+    letter-spacing: 0.08em;
   }
-  .reg-doc__top {
-    display: grid;
-    grid-template-columns: 1fr 120px;
-    gap: 12px;
-    align-items: start;
-    margin-bottom: 12px;
+  .reg-doc__account-bar {
+    margin-top: 2.8mm;
+    border: 1.2px solid #000;
+    padding: 2.2mm 3mm;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 3mm;
+    flex-wrap: nowrap;
   }
-  .reg-doc__section {
-    margin-bottom: 10px;
-    page-break-inside: avoid;
-  }
-  .reg-doc__section h2 {
-    margin: 0 0 6px;
-    font-size: 0.75rem;
-    font-weight: 700;
+  .reg-doc__account-heading {
+    font-size: 7.8pt;
+    font-weight: 800;
     text-transform: uppercase;
-    letter-spacing: 0.07em;
-    border: 1px solid #000;
-    padding: 3px 7px;
+    letter-spacing: 0.05em;
+    white-space: nowrap;
   }
   .reg-doc__accounts {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px 16px;
+    display: inline-flex;
     align-items: center;
-    min-height: 110px;
-    border: 1px solid #000;
-    padding: 10px;
+    gap: 5.5mm;
+    flex-wrap: nowrap;
   }
   .reg-doc__account {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 1.8mm;
     font-weight: 700;
-    font-size: 0.9rem;
+    font-size: 9pt;
+    white-space: nowrap;
   }
   .reg-doc__box {
-    width: 14px;
-    height: 14px;
-    border: 1.5px solid #000;
+    width: 3.8mm;
+    height: 3.8mm;
+    border: 1.4px solid #000;
+    display: inline-block;
     flex: 0 0 auto;
   }
   .reg-doc__photo {
-    border: 1px solid #000;
-    height: 130px;
+    border: 1.2px solid #000;
+    width: 34mm;
+    min-height: 34mm;
+    padding: 2mm;
     display: flex;
     align-items: center;
     justify-content: center;
     text-align: center;
-    font-size: 0.75rem;
+  }
+  .reg-doc__photo-inner {
+    border: 1px dashed #666;
+    width: 100%;
+    height: 100%;
+    min-height: 29mm;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 7pt;
     font-weight: 700;
-    padding: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 2mm;
+    line-height: 1.25;
+  }
+  .reg-doc__section {
+    margin-bottom: 4mm;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  .reg-doc__section:last-child {
+    margin-bottom: 0;
+  }
+  .reg-doc__section h2 {
+    margin: 0 0 2.8mm;
+    font-size: 7.8pt;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    border: 1.2px solid #000;
+    background: #f2f2f2;
+    padding: 1.3mm 2.5mm;
   }
   .reg-doc__grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 7px 14px;
+    gap: 3.4mm 5.5mm;
   }
-  .reg-doc__field--wide { grid-column: 1 / -1; }
+  .reg-doc__field--wide {
+    grid-column: 1 / -1;
+  }
   .reg-doc__label {
-    font-size: 0.7rem;
+    font-size: 6.8pt;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.03em;
+    letter-spacing: 0.04em;
+    line-height: 1.15;
   }
   .reg-doc__line {
     border-bottom: 1px solid #000;
-    min-height: 1.45em;
-    margin-top: 2px;
+    min-height: 6.4mm;
+    margin-top: 0.6mm;
   }
   .reg-doc__note {
-    font-size: 0.8rem;
-    margin: 0 0 6px;
-  }
-  .reg-doc__id-photo {
-    border: 1px solid #000;
-    min-height: 90px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 0.75rem;
-    font-weight: 700;
-    margin-top: 8px;
+    font-size: 7.5pt;
+    margin: 3mm 0 0;
+    line-height: 1.3;
   }
   .reg-doc__sign-block {
-    margin-top: 10px;
+    margin-top: 2mm;
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 18px;
+    grid-template-columns: 1.3fr 1fr;
+    gap: 10mm;
   }
   .reg-doc__sign-line {
     border-top: 1px solid #000;
-    margin-top: 34px;
-    padding-top: 5px;
-    font-size: 0.78rem;
+    margin-top: 10.5mm;
+    padding-top: 1.3mm;
+    font-size: 7.5pt;
     font-weight: 700;
     text-align: center;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
   }
   .reg-doc__office {
-    margin-top: 12px;
+    margin-top: 3.5mm;
     border-top: 2px solid #000;
-    padding-top: 8px;
+    padding-top: 3mm;
   }
   @media print {
-    body { padding: 0; }
+    html, body {
+      width: 100%;
+      height: auto;
+      background: #fff;
+      padding: 0;
+      margin: 0;
+    }
+    .reg-doc {
+      width: 100%;
+      max-width: none;
+      min-height: auto;
+      padding: 0;
+      box-shadow: none;
+      page-break-inside: avoid;
+      break-inside: avoid;
+    }
   }
 `;
 
@@ -167,6 +257,14 @@ function escapeHtml(value: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function isUsableLogoUrl(logoUrl: string | undefined | null): logoUrl is string {
+  if (!logoUrl?.trim()) {
+    return false;
+  }
+  const value = logoUrl.trim();
+  return /^data:image\/(jpeg|png|webp|gif|svg\+xml)/i.test(value) || /^https?:\/\//i.test(value);
 }
 
 function blankField(label: string, wide = false): string {
@@ -179,6 +277,21 @@ function blankField(label: string, wide = false): string {
 export function buildRegistrationFormDocumentHtml(options: RegistrationFormDocumentOptions): string {
   const company = options.companyName?.trim() || APP_BRAND_NAME;
   const fields = options.setup.fields;
+  const logoUrl = isUsableLogoUrl(options.companyLogoUrl) ? options.companyLogoUrl.trim() : undefined;
+
+  const contactParts = [
+    options.companyAddress?.trim(),
+    options.companyPhone?.trim() ? `Tel: ${options.companyPhone.trim()}` : undefined
+  ].filter((part): part is string => Boolean(part));
+
+  const contactHtml =
+    contactParts.length > 0
+      ? `<p class="reg-doc__contact">${escapeHtml(contactParts.join("  •  "))}</p>`
+      : "";
+
+  const logoHtml = logoUrl
+    ? `<img class="reg-doc__logo" src="${escapeHtml(logoUrl)}" alt="${escapeHtml(company)} logo" />`
+    : "";
 
   const accountBlocks = PAPER_ACCOUNT_TYPE_LABELS.map(
     (label) => `<label class="reg-doc__account">
@@ -187,26 +300,36 @@ export function buildRegistrationFormDocumentHtml(options: RegistrationFormDocum
     </label>`
   ).join("");
 
-  const personalFields = [
-    blankField("Full name"),
-    blankField("Phone"),
-    // Always print DOB + occupation on paper; ID card photo stays digital-only.
-    blankField("Date of birth (DOB)"),
-    blankField("Occupation"),
-    blankField("Marital status"),
-    blankField("Location / area", true),
-    fields.houseNumber !== "hidden" ? blankField("House number") : "",
-    fields.email !== "hidden" ? blankField("Email", true) : "",
-    fields.idCardNumber !== "hidden" ? blankField("ID card number") : "",
-    fields.dailyContribution !== "hidden" ? blankField("Daily contribution (GHS)") : ""
-  ]
-    .filter(Boolean)
-    .join("");
+  // Keep fields paired cleanly in 2 columns so the entire form fits on one A4 sheet.
+  const personalFieldDefs: Array<{ label: string; wide?: boolean }> = [
+    { label: "Full name" },
+    { label: "Phone number" },
+    { label: "Date of birth (DOB)" },
+    { label: "Occupation" },
+    { label: "Marital status" },
+    ...(fields.houseNumber !== "hidden" ? [{ label: "House number" }] : []),
+    { label: "Location / area" },
+    ...(fields.email !== "hidden" ? [{ label: "Email address" }] : []),
+    ...(fields.idCardNumber !== "hidden" ? [{ label: "ID card number" }] : []),
+    ...(fields.dailyContribution !== "hidden" ? [{ label: "Daily contribution (GHS)" }] : [])
+  ];
 
+  // If optional hidden settings produce an odd count, expand Location/Area or the last field cleanly
+  // only when it won't add an extra row (i.e. leave it spanning its own final row).
+  if (personalFieldDefs.length % 2 === 1) {
+    const last = personalFieldDefs[personalFieldDefs.length - 1];
+    if (last) {
+      last.wide = true;
+    }
+  }
+
+  const personalFields = personalFieldDefs.map((field) => blankField(field.label, field.wide)).join("");
+
+  const showNextOfKin = fields.nextOfKin !== "hidden";
   const kinFields = [
     blankField("Next of kin full name"),
     blankField("Next of kin phone"),
-    blankField("Next of kin location", true),
+    blankField("Next of kin location"),
     blankField("Next of kin house number")
   ].join("");
 
@@ -215,7 +338,8 @@ export function buildRegistrationFormDocumentHtml(options: RegistrationFormDocum
     blankField("Assigned field agent"),
     blankField("Account number"),
     blankField("Registration date"),
-    blankField("Staff name")
+    blankField("Staff name"),
+    blankField("Approved by")
   ].join("");
 
   return `<!DOCTYPE html>
@@ -227,37 +351,52 @@ export function buildRegistrationFormDocumentHtml(options: RegistrationFormDocum
 </head>
 <body>
   <article class="reg-doc">
-    <h1 class="reg-doc__company">${escapeHtml(company)}</h1>
-    <p class="reg-doc__title">Customer Registration Form</p>
+    <header class="reg-doc__masthead">
+      <div class="reg-doc__masthead-left">
+        <div class="reg-doc__brand">
+          ${logoHtml}
+          <div class="reg-doc__brand-text">
+            <h1 class="reg-doc__company">${escapeHtml(company)}</h1>
+            ${contactHtml}
+            <p class="reg-doc__title">Customer Registration Form</p>
+          </div>
+        </div>
 
-    <div class="reg-doc__top">
-      <section class="reg-doc__section" style="margin:0">
-        <h2>Account type</h2>
-        <div class="reg-doc__accounts">${accountBlocks}</div>
-      </section>
-      <div class="reg-doc__photo">Customer photo</div>
-    </div>
+        <div class="reg-doc__account-bar" role="group" aria-label="Account type">
+          <span class="reg-doc__account-heading">Account Type:</span>
+          <div class="reg-doc__accounts">${accountBlocks}</div>
+        </div>
+      </div>
+
+      <div class="reg-doc__photo">
+        <div class="reg-doc__photo-inner">Customer<br />Photo</div>
+      </div>
+    </header>
 
     <section class="reg-doc__section">
-      <h2>Customer details</h2>
+      <h2>Customer Details</h2>
       <div class="reg-doc__grid">${personalFields}</div>
-      <p class="reg-doc__note" style="margin-top:8px">
+      <p class="reg-doc__note">
         I confirm that the information on this form is true and I agree to the account rules that apply.
         ID card photo is captured in the system registration only (not on this paper form).
       </p>
       <div class="reg-doc__sign-block">
-        <div class="reg-doc__sign-line">Customer signature</div>
+        <div class="reg-doc__sign-line">Customer signature / thumbprint</div>
         <div class="reg-doc__sign-line">Date</div>
       </div>
     </section>
 
-    <section class="reg-doc__section">
-      <h2>Next of kin</h2>
+    ${
+      showNextOfKin
+        ? `<section class="reg-doc__section">
+      <h2>Next of Kin</h2>
       <div class="reg-doc__grid">${kinFields}</div>
-    </section>
+    </section>`
+        : ""
+    }
 
     <section class="reg-doc__section reg-doc__office">
-      <h2>Office use</h2>
+      <h2>Office Use Only</h2>
       <div class="reg-doc__grid">${officeFields}</div>
       <div class="reg-doc__sign-block">
         <div class="reg-doc__sign-line">Office / staff signature</div>

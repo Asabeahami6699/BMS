@@ -226,6 +226,8 @@ export type Customer = {
   assignedFieldAgentName?: string;
   createdByFieldAgentName?: string;
   dailyContributionAmount: number;
+  pendingDailyContributionAmount?: number | null;
+  pendingDailyContributionSetAt?: string | null;
   lockedBalance?: number;
   loanCollateralLocked?: number;
   accountBalance?: number;
@@ -1556,6 +1558,8 @@ export type PendingCollectionBatch = {
   fieldAgentName: string;
   fieldAgentEmail?: string;
   branchId?: string;
+  hasReportedDifferences?: boolean;
+  reportedDifferences?: CalloverReportLine[];
 };
 
 export async function listPendingCollectionBatches(params?: {
@@ -1588,7 +1592,7 @@ export async function getCollectionBatch(batchId: string): Promise<PendingCollec
 
 export async function postCollectionBatch(
   batchId: string,
-  body?: { cashReceivedAmount: number }
+  body?: { cashReceivedAmount: number; confirmDifferencesReviewed?: boolean }
 ): Promise<PendingCollectionBatch> {
   return fetchJson<PendingCollectionBatch>(
     `${API_BASE_URL}/api/v1/collection-batches/${batchId}/post`,
@@ -1600,13 +1604,27 @@ export async function postCollectionBatch(
   );
 }
 
+export async function rejectCollectionBatch(
+  batchId: string,
+  reason?: string
+): Promise<PendingCollectionBatch> {
+  return fetchJson<PendingCollectionBatch>(
+    `${API_BASE_URL}/api/v1/collection-batches/${batchId}/reject`,
+    {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify(reason ? { reason } : {})
+    }
+  );
+}
+
 export async function postAllCollectionBatches(body?: {
   businessDate?: string;
   fieldAgentId?: string;
   branchId?: string;
   cashByBatchId?: Record<string, number>;
-}): Promise<{ posted: number; batchIds: string[] }> {
-  return fetchJson<{ posted: number; batchIds: string[] }>(
+}): Promise<{ posted: number; batchIds: string[]; skippedWithDifferences?: number }> {
+  return fetchJson<{ posted: number; batchIds: string[]; skippedWithDifferences?: number }>(
     `${API_BASE_URL}/api/v1/collection-batches/post-all`,
     {
       method: "POST",
@@ -2353,6 +2371,27 @@ export async function updateCustomerStatus(
       method: "PATCH",
       headers: authHeaders(),
       body: JSON.stringify({ status, ...(reason ? { reason } : {}) })
+    }
+  );
+}
+
+export type ScheduleNextCardDailySusuResult = {
+  customer: Customer;
+  appliedImmediately: boolean;
+  cancelled: boolean;
+  effectiveCardNumber: number;
+};
+
+export async function scheduleCustomerNextCardDailySusu(
+  customerId: string,
+  dailyContributionAmount: number | null
+): Promise<ScheduleNextCardDailySusuResult> {
+  return fetchJson<ScheduleNextCardDailySusuResult>(
+    `${API_BASE_URL}/api/v1/customers/${encodeURIComponent(customerId)}/daily-susu`,
+    {
+      method: "PATCH",
+      headers: authHeaders(),
+      body: JSON.stringify({ dailyContributionAmount })
     }
   );
 }

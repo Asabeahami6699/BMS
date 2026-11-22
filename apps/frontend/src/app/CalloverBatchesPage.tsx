@@ -105,11 +105,13 @@ export function CalloverBatchesPage({ role }: Props) {
   const setBranchId = useCalloverBatchesStore((s) => s.setBranchId);
   const setFieldAgentId = useCalloverBatchesStore((s) => s.setFieldAgentId);
   const postBatch = useCalloverBatchesStore((s) => s.postBatch);
+  const rejectBatch = useCalloverBatchesStore((s) => s.rejectBatch);
   const postAll = useCalloverBatchesStore((s) => s.postAll);
   const settleVariance = useCalloverBatchesStore((s) => s.settleVariance);
 
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [cashByBatchId, setCashByBatchId] = useState<Record<string, string>>({});
+  const [reviewedDiffByBatchId, setReviewedDiffByBatchId] = useState<Record<string, boolean>>({});
   const [settleId, setSettleId] = useState<string | null>(null);
   const [settleAmount, setSettleAmount] = useState("");
   const [settleMethod, setSettleMethod] = useState<CashVarianceSettlementMethod>("cash_repayment");
@@ -184,24 +186,41 @@ export function CalloverBatchesPage({ role }: Props) {
     }
   }, [fieldAgentId, setFieldAgentId, visibleAgents]);
 
+  const autoPostableBatches = useMemo(
+    () => batches.filter((b) => !b.hasReportedDifferences),
+    [batches]
+  );
+
   const totals = useMemo(
     () => ({
       batches: batches.length,
       amount: batches.reduce((sum, b) => sum + b.totalAmount, 0),
       lines: batches.reduce((sum, b) => sum + b.lineCount, 0),
-      ready: batches.filter((b) => batchTotalsMatch(b)).length
+      ready: autoPostableBatches.filter((b) => batchTotalsMatch(b)).length,
+      heldWithDiffs: batches.filter((b) => b.hasReportedDifferences).length
     }),
-    [batches]
+    [batches, autoPostableBatches]
   );
 
-  const allLineReady = batches.length > 0 && totals.ready === batches.length;
-  const allCashReady = batches.every((b) => cashFlag(b.totalAmount, cashByBatchId[b.id] ?? "").amount != null);
+  const allLineReady =
+    autoPostableBatches.length > 0 && totals.ready === autoPostableBatches.length;
+  const allCashReady =
+    autoPostableBatches.length > 0 &&
+    autoPostableBatches.every((b) => cashFlag(b.totalAmount, cashByBatchId[b.id] ?? "").amount != null);
   const allReady = allLineReady && allCashReady;
 
   const postingRef = useRef(false);
 
   async function handlePostBatch(batch: PendingCollectionBatch) {
     if (postingRef.current) {
+      return;
+    }
+    const hasDiffs = Boolean(batch.hasReportedDifferences);
+    if (hasDiffs && !reviewedDiffByBatchId[batch.id]) {
+      showToast(
+        "Review and confirm the agent's reported differences first (or return the batch to the agent).",
+        "error"
+      );
       return;
     }
     const cash = cashFlag(batch.totalAmount, cashByBatchId[batch.id] ?? "");
@@ -211,7 +230,9 @@ export function CalloverBatchesPage({ role }: Props) {
     }
     postingRef.current = true;
     try {
-      const posted = await postBatch(batch.id, cash.amount);
+      const posted = await postBatch(batch.id, cash.amount, {
+        confirmDifferencesReviewed: hasDiffs
+      });
       const flag =
         posted.cashVarianceStatus === "balanced"
           ? "Balanced"
@@ -223,6 +244,21 @@ export function CalloverBatchesPage({ role }: Props) {
       showToast(`Batch posted · ${flag}`, "success");
     } catch (error) {
       showToast(toUserFacingError(error, "Failed to post batch"), "error");
+    } finally {
+      postingRef.current = false;
+    }
+  }
+
+  async function handleReturnBatch(batch: PendingCollectionBatch) {
+    if (postingRef.current) {
+      return;
+    }
+    postingRef.current = true;
+    try {
+      await rejectBatch(batch.id, "Returned for call-over difference resolution");
+      showToast(`Returned ${batch.fieldAgentName}'s call-over to the agent`, "info");
+    } catch (error) {
+      showToast(toUserFacingError(error, "Failed to return batch"), "error");
     } finally {
       postingRef.current = false;
     }
@@ -263,8 +299,13 @@ export function CalloverBatchesPage({ role }: Props) {
   }
 
   async function handlePostAll() {
-    if (batches.length === 0) {
-      showToast("No pending batches to post", "info");
+    if (autoPostableBatches.length === 0) {
+      showToast(
+        totals.heldWithDiffs > 0
+          ? "Batches with reported differences are held and cannot be auto-posted."
+          : "No pending batches to post",
+        "info"
+      );
       return;
     }
     if (!allLineReady) {
@@ -272,7 +313,7 @@ export function CalloverBatchesPage({ role }: Props) {
       return;
     }
     if (!allCashReady) {
-      showToast("Enter cash brought for every batch before posting all", "error");
+      showToast("Enter cash brought for every ready batch before posting all", "error");
       return;
     }
     if (postingRef.current) {
@@ -281,7 +322,7 @@ export function CalloverBatchesPage({ role }: Props) {
     postingRef.current = true;
     try {
       const cashMap: Record<string, number> = {};
-      for (const batch of batches) {
+      for (const batch of autoPostableBatches) {
         const cash = cashFlag(batch.totalAmount, cashByBatchId[batch.id] ?? "");
         if (cash.amount == null) {
           throw new Error("Missing cash amount");
@@ -289,7 +330,13 @@ export function CalloverBatchesPage({ role }: Props) {
         cashMap[batch.id] = cash.amount;
       }
       const result = await postAll(cashMap);
-      showToast(`Posted ${result.posted} batch${result.posted === 1 ? "" : "es"}`, "success");
+      const skipped = result.skippedWithDifferences ?? 0;
+      showToast(
+        skipped > 0
+          ? `Posted ${result.posted} batch${result.posted === 1 ? "" : "es"} · ${skipped} held with reported differences`
+          : `Posted ${result.posted} batch${result.posted === 1 ? "" : "es"}`,
+        "success"
+      );
     } catch (error) {
       showToast(toUserFacingError(error, "Failed to post batches"), "error");
     } finally {
@@ -497,11 +544,13 @@ export function CalloverBatchesPage({ role }: Props) {
             const lineTotals = batchLineSum(batch);
             const totalsMatch = batchTotalsMatch(batch);
             const cash = cashFlag(batch.totalAmount, cashByBatchId[batch.id] ?? "");
-            const canPost = totalsMatch && cash.amount != null;
+            const hasDiffs = Boolean(batch.hasReportedDifferences);
+            const diffConfirmed = !hasDiffs || Boolean(reviewedDiffByBatchId[batch.id]);
+            const canPost = totalsMatch && cash.amount != null && diffConfirmed;
             return (
               <article
                 key={batch.id}
-                className={`callover-batch-card${expanded ? " callover-batch-card--expanded" : ""}${totalsMatch ? "" : " callover-batch-card--warn"}`}
+                className={`callover-batch-card${expanded ? " callover-batch-card--expanded" : ""}${!totalsMatch || hasDiffs ? " callover-batch-card--warn" : ""}`}
               >
                 <div className="callover-batch-card__head">
                   <div className="callover-batch-card__agent">
@@ -513,7 +562,7 @@ export function CalloverBatchesPage({ role }: Props) {
                         <h2>{batch.fieldAgentName}</h2>
                         <span
                           className={`callover-batch-card__badge${
-                            !totalsMatch || cash.tone === "muted"
+                            hasDiffs || !totalsMatch || cash.tone === "muted"
                               ? " callover-batch-card__badge--warn"
                               : cash.tone === "ok"
                                 ? " callover-batch-card__badge--ready"
@@ -522,11 +571,13 @@ export function CalloverBatchesPage({ role }: Props) {
                                   : " callover-batch-card__badge--overage"
                           }`}
                         >
-                          {canPost
-                            ? cash.label
-                            : !totalsMatch
-                              ? "Totals mismatch"
-                              : "Enter cash brought"}
+                          {hasDiffs && !diffConfirmed
+                            ? "Difference reported · Held"
+                            : canPost
+                              ? cash.label
+                              : !totalsMatch
+                                ? "Totals mismatch"
+                                : "Enter cash brought"}
                         </span>
                       </div>
                       <p className="muted callover-batch-card__meta">
@@ -546,6 +597,14 @@ export function CalloverBatchesPage({ role }: Props) {
                       aria-expanded={expanded}
                     >
                       {expanded ? "Hide lines" : `View ${batch.lineCount} lines`}
+                    </button>
+                    <button
+                      type="button"
+                      className="button secondary"
+                      disabled={busyId !== null}
+                      onClick={() => void handleReturnBatch(batch)}
+                    >
+                      {busyId === `reject:${batch.id}` ? "Returning…" : "Return to agent"}
                     </button>
                     <button
                       type="button"
@@ -612,6 +671,39 @@ export function CalloverBatchesPage({ role }: Props) {
                   </p>
                 ) : null}
 
+                {hasDiffs && batch.reportedDifferences && batch.reportedDifferences.length > 0 ? (
+                  <div className="callover-batch-card__diff-box" role="alert">
+                    <strong>
+                      Agent reported {batch.reportedDifferences.length} difference
+                      {batch.reportedDifferences.length === 1 ? "" : "s"} — held from auto-posting
+                    </strong>
+                    <ul className="callover-batch-card__diff-list">
+                      {batch.reportedDifferences.map((diff, idx) => (
+                        <li key={`${diff.customerId}-${idx}`}>
+                          <span>{diff.customerName}</span>
+                          <span>
+                            Tally {formatMoney(diff.documentAmount)} vs System {formatMoney(diff.appAmount)} ({diff.varianceType})
+                            {diff.notes ? ` · ${diff.notes}` : ""}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                    <label className="callover-batch-card__diff-confirm">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(reviewedDiffByBatchId[batch.id])}
+                        onChange={(e) =>
+                          setReviewedDiffByBatchId((prev) => ({
+                            ...prev,
+                            [batch.id]: e.target.checked
+                          }))
+                        }
+                      />
+                      <span>I have reviewed these differences and authorize posting this batch</span>
+                    </label>
+                  </div>
+                ) : null}
+
                 {batch.agentNotes ? (
                   <blockquote className="callover-batch-card__notes">
                     <span className="callover-batch-card__notes-label">Agent notes</span>
@@ -622,16 +714,19 @@ export function CalloverBatchesPage({ role }: Props) {
                 {expanded ? (
                   <div className="callover-batch-card__lines">
                     <div className="callover-batch-card__lines-head">
-                      <h3>Collection lines</h3>
+                      <h3>Collection lines (tally sheet order)</h3>
                       <span className="muted">{batch.lines.length} entries</span>
                     </div>
                     <ul className="callover-batch-card__line-list">
-                      {batch.lines.map((line) => {
+                      {batch.lines.map((line, idx) => {
                         const customer = customerLabel(line.customerId);
                         return (
                           <li key={line.id} className="callover-batch-card__line">
                             <div className="callover-batch-card__line-main">
-                              <strong>{customer.name}</strong>
+                              <strong>
+                                <span className="callover-batch-card__line-num">#{idx + 1}</span>{" "}
+                                {customer.name}
+                              </strong>
                               {customer.sub ? <span className="muted">{customer.sub}</span> : null}
                             </div>
                             <div className="callover-batch-card__line-side">

@@ -3,7 +3,8 @@ import {
   createCustomerInputSchema,
   customerRegistrationInputSchema,
   rejectCustomerSchema,
-  roleMayApprove
+  roleMayApprove,
+  scheduleNextCardDailySusuSchema
 } from "@bms/shared";
 
 import { Router } from "express";
@@ -30,6 +31,8 @@ import {
   rejectCustomerRegistration,
 
   resetCustomerAccount,
+
+  scheduleNextCardDailySusu,
 
   searchActiveCustomers,
 
@@ -583,6 +586,50 @@ customersRouter.patch("/:customerId/status", async (req, res) => {
     });
   }
 });
+
+const OFFICE_DAILY_SUSU_ROLES = new Set([
+  "admin",
+  "super_admin",
+  "coordinator",
+  "teller",
+  "customer_service"
+]);
+
+customersRouter.patch(
+  "/:customerId/daily-susu",
+  requireAnyPermission("customers.create", "customers.read"),
+  validateBody(scheduleNextCardDailySusuSchema),
+  async (req, res) => {
+    const context = req.userContext;
+    if (!context) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    if (!OFFICE_DAILY_SUSU_ROLES.has(context.role)) {
+      res.status(403).json({
+        error: "Only office staff can update a customer's daily Susu amount for the next card"
+      });
+      return;
+    }
+    const customerId = Array.isArray(req.params.customerId)
+      ? req.params.customerId[0]
+      : req.params.customerId;
+    try {
+      res.json(
+        await scheduleNextCardDailySusu(
+          context.tenantId,
+          customerId,
+          context.userId,
+          req.body
+        )
+      );
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Failed to update daily Susu amount"
+      });
+    }
+  }
+);
 
 customersRouter.post("/:customerId/reset-account", async (req, res) => {
   const context = req.userContext;

@@ -16,6 +16,7 @@ import {
   listPendingCollectionBatches,
   postAllCollectionBatches,
   postCollectionBatch,
+  rejectCollectionBatch,
   settleCashVariance
 } from "../api";
 import { toUserFacingError } from "../../lib/networkError";
@@ -55,8 +56,15 @@ type CalloverBatchesState = {
   setBranchId: (value: string) => void;
   setFieldAgentId: (value: string) => void;
 
-  postBatch: (batchId: string, cashReceivedAmount: number) => Promise<PendingCollectionBatch>;
-  postAll: (cashByBatchId: Record<string, number>) => Promise<{ posted: number; batchIds: string[] }>;
+  postBatch: (
+    batchId: string,
+    cashReceivedAmount: number,
+    options?: { confirmDifferencesReviewed?: boolean }
+  ) => Promise<PendingCollectionBatch>;
+  rejectBatch: (batchId: string, reason?: string) => Promise<PendingCollectionBatch>;
+  postAll: (
+    cashByBatchId: Record<string, number>
+  ) => Promise<{ posted: number; batchIds: string[]; skippedWithDifferences?: number }>;
   settleVariance: (
     varianceId: string,
     input: { amount: number; method: CashVarianceSettlementMethod; notes?: string }
@@ -232,12 +240,26 @@ export const useCalloverBatchesStore = create<CalloverBatchesState>((set, get) =
     set({ liveSyncActive: false });
   },
 
-  postBatch: async (batchId, cashReceivedAmount) => {
+  postBatch: async (batchId, cashReceivedAmount, options) => {
     set({ busyId: batchId });
     try {
-      const posted = await postCollectionBatch(batchId, { cashReceivedAmount });
+      const posted = await postCollectionBatch(batchId, {
+        cashReceivedAmount,
+        ...(options?.confirmDifferencesReviewed ? { confirmDifferencesReviewed: true } : {})
+      });
       await get().refreshSilent();
       return posted;
+    } finally {
+      set({ busyId: null });
+    }
+  },
+
+  rejectBatch: async (batchId, reason) => {
+    set({ busyId: `reject:${batchId}` });
+    try {
+      const returned = await rejectCollectionBatch(batchId, reason);
+      await get().refreshSilent();
+      return returned;
     } finally {
       set({ busyId: null });
     }

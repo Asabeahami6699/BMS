@@ -162,6 +162,8 @@ export function SusuPassbookCard({ customerId, customerName, compact = false }: 
 
   const dailyPlan = activeCard.dailyContributionAmount;
   const feeBoxNum = activeCard.boxes.find((b) => b.isFeeBox)?.boxNumber ?? null;
+  const latestCardNumber = cards[cards.length - 1]?.cycleNumber ?? activeCard.cycleNumber;
+  const pendingNextDaily = passbook.pendingDailyContributionAmount ?? null;
 
   return (
     <section className={`susu-passbook ${compact ? "is-compact" : ""}`} aria-label="Susu passbook">
@@ -180,6 +182,13 @@ export function SusuPassbookCard({ customerId, customerName, compact = false }: 
               : `${activeCard.cycleDays}-day page · set daily contribution to track boxes`}
             {feeBoxNum ? ` · Box ${feeBoxNum} = Fee` : ""}
           </p>
+          {pendingNextDaily && pendingNextDaily > 0 ? (
+            <p className="susu-passbook-next-rate" role="status">
+              Scheduled for Page #{latestCardNumber + 1}:{" "}
+              <strong>GHS {formatShortMoney(pendingNextDaily)} / box</strong> (current page stays at{" "}
+              GHS {formatShortMoney(dailyPlan)})
+            </p>
+          ) : null}
         </div>
 
         <div className="susu-passbook-actions">

@@ -64,7 +64,8 @@ function buildState(
       byCustomer.set(item.customerId, { ...item, entryCount: 1 });
     }
   }
-  const items = [...byCustomer.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  // Keep tally-sheet chronological order: first customer collected appears 1st, second appears 2nd.
+  const items = [...byCustomer.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   return {
     customerIds: items.map((i) => i.customerId),
     items,
@@ -106,8 +107,7 @@ export const useAgentCollectionStore = create<AgentCollectionState>((set, get) =
             ? {
                 ...p,
                 amount: p.amount + amount,
-                entryCount: (p.entryCount ?? 1) + 1,
-                createdAt: new Date().toISOString()
+                entryCount: (p.entryCount ?? 1) + 1
               }
             : p
         )

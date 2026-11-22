@@ -1,4 +1,10 @@
-import { APP_BRAND_NAME, type AccountType, formatAccountAmount } from "@bms/shared";
+import {
+  APP_BRAND_NAME,
+  SUSU_COMMISSION_DEBIT_TAG,
+  SUSU_COMMISSION_REFUND_TAG,
+  type AccountType,
+  formatAccountAmount
+} from "@bms/shared";
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
 import { getCompanyProfile, type Customer, type LedgerEntry } from "./api";
@@ -151,6 +157,12 @@ function accountTypeLabel(type: AccountType | undefined): string {
 function typeLabel(entry: LedgerEntry): string {
   if (entry.transactionType === "susu_reversal") {
     return "Reversal";
+  }
+  if (entry.notes?.toLowerCase().includes(SUSU_COMMISSION_DEBIT_TAG)) {
+    return "Susu commission";
+  }
+  if (entry.notes?.toLowerCase().includes(SUSU_COMMISSION_REFUND_TAG)) {
+    return "Commission refund";
   }
   return entry.entryType === "credit" ? "Credit" : "Debit";
 }

@@ -335,7 +335,9 @@ fieldAgentsRouter.post("/me/callover/report", requirePermission("transactions.re
   }
 
   try {
-    const result = await submitCalloverReport(context.tenantId, context.userId, req.body);
+    const result = await submitCalloverReport(context.tenantId, context.userId, req.body, {
+      notifyOnDifferences: true
+    });
     res.status(201).json(result);
   } catch (error) {
     res.status(400).json({

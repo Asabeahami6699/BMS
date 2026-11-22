@@ -134,7 +134,8 @@ function printContextFromProfile(profile: CompanyProfile | null): RegistrationFo
   return {
     companyName: profile.name,
     companyPhone: profile.phone,
-    companyAddress: profile.address
+    companyAddress: profile.address,
+    companyLogoUrl: profile.logoUrl
   };
 }
 
@@ -429,7 +430,11 @@ export const useSettingsWorkspaceStore = create<SettingsWorkspaceState>((set, ge
     set({ savingCompanyProfile: true });
     try {
       const saved = await updateCompanyProfile(profile);
-      set({ companyProfile: saved, savingCompanyProfile: false });
+      set({
+        companyProfile: saved,
+        formSetupPrintContext: printContextFromProfile(saved),
+        savingCompanyProfile: false
+      });
       sectionSnapshotKey.companyProfile = JSON.stringify(saved);
       return saved;
     } catch (error) {

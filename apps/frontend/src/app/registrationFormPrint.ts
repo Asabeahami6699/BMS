@@ -6,6 +6,7 @@ export type RegistrationFormPrintContext = {
   companyName?: string;
   companyPhone?: string;
   companyAddress?: string;
+  companyLogoUrl?: string;
 };
 
 function documentHtml(setup: RegistrationFormSetup, context: RegistrationFormPrintContext, isDefault: boolean): string {
@@ -14,6 +15,7 @@ function documentHtml(setup: RegistrationFormSetup, context: RegistrationFormPri
     companyName: context.companyName,
     companyPhone: context.companyPhone,
     companyAddress: context.companyAddress,
+    companyLogoUrl: context.companyLogoUrl,
     isDefault
   });
 }

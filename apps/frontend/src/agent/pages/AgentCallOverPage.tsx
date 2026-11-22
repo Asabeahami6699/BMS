@@ -1,7 +1,11 @@
 import { formatAccountAmount } from "@bms/shared";
 import { useEffect, useMemo, useState } from "react";
 import type { Customer } from "../../app/api";
-import { submitCollectionBatchForApproval, type CalloverReportLine } from "../../app/api";
+import {
+  submitCalloverReport,
+  submitCollectionBatchForApproval,
+  type CalloverReportLine
+} from "../../app/api";
 import { useToast } from "../../components/Toast";
 import { toUserFacingError } from "../../lib/networkError";
 import { useNetworkStatus } from "../../lib/useNetworkStatus";
@@ -45,6 +49,8 @@ export function AgentCallOverPage() {
   const removeDiscrepancy = useAgentCalloverStore((s) => s.removeDiscrepancy);
 
   const [submitting, setSubmitting] = useState(false);
+  const [reportingDiff, setReportingDiff] = useState(false);
+  const [differenceHeldNotice, setDifferenceHeldNotice] = useState<string | null>(null);
   const [reportNotes, setReportNotes] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerQuery, setPickerQuery] = useState("");
@@ -99,7 +105,7 @@ export function AgentCallOverPage() {
   const hasCollections = totalCheckTargets > 0 || totalApp > 0;
 
   const sendDisabledReason = useMemo(() => {
-    if (submitting) {
+    if (submitting || reportingDiff) {
       return "Sending…";
     }
     if (!online) {
@@ -117,16 +123,21 @@ export function AgentCallOverPage() {
     if (!hasCollections) {
       return "Record at least one collection before call-over.";
     }
+    if (discrepancies.length > 0) {
+      return "Differences are listed below — report them to hold call-over or resolve them before sending.";
+    }
     if (!allCollectedChecked) {
       return `Check all ${totalCheckTargets} collected customer${totalCheckTargets === 1 ? "" : "s"} first.`;
     }
     return null;
   }, [
     submitting,
+    reportingDiff,
     online,
     batchStatus,
     canSubmitCallover,
     hasCollections,
+    discrepancies.length,
     allCollectedChecked,
     totalCheckTargets
   ]);
@@ -212,7 +223,11 @@ export function AgentCallOverPage() {
     }
   }
 
-  function handleReportDifferences() {
+  async function handleReportDifferences() {
+    if (!online) {
+      showToast("Connect to the internet to report differences.", "error");
+      return;
+    }
     const lines: CalloverReportLine[] = [];
     for (const d of discrepancies) {
       const given = parseAmount(d.givenAmount);
@@ -235,12 +250,41 @@ export function AgentCallOverPage() {
       showToast("Add at least one difference to report.", "error");
       return;
     }
-    void submitForApproval(lines, false);
+    setReportingDiff(true);
+    try {
+      const totalGiven = lines.reduce((s, l) => s + l.documentAmount, 0);
+      const totalAppLines = lines.reduce((s, l) => s + l.appAmount, 0);
+      await submitCalloverReport({
+        lines,
+        summary: {
+          totalDocument: totalGiven,
+          totalApp: totalAppLines,
+          totalVariance: Math.round((totalGiven - totalAppLines) * 100) / 100,
+          unresolvedCount: lines.filter((l) => l.varianceType !== "match").length
+        },
+        agentNotes: reportNotes.trim() || undefined
+      });
+      discrepancies.forEach((d) => removeDiscrepancy(d.id));
+      setReportNotes("");
+      setDifferenceHeldNotice(
+        `Reported ${lines.length} difference${lines.length === 1 ? "" : "s"} to the coordinator. Your call-over was NOT auto-posted — reconcile with the office first, then send for approval when ready.`
+      );
+      showToast("Difference reported — call-over held (not auto-posted)", "info");
+      setVarianceRefreshKey((k) => k + 1);
+    } catch (error) {
+      showToast(toUserFacingError(error, "Failed to report differences"), "error");
+    } finally {
+      setReportingDiff(false);
+    }
   }
 
   function handleSendForApproval() {
     if (totalCheckTargets === 0) {
       showToast("Record at least one collection before call-over.", "error");
+      return;
+    }
+    if (discrepancies.length > 0) {
+      showToast("Report or resolve your listed differences first.", "error");
       return;
     }
     if (checkedCount < totalCheckTargets) {
@@ -252,6 +296,7 @@ export function AgentCallOverPage() {
   }
 
   function renderCheckRow(
+    orderIndex: number,
     customerId: string,
     displayName: string,
     subtitle: string,
@@ -264,6 +309,9 @@ export function AgentCallOverPage() {
           checked={checked}
           onChange={() => toggleChecked(customerId)}
         />
+        <span className="agent-callover-tally-num" aria-label={`Tally line ${orderIndex}`}>
+          {orderIndex}
+        </span>
         <span className="agent-callover-check-row-body">
           <strong>{displayName}</strong>
           <span className="muted">{subtitle}</span>
@@ -283,6 +331,22 @@ export function AgentCallOverPage() {
       </p>
 
       <AgentCashVariancePanel refreshKey={varianceRefreshKey} />
+
+      {differenceHeldNotice ? (
+        <article className="card agent-callover-held-notice" role="status">
+          <p>
+            <strong>Call-over held for review.</strong> {differenceHeldNotice}
+          </p>
+        </article>
+      ) : null}
+
+      {batchStatus === "rejected" ? (
+        <article className="card agent-callover-held-notice" role="status">
+          <p>
+            <strong>Returned by coordinator.</strong> Review your collections and differences, then resend when ready.
+          </p>
+        </article>
+      ) : null}
 
       {batchStatus === "pending_approval" ? (
         <article className="card">
@@ -326,10 +390,13 @@ export function AgentCallOverPage() {
 
         {systemRows.length > 0 ? (
           <>
-            <p className="muted agent-callover-checklist-label">Collected today</p>
+            <p className="muted agent-callover-checklist-label">
+              Collected today (tally sheet order — 1st collected first)
+            </p>
             <div className="agent-callover-check-list">
-              {systemRows.map(({ customerId, displayName, item, count }) =>
+              {systemRows.map(({ customerId, displayName, item, count }, idx) =>
                 renderCheckRow(
+                  idx + 1,
                   customerId,
                   displayName,
                   `${formatMoney(item.amount)}${count > 1 ? ` · ${count} payments` : ""}`,
@@ -424,13 +491,16 @@ export function AgentCallOverPage() {
               onChange={(e) => setReportNotes(e.target.value)}
             />
           </label>
+          <p className="muted">
+            Reporting a difference notifies the coordinator and holds the call-over — it will NOT auto-post.
+          </p>
           <button
             type="button"
-            className="button"
-            disabled={submitting || !online || !canSubmitCallover}
-            onClick={handleReportDifferences}
+            className="button secondary"
+            disabled={reportingDiff || submitting || !online || !canSubmitCallover}
+            onClick={() => void handleReportDifferences()}
           >
-            {submitting ? "Submitting…" : "Send differences for approval"}
+            {reportingDiff ? "Reporting…" : "Report difference (hold call-over)"}
           </button>
         </section>
       ) : null}

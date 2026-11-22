@@ -1,6 +1,7 @@
 import {
   buildAccountOpenedMessage,
   buildLoanRepaymentFromSusuMessage,
+  buildSusuCommissionDebitMessage,
   buildTransactionAlertMessage,
   formatAccountAmount,
   hasTenantAddon,
@@ -24,6 +25,7 @@ type NotifyInput = {
   transactionId: string;
   type: "deposit" | "withdrawal" | "daily_susu";
   amount: number;
+  balanceOverride?: number;
   subscribedAddons?: TenantAddon[];
 };
 
@@ -161,9 +163,11 @@ export async function notifyCustomerTransactionSms(input: NotifyInput): Promise<
     return;
   }
 
-  const [brand, balance, settings] = await Promise.all([
+  const [brand, computedBalance, settings] = await Promise.all([
     resolveTenantName(input.tenantId),
-    computeCustomerBalance(input.tenantId, input.customerId),
+    input.balanceOverride !== undefined
+      ? Promise.resolve(input.balanceOverride)
+      : computeCustomerBalance(input.tenantId, input.customerId),
     getTenantSmsSettings(input.tenantId)
   ]);
 
@@ -171,7 +175,7 @@ export async function notifyCustomerTransactionSms(input: NotifyInput): Promise<
     brand: brand.slice(0, 40),
     type: input.type,
     amount: input.amount,
-    balance,
+    balance: computedBalance,
     accountNumber: customer.accountNumber,
     customerName: customer.fullName
   }).text;
@@ -281,6 +285,65 @@ export async function notifyCustomerLoanQualifiedSms(input: {
     senderId: settings.senderId
   });
   return true;
+}
+
+/** SMS when Susu cycle commission (service charge) is debited from the customer's account. */
+export async function notifyCustomerSusuCommissionSms(input: {
+  tenantId: string;
+  customerId: string;
+  transactionId: string;
+  amount: number;
+  cycleNumber?: number;
+  subscribedAddons?: TenantAddon[];
+}): Promise<void> {
+  const addons = input.subscribedAddons ?? (await loadTenantAddons(input.tenantId)) ?? [];
+  if (!hasTenantAddon(addons, "sms_notifications")) {
+    return;
+  }
+
+  const settings = await getTenantSmsSettings(input.tenantId);
+  if (
+    !settings.enabled ||
+    (!isSmsEventEnabled(settings, "withdrawal") &&
+      !isSmsEventEnabled(settings, "daily_susu") &&
+      !isSmsEventEnabled(settings, "deposit"))
+  ) {
+    return;
+  }
+
+  const customer = await getCustomerById(input.tenantId, input.customerId);
+  if (!customer?.phone) {
+    return;
+  }
+
+  const phone = normalizeGhanaPhone(customer.phone);
+  if (!phone) {
+    return;
+  }
+
+  const [brand, balance] = await Promise.all([
+    resolveTenantName(input.tenantId),
+    computeCustomerBalance(input.tenantId, input.customerId)
+  ]);
+
+  const message = buildSusuCommissionDebitMessage({
+    brand: brand.slice(0, 40),
+    amount: input.amount,
+    balance,
+    accountNumber: customer.accountNumber,
+    cycleNumber: input.cycleNumber
+  }).text;
+
+  await deliverSms({
+    tenantId: input.tenantId,
+    customerId: input.customerId,
+    eventType: "withdrawal",
+    phone,
+    message,
+    idempotencyKey: `susu-comm:${input.transactionId}`,
+    transactionId: input.transactionId,
+    senderId: settings.senderId
+  });
 }
 
 /** SMS when a loan repayment is taken from the customer's Susu/savings balance. */

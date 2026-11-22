@@ -4,7 +4,8 @@ import {
   getCollectionBatchById,
   listPendingCollectionBatches,
   postAllPendingCollectionBatches,
-  postCollectionBatch
+  postCollectionBatch,
+  rejectCollectionBatch
 } from "../services/collectionBatchService.js";
 import {
   creditCustomerFromOverage,
@@ -256,6 +257,7 @@ collectionBatchesRouter.post("/:batchId/post", requirePermission("transactions.c
       : typeof req.body?.cashReceivedAmount === "string"
         ? Number(req.body.cashReceivedAmount)
         : undefined;
+  const confirmDifferencesReviewed = req.body?.confirmDifferencesReviewed === true;
 
   try {
     const batch = await postCollectionBatch(
@@ -267,7 +269,7 @@ collectionBatchesRouter.post("/:batchId/post", requirePermission("transactions.c
         scopeType: context.scopeType
       },
       batchId,
-      { cashReceivedAmount }
+      { cashReceivedAmount, confirmDifferencesReviewed }
     );
     res.json(batch);
   } catch (error) {
@@ -276,6 +278,37 @@ collectionBatchesRouter.post("/:batchId/post", requirePermission("transactions.c
     });
   }
 });
+
+collectionBatchesRouter.post(
+  "/:batchId/reject",
+  requirePermission("transactions.create.daily_susu"),
+  async (req, res) => {
+    if (!requireCoordinator(req, res)) {
+      return;
+    }
+    const context = req.userContext!;
+    const batchId = Array.isArray(req.params.batchId) ? req.params.batchId[0] : req.params.batchId;
+    const reason = typeof req.body?.reason === "string" ? req.body.reason : undefined;
+    try {
+      const batch = await rejectCollectionBatch(
+        {
+          tenantId: context.tenantId,
+          userId: context.userId,
+          role: context.role,
+          branchId: context.branchId,
+          scopeType: context.scopeType
+        },
+        batchId,
+        reason
+      );
+      res.json(batch);
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Failed to return batch to agent"
+      });
+    }
+  }
+);
 
 collectionBatchesRouter.post("/post-all", requirePermission("transactions.create.daily_susu"), async (req, res) => {
   const context = req.userContext;

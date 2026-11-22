@@ -1,5 +1,6 @@
 import {
   buildAccountOpenedMessage,
+  buildSusuCommissionDebitMessage,
   buildTransactionAlertMessage,
   hasTenantAddon,
   normalizeCustomerEmail,
@@ -21,6 +22,7 @@ type NotifyInput = {
   transactionId: string;
   type: "deposit" | "withdrawal" | "daily_susu";
   amount: number;
+  balanceOverride?: number;
   subscribedAddons?: TenantAddon[];
 };
 
@@ -151,7 +153,9 @@ export async function notifyCustomerTransactionEmail(input: NotifyInput): Promis
 
   const [brand, balance] = await Promise.all([
     resolveTenantName(input.tenantId),
-    computeCustomerBalance(input.tenantId, input.customerId)
+    input.balanceOverride !== undefined
+      ? Promise.resolve(input.balanceOverride)
+      : computeCustomerBalance(input.tenantId, input.customerId)
   ]);
 
   const displayName = settings.fromName?.trim() || brand;
@@ -172,6 +176,64 @@ export async function notifyCustomerTransactionEmail(input: NotifyInput): Promis
     subject: alert.subject,
     message: alert.text,
     idempotencyKey: `email:tx:${input.transactionId}`,
+    transactionId: input.transactionId,
+    fromName: displayName,
+    replyTo: settings.replyToEmail || undefined
+  });
+}
+
+/** Email when Susu cycle commission (service charge) is debited from the customer's account. */
+export async function notifyCustomerSusuCommissionEmail(input: {
+  tenantId: string;
+  customerId: string;
+  transactionId: string;
+  amount: number;
+  cycleNumber?: number;
+  subscribedAddons?: TenantAddon[];
+}): Promise<void> {
+  const addons = input.subscribedAddons ?? (await loadTenantAddons(input.tenantId)) ?? [];
+  if (!hasTenantAddon(addons, "email_notifications")) {
+    return;
+  }
+
+  const settings = await getTenantEmailSettings(input.tenantId);
+  if (
+    !settings.enabled ||
+    (!isEmailEventEnabled(settings, "withdrawal") &&
+      !isEmailEventEnabled(settings, "daily_susu") &&
+      !isEmailEventEnabled(settings, "deposit"))
+  ) {
+    return;
+  }
+
+  const customer = await getCustomerById(input.tenantId, input.customerId);
+  const toEmail = normalizeCustomerEmail(customer?.email);
+  if (!toEmail) {
+    return;
+  }
+
+  const [brand, balance] = await Promise.all([
+    resolveTenantName(input.tenantId),
+    computeCustomerBalance(input.tenantId, input.customerId)
+  ]);
+
+  const displayName = settings.fromName?.trim() || brand;
+  const alert = buildSusuCommissionDebitMessage({
+    brand: displayName,
+    amount: input.amount,
+    balance,
+    accountNumber: customer?.accountNumber,
+    cycleNumber: input.cycleNumber
+  });
+
+  await deliverEmail({
+    tenantId: input.tenantId,
+    customerId: input.customerId,
+    eventType: "withdrawal",
+    toEmail,
+    subject: alert.subject,
+    message: alert.text,
+    idempotencyKey: `email:susu-comm:${input.transactionId}`,
     transactionId: input.transactionId,
     fromName: displayName,
     replyTo: settings.replyToEmail || undefined

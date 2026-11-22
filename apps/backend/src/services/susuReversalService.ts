@@ -1,5 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { reverseSusuCollectionSchema, type Transaction, formatAccountAmount } from "@bms/shared";
+import {
+  reverseSusuCollectionSchema,
+  SUSU_COMMISSION_DEBIT_TAG,
+  SUSU_COMMISSION_REFUND_TAG,
+  type Transaction,
+  formatAccountAmount
+} from "@bms/shared";
 import { assertBranchAccess } from "../middleware/branchScope.js";
 import { getSupabaseAdminClient } from "../config/supabaseClient.js";
 import { listBranches } from "./branchService.js";
@@ -240,6 +246,113 @@ export async function reverseSusuCollection(
 
   const reversalId = randomUUID();
   const supabase = getSupabaseAdminClient();
+
+  // If this collection had a paired separate Susu commission debit (susu_comm_tx:<id>),
+  // refund that commission debit back to the customer before reversing the full gross collection
+  // so the customer balance returns cleanly to its pre-collection level.
+  let pairedCommissionAmount = 0;
+  const debitTag = `${SUSU_COMMISSION_DEBIT_TAG}${existing.id}`;
+  const refundTag = `${SUSU_COMMISSION_REFUND_TAG}${existing.id}`;
+  if (supabase) {
+    const [{ data: commDebits }, { data: existingRefund }] = await Promise.all([
+      supabase
+        .from("customer_transactions")
+        .select("amount")
+        .eq("tenant_id", context.tenantId)
+        .eq("customer_id", existing.customerId)
+        .eq("type", "withdrawal")
+        .like("notes", `%${debitTag}%`),
+      supabase
+        .from("customer_transactions")
+        .select("id")
+        .eq("tenant_id", context.tenantId)
+        .eq("customer_id", existing.customerId)
+        .eq("type", "deposit")
+        .like("notes", `%${refundTag}%`)
+        .limit(1)
+        .maybeSingle()
+    ]);
+    if (!existingRefund?.id && commDebits && commDebits.length > 0) {
+      pairedCommissionAmount =
+        Math.round(
+          commDebits.reduce((sum, row) => sum + Number(row.amount ?? 0), 0) * 100
+        ) / 100;
+    }
+  } else {
+    const all = await listTransactions(context.tenantId);
+    const hasRefund = all.some(
+      (tx) =>
+        tx.customerId === existing.customerId &&
+        tx.type === "deposit" &&
+        (tx.notes ?? "").includes(refundTag)
+    );
+    if (!hasRefund) {
+      pairedCommissionAmount =
+        Math.round(
+          all
+            .filter(
+              (tx) =>
+                tx.customerId === existing.customerId &&
+                tx.type === "withdrawal" &&
+                (tx.notes ?? "").includes(debitTag)
+            )
+            .reduce((sum, tx) => sum + Number(tx.amount ?? 0), 0) * 100
+        ) / 100;
+    }
+  }
+
+  if (pairedCommissionAmount > 0) {
+    // Verify balance after refund will be sufficient to reverse the gross collection before crediting.
+    const customer = await getCustomerById(context.tenantId, existing.customerId);
+    const currentBalance = await computeCustomerBalance(context.tenantId, existing.customerId);
+    const locked = (customer?.lockedBalance ?? 0) + (customer?.loanCollateralLocked ?? 0);
+    if (currentBalance + pairedCommissionAmount - existing.amount < locked - 0.005) {
+      throw new Error("Customer balance is not high enough to reverse this collection");
+    }
+
+    const refundTxId = randomUUID();
+    const refundNotes = `Susu commission refund (collection reversed) · ${refundTag}`;
+    if (supabase) {
+      const { error: refundError } = await supabase.rpc("post_customer_transaction_atomic", {
+        p_transaction_id: refundTxId,
+        p_tenant_id: context.tenantId,
+        p_customer_id: existing.customerId,
+        p_type: "deposit",
+        p_amount: pairedCommissionAmount,
+        p_transaction_branch_id: existing.transactionBranchId,
+        p_home_branch_id: existing.homeBranchId,
+        p_recorded_by_user_id: "system:susu-commission",
+        p_field_agent_id: existing.fieldAgentId,
+        p_notes: refundNotes
+      });
+      if (refundError) {
+        throw new Error(`Failed to refund paired Susu commission: ${refundError.message}`);
+      }
+    } else {
+      upsertMemoryTransaction(context.tenantId, {
+        id: refundTxId,
+        tenantId: context.tenantId,
+        customerId: existing.customerId,
+        type: "deposit",
+        amount: pairedCommissionAmount,
+        transactionBranchId: existing.transactionBranchId,
+        homeBranchId: existing.homeBranchId,
+        recordedByUserId: "system:susu-commission",
+        fieldAgentId: existing.fieldAgentId,
+        createdAt: new Date().toISOString(),
+        notes: refundNotes,
+        executionStatus: "completed"
+      });
+      await addLedgerEntry({
+        tenantId: context.tenantId,
+        customerId: existing.customerId,
+        transactionId: refundTxId,
+        entryType: "credit",
+        amount: pairedCommissionAmount,
+        transactionBranchId: existing.transactionBranchId
+      });
+    }
+  }
 
   if (!supabase) {
     await applyMemoryReversal(context, existing, reversalId, reason);

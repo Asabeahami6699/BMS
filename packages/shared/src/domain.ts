@@ -31,6 +31,13 @@ export const updateCustomerStatusSchema = z.object({
 
 export type UpdateCustomerStatusInput = z.infer<typeof updateCustomerStatusSchema>;
 
+export const scheduleNextCardDailySusuSchema = z.object({
+  /** New daily Susu amount (GHS) for the next card. Pass null to cancel a scheduled change. */
+  dailyContributionAmount: z.number().positive().nullable()
+});
+
+export type ScheduleNextCardDailySusuInput = z.infer<typeof scheduleNextCardDailySusuSchema>;
+
 /** Months without qualifying activity before auto-status applies. */
 export const CUSTOMER_INACTIVE_AFTER_MONTHS = 12;
 export const CUSTOMER_DORMANT_AFTER_MONTHS = 24;
@@ -100,6 +107,10 @@ export const customerSchema = z.object({
   createdByFieldAgentName: z.string().optional(),
 
   dailyContributionAmount: z.number().nonnegative(),
+
+  /** Scheduled daily Susu amount (GHS) that activates automatically on the next card/cycle. */
+  pendingDailyContributionAmount: z.number().positive().nullable().optional(),
+  pendingDailyContributionSetAt: z.string().nullable().optional(),
 
   lockedBalance: z.number().nonnegative().optional(),
 

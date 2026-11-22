@@ -9,6 +9,7 @@ import {
   registrationPayloadForSetup,
   loanBorrowerRegistrationSchema,
   rejectCustomerSchema,
+  scheduleNextCardDailySusuSchema,
   updateCustomerStatusSchema,
   type AdminManagedCustomerStatus,
   type Customer,
@@ -75,6 +76,19 @@ async function resolveHomeBranchId(
 
 
 const customerStore = new Map<string, Customer[]>();
+/** In-memory fallback for scheduled next-card daily Susu rate if migration 097 is not yet applied. */
+const pendingDailyContributionFallback = new Map<
+  string,
+  { amount: number; setAt: string }
+>();
+
+function pendingDailyKey(tenantId: string, customerId: string): string {
+  return `${tenantId}:${customerId}`;
+}
+
+function isMissingPendingDailyColumn(message: string): boolean {
+  return /pending_daily_contribution/i.test(message);
+}
 
 
 
@@ -175,6 +189,19 @@ function mapCustomerRow(row: Record<string, unknown>): Customer {
     createdByFieldAgentId: String(row.created_by_field_agent_id),
 
     dailyContributionAmount: Number(row.daily_contribution_amount ?? 0),
+
+    pendingDailyContributionAmount:
+      row.pending_daily_contribution_amount != null
+        ? Number(row.pending_daily_contribution_amount)
+        : (pendingDailyContributionFallback.get(
+            pendingDailyKey(String(row.tenant_id), String(row.id))
+          )?.amount ?? undefined),
+    pendingDailyContributionSetAt:
+      row.pending_daily_contribution_set_at != null
+        ? String(row.pending_daily_contribution_set_at)
+        : (pendingDailyContributionFallback.get(
+            pendingDailyKey(String(row.tenant_id), String(row.id))
+          )?.setAt ?? undefined),
 
     lockedBalance:
       row.locked_balance != null ? Number(row.locked_balance) : undefined,
@@ -870,6 +897,8 @@ const LIGHT_CUSTOMER_COLUMNS = [
   "assigned_field_agent_id",
   "created_by_field_agent_id",
   "daily_contribution_amount",
+  "pending_daily_contribution_amount",
+  "pending_daily_contribution_set_at",
   "locked_balance",
   "loan_collateral_locked",
   "loan_qualified_at",
@@ -918,37 +947,42 @@ export async function listCustomers(
     return enrichCustomersWithAccountBalances(tenantId, named);
   }
 
-  let query = supabase
-    .from("customers")
-    .select(options?.light ? LIGHT_CUSTOMER_COLUMNS : "*")
-    .eq("tenant_id", tenantId);
+  const runCustomerListQuery = async (selectCols: string) => {
+    let q = supabase
+      .from("customers")
+      .select(selectCols)
+      .eq("tenant_id", tenantId);
 
-  if (options?.agentId) {
+    if (options?.agentId) {
+      q = q.or(
+        `created_by_field_agent_id.eq.${options.agentId},assigned_field_agent_id.eq.${options.agentId}`
+      );
+    }
 
-    query = query.or(
+    if (branchId) {
+      q = q.eq("home_branch_id", branchId);
+    }
 
-      `created_by_field_agent_id.eq.${options.agentId},assigned_field_agent_id.eq.${options.agentId}`
+    if (options?.status) {
+      q = q.eq("status", options.status);
+    }
 
-    );
+    return q.order("created_at", { ascending: false });
+  };
 
+  let { data, error } = await runCustomerListQuery(options?.light ? LIGHT_CUSTOMER_COLUMNS : "*");
+
+  if (error && options?.light && isMissingPendingDailyColumn(error.message)) {
+    const fallbackCols = LIGHT_CUSTOMER_COLUMNS.split(",")
+      .filter((col) => !col.startsWith("pending_daily_contribution_"))
+      .join(",");
+    const retry = await runCustomerListQuery(fallbackCols);
+    data = retry.data;
+    error = retry.error;
   }
-
-  if (branchId) {
-    query = query.eq("home_branch_id", branchId);
-  }
-
-  if (options?.status) {
-
-    query = query.eq("status", options.status);
-
-  }
-
-  const { data, error } = await query.order("created_at", { ascending: false });
 
   if (error) {
-
     throw new Error(`Failed to list customers: ${error.message}`);
-
   }
 
 
@@ -1459,6 +1493,271 @@ export async function deleteCustomer(tenantId: string, customerId: string): Prom
     tenantId,
     getTenantCustomers(tenantId).filter((c) => c.id !== customerId)
   );
+}
+
+export async function getPendingDailyContribution(
+  tenantId: string,
+  customerId: string
+): Promise<number | null> {
+  const supabase = getSupabaseAdminClient();
+  if (supabase) {
+    const { data, error } = await supabase
+      .from("customers")
+      .select("pending_daily_contribution_amount")
+      .eq("tenant_id", tenantId)
+      .eq("id", customerId)
+      .maybeSingle();
+    if (!error) {
+      const amount = Number(data?.pending_daily_contribution_amount ?? 0);
+      return amount > 0 ? Math.round(amount * 100) / 100 : null;
+    }
+    if (!isMissingPendingDailyColumn(error.message)) {
+      throw new Error(`Failed to load scheduled daily Susu rate: ${error.message}`);
+    }
+  }
+  const fallback = pendingDailyContributionFallback.get(pendingDailyKey(tenantId, customerId));
+  if (fallback && fallback.amount > 0) {
+    return Math.round(fallback.amount * 100) / 100;
+  }
+  const mem = getTenantCustomers(tenantId).find((c) => c.id === customerId);
+  if (mem?.pendingDailyContributionAmount && mem.pendingDailyContributionAmount > 0) {
+    return Math.round(mem.pendingDailyContributionAmount * 100) / 100;
+  }
+  return null;
+}
+
+export async function promotePendingDailyContributionToActive(
+  tenantId: string,
+  customerId: string,
+  nextAmount: number
+): Promise<void> {
+  const rounded = Math.round(Math.max(0, nextAmount) * 100) / 100;
+  if (rounded <= 0) {
+    return;
+  }
+  pendingDailyContributionFallback.delete(pendingDailyKey(tenantId, customerId));
+  const supabase = getSupabaseAdminClient();
+  if (supabase) {
+    const { error } = await supabase
+      .from("customers")
+      .update({
+        daily_contribution_amount: rounded,
+        pending_daily_contribution_amount: null,
+        pending_daily_contribution_set_at: null,
+        pending_daily_contribution_set_by: null
+      })
+      .eq("tenant_id", tenantId)
+      .eq("id", customerId);
+    if (error && isMissingPendingDailyColumn(error.message)) {
+      await supabase
+        .from("customers")
+        .update({ daily_contribution_amount: rounded })
+        .eq("tenant_id", tenantId)
+        .eq("id", customerId);
+    } else if (error) {
+      throw new Error(`Failed to activate next-card daily Susu rate: ${error.message}`);
+    }
+    return;
+  }
+
+  const customers = getTenantCustomers(tenantId);
+  const idx = customers.findIndex((c) => c.id === customerId);
+  if (idx >= 0) {
+    customers[idx] = {
+      ...customers[idx]!,
+      dailyContributionAmount: rounded,
+      pendingDailyContributionAmount: undefined,
+      pendingDailyContributionSetAt: undefined
+    };
+    setTenantCustomers(tenantId, customers);
+  }
+}
+
+export type ScheduleNextCardDailySusuResult = {
+  customer: Customer;
+  appliedImmediately: boolean;
+  cancelled: boolean;
+  effectiveCardNumber: number;
+};
+
+/**
+ * Office-side daily Susu rate change.
+ * - If the customer's current Susu card already has contributions recorded, schedules the new
+ *   amount on `pending_daily_contribution_amount` so it starts automatically on the next new card
+ *   without causing conflicts on the current card.
+ * - If the current card has no contributions yet (or the previous card already matured/closed),
+ *   applies the new amount immediately so the upcoming card starts with it.
+ */
+export async function scheduleNextCardDailySusu(
+  tenantId: string,
+  customerId: string,
+  actorUserId: string,
+  input: unknown
+): Promise<ScheduleNextCardDailySusuResult> {
+  const payload = scheduleNextCardDailySusuSchema.parse(input);
+  const existing = await getCustomerById(tenantId, customerId);
+  if (!existing) {
+    throw new Error("Customer not found");
+  }
+  if (existing.accountType !== "susu") {
+    throw new Error("Daily Susu rate changes only apply to Susu accounts");
+  }
+  if (existing.status !== "active") {
+    throw new Error("Customer account must be active to change the daily Susu amount");
+  }
+
+  const {
+    getCustomerSusuCycleSummary,
+    lockCurrentOpenCycleRateIfNeeded,
+    updateEmptyOpenCycleDailyRate
+  } = await import("./susuCycleCommissionService.js");
+  const summary = await getCustomerSusuCycleSummary(tenantId, customerId);
+  const cards = summary.passbook.cards;
+  const activeCard =
+    cards.find((c) => c.cycleNumber === summary.passbook.activeCardNumber) ??
+    cards[cards.length - 1] ??
+    null;
+
+  const hasContributionsOnOpenCard = Boolean(
+    activeCard && activeCard.status === "open" && activeCard.grossContributions > 0.005
+  );
+  const currentCardNumber = activeCard?.cycleNumber ?? 1;
+  const nextCardNumber =
+    activeCard && (activeCard.status === "matured" || activeCard.status === "closed" || hasContributionsOnOpenCard)
+      ? currentCardNumber + 1
+      : currentCardNumber;
+
+  const supabase = getSupabaseAdminClient();
+  const clearPendingInStore = async () => {
+    pendingDailyContributionFallback.delete(pendingDailyKey(tenantId, customerId));
+    if (supabase) {
+      const { error } = await supabase
+        .from("customers")
+        .update({
+          pending_daily_contribution_amount: null,
+          pending_daily_contribution_set_at: null,
+          pending_daily_contribution_set_by: null
+        })
+        .eq("tenant_id", tenantId)
+        .eq("id", customerId);
+      if (error && !isMissingPendingDailyColumn(error.message)) {
+        throw new Error(`Failed to clear scheduled daily Susu change: ${error.message}`);
+      }
+      return;
+    }
+    const customers = getTenantCustomers(tenantId);
+    const idx = customers.findIndex((c) => c.id === customerId);
+    if (idx >= 0) {
+      customers[idx] = {
+        ...customers[idx]!,
+        pendingDailyContributionAmount: undefined,
+        pendingDailyContributionSetAt: undefined
+      };
+      setTenantCustomers(tenantId, customers);
+    }
+  };
+
+  if (payload.dailyContributionAmount === null) {
+    await clearPendingInStore();
+    const updated = (await getCustomerById(tenantId, customerId)) ?? existing;
+    return {
+      customer: updated,
+      appliedImmediately: false,
+      cancelled: true,
+      effectiveCardNumber: nextCardNumber
+    };
+  }
+
+  const nextAmount = Math.round(payload.dailyContributionAmount * 100) / 100;
+  if (Math.abs(nextAmount - existing.dailyContributionAmount) < 0.005) {
+    await clearPendingInStore();
+    const updated = (await getCustomerById(tenantId, customerId)) ?? existing;
+    return {
+      customer: updated,
+      appliedImmediately: false,
+      cancelled: true,
+      effectiveCardNumber: nextCardNumber
+    };
+  }
+
+  if (hasContributionsOnOpenCard) {
+    // Lock the current in-progress card's rate on a persisted cycle row if none exists yet
+    // so historical Page #1 boxes never shift once the next card promotes the new rate.
+    await lockCurrentOpenCycleRateIfNeeded({
+      context: { userId: actorUserId, tenantId, role: "admin" },
+      customerId,
+      branchId: existing.homeBranchId,
+      dailyContributionAmount: existing.dailyContributionAmount,
+      activeCard: activeCard!
+    });
+
+    const now = new Date().toISOString();
+    if (supabase) {
+      const { error } = await supabase
+        .from("customers")
+        .update({
+          pending_daily_contribution_amount: nextAmount,
+          pending_daily_contribution_set_at: now,
+          pending_daily_contribution_set_by: actorUserId
+        })
+        .eq("tenant_id", tenantId)
+        .eq("id", customerId);
+      if (error) {
+        if (isMissingPendingDailyColumn(error.message)) {
+          pendingDailyContributionFallback.set(pendingDailyKey(tenantId, customerId), {
+            amount: nextAmount,
+            setAt: now
+          });
+        } else {
+          throw new Error(`Failed to schedule next-card daily Susu rate: ${error.message}`);
+        }
+      }
+    } else {
+      pendingDailyContributionFallback.set(pendingDailyKey(tenantId, customerId), {
+        amount: nextAmount,
+        setAt: now
+      });
+      const customers = getTenantCustomers(tenantId);
+      const idx = customers.findIndex((c) => c.id === customerId);
+      if (idx >= 0) {
+        customers[idx] = {
+          ...customers[idx]!,
+          pendingDailyContributionAmount: nextAmount,
+          pendingDailyContributionSetAt: now
+        };
+        setTenantCustomers(tenantId, customers);
+      }
+    }
+
+    const updated = (await getCustomerById(tenantId, customerId)) ?? {
+      ...existing,
+      pendingDailyContributionAmount: nextAmount,
+      pendingDailyContributionSetAt: now
+    };
+    return {
+      customer: updated,
+      appliedImmediately: false,
+      cancelled: false,
+      effectiveCardNumber: currentCardNumber + 1
+    };
+  }
+
+  // No collections recorded on the active card yet (or previous card is already completed/closed):
+  // apply immediately so the upcoming card opens at the new amount with zero conflict.
+  await promotePendingDailyContributionToActive(tenantId, customerId, nextAmount);
+  await updateEmptyOpenCycleDailyRate(tenantId, customerId, nextAmount);
+  const updated = (await getCustomerById(tenantId, customerId)) ?? {
+    ...existing,
+    dailyContributionAmount: nextAmount,
+    pendingDailyContributionAmount: undefined,
+    pendingDailyContributionSetAt: undefined
+  };
+  return {
+    customer: updated,
+    appliedImmediately: true,
+    cancelled: false,
+    effectiveCardNumber: nextCardNumber
+  };
 }
 
 export { QUALIFYING_TX_TYPES };

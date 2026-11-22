@@ -6,12 +6,15 @@ import {
   defaultSusuCommissionPolicy,
   extractGrossSusuContribution,
   roundMoney,
+  SUSU_COMMISSION_DEBIT_TAG,
+  SUSU_COMMISSION_REFUND_TAG,
   susuCommissionPolicySchema,
   susuCustomerCycleSchema,
   updateSusuCommissionPolicySchema,
   type SusuCommissionPolicy,
   type SusuCustomerCycle,
   type SusuCustomerCycleSummary,
+  type SusuPassbookCard,
   type SusuPassbookCollectionInput,
   type UpdateSusuCommissionPolicyInput
 } from "@bms/shared";
@@ -21,6 +24,10 @@ import {
   reverseInstitutionalIncome
 } from "./institutionalIncomeService.js";
 import { listBranches } from "./branchService.js";
+import {
+  getPendingDailyContribution,
+  promotePendingDailyContributionToActive
+} from "./customerService.js";
 
 type Ctx = {
   userId: string;
@@ -311,11 +318,19 @@ async function openCycle(options: {
   if (!policy.id) {
     (policy as SusuCommissionPolicy).id = policyId;
   }
-  // Prefer registration daily; policy default only when customer has none saved.
+  // Check if the customer has a scheduled next-card daily Susu rate waiting to activate.
+  const pendingNextDaily = await getPendingDailyContribution(
+    options.context.tenantId,
+    options.customerId
+  ).catch(() => null);
+
+  // Prefer scheduled next-card rate when opening a new card; otherwise registration daily; policy default last.
   const daily =
-    options.dailyContributionAmount > 0
-      ? options.dailyContributionAmount
-      : policy.defaultDailyContributionGhs;
+    pendingNextDaily && pendingNextDaily > 0
+      ? pendingNextDaily
+      : options.dailyContributionAmount > 0
+        ? options.dailyContributionAmount
+        : policy.defaultDailyContributionGhs;
   const agreed = policy.enabled
     ? computeAgreedCommissionAmount(policy, daily)
     : 0;
@@ -358,6 +373,13 @@ async function openCycle(options: {
   if (!supabase) {
     const list = memoryCycles.get(options.context.tenantId) ?? [];
     memoryCycles.set(options.context.tenantId, [cycle, ...list]);
+    if (pendingNextDaily && pendingNextDaily > 0) {
+      await promotePendingDailyContributionToActive(
+        options.context.tenantId,
+        options.customerId,
+        pendingNextDaily
+      ).catch(() => undefined);
+    }
     return cycle;
   }
 
@@ -413,7 +435,153 @@ async function openCycle(options: {
   if (error) {
     throw new Error(`Failed to open Susu cycle: ${error.message}`);
   }
+  if (pendingNextDaily && pendingNextDaily > 0) {
+    await promotePendingDailyContributionToActive(
+      options.context.tenantId,
+      options.customerId,
+      pendingNextDaily
+    ).catch(() => undefined);
+  }
   return mapCycle(data as Record<string, unknown>);
+}
+
+/**
+ * Persist a cycle snapshot for an in-progress open card that predates persisted cycles,
+ * locking its original daily rate before a scheduled next-card rate activates later.
+ */
+export async function lockCurrentOpenCycleRateIfNeeded(options: {
+  context: Ctx;
+  customerId: string;
+  branchId: string;
+  dailyContributionAmount: number;
+  activeCard: SusuPassbookCard;
+}): Promise<void> {
+  const existingOpen = await getOpenCycle(options.context.tenantId, options.customerId);
+  if (existingOpen) {
+    return;
+  }
+  const existingCycles = await listCustomerCycles(options.context.tenantId, options.customerId);
+  if (existingCycles.some((c) => c.cycleNumber === options.activeCard.cycleNumber)) {
+    return;
+  }
+  const policy = await getActiveSusuCommissionPolicy(options.context.tenantId);
+  const daily =
+    options.dailyContributionAmount > 0
+      ? roundMoney(options.dailyContributionAmount)
+      : roundMoney(options.activeCard.dailyContributionAmount);
+  if (daily <= 0) {
+    return;
+  }
+  const now = new Date().toISOString();
+  const cycle: SusuCustomerCycle = {
+    id: randomUUID(),
+    tenantId: options.context.tenantId,
+    customerId: options.customerId,
+    branchId: options.branchId,
+    policyId: policy.id ?? randomUUID(),
+    policyVersion: policy.version,
+    cycleNumber: options.activeCard.cycleNumber,
+    status: "open",
+    dailyContributionAmount: daily,
+    cycleDays: options.activeCard.cycleDays,
+    commissionBasis: options.activeCard.commissionBasis,
+    commissionAgreedAmount: options.activeCard.commissionAgreedAmount,
+    deductionTiming: options.activeCard.deductionTiming,
+    rolloverTreatment: policy.rolloverTreatment,
+    partialAllocation: policy.partialAllocation,
+    earlyWithdrawalPolicy: policy.earlyWithdrawalPolicy,
+    grossContributions: options.activeCard.grossContributions,
+    customerSavingsCredited: options.activeCard.customerSavingsCredited,
+    commissionEarned: options.activeCard.commissionAgreedAmount,
+    commissionCollected: options.activeCard.commissionCollected,
+    commissionOutstanding: options.activeCard.commissionOutstanding,
+    collectionsCount: new Set(options.activeCard.boxes.flatMap((b) => b.transactionIds)).size,
+    contributionDays: options.activeCard.checkedBoxes,
+    openedAt: options.activeCard.openedAt ?? now,
+    firstCollectionAt: options.activeCard.openedAt ?? now,
+    maturedAt: null,
+    closedAt: null,
+    rolledFromCycleId: null,
+    createdAt: now,
+    updatedAt: now
+  };
+  const supabase = getSupabaseAdminClient();
+  if (!supabase) {
+    const list = memoryCycles.get(options.context.tenantId) ?? [];
+    memoryCycles.set(options.context.tenantId, [cycle, ...list]);
+    return;
+  }
+  const { data: latestPolicy } = await supabase
+    .from("susu_commission_policies")
+    .select("id, version")
+    .eq("tenant_id", options.context.tenantId)
+    .order("version", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const resolvedPolicyId = String(latestPolicy?.id ?? cycle.policyId);
+  const resolvedVersion = Number(latestPolicy?.version ?? cycle.policyVersion);
+  await supabase.from("susu_customer_cycles").insert({
+    id: cycle.id,
+    tenant_id: cycle.tenantId,
+    customer_id: cycle.customerId,
+    branch_id: cycle.branchId,
+    policy_id: resolvedPolicyId,
+    policy_version: resolvedVersion,
+    cycle_number: cycle.cycleNumber,
+    status: cycle.status,
+    daily_contribution_amount: cycle.dailyContributionAmount,
+    cycle_days: cycle.cycleDays,
+    commission_basis: cycle.commissionBasis,
+    commission_agreed_amount: cycle.commissionAgreedAmount,
+    deduction_timing: cycle.deductionTiming,
+    rollover_treatment: cycle.rolloverTreatment,
+    partial_allocation: cycle.partialAllocation,
+    early_withdrawal_policy: cycle.earlyWithdrawalPolicy,
+    gross_contributions: cycle.grossContributions,
+    customer_savings_credited: cycle.customerSavingsCredited,
+    commission_earned: cycle.commissionEarned,
+    commission_collected: cycle.commissionCollected,
+    commission_outstanding: cycle.commissionOutstanding,
+    collections_count: cycle.collectionsCount,
+    contribution_days: cycle.contributionDays,
+    opened_at: cycle.openedAt,
+    first_collection_at: cycle.firstCollectionAt,
+    rolled_from_cycle_id: null,
+    created_at: now,
+    updated_at: now
+  });
+}
+
+/** Update an open cycle that has zero collections yet when the customer's daily rate changes. */
+export async function updateEmptyOpenCycleDailyRate(
+  tenantId: string,
+  customerId: string,
+  nextDailyAmount: number
+): Promise<void> {
+  const open = await getOpenCycle(tenantId, customerId);
+  if (!open || open.grossContributions > 0.005 || open.collectionsCount > 0) {
+    return;
+  }
+  const policy = await getActiveSusuCommissionPolicy(tenantId);
+  const daily = roundMoney(nextDailyAmount);
+  const agreed = policy.enabled
+    ? computeAgreedCommissionAmount(
+        {
+          commissionBasis: open.commissionBasis,
+          commissionFixedAmount: policy.commissionFixedAmount,
+          commissionPercent: policy.commissionPercent,
+          cycleDays: open.cycleDays
+        },
+        daily
+      )
+    : 0;
+  await saveCycle({
+    ...open,
+    dailyContributionAmount: daily,
+    commissionAgreedAmount: agreed,
+    commissionEarned: agreed,
+    commissionOutstanding: agreed
+  });
 }
 
 async function saveCycle(cycle: SusuCustomerCycle): Promise<SusuCustomerCycle> {
@@ -432,6 +600,8 @@ async function saveCycle(cycle: SusuCustomerCycle): Promise<SusuCustomerCycle> {
     .from("susu_customer_cycles")
     .update({
       status: next.status,
+      daily_contribution_amount: next.dailyContributionAmount,
+      commission_agreed_amount: next.commissionAgreedAmount,
       gross_contributions: next.grossContributions,
       customer_savings_credited: next.customerSavingsCredited,
       commission_earned: next.commissionEarned,
@@ -524,7 +694,7 @@ export async function applySusuCollectionToCycle(
     options.customerId,
     options.dailyContributionAmount
   );
-  const fallbackDaily =
+  let fallbackDaily =
     registeredDaily > 0 ? registeredDaily : policy.defaultDailyContributionGhs;
 
   let cycle = await getOpenCycle(context.tenantId, options.customerId);
@@ -535,6 +705,9 @@ export async function applySusuCollectionToCycle(
       branchId: options.branchId,
       dailyContributionAmount: fallbackDaily
     });
+    if (cycle.dailyContributionAmount > 0) {
+      fallbackDaily = cycle.dailyContributionAmount;
+    }
   } else if (
     registeredDaily > 0 &&
     cycle.commissionCollected <= 0 &&
@@ -596,6 +769,9 @@ export async function applySusuCollectionToCycle(
           dailyContributionAmount: fallbackDaily,
           rolledFromCycleId: matured.id
         });
+        if (cycle.dailyContributionAmount > 0) {
+          fallbackDaily = cycle.dailyContributionAmount;
+        }
         latestCycle = cycle;
         continue;
       }
@@ -681,6 +857,9 @@ export async function applySusuCollectionToCycle(
         dailyContributionAmount: fallbackDaily,
         rolledFromCycleId: updated.id
       });
+      if (cycle.dailyContributionAmount > 0) {
+        fallbackDaily = cycle.dailyContributionAmount;
+      }
       latestCycle = cycle;
     }
   }
@@ -853,7 +1032,8 @@ async function listCustomerCycles(
 const NON_SUSU_BRIDGE_DEPOSIT_TAGS = [
   "loan_disburse:",
   "loan_repay_reverse:",
-  "loan_repay:"
+  "loan_repay:",
+  SUSU_COMMISSION_REFUND_TAG
 ];
 
 function isExcludedNonSusuDepositNote(notes?: string | null): boolean {
@@ -864,15 +1044,40 @@ function isExcludedNonSusuDepositNote(notes?: string | null): boolean {
   return NON_SUSU_BRIDGE_DEPOSIT_TAGS.some((tag) => lower.includes(tag));
 }
 
+function extractCommissionDebitParentTxId(notes?: string | null): string | null {
+  if (!notes) {
+    return null;
+  }
+  const match = new RegExp(`${SUSU_COMMISSION_DEBIT_TAG}([0-9a-f-]+)`, "i").exec(notes);
+  return match?.[1] ?? null;
+}
+
 async function loadCustomerNonReversedSusuCollections(
   tenantId: string,
   customerId: string
-): Promise<SusuPassbookCollectionInput[]> {
+): Promise<{
+  collections: SusuPassbookCollectionInput[];
+  totalSeparateCommissionDebits: number;
+}> {
   const supabase = getSupabaseAdminClient();
   if (!supabase) {
     const { listTransactions } = await import("./transactionService.js");
     const all = await listTransactions(tenantId);
-    return all
+    const commDebitByParent = new Map<string, number>();
+    for (const tx of all) {
+      if (tx.customerId !== customerId || tx.type !== "withdrawal") {
+        continue;
+      }
+      const parentId = extractCommissionDebitParentTxId(tx.notes);
+      if (parentId) {
+        commDebitByParent.set(
+          parentId,
+          roundMoney((commDebitByParent.get(parentId) ?? 0) + Number(tx.amount ?? 0))
+        );
+      }
+    }
+    let totalSeparateCommissionDebits = 0;
+    const collections = all
       .filter(
         (tx) =>
           tx.customerId === customerId &&
@@ -882,39 +1087,71 @@ async function loadCustomerNonReversedSusuCollections(
           !tx.reversedByTransactionId
       )
       .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
-      .map((tx) => ({
-        id: tx.id,
-        grossAmount: extractGrossSusuContribution(tx.amount, tx.notes),
-        ledgerAmount: roundMoney(Math.max(0, Number(tx.amount ?? 0))),
-        createdAt: tx.createdAt
-      }));
+      .map((tx) => {
+        const separateComm = commDebitByParent.get(tx.id) ?? 0;
+        totalSeparateCommissionDebits = roundMoney(totalSeparateCommissionDebits + separateComm);
+        return {
+          id: tx.id,
+          grossAmount: extractGrossSusuContribution(tx.amount, tx.notes),
+          ledgerAmount: roundMoney(Math.max(0, Number(tx.amount ?? 0) - separateComm)),
+          createdAt: tx.createdAt
+        };
+      });
+    return { collections, totalSeparateCommissionDebits };
   }
 
-  const { data, error } = await supabase
-    .from("customer_transactions")
-    .select("id, type, amount, notes, created_at, reversed_at, reversed_by_transaction_id, execution_status")
-    .eq("tenant_id", tenantId)
-    .eq("customer_id", customerId)
-    .in("type", ["daily_susu", "deposit"])
-    .is("reversed_at", null)
-    .is("reversed_by_transaction_id", null)
-    .order("created_at", { ascending: true })
-    .limit(5000);
+  const [{ data, error }, { data: commRows }] = await Promise.all([
+    supabase
+      .from("customer_transactions")
+      .select("id, type, amount, notes, created_at, reversed_at, reversed_by_transaction_id, execution_status")
+      .eq("tenant_id", tenantId)
+      .eq("customer_id", customerId)
+      .in("type", ["daily_susu", "deposit"])
+      .is("reversed_at", null)
+      .is("reversed_by_transaction_id", null)
+      .order("created_at", { ascending: true })
+      .limit(5000),
+    supabase
+      .from("customer_transactions")
+      .select("amount, notes")
+      .eq("tenant_id", tenantId)
+      .eq("customer_id", customerId)
+      .eq("type", "withdrawal")
+      .like("notes", `%${SUSU_COMMISSION_DEBIT_TAG}%`)
+      .limit(5000)
+  ]);
   if (error) {
     throw new Error(`Failed to load Susu collections: ${error.message}`);
   }
-  return (data ?? [])
+  const commDebitByParent = new Map<string, number>();
+  for (const row of commRows ?? []) {
+    const parentId = extractCommissionDebitParentTxId(row.notes as string | null);
+    if (parentId) {
+      commDebitByParent.set(
+        parentId,
+        roundMoney((commDebitByParent.get(parentId) ?? 0) + Number(row.amount ?? 0))
+      );
+    }
+  }
+  let totalSeparateCommissionDebits = 0;
+  const collections = (data ?? [])
     .filter(
       (row) =>
         (!row.execution_status || row.execution_status === "completed") &&
         !isExcludedNonSusuDepositNote(row.notes as string | null)
     )
-    .map((row) => ({
-      id: String(row.id),
-      grossAmount: extractGrossSusuContribution(Number(row.amount ?? 0), row.notes as string | null),
-      ledgerAmount: roundMoney(Math.max(0, Number(row.amount ?? 0))),
-      createdAt: String(row.created_at)
-    }));
+    .map((row) => {
+      const id = String(row.id);
+      const separateComm = commDebitByParent.get(id) ?? 0;
+      totalSeparateCommissionDebits = roundMoney(totalSeparateCommissionDebits + separateComm);
+      return {
+        id,
+        grossAmount: extractGrossSusuContribution(Number(row.amount ?? 0), row.notes as string | null),
+        ledgerAmount: roundMoney(Math.max(0, Number(row.amount ?? 0) - separateComm)),
+        createdAt: String(row.created_at)
+      };
+    });
+  return { collections, totalSeparateCommissionDebits };
 }
 
 async function loadCustomerLedgerTotals(
@@ -1009,7 +1246,7 @@ export async function reverseSusuCollectionFromCycles(
   }
 
   // 2. Rebuild passbook from remaining non-reversed collections and sync persisted cycles.
-  const [policy, cycles, collections, registeredDaily] = await Promise.all([
+  const [policy, cycles, loaded, registeredDaily] = await Promise.all([
     getActiveSusuCommissionPolicy(context.tenantId),
     listCustomerCycles(context.tenantId, options.customerId),
     loadCustomerNonReversedSusuCollections(context.tenantId, options.customerId),
@@ -1025,7 +1262,7 @@ export async function reverseSusuCollectionFromCycles(
     dailyContributionAmount: registeredDaily,
     policy,
     cycles,
-    collections
+    collections: loaded.collections
   });
   const cardByNumber = new Map(passbook.cards.map((c) => [c.cycleNumber, c]));
 
@@ -1070,26 +1307,35 @@ export async function getCustomerSusuCycleSummary(
   tenantId: string,
   customerId: string
 ): Promise<SusuCustomerCycleSummary> {
-  const [policy, cycles, collections, registeredDaily, ledgerTotals] = await Promise.all([
+  const [policy, cycles, loaded, registeredDaily, pendingDaily, ledgerTotals] = await Promise.all([
     getActiveSusuCommissionPolicy(tenantId),
     listCustomerCycles(tenantId, customerId),
     loadCustomerNonReversedSusuCollections(tenantId, customerId),
     resolveRegisteredDailyContribution(tenantId, customerId),
+    getPendingDailyContribution(tenantId, customerId).catch(() => null),
     loadCustomerLedgerTotals(tenantId, customerId)
   ]);
+  const { collections, totalSeparateCommissionDebits } = loaded;
   const openCycle = cycles.find((c) => c.status === "open") ?? null;
   const passbookNetCredited = roundMoney(
     collections.reduce((sum, c) => sum + (c.ledgerAmount ?? c.grossAmount), 0)
   );
-  const otherCredits = roundMoney(Math.max(0, ledgerTotals.totalCredits - passbookNetCredited));
+  // Separate system commission debits were already deducted from each collection's passbook net credit,
+  // so subtract them from both totalCredits (gross credit on ledger) and totalDebits to avoid double-counting.
+  const passbookGrossOnLedger = roundMoney(passbookNetCredited + totalSeparateCommissionDebits);
+  const otherCredits = roundMoney(Math.max(0, ledgerTotals.totalCredits - passbookGrossOnLedger));
+  const nonCommissionDebits = roundMoney(
+    Math.max(0, ledgerTotals.totalDebits - totalSeparateCommissionDebits)
+  );
   const passbook = buildSusuCustomerPassbook({
     customerId,
     dailyContributionAmount: registeredDaily,
+    pendingDailyContributionAmount: pendingDaily,
     policy,
     cycles,
     collections,
     reconciliation: {
-      totalWithdrawalsAndCharges: ledgerTotals.totalDebits,
+      totalWithdrawalsAndCharges: nonCommissionDebits,
       otherCredits,
       accountBalance: ledgerTotals.accountBalance
     }

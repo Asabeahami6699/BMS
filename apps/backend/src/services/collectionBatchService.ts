@@ -1,7 +1,13 @@
 import { formatAccountAmount } from "@bms/shared";
 import { randomUUID } from "node:crypto";
-import type { SubmitCalloverInput } from "./calloverReportService.js";
-import { submitCalloverReport } from "./calloverReportService.js";
+import type { CalloverReportLineInput, SubmitCalloverInput } from "./calloverReportService.js";
+import {
+  extractReportedDifferences,
+  getCalloverReportById,
+  getLatestUnreviewedCalloverReport,
+  markCalloverReportsReviewed,
+  submitCalloverReport
+} from "./calloverReportService.js";
 import { getCustomerById } from "./customerService.js";
 import { getSupabaseAdminClient } from "../config/supabaseClient.js";
 import { beginIdempotency } from "../middleware/idempotency.js";
@@ -109,31 +115,39 @@ function batchKey(tenantId: string, agentId: string, date: string): string {
 }
 
 function aggregateItems(lines: CollectionBatchLine[]): FieldAgentTodayCollection[] {
-  const grouped = new Map<string, { amount: number; createdAt: string; entryCount: number }>();
+  const grouped = new Map<
+    string,
+    { amount: number; firstCreatedAt: string; entryCount: number; order: number }
+  >();
+  let order = 0;
   for (const line of lines) {
     const existing = grouped.get(line.customerId);
     if (!existing) {
       grouped.set(line.customerId, {
         amount: line.amount,
-        createdAt: line.createdAt,
-        entryCount: 1
+        firstCreatedAt: line.createdAt,
+        entryCount: 1,
+        order: order++
       });
       continue;
     }
     existing.amount += line.amount;
     existing.entryCount += 1;
-    if (line.createdAt > existing.createdAt) {
-      existing.createdAt = line.createdAt;
+    if (line.createdAt < existing.firstCreatedAt) {
+      existing.firstCreatedAt = line.createdAt;
     }
   }
   return [...grouped.entries()]
+    .sort(([, a], [, b]) => {
+      const cmp = a.firstCreatedAt.localeCompare(b.firstCreatedAt);
+      return cmp !== 0 ? cmp : a.order - b.order;
+    })
     .map(([customerId, row]) => ({
       customerId,
       amount: row.amount,
-      createdAt: row.createdAt,
+      createdAt: row.firstCreatedAt,
       entryCount: row.entryCount
-    }))
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    }));
 }
 
 function toTodayCollections(batch: CollectionBatch | null): FieldAgentTodayCollections {
@@ -480,7 +494,27 @@ export type PendingCollectionBatchView = CollectionBatch & {
   fieldAgentName: string;
   fieldAgentEmail?: string;
   branchId?: string;
+  hasReportedDifferences?: boolean;
+  reportedDifferences?: CalloverReportLineInput[];
 };
+
+async function loadReportedDifferencesForBatch(
+  batch: CollectionBatch
+): Promise<CalloverReportLineInput[]> {
+  if (batch.calloverReportId) {
+    const linked = await getCalloverReportById(batch.tenantId, batch.calloverReportId);
+    const linkedDiffs = extractReportedDifferences(linked);
+    if (linkedDiffs.length > 0) {
+      return linkedDiffs;
+    }
+  }
+  const latestUnreviewed = await getLatestUnreviewedCalloverReport(
+    batch.tenantId,
+    batch.fieldAgentId,
+    batch.businessDate
+  );
+  return extractReportedDifferences(latestUnreviewed);
+}
 
 function agentMatchesBranchFilter(
   agentBranchId: string | undefined,
@@ -564,11 +598,14 @@ export async function listPendingCollectionBatches(
       if (!agentMatchesBranchFilter(agent.branchId, context, options?.branchId)) {
         continue;
       }
+      const reportedDifferences = await loadReportedDifferencesForBatch(batch);
       results.push({
         ...batch,
         fieldAgentName: agent.name,
         fieldAgentEmail: agent.email,
-        branchId: agent.branchId
+        branchId: agent.branchId,
+        hasReportedDifferences: reportedDifferences.length > 0,
+        reportedDifferences
       });
     }
     return results;
@@ -585,11 +622,14 @@ export async function listPendingCollectionBatches(
       if (!agentMatchesBranchFilter(agent.branchId, context, options?.branchId)) {
         continue;
       }
+      const reportedDifferences = await loadReportedDifferencesForBatch(batch);
       results.push({
         ...batch,
         fieldAgentName: agent.name,
         fieldAgentEmail: agent.email,
-        branchId: agent.branchId
+        branchId: agent.branchId,
+        hasReportedDifferences: reportedDifferences.length > 0,
+        reportedDifferences
       });
     }
   }
@@ -622,8 +662,18 @@ export async function getCollectionBatchById(
     throw new Error("Collection batch not found");
   }
 
-  const agent = await resolveAgentName(context.tenantId, batch.fieldAgentId);
-  return { ...batch, fieldAgentName: agent.name, fieldAgentEmail: agent.email, branchId: agent.branchId };
+  const [agent, reportedDifferences] = await Promise.all([
+    resolveAgentName(context.tenantId, batch.fieldAgentId),
+    loadReportedDifferencesForBatch(batch)
+  ]);
+  return {
+    ...batch,
+    fieldAgentName: agent.name,
+    fieldAgentEmail: agent.email,
+    branchId: agent.branchId,
+    hasReportedDifferences: reportedDifferences.length > 0,
+    reportedDifferences
+  };
 }
 
 const batchPostLocks = new Map<string, Promise<unknown>>();
@@ -646,7 +696,7 @@ function withBatchLock<T>(batchId: string, work: () => Promise<T>): Promise<T> {
 async function postSingleBatch(
   context: CoordinatorContext,
   batch: CollectionBatch,
-  options?: { cashReceivedAmount?: number }
+  options?: { cashReceivedAmount?: number; confirmDifferencesReviewed?: boolean }
 ): Promise<CollectionBatch> {
   return withBatchLock(batch.id, () => postSingleBatchUnlocked(context, batch, options));
 }
@@ -654,7 +704,7 @@ async function postSingleBatch(
 async function postSingleBatchUnlocked(
   context: CoordinatorContext,
   batch: CollectionBatch,
-  options?: { cashReceivedAmount?: number }
+  options?: { cashReceivedAmount?: number; confirmDifferencesReviewed?: boolean }
 ): Promise<CollectionBatch> {
   const fresh = await loadBatchRow(context.tenantId, batch.fieldAgentId, batch.businessDate);
   const current = fresh ?? batch;
@@ -663,6 +713,13 @@ async function postSingleBatchUnlocked(
   }
   if (current.status !== "pending_approval") {
     throw new Error("Only pending batches can be posted");
+  }
+
+  const reportedDifferences = await loadReportedDifferencesForBatch(current);
+  if (reportedDifferences.length > 0 && !options?.confirmDifferencesReviewed) {
+    throw new Error(
+      "This call-over has reported differences from the field agent and cannot be auto-posted. Review the differences first, then return to the agent or explicitly confirm before posting."
+    );
   }
 
   const cashReceived =
@@ -749,15 +806,12 @@ async function postSingleBatchUnlocked(
   batch.postedBy = context.userId;
   await persistBatch(batch);
 
-  if (batch.calloverReportId) {
-    const supabase = getSupabaseAdminClient();
-    if (supabase) {
-      await supabase
-        .from("field_agent_callover_reports")
-        .update({ status: "reviewed" })
-        .eq("id", batch.calloverReportId);
-    }
-  }
+  await markCalloverReportsReviewed(
+    batch.tenantId,
+    batch.fieldAgentId,
+    batch.businessDate,
+    batch.calloverReportId
+  );
 
   try {
     const varianceNote =
@@ -800,10 +854,44 @@ async function postSingleBatchUnlocked(
 export async function postCollectionBatch(
   context: CoordinatorContext,
   batchId: string,
-  options?: { cashReceivedAmount?: number }
+  options?: { cashReceivedAmount?: number; confirmDifferencesReviewed?: boolean }
 ): Promise<CollectionBatch> {
   const batchView = await getCollectionBatchById(context, batchId);
   return postSingleBatch(context, batchView, options);
+}
+
+export async function rejectCollectionBatch(
+  context: CoordinatorContext,
+  batchId: string,
+  reason?: string
+): Promise<CollectionBatch> {
+  if (context.role !== "admin" && context.role !== "coordinator") {
+    throw new Error("Only admin or coordinator can return a collection batch");
+  }
+  const batch = await getCollectionBatchById(context, batchId);
+  if (batch.status !== "pending_approval") {
+    throw new Error("Only pending collection batches can be returned to the agent");
+  }
+  const note = reason?.trim() || undefined;
+  batch.status = "rejected";
+  if (note) {
+    batch.agentNotes = note;
+  }
+  await persistBatch(batch);
+  try {
+    await createAgentNotification({
+      tenantId: context.tenantId,
+      userId: batch.fieldAgentId,
+      kind: "collection_batch_pending",
+      title: "Call-over returned for review",
+      body: note
+        ? `Your call-over batch for ${batch.businessDate} was returned by the coordinator: ${note}`
+        : `Your call-over batch for ${batch.businessDate} was returned by the coordinator to resolve differences before posting.`
+    });
+  } catch {
+    /* non-blocking */
+  }
+  return batch;
 }
 
 export async function postAllPendingCollectionBatches(
@@ -815,13 +903,19 @@ export async function postAllPendingCollectionBatches(
     /** Map of batchId → cash brought. Required for each pending batch. */
     cashByBatchId?: Record<string, number>;
   }
-): Promise<{ posted: number; batchIds: string[] }> {
+): Promise<{ posted: number; batchIds: string[]; skippedWithDifferences: number }> {
   const pending = await listPendingCollectionBatches(context, options);
   const batchIds: string[] = [];
+  let skippedWithDifferences = 0;
   for (const batch of pending) {
+    if (batch.hasReportedDifferences) {
+      // Never auto-post a call-over where the agent reported differences.
+      skippedWithDifferences += 1;
+      continue;
+    }
     const cash = options?.cashByBatchId?.[batch.id];
     await postSingleBatch(context, batch, { cashReceivedAmount: cash });
     batchIds.push(batch.id);
   }
-  return { posted: batchIds.length, batchIds };
+  return { posted: batchIds.length, batchIds, skippedWithDifferences };
 }

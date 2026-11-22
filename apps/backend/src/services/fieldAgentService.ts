@@ -150,7 +150,7 @@ export async function getFieldAgentTodayCollections(
     }
     existing.amount += item.amount;
     existing.entryCount += 1;
-    if (item.createdAt > existing.createdAt) {
+    if (item.createdAt < existing.createdAt) {
       existing.createdAt = item.createdAt;
     }
   }
@@ -165,7 +165,7 @@ export async function getFieldAgentTodayCollections(
   return {
     customerIds: merged.map((i) => i.customerId),
     totalAmount: merged.reduce((sum, i) => sum + i.amount, 0),
-    items: merged.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    items: merged.sort((a, b) => a.createdAt.localeCompare(b.createdAt))
   };
 }
 

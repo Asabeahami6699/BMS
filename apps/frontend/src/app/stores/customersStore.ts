@@ -34,7 +34,7 @@ function bootstrapSnapshotKey(customers: Customer[], branches: Branch[]): string
   const customerSig = customers
     .map(
       (c) =>
-        `${c.id}\t${c.status}\t${c.fullName}\t${c.phone}\t${c.accountNumber ?? ""}\t${c.accountBalance ?? ""}\t${c.withdrawableBalance ?? ""}\t${c.loanReserveAmount ?? ""}\t${c.loanCollateralLocked ?? ""}\t${c.loanQualificationBadge ?? ""}\t${c.assignedFieldAgentId ?? ""}\t${c.assignedFieldAgentName ?? ""}\t${c.routeId ?? ""}`
+        `${c.id}\t${c.status}\t${c.fullName}\t${c.phone}\t${c.accountNumber ?? ""}\t${c.dailyContributionAmount}\t${c.pendingDailyContributionAmount ?? ""}\t${c.accountBalance ?? ""}\t${c.withdrawableBalance ?? ""}\t${c.loanReserveAmount ?? ""}\t${c.loanCollateralLocked ?? ""}\t${c.loanQualificationBadge ?? ""}\t${c.assignedFieldAgentId ?? ""}\t${c.assignedFieldAgentName ?? ""}\t${c.routeId ?? ""}`
     )
     .join("\n");
   const branchSig = branches.map((b) => `${b.id}\t${b.status}\t${b.name}`).join("\n");

@@ -28,7 +28,12 @@ export function printHtmlDocument(html: string, blockedMessage: string): void {
     iframe.remove();
   };
 
+  let printed = false;
   const trigger = () => {
+    if (printed) {
+      return;
+    }
+    printed = true;
     try {
       frameWindow.focus();
       frameWindow.print();
@@ -38,10 +43,31 @@ export function printHtmlDocument(html: string, blockedMessage: string): void {
     }
   };
 
+  const waitForImagesAndPrint = () => {
+    const images = Array.from(frameDocument.images ?? []);
+    const pending = images.filter((img) => !img.complete);
+    if (pending.length === 0) {
+      window.setTimeout(trigger, 250);
+      return;
+    }
+    let remaining = pending.length;
+    const onDone = () => {
+      remaining -= 1;
+      if (remaining <= 0) {
+        window.setTimeout(trigger, 150);
+      }
+    };
+    for (const img of pending) {
+      img.addEventListener("load", onDone, { once: true });
+      img.addEventListener("error", onDone, { once: true });
+    }
+    window.setTimeout(trigger, 2500);
+  };
+
   if (frameDocument.readyState === "complete") {
-    window.setTimeout(trigger, 300);
+    waitForImagesAndPrint();
   } else {
-    iframe.onload = () => window.setTimeout(trigger, 300);
+    iframe.onload = () => waitForImagesAndPrint();
   }
 }
 

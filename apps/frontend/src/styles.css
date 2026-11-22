@@ -18674,3 +18674,134 @@ button.cif-ledger__row:hover {
 .password-generate-btn:hover {
   text-decoration: underline;
 }
+
+/* Call-over tally order & difference hold */
+.agent-callover-tally-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.6rem;
+  height: 1.6rem;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  background: rgba(59, 130, 246, 0.16);
+  color: var(--primary-hover, #60a5fa);
+  flex-shrink: 0;
+}
+
+[data-theme="light"] .agent-callover-tally-num {
+  background: rgba(37, 99, 235, 0.1);
+  color: var(--primary, #2563eb);
+}
+
+.agent-callover-held-notice {
+  border-left: 3px solid var(--warning, #f59e0b);
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.callover-batch-card__diff-box {
+  margin-top: 0.75rem;
+  padding: 0.8rem 0.95rem;
+  border-radius: 10px;
+  border: 1px solid rgba(245, 158, 11, 0.42);
+  background: rgba(245, 158, 11, 0.09);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.callover-batch-card__diff-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+}
+
+.callover-batch-card__diff-list li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+
+.callover-batch-card__diff-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.callover-batch-card__line-num {
+  display: inline-block;
+  min-width: 1.75rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+/* Next-card daily Susu rate change */
+.cif-next-daily-pill {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.cif-next-daily-box {
+  padding-top: 0.25rem;
+}
+
+.cif-next-daily-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.cif-next-daily-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(59, 130, 246, 0.06);
+}
+
+.cif-next-daily-hint {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.cif-next-daily-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+.cif-next-daily-controls .field {
+  flex: 1 1 150px;
+  margin: 0;
+}
+
+.susu-passbook-next-rate {
+  margin: 0.35rem 0 0;
+  padding: 0.32rem 0.6rem;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--text);
+  display: inline-block;
+}
+
+[data-theme="light"] .susu-passbook-next-rate {
+  background: rgba(37, 99, 235, 0.09);
+}
