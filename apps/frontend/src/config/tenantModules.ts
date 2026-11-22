@@ -133,11 +133,26 @@ function buildSusuChildren(susuNav?: SusuNavVisibilityRow[]): NavChildDef[] {
       anyPermissions: ["income.read", "income.read.daily"]
     });
   }
+  const TELLER_CALLOVER_PATH = "susu/teller-callover";
+  if (!byPath.has(TELLER_CALLOVER_PATH)) {
+    byPath.set(TELLER_CALLOVER_PATH, {
+      navPath: TELLER_CALLOVER_PATH,
+      label: "Teller call-over",
+      description:
+        "Check daily branch counter deposits and withdrawals before closing the till.",
+      roles: ["admin", "coordinator", "teller"],
+      anyPermissions: ["transactions.read"]
+    });
+  }
   const order = [
     ...SUSU_NAV_VISIBILITY.map((r) => r.navPath),
     ...(byPath.has(OVERAGES_SHORTAGES_NAV_CHILD.to) &&
     !SUSU_NAV_VISIBILITY.some((r) => r.navPath === OVERAGES_SHORTAGES_NAV_CHILD.to)
       ? [OVERAGES_SHORTAGES_NAV_CHILD.to]
+      : []),
+    ...(byPath.has(TELLER_CALLOVER_PATH) &&
+    !SUSU_NAV_VISIBILITY.some((r) => r.navPath === TELLER_CALLOVER_PATH)
+      ? [TELLER_CALLOVER_PATH]
       : []),
     ...(byPath.has(CYCLE_FEES_PATH) &&
     !SUSU_NAV_VISIBILITY.some((r) => r.navPath === CYCLE_FEES_PATH)

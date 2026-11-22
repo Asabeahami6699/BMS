@@ -213,7 +213,7 @@ export function computeDashboardPageLoading(pathname: string): boolean {
     return useCustomersStore.getState().loading;
   }
 
-  if (path === "susu/collections") {
+  if (path === "susu/collections" || path === "susu/teller-callover") {
     return branchCounterLoading();
   }
 

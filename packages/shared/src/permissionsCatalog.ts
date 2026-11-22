@@ -692,6 +692,14 @@ export const SUSU_NAV_VISIBILITY: SusuNavVisibilityRow[] = [
     roles: ["admin", "field_agent", "coordinator", "teller"]
   },
   {
+    navPath: "susu/teller-callover",
+    label: "Teller call-over",
+    description:
+      "Check daily branch counter deposits and withdrawals before closing the till.",
+    anyPermissions: ["transactions.read"],
+    roles: ["admin", "coordinator", "teller"]
+  },
+  {
     navPath: "susu/agents",
     label: "Agents",
     description: "Field agent roster and performance.",

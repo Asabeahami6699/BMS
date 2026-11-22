@@ -2117,6 +2117,91 @@ html {
   border-color: color-mix(in srgb, #b71c1c 55%, transparent);
 }
 
+.branch-float__top-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.teller-callover-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-input) 55%, var(--bg-surface));
+}
+
+.teller-callover-banner h3 {
+  margin: 0;
+  font-size: 0.92rem;
+}
+
+.teller-callover-page__head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.teller-callover-page__board,
+.teller-callover-page__close,
+.teller-callover-page__status-card {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.teller-callover-page__status-card h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.teller-callover-page__status-card p {
+  margin: 0;
+}
+
+.teller-callover-page__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.teller-callover-page__search {
+  min-width: 14rem;
+}
+
+.teller-callover__col-total {
+  display: block;
+  font-size: 0.76rem;
+  margin-top: 0.1rem;
+}
+
+.teller-callover__list--tall {
+  max-height: 26rem;
+}
+
+.teller-callover-page__close-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+@media (max-width: 680px) {
+  .teller-callover-page__close-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.teller-callover-page__close-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .branch-float__eod-wrap {
   display: grid;
   gap: 1rem;

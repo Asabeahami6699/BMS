@@ -57,6 +57,16 @@ function canAccessSusuIncomeFallback(
   return hasAnyPermission(permissions, ["income.read", "income.read.daily"]);
 }
 
+function canAccessTellerCalloverFallback(
+  role: Role | undefined,
+  permissions: Permission[] | undefined
+): boolean {
+  if (role !== "admin" && role !== "coordinator" && role !== "teller") {
+    return false;
+  }
+  return hasAnyPermission(permissions, ["transactions.read"]);
+}
+
 export function SusuPermissionGate({
   role,
   permissions,
@@ -70,7 +80,8 @@ export function SusuPermissionGate({
     canAccessSusuRoute(role, permissions, route, susuNavVisibility) ||
     (path === "susu/overages-shortages" && canAccessOsFallback(role, permissions)) ||
     (path === "susu/cycle-commission" && canAccessCycleFeesFallback(role, permissions)) ||
-    (path === "susu/income" && canAccessSusuIncomeFallback(role, permissions));
+    (path === "susu/income" && canAccessSusuIncomeFallback(role, permissions)) ||
+    (path === "susu/teller-callover" && canAccessTellerCalloverFallback(role, permissions));
   if (!allowed) {
     return <>{denied}</>;
   }

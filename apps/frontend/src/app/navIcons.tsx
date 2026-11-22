@@ -63,6 +63,7 @@ const iconByPath: Record<string, string> = {
   "susu/overages-shortages": "⚖",
   "susu/till-float": "💵",
   "susu/collections": "₵",
+  "susu/teller-callover": "☑",
   "susu/agents": "🚶",
   "susu/coordinators": "👥",
   "susu/routes": "↝",

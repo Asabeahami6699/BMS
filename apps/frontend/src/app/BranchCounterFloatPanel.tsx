@@ -45,26 +45,6 @@ function formatMoney(n: number): string {
   return `GHS ${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-function formatCalloverTime(iso: string): string {
-  try {
-    return new Date(iso).toLocaleTimeString(undefined, {
-      hour: "2-digit",
-      minute: "2-digit"
-    });
-  } catch {
-    return "";
-  }
-}
-
-function isFieldPayoutLine(line: BranchCounterStatementLine): boolean {
-  const notes = (line.notes ?? "").toLowerCase();
-  return (
-    notes.includes("teller cash payout") ||
-    notes.includes("agency withdrawal") ||
-    notes.includes("teller payout")
-  );
-}
-
 const REQUIRES_FLOAT = new Set<AppRole>(["teller", "coordinator"]);
 
 const ACTION_COPY: Record<
@@ -120,9 +100,6 @@ export function BranchCounterFloatPanel({
     fallbackStatement,
     tellerCalloverCheckedBySession,
     tellerCalloverConfirmedBySession,
-    toggleTellerCalloverTx,
-    setTellerCalloverMany,
-    setTellerCalloverConfirmed,
     clearTellerCallover
   } = useBranchCounterStore(
     useShallow((s) => ({
@@ -130,9 +107,6 @@ export function BranchCounterFloatPanel({
       fallbackStatement: s.statement,
       tellerCalloverCheckedBySession: s.tellerCalloverCheckedBySession,
       tellerCalloverConfirmedBySession: s.tellerCalloverConfirmedBySession,
-      toggleTellerCalloverTx: s.toggleTellerCalloverTx,
-      setTellerCalloverMany: s.setTellerCalloverMany,
-      setTellerCalloverConfirmed: s.setTellerCalloverConfirmed,
       clearTellerCallover: s.clearTellerCallover
     }))
   );
@@ -533,21 +507,35 @@ export function BranchCounterFloatPanel({
         </button>
 
         {needsFloat && tillOpen ? (
-          <button
-            type="button"
-            className="button branch-float__top-action"
-            disabled={busy}
-            onClick={(e) => {
-              e.stopPropagation();
-              openMovement(
-                floatSummary?.expectedCash != null && floatSummary.expectedCash <= 0
-                  ? "extra_cash"
-                  : "extra_float"
-              );
-            }}
-          >
-            Till movement
-          </button>
+          <div className="branch-float__top-actions">
+            <Link
+              to="/app/susu/teller-callover"
+              className="button secondary branch-float__top-action"
+              onClick={(e) => e.stopPropagation()}
+            >
+              Teller call-over{" "}
+              {tellerCallover.readyToClose
+                ? "✓"
+                : tellerCallover.totalCount > 0
+                  ? `(${tellerCallover.checkedCount}/${tellerCallover.totalCount})`
+                  : ""}
+            </Link>
+            <button
+              type="button"
+              className="button branch-float__top-action"
+              disabled={busy}
+              onClick={(e) => {
+                e.stopPropagation();
+                openMovement(
+                  floatSummary?.expectedCash != null && floatSummary.expectedCash <= 0
+                    ? "extra_cash"
+                    : "extra_float"
+                );
+              }}
+            >
+              Till movement
+            </button>
+          </div>
         ) : null}
 
         {needsFloat && !floatSession ? (
@@ -766,218 +754,21 @@ export function BranchCounterFloatPanel({
 
           {floatSession?.status === "open" && needsFloat ? (
             <div className="branch-float__eod-wrap">
-              <section className="teller-callover" aria-label="Teller end-of-day call-over">
-                <div className="teller-callover__head">
-                  <div>
-                    <h3>1. Teller call-over (Deposits &amp; Withdrawals)</h3>
-                    <p className="muted teller-callover__lead">
-                      Verify every deposit slip and withdrawal voucher for{" "}
-                      <strong>{floatSession.businessDate}</strong> before closing your till.
-                    </p>
-                  </div>
-                  <span
-                    className={`susu-closing-editor__pill ${
-                      tellerCallover.readyToClose
-                        ? "susu-closing-editor__pill--ok"
-                        : "susu-closing-editor__pill--delta"
-                    }`}
-                  >
-                    {tellerCallover.totalCount === 0
-                      ? tellerCallover.confirmed
-                        ? "Verified (no entries)"
-                        : "Confirm zero entries"
-                      : tellerCallover.allItemsChecked
-                        ? `${tellerCallover.checkedCount}/${tellerCallover.totalCount} checked`
-                        : `${tellerCallover.checkedCount}/${tellerCallover.totalCount} checked`}
-                  </span>
+              <div className="teller-callover-banner">
+                <div>
+                  <h3>1. Teller call-over</h3>
+                  <p className="muted teller-callover__lead">
+                    {tellerCallover.readyToClose
+                      ? `Call-over verified (${tellerCallover.deposits.length} deposit(s) · ${tellerCallover.withdrawals.length} withdrawal(s)). Ready to close your till.`
+                      : tellerCallover.totalCount === 0
+                        ? "Confirm your daily call-over on the Teller call-over page before closing your till."
+                        : `${tellerCallover.checkedCount} of ${tellerCallover.totalCount} deposits & withdrawals checked. Complete verification on Teller call-over before closing.`}
+                  </p>
                 </div>
-
-                <div className="teller-callover__recap">
-                  <div>
-                    <span className="muted">Opening + extra cash</span>
-                    <strong>{formatMoney(initialCash + extraCash)}</strong>
-                  </div>
-                  <div>
-                    <span className="muted">
-                      Deposits ({tellerCallover.deposits.length})
-                    </span>
-                    <strong className="teller-callover__val--in">
-                      + {formatMoney(tellerCallover.depositTotal)}
-                    </strong>
-                  </div>
-                  <div>
-                    <span className="muted">
-                      Withdrawals ({tellerCallover.withdrawals.length})
-                    </span>
-                    <strong className="teller-callover__val--out">
-                      − {formatMoney(tellerCallover.withdrawalTotal)}
-                    </strong>
-                  </div>
-                  <div>
-                    <span className="muted">Till expenses</span>
-                    <strong>− {formatMoney(totalExpenses)}</strong>
-                  </div>
-                  <div className="teller-callover__recap-total">
-                    <span className="muted">Expected drawer cash</span>
-                    <strong>{formatMoney(floatSummary?.expectedCash ?? 0)}</strong>
-                  </div>
-                </div>
-
-                <div className="teller-callover__grid">
-                  <div className="teller-callover__col">
-                    <div className="teller-callover__col-head">
-                      <h4>
-                        Deposits ({tellerCallover.checkedDepositsCount}/
-                        {tellerCallover.deposits.length})
-                      </h4>
-                      {tellerCallover.deposits.length > 0 ? (
-                        <button
-                          type="button"
-                          className="button secondary teller-callover__toggle-all"
-                          onClick={() =>
-                            setTellerCalloverMany(
-                              tellerCallover.sessionId,
-                              tellerCallover.depositIds,
-                              tellerCallover.checkedDepositsCount < tellerCallover.deposits.length
-                            )
-                          }
-                        >
-                          {tellerCallover.checkedDepositsCount === tellerCallover.deposits.length
-                            ? "Uncheck all"
-                            : "Check all"}
-                        </button>
-                      ) : null}
-                    </div>
-                    {tellerCallover.deposits.length === 0 ? (
-                      <p className="muted teller-callover__empty">
-                        No counter deposits posted by you today.
-                      </p>
-                    ) : (
-                      <ul className="teller-callover__list">
-                        {tellerCallover.deposits.map((line) => {
-                          const checked = tellerCallover.checkedIds.has(line.id);
-                          return (
-                            <li
-                              key={line.id}
-                              className={`teller-callover__row${checked ? " teller-callover__row--checked" : ""}`}
-                            >
-                              <label className="teller-callover__row-label">
-                                <input
-                                  type="checkbox"
-                                  checked={checked}
-                                  onChange={() =>
-                                    toggleTellerCalloverTx(tellerCallover.sessionId, line.id)
-                                  }
-                                />
-                                <span className="teller-callover__row-main">
-                                  <strong>{line.customerName}</strong>
-                                  <span className="muted teller-callover__row-meta">
-                                    {line.customerAccountNumber ? `${line.customerAccountNumber} · ` : ""}
-                                    {formatCalloverTime(line.createdAt)}
-                                    {line.type === "daily_susu" ? " · Daily Susu" : " · Deposit"}
-                                  </span>
-                                </span>
-                                <span className="teller-callover__row-amt teller-callover__val--in">
-                                  + {formatMoney(line.amount)}
-                                </span>
-                              </label>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    )}
-                  </div>
-
-                  <div className="teller-callover__col">
-                    <div className="teller-callover__col-head">
-                      <h4>
-                        Withdrawals ({tellerCallover.checkedWithdrawalsCount}/
-                        {tellerCallover.withdrawals.length})
-                      </h4>
-                      {tellerCallover.withdrawals.length > 0 ? (
-                        <button
-                          type="button"
-                          className="button secondary teller-callover__toggle-all"
-                          onClick={() =>
-                            setTellerCalloverMany(
-                              tellerCallover.sessionId,
-                              tellerCallover.withdrawalIds,
-                              tellerCallover.checkedWithdrawalsCount <
-                                tellerCallover.withdrawals.length
-                            )
-                          }
-                        >
-                          {tellerCallover.checkedWithdrawalsCount ===
-                          tellerCallover.withdrawals.length
-                            ? "Uncheck all"
-                            : "Check all"}
-                        </button>
-                      ) : null}
-                    </div>
-                    {tellerCallover.withdrawals.length === 0 ? (
-                      <p className="muted teller-callover__empty">
-                        No counter withdrawals or cash payouts posted by you today.
-                      </p>
-                    ) : (
-                      <ul className="teller-callover__list">
-                        {tellerCallover.withdrawals.map((line) => {
-                          const checked = tellerCallover.checkedIds.has(line.id);
-                          const isField = isFieldPayoutLine(line);
-                          return (
-                            <li
-                              key={line.id}
-                              className={`teller-callover__row${checked ? " teller-callover__row--checked" : ""}`}
-                            >
-                              <label className="teller-callover__row-label">
-                                <input
-                                  type="checkbox"
-                                  checked={checked}
-                                  onChange={() =>
-                                    toggleTellerCalloverTx(tellerCallover.sessionId, line.id)
-                                  }
-                                />
-                                <span className="teller-callover__row-main">
-                                  <strong>{line.customerName}</strong>
-                                  <span className="muted teller-callover__row-meta">
-                                    {line.customerAccountNumber ? `${line.customerAccountNumber} · ` : ""}
-                                    {formatCalloverTime(line.createdAt)} ·{" "}
-                                    {isField ? "Field payout" : "Walk-in"}
-                                  </span>
-                                </span>
-                                <span className="teller-callover__row-amt teller-callover__val--out">
-                                  − {formatMoney(line.amount)}
-                                </span>
-                              </label>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    )}
-                  </div>
-                </div>
-
-                <label
-                  className={`teller-callover__confirm${
-                    !tellerCallover.allItemsChecked ? " teller-callover__confirm--disabled" : ""
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={tellerCallover.confirmed}
-                    disabled={!tellerCallover.allItemsChecked}
-                    onChange={(e) =>
-                      setTellerCalloverConfirmed(tellerCallover.sessionId, e.target.checked)
-                    }
-                  />
-                  <span>
-                    {tellerCallover.totalCount === 0
-                      ? "I confirm I had no counter deposits or withdrawals today and am ready to count my drawer."
-                      : tellerCallover.allItemsChecked
-                        ? "I have called over and verified all today's deposits and withdrawals against my slips and vouchers."
-                        : `Check all ${tellerCallover.totalCount - tellerCallover.checkedCount} remaining item(s) above before confirming call-over.`}
-                  </span>
-                </label>
-              </section>
+                <Link to="/app/susu/teller-callover" className="button secondary">
+                  {tellerCallover.readyToClose ? "Review call-over" : "Open Teller call-over →"}
+                </Link>
+              </div>
 
               <form className="branch-float__close-form" onSubmit={(e) => void handleClose(e)}>
                 <h3>2. End of day balancing</h3>
