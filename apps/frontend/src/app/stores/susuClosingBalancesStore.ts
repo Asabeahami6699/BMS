@@ -14,6 +14,10 @@ import {
   saveSusuClosingBalance,
   voidBranchCapitalEntry
 } from "../api";
+import {
+  formatAccountingInput,
+  parseAccountingAmount
+} from "../../components/AccountingAmountInput";
 import { toUserFacingError } from "../../lib/networkError";
 import {
   createLiveSyncManager,
@@ -125,11 +129,13 @@ function clearPersistedDraft(branchId: string, businessDate: string): void {
 
 function applyDraftFromSnapshot(snapshot: SusuClosingBalanceSnapshot): DraftFields {
   return {
-    openingVault: String(snapshot.openingVault),
-    cashToBank: String(snapshot.cashToBank),
-    susuExpenses: String(snapshot.susuExpenses),
+    openingVault: formatAccountingInput(snapshot.openingVault),
+    cashToBank: formatAccountingInput(snapshot.cashToBank),
+    susuExpenses: formatAccountingInput(snapshot.susuExpenses),
     closingVaultCounted:
-      snapshot.closingVaultCounted != null ? String(snapshot.closingVaultCounted) : "",
+      snapshot.closingVaultCounted != null
+        ? formatAccountingInput(snapshot.closingVaultCounted)
+        : "",
     notes: snapshot.notes ?? ""
   };
 }
@@ -264,20 +270,18 @@ export const useSusuClosingBalancesStore = create<SusuClosingBalancesState>((set
         return;
       }
       clearPersistedDraft(branchId, businessDate);
-      set({
-        openingVault: String(snapshot.suggestedOpeningVault),
-        cashToBank: "0",
-        susuExpenses: String(snapshot.tillExpenses),
-        closingVaultCounted: "",
-        dirty: true
-      });
-      persistDraft(branchId, businessDate, {
-        openingVault: String(snapshot.suggestedOpeningVault),
-        cashToBank: "0",
-        susuExpenses: String(snapshot.tillExpenses),
+      const nextDraft: DraftFields = {
+        openingVault: formatAccountingInput(snapshot.suggestedOpeningVault),
+        cashToBank: formatAccountingInput(0),
+        susuExpenses: formatAccountingInput(snapshot.tillExpenses),
         closingVaultCounted: "",
         notes: get().notes
+      };
+      set({
+        ...nextDraft,
+        dirty: true
       });
+      persistDraft(branchId, businessDate, nextDraft);
     },
 
     refresh: async () => {
@@ -456,13 +460,18 @@ export const useSusuClosingBalancesStore = create<SusuClosingBalancesState>((set
       set({ saving: true, error: null });
       try {
         const countedRaw = state.closingVaultCounted.trim();
+        const openingParsed = parseAccountingAmount(state.openingVault);
+        const bankParsed = parseAccountingAmount(state.cashToBank);
+        const expenseParsed = parseAccountingAmount(state.susuExpenses);
+        const countedParsed = countedRaw === "" ? null : parseAccountingAmount(countedRaw);
         const saved = await saveSusuClosingBalance({
           branchId: state.branchId,
           businessDate: state.businessDate,
-          openingVault: Number(state.openingVault) || 0,
-          cashToBank: Number(state.cashToBank) || 0,
-          susuExpenses: Number(state.susuExpenses) || 0,
-          closingVaultCounted: countedRaw === "" ? null : Number(countedRaw) || 0,
+          openingVault: Number.isFinite(openingParsed) ? openingParsed : 0,
+          cashToBank: Number.isFinite(bankParsed) ? bankParsed : 0,
+          susuExpenses: Number.isFinite(expenseParsed) ? expenseParsed : 0,
+          closingVaultCounted:
+            countedParsed == null || !Number.isFinite(countedParsed) ? null : countedParsed,
           initialCash: state.snapshot?.tillPhysicalCash,
           notes: state.notes.trim() || undefined
         });

@@ -1,6 +1,11 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import type { AppRole, BranchCapitalEntry, BranchCapitalEntryType } from "./api";
+import {
+  AccountingAmountInput,
+  formatAccountingInput,
+  parseAccountingAmount
+} from "../components/AccountingAmountInput";
 import { Modal } from "../components/Modal";
 import { useToast } from "../components/Toast";
 import { usePageLoading } from "./hooks/usePageLoading";
@@ -82,7 +87,7 @@ export function SusuClosingBalancesPage({ role }: Props) {
     if (!snapshot) {
       return 0;
     }
-    const value = Number(openingVault);
+    const value = parseAccountingAmount(openingVault);
     if (!Number.isFinite(value)) {
       return 0;
     }
@@ -130,7 +135,7 @@ export function SusuClosingBalancesPage({ role }: Props) {
 
   async function handleCapitalSubmit(event: FormEvent) {
     event.preventDefault();
-    const amount = Number(capitalAmount);
+    const amount = parseAccountingAmount(capitalAmount);
     if (!Number.isFinite(amount) || amount <= 0) {
       showToast("Enter a valid amount greater than zero", "error");
       return;
@@ -623,14 +628,10 @@ export function SusuClosingBalancesPage({ role }: Props) {
                     </span>
                   </div>
                   <label className="field">
-                    <span>Opening vault (GHS)</span>
-                    <input
-                      type="number"
-                      className="input-no-spin"
-                      min="0"
-                      step="0.01"
+                    <span>Opening vault</span>
+                    <AccountingAmountInput
                       value={openingVault}
-                      onChange={(e) => setOpeningVault(e.target.value)}
+                      onChange={setOpeningVault}
                       required
                     />
                   </label>
@@ -646,27 +647,17 @@ export function SusuClosingBalancesPage({ role }: Props) {
                   </div>
                   <div className="susu-closing-editor__pair">
                     <label className="field">
-                      <span>Cash to bank (GHS)</span>
-                      <input
-                        type="number"
-                        className="input-no-spin"
-                        min="0"
-                        step="0.01"
+                      <span>Cash to bank</span>
+                      <AccountingAmountInput
                         value={cashToBank}
-                        onChange={(e) => setCashToBank(e.target.value)}
-                        placeholder="0.00"
+                        onChange={setCashToBank}
                       />
                     </label>
                     <label className="field">
-                      <span>Branch expenses (GHS)</span>
-                      <input
-                        type="number"
-                        className="input-no-spin"
-                        min="0"
-                        step="0.01"
+                      <span>Branch expenses</span>
+                      <AccountingAmountInput
                         value={susuExpenses}
-                        onChange={(e) => setSusuExpenses(e.target.value)}
-                        placeholder="0.00"
+                        onChange={setSusuExpenses}
                       />
                     </label>
                   </div>
@@ -683,15 +674,12 @@ export function SusuClosingBalancesPage({ role }: Props) {
                     <span className="susu-closing-editor__pill">Optional</span>
                   </div>
                   <label className="field">
-                    <span>Vault counted (GHS)</span>
-                    <input
-                      type="number"
-                      className="input-no-spin"
-                      min="0"
-                      step="0.01"
+                    <span>Vault counted</span>
+                    <AccountingAmountInput
                       value={closingVaultCounted}
-                      onChange={(e) => setClosingVaultCounted(e.target.value)}
-                      placeholder={formatMoney(snapshot.expectedClosingVault).replace("GHS ", "")}
+                      onChange={setClosingVaultCounted}
+                      allowEmpty
+                      placeholder={formatAccountingInput(snapshot.expectedClosingVault)}
                     />
                   </label>
                   <p className="muted susu-closing-editor__meta">
@@ -757,17 +745,14 @@ export function SusuClosingBalancesPage({ role }: Props) {
           </div>
 
           <label className="field">
-            <span>Amount (GHS)</span>
-            <input
-              type="number"
-              className="input-no-spin"
-              min="0.01"
-              step="0.01"
+            <span>Amount</span>
+            <AccountingAmountInput
+              value={capitalAmount}
+              onChange={setCapitalAmount}
               required
               autoFocus
-              value={capitalAmount}
-              onChange={(e) => setCapitalAmount(e.target.value)}
-              placeholder="e.g. 5000.00"
+              allowEmpty
+              placeholder="5,000.00"
             />
           </label>
 
