@@ -87,6 +87,9 @@ export function SusuClosingBalancesPage({ role }: Props) {
     if (!snapshot) {
       return 0;
     }
+    if (openingVault.trim() === "") {
+      return 0;
+    }
     const value = parseAccountingAmount(openingVault);
     if (!Number.isFinite(value)) {
       return 0;
@@ -632,7 +635,8 @@ export function SusuClosingBalancesPage({ role }: Props) {
                     <AccountingAmountInput
                       value={openingVault}
                       onChange={setOpeningVault}
-                      required
+                      allowEmpty
+                      placeholder={formatAccountingInput(snapshot.suggestedOpeningVault)}
                     />
                   </label>
                   <p className="muted susu-closing-editor__meta">
@@ -651,6 +655,8 @@ export function SusuClosingBalancesPage({ role }: Props) {
                       <AccountingAmountInput
                         value={cashToBank}
                         onChange={setCashToBank}
+                        allowEmpty
+                        placeholder="0.00"
                       />
                     </label>
                     <label className="field">
@@ -658,6 +664,8 @@ export function SusuClosingBalancesPage({ role }: Props) {
                       <AccountingAmountInput
                         value={susuExpenses}
                         onChange={setSusuExpenses}
+                        allowEmpty
+                        placeholder={formatAccountingInput(snapshot.tillExpenses)}
                       />
                     </label>
                   </div>
@@ -752,7 +760,7 @@ export function SusuClosingBalancesPage({ role }: Props) {
               required
               autoFocus
               allowEmpty
-              placeholder="5,000.00"
+              placeholder="0.00"
             />
           </label>
 

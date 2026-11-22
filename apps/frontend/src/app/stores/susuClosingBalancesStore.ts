@@ -128,10 +128,20 @@ function clearPersistedDraft(branchId: string, businessDate: string): void {
 }
 
 function applyDraftFromSnapshot(snapshot: SusuClosingBalanceSnapshot): DraftFields {
+  const showOpening =
+    snapshot.usingSavedInputs && snapshot.openingVault > 0
+      ? formatAccountingInput(snapshot.openingVault)
+      : "";
+  const showBank =
+    snapshot.cashToBank > 0 ? formatAccountingInput(snapshot.cashToBank) : "";
+  const showExpenses =
+    snapshot.usingSavedInputs && snapshot.susuExpenses > 0
+      ? formatAccountingInput(snapshot.susuExpenses)
+      : "";
   return {
-    openingVault: formatAccountingInput(snapshot.openingVault),
-    cashToBank: formatAccountingInput(snapshot.cashToBank),
-    susuExpenses: formatAccountingInput(snapshot.susuExpenses),
+    openingVault: showOpening,
+    cashToBank: showBank,
+    susuExpenses: showExpenses,
     closingVaultCounted:
       snapshot.closingVaultCounted != null
         ? formatAccountingInput(snapshot.closingVaultCounted)
@@ -271,9 +281,9 @@ export const useSusuClosingBalancesStore = create<SusuClosingBalancesState>((set
       }
       clearPersistedDraft(branchId, businessDate);
       const nextDraft: DraftFields = {
-        openingVault: formatAccountingInput(snapshot.suggestedOpeningVault),
-        cashToBank: formatAccountingInput(0),
-        susuExpenses: formatAccountingInput(snapshot.tillExpenses),
+        openingVault: "",
+        cashToBank: "",
+        susuExpenses: "",
         closingVaultCounted: "",
         notes: get().notes
       };
@@ -459,10 +469,19 @@ export const useSusuClosingBalancesStore = create<SusuClosingBalancesState>((set
       }
       set({ saving: true, error: null });
       try {
+        const openingRaw = state.openingVault.trim();
+        const bankRaw = state.cashToBank.trim();
+        const expenseRaw = state.susuExpenses.trim();
         const countedRaw = state.closingVaultCounted.trim();
-        const openingParsed = parseAccountingAmount(state.openingVault);
-        const bankParsed = parseAccountingAmount(state.cashToBank);
-        const expenseParsed = parseAccountingAmount(state.susuExpenses);
+        const openingParsed =
+          openingRaw === ""
+            ? (state.snapshot?.suggestedOpeningVault ?? 0)
+            : parseAccountingAmount(openingRaw);
+        const bankParsed = bankRaw === "" ? 0 : parseAccountingAmount(bankRaw);
+        const expenseParsed =
+          expenseRaw === ""
+            ? (state.snapshot?.tillExpenses ?? 0)
+            : parseAccountingAmount(expenseRaw);
         const countedParsed = countedRaw === "" ? null : parseAccountingAmount(countedRaw);
         const saved = await saveSusuClosingBalance({
           branchId: state.branchId,
