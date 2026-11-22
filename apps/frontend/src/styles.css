@@ -3449,6 +3449,79 @@ select:disabled {
   min-height: 4.5rem;
 }
 
+.susu-capital-card__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  margin-bottom: 0.9rem;
+}
+
+.susu-capital-card__head h3 {
+  margin: 0.15rem 0 0.25rem;
+}
+
+.susu-capital-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.susu-capital-card__stats {
+  margin-bottom: 0.65rem;
+}
+
+.susu-capital-card__hint {
+  margin: 0 0 0.75rem;
+  font-size: 0.82rem;
+}
+
+.susu-capital-card__table-wrap {
+  margin-top: 0.5rem;
+}
+
+.susu-capital-card__empty {
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
+}
+
+.susu-capital-row--voided {
+  opacity: 0.58;
+  text-decoration: line-through;
+}
+
+.susu-capital-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.susu-capital-badge--in {
+  background: rgba(16, 185, 129, 0.14);
+  color: #047857;
+}
+
+.susu-capital-badge--out {
+  background: rgba(245, 158, 11, 0.16);
+  color: #b45309;
+}
+
+.susu-capital-badge--voided {
+  background: rgba(100, 116, 139, 0.15);
+  color: #475569;
+}
+
+.susu-capital-modal__toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
 .visually-hidden {
   position: absolute;
   width: 1px;

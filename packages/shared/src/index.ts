@@ -40,3 +40,4 @@ export * from "./companyProfile.js";
 export * from "./approvalWorkflow.js";
 export * from "./registrationForm.js";
 export * from "./tenantHost.js";
+export * from "./branchCapital.js";

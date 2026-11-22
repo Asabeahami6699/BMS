@@ -1,10 +1,18 @@
 import { create } from "zustand";
-import type { Branch, SusuClosingBalanceSnapshot } from "../api";
+import type {
+  Branch,
+  BranchCapitalEntryType,
+  BranchCapitalSummary,
+  SusuClosingBalanceSnapshot
+} from "../api";
 import {
+  createBranchCapitalEntry,
+  getBranchCapitalSummary,
   getSusuClosingBalance,
   getTenantId,
   listBranches,
-  saveSusuClosingBalance
+  saveSusuClosingBalance,
+  voidBranchCapitalEntry
 } from "../api";
 import { toUserFacingError } from "../../lib/networkError";
 import {
@@ -131,6 +139,7 @@ type SusuClosingBalancesState = {
   branchId: string;
   businessDate: string;
   snapshot: SusuClosingBalanceSnapshot | null;
+  capitalSummary: BranchCapitalSummary | null;
   openingVault: string;
   cashToBank: string;
   susuExpenses: string;
@@ -139,6 +148,7 @@ type SusuClosingBalancesState = {
   dirty: boolean;
   loading: boolean;
   saving: boolean;
+  savingCapital: boolean;
   error: string | null;
   lastFetchedAt: number | null;
   liveSyncActive: boolean;
@@ -158,6 +168,14 @@ type SusuClosingBalancesState = {
   setNotes: (value: string) => void;
   resetFromSuggestion: () => void;
   save: () => Promise<SusuClosingBalanceSnapshot>;
+  recordCapitalEntry: (input: {
+    entryType: BranchCapitalEntryType;
+    amount: number;
+    source?: string;
+    reference?: string;
+    notes?: string;
+  }) => Promise<void>;
+  voidCapitalEntry: (entryId: string, reason: string) => Promise<void>;
 };
 
 let fetchInFlight: Promise<void> | null = null;
@@ -188,6 +206,7 @@ export const useSusuClosingBalancesStore = create<SusuClosingBalancesState>((set
     branchId: initialSelection.branchId ?? "",
     businessDate: initialSelection.businessDate ?? todayIso(),
     snapshot: null,
+    capitalSummary: null,
     openingVault: "",
     cashToBank: "",
     susuExpenses: "",
@@ -196,6 +215,7 @@ export const useSusuClosingBalancesStore = create<SusuClosingBalancesState>((set
     dirty: false,
     loading: false,
     saving: false,
+    savingCapital: false,
     error: null,
     lastFetchedAt: null,
     liveSyncActive: false,
@@ -303,7 +323,10 @@ export const useSusuClosingBalancesStore = create<SusuClosingBalancesState>((set
           persistSelection(branchId, businessDate);
           fetchInFlightKey = `${branchId}::${businessDate}`;
 
-          const snapshot = await getSusuClosingBalance(branchId, businessDate);
+          const [snapshot, capitalSummary] = await Promise.all([
+            getSusuClosingBalance(branchId, businessDate),
+            getBranchCapitalSummary(branchId, businessDate).catch(() => null)
+          ]);
           if (reqSeq !== activeRequestSeq) {
             return;
           }
@@ -312,6 +335,7 @@ export const useSusuClosingBalancesStore = create<SusuClosingBalancesState>((set
           if (savedDraft) {
             set({
               snapshot,
+              capitalSummary,
               ...savedDraft,
               dirty: true,
               loading: false,
@@ -321,6 +345,7 @@ export const useSusuClosingBalancesStore = create<SusuClosingBalancesState>((set
           } else {
             set({
               snapshot,
+              capitalSummary,
               ...applyDraftFromSnapshot(snapshot),
               dirty: false,
               loading: false,
@@ -361,7 +386,10 @@ export const useSusuClosingBalancesStore = create<SusuClosingBalancesState>((set
       const reqSeq = ++activeRequestSeq;
       const job = (async () => {
         try {
-          const snapshot = await getSusuClosingBalance(branchId, businessDate);
+          const [snapshot, capitalSummary] = await Promise.all([
+            getSusuClosingBalance(branchId, businessDate),
+            getBranchCapitalSummary(branchId, businessDate).catch(() => get().capitalSummary)
+          ]);
           if (reqSeq !== activeRequestSeq) {
             return;
           }
@@ -370,12 +398,14 @@ export const useSusuClosingBalancesStore = create<SusuClosingBalancesState>((set
             // Preserve user's unsaved form edits while refreshing live KPIs & till rollups.
             set({
               snapshot,
+              capitalSummary,
               lastFetchedAt: Date.now(),
               error: null
             });
           } else {
             set({
               snapshot,
+              capitalSummary,
               ...applyDraftFromSnapshot(snapshot),
               lastFetchedAt: Date.now(),
               error: null
@@ -402,7 +432,12 @@ export const useSusuClosingBalancesStore = create<SusuClosingBalancesState>((set
       set({ liveSyncActive: true });
       liveSync.start({
         getTenantId,
-        tables: ["susu_daily_closing_records", "branch_float_sessions", "customer_transactions"],
+        tables: [
+          "susu_daily_closing_records",
+          "branch_capital_entries",
+          "branch_float_sessions",
+          "customer_transactions"
+        ],
         onRefresh: () => void get().refreshSilent()
       });
     },
@@ -444,6 +479,64 @@ export const useSusuClosingBalancesStore = create<SusuClosingBalancesState>((set
       } catch (error) {
         const message = toUserFacingError(error, "Failed to save");
         set({ saving: false, error: message });
+        throw new Error(message);
+      }
+    },
+
+    recordCapitalEntry: async (input) => {
+      const state = get();
+      if (!state.branchId) {
+        throw new Error("Select a branch");
+      }
+      set({ savingCapital: true, error: null });
+      try {
+        await createBranchCapitalEntry({
+          branchId: state.branchId,
+          businessDate: state.businessDate,
+          ...input
+        });
+        const [snapshot, capitalSummary] = await Promise.all([
+          getSusuClosingBalance(state.branchId, state.businessDate),
+          getBranchCapitalSummary(state.branchId, state.businessDate)
+        ]);
+        set((curr) => ({
+          snapshot,
+          capitalSummary,
+          ...(curr.dirty ? {} : applyDraftFromSnapshot(snapshot)),
+          savingCapital: false,
+          lastFetchedAt: Date.now(),
+          error: null
+        }));
+      } catch (error) {
+        const message = toUserFacingError(error, "Failed to record capital entry");
+        set({ savingCapital: false, error: message });
+        throw new Error(message);
+      }
+    },
+
+    voidCapitalEntry: async (entryId, reason) => {
+      const state = get();
+      if (!state.branchId) {
+        throw new Error("Select a branch");
+      }
+      set({ savingCapital: true, error: null });
+      try {
+        await voidBranchCapitalEntry(entryId, reason);
+        const [snapshot, capitalSummary] = await Promise.all([
+          getSusuClosingBalance(state.branchId, state.businessDate),
+          getBranchCapitalSummary(state.branchId, state.businessDate)
+        ]);
+        set((curr) => ({
+          snapshot,
+          capitalSummary,
+          ...(curr.dirty ? {} : applyDraftFromSnapshot(snapshot)),
+          savingCapital: false,
+          lastFetchedAt: Date.now(),
+          error: null
+        }));
+      } catch (error) {
+        const message = toUserFacingError(error, "Failed to void capital entry");
+        set({ savingCapital: false, error: message });
         throw new Error(message);
       }
     }

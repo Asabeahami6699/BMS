@@ -3030,10 +3030,53 @@ export type SusuClosingBalanceSnapshot = {
   closingVaultCounted: number | null;
   vaultCountVariance: number | null;
   branchCashPosition: number;
+  capitalInjectedToday?: number;
+  capitalDrawingsToday?: number;
+  branchTotalCapitalAdded?: number;
+  branchTotalDrawings?: number;
+  branchNetCapital?: number;
+  companyTotalCapitalAdded?: number;
+  companyTotalDrawings?: number;
+  companyNetCapital?: number;
   usingSavedInputs: boolean;
   notes?: string;
   recordedBy?: string;
   updatedAt?: string;
+};
+
+export type BranchCapitalEntryType = "injection" | "drawing";
+
+export type BranchCapitalEntry = {
+  id: string;
+  tenantId: string;
+  branchId: string;
+  businessDate: string;
+  entryType: BranchCapitalEntryType;
+  amount: number;
+  source?: string;
+  reference?: string;
+  notes?: string;
+  recordedBy: string;
+  recordedByName?: string;
+  voidedAt?: string;
+  voidedBy?: string;
+  voidReason?: string;
+  createdAt: string;
+};
+
+export type BranchCapitalSummary = {
+  storageReady: boolean;
+  branchId?: string;
+  businessDate: string;
+  companyTotalInjected: number;
+  companyTotalDrawings: number;
+  companyNetCapital: number;
+  branchTotalInjected: number;
+  branchTotalDrawings: number;
+  branchNetCapital: number;
+  dayInjections: number;
+  dayDrawings: number;
+  entries: BranchCapitalEntry[];
 };
 
 export async function listFieldWithdrawalFulfillment(options?: {
@@ -3085,6 +3128,50 @@ export async function saveSusuClosingBalance(input: {
       method: "PUT",
       headers: { ...authHeaders(), "Content-Type": "application/json" },
       body: JSON.stringify(input)
+    }
+  );
+}
+
+export async function getBranchCapitalSummary(
+  branchId: string,
+  date: string
+): Promise<BranchCapitalSummary> {
+  const params = new URLSearchParams({ branchId, date });
+  return fetchJson<BranchCapitalSummary>(
+    `${API_BASE_URL}/api/v1/reports/branch-capital?${params.toString()}`,
+    { headers: authHeaders() }
+  );
+}
+
+export async function createBranchCapitalEntry(input: {
+  branchId: string;
+  businessDate: string;
+  entryType: BranchCapitalEntryType;
+  amount: number;
+  source?: string;
+  reference?: string;
+  notes?: string;
+}): Promise<BranchCapitalEntry> {
+  return fetchJson<BranchCapitalEntry>(
+    `${API_BASE_URL}/api/v1/reports/branch-capital`,
+    {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify(input)
+    }
+  );
+}
+
+export async function voidBranchCapitalEntry(
+  entryId: string,
+  reason: string
+): Promise<BranchCapitalEntry> {
+  return fetchJson<BranchCapitalEntry>(
+    `${API_BASE_URL}/api/v1/reports/branch-capital/${encodeURIComponent(entryId)}/void`,
+    {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ reason })
     }
   );
 }

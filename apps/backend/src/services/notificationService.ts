@@ -25,6 +25,7 @@ export type AgentNotificationKind =
   | "cash_variance_settled"
   | "vault_opening_adjusted"
   | "vault_close_variance"
+  | "business_capital_recorded"
   | "deposit_pending_bank"
   | "deposit_pending_accountant"
   | "deposit_completed"

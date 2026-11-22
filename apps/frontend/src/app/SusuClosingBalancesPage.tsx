@@ -1,6 +1,7 @@
-import { FormEvent, useEffect, useMemo } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import type { AppRole } from "./api";
+import type { AppRole, BranchCapitalEntry, BranchCapitalEntryType } from "./api";
+import { Modal } from "../components/Modal";
 import { useToast } from "../components/Toast";
 import { usePageLoading } from "./hooks/usePageLoading";
 import { formatBranchLabel } from "./branchDisplay";
@@ -15,11 +16,13 @@ function formatMoney(amount: number): string {
 export function SusuClosingBalancesPage({ role }: Props) {
   const { showToast } = useToast();
   const canEdit = role === "admin" || role === "coordinator" || role === "accountant";
+  const canManageCapital = role === "admin" || role === "accountant";
 
   const branches = useSusuClosingBalancesStore((s) => s.branches);
   const branchId = useSusuClosingBalancesStore((s) => s.branchId);
   const businessDate = useSusuClosingBalancesStore((s) => s.businessDate);
   const snapshot = useSusuClosingBalancesStore((s) => s.snapshot);
+  const capitalSummary = useSusuClosingBalancesStore((s) => s.capitalSummary);
   const openingVault = useSusuClosingBalancesStore((s) => s.openingVault);
   const cashToBank = useSusuClosingBalancesStore((s) => s.cashToBank);
   const susuExpenses = useSusuClosingBalancesStore((s) => s.susuExpenses);
@@ -28,6 +31,7 @@ export function SusuClosingBalancesPage({ role }: Props) {
   const dirty = useSusuClosingBalancesStore((s) => s.dirty);
   const loading = useSusuClosingBalancesStore((s) => s.loading);
   const saving = useSusuClosingBalancesStore((s) => s.saving);
+  const savingCapital = useSusuClosingBalancesStore((s) => s.savingCapital);
   const error = useSusuClosingBalancesStore((s) => s.error);
   const hydrate = useSusuClosingBalancesStore((s) => s.hydrate);
   const refresh = useSusuClosingBalancesStore((s) => s.refresh);
@@ -42,8 +46,20 @@ export function SusuClosingBalancesPage({ role }: Props) {
   const setNotes = useSusuClosingBalancesStore((s) => s.setNotes);
   const resetFromSuggestion = useSusuClosingBalancesStore((s) => s.resetFromSuggestion);
   const save = useSusuClosingBalancesStore((s) => s.save);
+  const recordCapitalEntry = useSusuClosingBalancesStore((s) => s.recordCapitalEntry);
+  const voidCapitalEntry = useSusuClosingBalancesStore((s) => s.voidCapitalEntry);
 
-  usePageLoading(loading || saving, "susu-closing-balances");
+  const [capitalModalOpen, setCapitalModalOpen] = useState(false);
+  const [capitalType, setCapitalType] = useState<BranchCapitalEntryType>("injection");
+  const [capitalAmount, setCapitalAmount] = useState("");
+  const [capitalSource, setCapitalSource] = useState("Owner cash");
+  const [capitalReference, setCapitalReference] = useState("");
+  const [capitalNotes, setCapitalNotes] = useState("");
+
+  const [voidTarget, setVoidTarget] = useState<BranchCapitalEntry | null>(null);
+  const [voidReason, setVoidReason] = useState("");
+
+  usePageLoading(loading || saving || savingCapital, "susu-closing-balances");
 
   useEffect(() => {
     hydrate({ force: true });
@@ -73,6 +89,23 @@ export function SusuClosingBalancesPage({ role }: Props) {
     return Math.round((value - snapshot.suggestedOpeningVault) * 100) / 100;
   }, [openingVault, snapshot]);
 
+  const companyTotalAdded =
+    capitalSummary?.companyTotalInjected ?? snapshot?.companyTotalCapitalAdded ?? 0;
+  const companyTotalDrawings =
+    capitalSummary?.companyTotalDrawings ?? snapshot?.companyTotalDrawings ?? 0;
+  const companyNetCapital =
+    capitalSummary?.companyNetCapital ?? snapshot?.companyNetCapital ?? 0;
+  const branchTotalAdded =
+    capitalSummary?.branchTotalInjected ?? snapshot?.branchTotalCapitalAdded ?? 0;
+  const branchTotalDrawings =
+    capitalSummary?.branchTotalDrawings ?? snapshot?.branchTotalDrawings ?? 0;
+  const branchNetCapital =
+    capitalSummary?.branchNetCapital ?? snapshot?.branchNetCapital ?? 0;
+  const capitalInjectedToday =
+    capitalSummary?.dayInjections ?? snapshot?.capitalInjectedToday ?? 0;
+  const capitalDrawingsToday =
+    capitalSummary?.dayDrawings ?? snapshot?.capitalDrawingsToday ?? 0;
+
   async function handleSave(event: FormEvent) {
     event.preventDefault();
     if (!canEdit) {
@@ -86,14 +119,70 @@ export function SusuClosingBalancesPage({ role }: Props) {
     }
   }
 
+  function openCapitalModal(type: BranchCapitalEntryType) {
+    setCapitalType(type);
+    setCapitalAmount("");
+    setCapitalSource(type === "injection" ? "Owner cash" : "Owner drawing");
+    setCapitalReference("");
+    setCapitalNotes("");
+    setCapitalModalOpen(true);
+  }
+
+  async function handleCapitalSubmit(event: FormEvent) {
+    event.preventDefault();
+    const amount = Number(capitalAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      showToast("Enter a valid amount greater than zero", "error");
+      return;
+    }
+    try {
+      await recordCapitalEntry({
+        entryType: capitalType,
+        amount,
+        source: capitalSource.trim() || undefined,
+        reference: capitalReference.trim() || undefined,
+        notes: capitalNotes.trim() || undefined
+      });
+      setCapitalModalOpen(false);
+      showToast(
+        capitalType === "injection"
+          ? `Added ${formatMoney(amount)} business capital`
+          : `Recorded ${formatMoney(amount)} owner drawing`,
+        "success"
+      );
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to save capital entry", "error");
+    }
+  }
+
+  async function handleVoidSubmit(event: FormEvent) {
+    event.preventDefault();
+    if (!voidTarget) {
+      return;
+    }
+    const reason = voidReason.trim();
+    if (reason.length < 2) {
+      showToast("Enter a short reason for voiding this entry", "error");
+      return;
+    }
+    try {
+      await voidCapitalEntry(voidTarget.id, reason);
+      setVoidTarget(null);
+      setVoidReason("");
+      showToast("Capital entry voided", "success");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to void capital entry", "error");
+    }
+  }
+
   return (
     <div className="agents-page">
       <header className="agents-page__header">
         <div>
           <h2>Susu activity closing balances</h2>
           <p className="muted">
-            Branch vault day-close: opening safe, till issues, field callover, cash to bank, and
-            vault remaining. Teller drawer OS stays on{" "}
+            Branch vault day-close: opening safe, business capital injections, till issues, field
+            callover, cash to bank, and vault remaining. Teller drawer OS stays on{" "}
             <Link to="/app/susu/overages-shortages#os-branch-till">Overages/Shortages</Link>.
           </p>
         </div>
@@ -159,6 +248,16 @@ export function SusuClosingBalancesPage({ role }: Props) {
               <p className="kpi-meta muted">
                 {snapshot.tillSessionCount} till session(s) · position{" "}
                 {formatMoney(snapshot.branchCashPosition)}
+              </p>
+            </article>
+            <article className="kpi-card">
+              <span className="kpi-label">Net business capital</span>
+              <p className="kpi-value">{formatMoney(companyNetCapital)}</p>
+              <p className="kpi-meta muted">
+                Added {formatMoney(companyTotalAdded)}
+                {companyTotalDrawings > 0
+                  ? ` · Drawings ${formatMoney(companyTotalDrawings)}`
+                  : ""}
               </p>
             </article>
           </div>
@@ -244,6 +343,18 @@ export function SusuClosingBalancesPage({ role }: Props) {
                 <span className="muted">Opening vault</span>
                 <strong>{formatMoney(snapshot.openingVault)}</strong>
               </div>
+              {capitalInjectedToday > 0 ? (
+                <div>
+                  <span className="muted">Capital added today</span>
+                  <strong>+ {formatMoney(capitalInjectedToday)}</strong>
+                </div>
+              ) : null}
+              {capitalDrawingsToday > 0 ? (
+                <div>
+                  <span className="muted">Owner drawings today</span>
+                  <strong>− {formatMoney(capitalDrawingsToday)}</strong>
+                </div>
+              ) : null}
               <div>
                 <span className="muted">Issued to tills</span>
                 <strong>− {formatMoney(snapshot.tillPhysicalCash)}</strong>
@@ -275,6 +386,165 @@ export function SusuClosingBalancesPage({ role }: Props) {
                 <strong>{formatMoney(snapshot.expectedClosingVault)}</strong>
               </div>
             </div>
+          </section>
+
+          <section className="card susu-capital-card">
+            <div className="susu-capital-card__head">
+              <div>
+                <p className="susu-closing-editor__eyebrow">Owner equity ledger</p>
+                <h3>Business capital &amp; owner drawings</h3>
+                <p className="muted susu-closing-editor__lead">
+                  Track every cedi added to the business by the owner (and any owner drawings).
+                  Entries recorded for <strong>{businessDate}</strong> automatically update
+                  today&apos;s Expected Closing Vault and carry forward to tomorrow.
+                </p>
+              </div>
+              {canManageCapital ? (
+                <div className="susu-capital-card__actions">
+                  <button
+                    type="button"
+                    className="button"
+                    disabled={savingCapital || capitalSummary?.storageReady === false}
+                    onClick={() => openCapitalModal("injection")}
+                  >
+                    + Add capital
+                  </button>
+                  <button
+                    type="button"
+                    className="button secondary"
+                    disabled={savingCapital || capitalSummary?.storageReady === false}
+                    onClick={() => openCapitalModal("drawing")}
+                  >
+                    Record drawing
+                  </button>
+                </div>
+              ) : null}
+            </div>
+
+            {capitalSummary?.storageReady === false ? (
+              <p className="branch-float__eod-flag branch-float__eod-flag--shortage" role="status">
+                Business capital storage is not ready yet. Apply migration{" "}
+                <code>098_branch_capital_entries.sql</code> in Supabase, then refresh.
+              </p>
+            ) : null}
+
+            <div className="susu-closing-formula__grid susu-capital-card__stats">
+              <div>
+                <span className="muted">Total capital added (all branches)</span>
+                <strong>{formatMoney(companyTotalAdded)}</strong>
+              </div>
+              <div>
+                <span className="muted">Total owner drawings</span>
+                <strong>− {formatMoney(companyTotalDrawings)}</strong>
+              </div>
+              <div>
+                <span className="muted">Net owner capital (company)</span>
+                <strong>{formatMoney(companyNetCapital)}</strong>
+              </div>
+              <div>
+                <span className="muted">{branchLabel} net capital</span>
+                <strong>
+                  {formatMoney(branchNetCapital)}
+                  {branchTotalDrawings > 0
+                    ? ` (${formatMoney(branchTotalAdded)} in)`
+                    : ""}
+                </strong>
+              </div>
+            </div>
+
+            <p className="muted susu-capital-card__hint">
+              Tip: When recording starting capital here on Day 1, keep <strong>Opening vault</strong>{" "}
+              at GHS 0.00 so the same cash is not counted twice.
+            </p>
+
+            {capitalSummary && capitalSummary.entries.length > 0 ? (
+              <div className="table-wrap susu-capital-card__table-wrap">
+                <table className="data-table susu-capital-card__table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Type</th>
+                      <th>Amount</th>
+                      <th>Source / Ref</th>
+                      <th>Recorded by</th>
+                      <th>Notes</th>
+                      {canManageCapital ? <th>Action</th> : null}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {capitalSummary.entries.map((entry) => {
+                      const isVoided = Boolean(entry.voidedAt);
+                      return (
+                        <tr
+                          key={entry.id}
+                          className={isVoided ? "susu-capital-row--voided" : undefined}
+                        >
+                          <td>{entry.businessDate}</td>
+                          <td>
+                            <span
+                              className={`susu-capital-badge ${
+                                isVoided
+                                  ? "susu-capital-badge--voided"
+                                  : entry.entryType === "injection"
+                                    ? "susu-capital-badge--in"
+                                    : "susu-capital-badge--out"
+                              }`}
+                            >
+                              {isVoided
+                                ? "Voided"
+                                : entry.entryType === "injection"
+                                  ? "Capital added"
+                                  : "Owner drawing"}
+                            </span>
+                          </td>
+                          <td>
+                            <strong>
+                              {entry.entryType === "injection" ? "+" : "−"}{" "}
+                              {formatMoney(entry.amount)}
+                            </strong>
+                          </td>
+                          <td>
+                            {entry.source || "—"}
+                            {entry.reference ? (
+                              <span className="muted"> · {entry.reference}</span>
+                            ) : null}
+                          </td>
+                          <td>{entry.recordedByName || entry.recordedBy}</td>
+                          <td>
+                            {isVoided
+                              ? `Voided: ${entry.voidReason ?? "—"}`
+                              : entry.notes || "—"}
+                          </td>
+                          {canManageCapital ? (
+                            <td>
+                              {isVoided ? (
+                                <span className="muted">—</span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="button secondary button--sm"
+                                  disabled={savingCapital}
+                                  onClick={() => {
+                                    setVoidTarget(entry);
+                                    setVoidReason("");
+                                  }}
+                                >
+                                  Void
+                                </button>
+                              )}
+                            </td>
+                          ) : null}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="muted susu-capital-card__empty">
+                No capital injections or owner drawings recorded yet for {branchLabel}.
+              </p>
+            )}
           </section>
 
           {canEdit ? (
@@ -334,7 +604,6 @@ export function SusuClosingBalancesPage({ role }: Props) {
                       value={openingVault}
                       onChange={(e) => setOpeningVault(e.target.value)}
                       required
-                      autoFocus
                     />
                   </label>
                   <p className="muted susu-closing-editor__meta">
@@ -424,6 +693,157 @@ export function SusuClosingBalancesPage({ role }: Props) {
       ) : (
         <p className="muted">Select a branch to view closing balance.</p>
       )}
+
+      <Modal
+        open={capitalModalOpen}
+        title={capitalType === "injection" ? "Add business capital" : "Record owner drawing"}
+        subtitle={`${branchLabel} · ${businessDate}`}
+        onClose={() => !savingCapital && setCapitalModalOpen(false)}
+      >
+        <form className="form-stack" onSubmit={(e) => void handleCapitalSubmit(e)}>
+          <div className="susu-capital-modal__toggle" role="group" aria-label="Entry type">
+            <button
+              type="button"
+              className={`button ${capitalType === "injection" ? "" : "secondary"}`}
+              onClick={() => {
+                setCapitalType("injection");
+                if (capitalSource === "Owner drawing") {
+                  setCapitalSource("Owner cash");
+                }
+              }}
+            >
+              + Capital added
+            </button>
+            <button
+              type="button"
+              className={`button ${capitalType === "drawing" ? "" : "secondary"}`}
+              onClick={() => {
+                setCapitalType("drawing");
+                if (capitalSource === "Owner cash") {
+                  setCapitalSource("Owner drawing");
+                }
+              }}
+            >
+              − Owner drawing
+            </button>
+          </div>
+
+          <label className="field">
+            <span>Amount (GHS)</span>
+            <input
+              type="number"
+              className="input-no-spin"
+              min="0.01"
+              step="0.01"
+              required
+              autoFocus
+              value={capitalAmount}
+              onChange={(e) => setCapitalAmount(e.target.value)}
+              placeholder="e.g. 5000.00"
+            />
+          </label>
+
+          <label className="field">
+            <span>Source / description</span>
+            <input
+              type="text"
+              maxLength={120}
+              value={capitalSource}
+              onChange={(e) => setCapitalSource(e.target.value)}
+              placeholder={
+                capitalType === "injection"
+                  ? "Owner cash, bank transfer, partner equity…"
+                  : "Owner drawing, profit withdrawal…"
+              }
+            />
+          </label>
+
+          <label className="field">
+            <span>Reference (optional)</span>
+            <input
+              type="text"
+              maxLength={120}
+              value={capitalReference}
+              onChange={(e) => setCapitalReference(e.target.value)}
+              placeholder="Receipt or transfer ref…"
+            />
+          </label>
+
+          <label className="field">
+            <span>Notes (optional)</span>
+            <textarea
+              rows={2}
+              maxLength={500}
+              value={capitalNotes}
+              onChange={(e) => setCapitalNotes(e.target.value)}
+              placeholder="Any extra context for audit trail…"
+            />
+          </label>
+
+          <div className="form-actions">
+            <button
+              type="button"
+              className="button secondary"
+              disabled={savingCapital}
+              onClick={() => setCapitalModalOpen(false)}
+            >
+              Cancel
+            </button>
+            <button type="submit" className="button" disabled={savingCapital}>
+              {savingCapital
+                ? "Saving…"
+                : capitalType === "injection"
+                  ? "Save capital added"
+                  : "Save owner drawing"}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal
+        open={voidTarget != null}
+        title="Void capital entry"
+        subtitle={
+          voidTarget
+            ? `${voidTarget.businessDate} · ${formatMoney(voidTarget.amount)} (${
+                voidTarget.entryType === "injection" ? "Capital added" : "Owner drawing"
+              })`
+            : undefined
+        }
+        onClose={() => !savingCapital && setVoidTarget(null)}
+      >
+        <form className="form-stack" onSubmit={(e) => void handleVoidSubmit(e)}>
+          <p className="muted">
+            Voiding removes this entry from total business capital and today&apos;s Expected Closing
+            Vault while keeping it visible in the audit log.
+          </p>
+          <label className="field">
+            <span>Reason for voiding</span>
+            <input
+              type="text"
+              required
+              autoFocus
+              maxLength={300}
+              value={voidReason}
+              onChange={(e) => setVoidReason(e.target.value)}
+              placeholder="e.g. Duplicate entry or wrong amount"
+            />
+          </label>
+          <div className="form-actions">
+            <button
+              type="button"
+              className="button secondary"
+              disabled={savingCapital}
+              onClick={() => setVoidTarget(null)}
+            >
+              Cancel
+            </button>
+            <button type="submit" className="button button--danger" disabled={savingCapital}>
+              {savingCapital ? "Voiding…" : "Confirm void"}
+            </button>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 }

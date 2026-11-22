@@ -7,6 +7,7 @@ import { notifyTenantStaff } from "./notificationService.js";
 import { DISCLOSURE_WITHDRAWAL_NOTE_TAG } from "./transactionService.js";
 import { userDisplayName } from "./userNameResolver.js";
 import { branchDisplayLabel } from "./branchService.js";
+import { loadDayBranchCapitalTotals } from "./branchCapitalService.js";
 
 type RoleContext = {
   role: string;
@@ -42,6 +43,14 @@ export type SusuClosingBalanceSnapshot = {
   closingVaultCounted: number | null;
   vaultCountVariance: number | null;
   branchCashPosition: number;
+  capitalInjectedToday: number;
+  capitalDrawingsToday: number;
+  branchTotalCapitalAdded: number;
+  branchTotalDrawings: number;
+  branchNetCapital: number;
+  companyTotalCapitalAdded: number;
+  companyTotalDrawings: number;
+  companyNetCapital: number;
   usingSavedInputs: boolean;
   notes?: string;
   recordedBy?: string;
@@ -601,9 +610,12 @@ async function buildSnapshot(
   businessDate: string,
   options?: { skipPriorSuggestion?: boolean }
 ): Promise<SusuClosingBalanceSnapshot> {
-  const activity = await loadDayActivity(tenantId, branchId, businessDate);
-  const till = await loadTillCashRollup(tenantId, branchId, businessDate);
-  const saved = await loadSavedClosingRow(tenantId, branchId, businessDate);
+  const [activity, till, saved, capital] = await Promise.all([
+    loadDayActivity(tenantId, branchId, businessDate),
+    loadTillCashRollup(tenantId, branchId, businessDate),
+    loadSavedClosingRow(tenantId, branchId, businessDate),
+    loadDayBranchCapitalTotals(tenantId, branchId, businessDate)
+  ]);
 
   const suggestedOpeningVault = options?.skipPriorSuggestion
     ? saved?.openingVault != null
@@ -623,8 +635,11 @@ async function buildSnapshot(
     saved?.closingVaultCounted != null ? roundMoney(saved.closingVaultCounted) : null;
 
   // Walk-in stays inside tills — do not add walk-in to vault again.
+  // Capital injections add physical cash into the vault; owner drawings remove it.
   const expectedClosingVault = roundMoney(
-    openingVault -
+    openingVault +
+      capital.dayInjections -
+      capital.dayDrawings -
       till.physicalCash +
       activity.fieldAgentDeposits -
       activity.fieldAgentWithdrawals +
@@ -647,10 +662,11 @@ async function buildSnapshot(
   const initialCash =
     saved?.initialCash != null ? roundMoney(saved.initialCash) : till.physicalCash;
   const totalInflows = roundMoney(
-    openingVault + activity.fieldAgentDeposits + activity.walkInDeposits
+    openingVault + capital.dayInjections + activity.fieldAgentDeposits + activity.walkInDeposits
   );
   const totalOutflows = roundMoney(
-    activity.fieldAgentWithdrawals +
+    capital.dayDrawings +
+      activity.fieldAgentWithdrawals +
       activity.walkInWithdrawals +
       susuExpenses +
       cashToBank
@@ -683,6 +699,14 @@ async function buildSnapshot(
     closingVaultCounted,
     vaultCountVariance,
     branchCashPosition,
+    capitalInjectedToday: capital.dayInjections,
+    capitalDrawingsToday: capital.dayDrawings,
+    branchTotalCapitalAdded: capital.branchTotalInjected,
+    branchTotalDrawings: capital.branchTotalDrawings,
+    branchNetCapital: capital.branchNetCapital,
+    companyTotalCapitalAdded: capital.companyTotalInjected,
+    companyTotalDrawings: capital.companyTotalDrawings,
+    companyNetCapital: capital.companyNetCapital,
     usingSavedInputs: Boolean(saved?.usingSavedInputs),
     notes: saved?.notes,
     recordedBy: saved?.recordedBy,

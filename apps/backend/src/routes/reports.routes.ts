@@ -15,6 +15,11 @@ import {
   getSusuClosingBalance,
   saveSusuClosingRecord
 } from "../services/susuClosingBalanceService.js";
+import {
+  createBranchCapitalEntry,
+  getBranchCapitalSummary,
+  voidBranchCapitalEntry
+} from "../services/branchCapitalService.js";
 
 import { resolveRequestBranchFilter } from "../middleware/branchScope.js";
 import { listBranches } from "../services/branchService.js";
@@ -441,3 +446,91 @@ reportsRouter.put("/susu-closing-balance", requirePermission("transactions.read"
     });
   }
 });
+
+reportsRouter.get("/branch-capital", requirePermission("transactions.read"), async (req, res) => {
+  const context = req.userContext;
+  if (!context) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  const branchId = typeof req.query.branchId === "string" ? req.query.branchId : undefined;
+  const businessDate = typeof req.query.date === "string" ? req.query.date : undefined;
+
+  try {
+    res.json(
+      await getBranchCapitalSummary(
+        context.tenantId,
+        {
+          role: context.role,
+          scopeType: context.scopeType as "head_office" | "branch",
+          branchId: context.branchId
+        },
+        { branchId, businessDate }
+      )
+    );
+  } catch (error) {
+    res.status(400).json({
+      error: error instanceof Error ? error.message : "Failed to load business capital summary"
+    });
+  }
+});
+
+reportsRouter.post("/branch-capital", requirePermission("transactions.read"), async (req, res) => {
+  const context = req.userContext;
+  if (!context) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  try {
+    res.status(201).json(
+      await createBranchCapitalEntry(
+        context.tenantId,
+        {
+          role: context.role,
+          scopeType: context.scopeType as "head_office" | "branch",
+          branchId: context.branchId,
+          userId: context.userId
+        },
+        req.body
+      )
+    );
+  } catch (error) {
+    res.status(400).json({
+      error: error instanceof Error ? error.message : "Failed to record business capital entry"
+    });
+  }
+});
+
+reportsRouter.post(
+  "/branch-capital/:entryId/void",
+  requirePermission("transactions.read"),
+  async (req, res) => {
+    const context = req.userContext;
+    if (!context) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+
+    try {
+      res.json(
+        await voidBranchCapitalEntry(
+          context.tenantId,
+          {
+            role: context.role,
+            scopeType: context.scopeType as "head_office" | "branch",
+            branchId: context.branchId,
+            userId: context.userId
+          },
+          String(req.params.entryId),
+          req.body
+        )
+      );
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Failed to void business capital entry"
+      });
+    }
+  }
+);
