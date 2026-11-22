@@ -18,6 +18,13 @@ function formatMoney(amount: number): string {
   return `GHS ${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+const CAPITAL_INJECTION_TOOLTIP =
+  "Cash put INTO the business by the owner (e.g. Day 1 starting cash or liquidity top-up). Adds to Net Owner Capital and today's Expected Closing Vault.";
+const CAPITAL_DRAWING_TOOLTIP =
+  "Cash taken OUT of the vault by the owner for personal use or profit withdrawal. Reduces Net Owner Capital and today's Expected Closing Vault (do not use for branch expenses or customer payouts).";
+const NET_CAPITAL_TOOLTIP =
+  "Net owner capital = Total capital added minus Total owner drawings across all branches.";
+
 export function SusuClosingBalancesPage({ role }: Props) {
   const { showToast } = useToast();
   const canEdit = role === "admin" || role === "coordinator" || role === "accountant";
@@ -410,7 +417,8 @@ export function SusuClosingBalancesPage({ role }: Props) {
                 <div className="susu-capital-card__actions">
                   <button
                     type="button"
-                    className="button"
+                    className="button susu-tooltip susu-tooltip--end"
+                    data-tooltip={CAPITAL_INJECTION_TOOLTIP}
                     disabled={savingCapital || capitalSummary?.storageReady === false}
                     onClick={() => openCapitalModal("injection")}
                   >
@@ -418,7 +426,8 @@ export function SusuClosingBalancesPage({ role }: Props) {
                   </button>
                   <button
                     type="button"
-                    className="button secondary"
+                    className="button secondary susu-tooltip susu-tooltip--end"
+                    data-tooltip={CAPITAL_DRAWING_TOOLTIP}
                     disabled={savingCapital || capitalSummary?.storageReady === false}
                     onClick={() => openCapitalModal("drawing")}
                   >
@@ -436,14 +445,22 @@ export function SusuClosingBalancesPage({ role }: Props) {
             ) : null}
 
             <div className="susu-capital-card__stats">
-              <div className="susu-capital-stat">
+              <div
+                className="susu-capital-stat susu-tooltip susu-tooltip--start"
+                data-tooltip={CAPITAL_INJECTION_TOOLTIP}
+                tabIndex={0}
+              >
                 <span className="susu-capital-stat__label">Total capital added</span>
                 <strong className="susu-capital-stat__value susu-capital-stat__value--in">
                   {formatMoney(companyTotalAdded)}
                 </strong>
                 <span className="susu-capital-stat__meta muted">All branches</span>
               </div>
-              <div className="susu-capital-stat">
+              <div
+                className="susu-capital-stat susu-tooltip"
+                data-tooltip={CAPITAL_DRAWING_TOOLTIP}
+                tabIndex={0}
+              >
                 <span className="susu-capital-stat__label">Owner drawings</span>
                 <strong className="susu-capital-stat__value susu-capital-stat__value--out">
                   {companyTotalDrawings > 0
@@ -452,14 +469,22 @@ export function SusuClosingBalancesPage({ role }: Props) {
                 </strong>
                 <span className="susu-capital-stat__meta muted">All branches</span>
               </div>
-              <div className="susu-capital-stat susu-capital-stat--highlight">
+              <div
+                className="susu-capital-stat susu-capital-stat--highlight susu-tooltip"
+                data-tooltip={NET_CAPITAL_TOOLTIP}
+                tabIndex={0}
+              >
                 <span className="susu-capital-stat__label">Net owner capital</span>
                 <strong className="susu-capital-stat__value">
                   {formatMoney(companyNetCapital)}
                 </strong>
                 <span className="susu-capital-stat__meta muted">Company total</span>
               </div>
-              <div className="susu-capital-stat">
+              <div
+                className="susu-capital-stat susu-tooltip susu-tooltip--end"
+                data-tooltip={`Cumulative capital added minus owner drawings recorded for ${branchLabel}.`}
+                tabIndex={0}
+              >
                 <span className="susu-capital-stat__label">{branchLabel}</span>
                 <strong className="susu-capital-stat__value">
                   {formatMoney(branchNetCapital)}
@@ -515,6 +540,13 @@ export function SusuClosingBalancesPage({ role }: Props) {
                                         ? "susu-capital-badge--in"
                                         : "susu-capital-badge--out"
                                   }`}
+                                  title={
+                                    isVoided
+                                      ? `Voided entry${entry.voidReason ? `: ${entry.voidReason}` : ""}`
+                                      : entry.entryType === "injection"
+                                        ? CAPITAL_INJECTION_TOOLTIP
+                                        : CAPITAL_DRAWING_TOOLTIP
+                                  }
                                 >
                                   {isVoided
                                     ? "Voided"
@@ -728,7 +760,8 @@ export function SusuClosingBalancesPage({ role }: Props) {
           <div className="susu-capital-modal__toggle" role="group" aria-label="Entry type">
             <button
               type="button"
-              className={`button ${capitalType === "injection" ? "" : "secondary"}`}
+              className={`button susu-tooltip susu-tooltip--below susu-tooltip--start ${capitalType === "injection" ? "" : "secondary"}`}
+              data-tooltip={CAPITAL_INJECTION_TOOLTIP}
               onClick={() => {
                 setCapitalType("injection");
                 if (capitalSource === "Owner drawing") {
@@ -740,7 +773,8 @@ export function SusuClosingBalancesPage({ role }: Props) {
             </button>
             <button
               type="button"
-              className={`button ${capitalType === "drawing" ? "" : "secondary"}`}
+              className={`button susu-tooltip susu-tooltip--below susu-tooltip--end ${capitalType === "drawing" ? "" : "secondary"}`}
+              data-tooltip={CAPITAL_DRAWING_TOOLTIP}
               onClick={() => {
                 setCapitalType("drawing");
                 if (capitalSource === "Owner cash") {
@@ -751,6 +785,9 @@ export function SusuClosingBalancesPage({ role }: Props) {
               − Owner drawing
             </button>
           </div>
+          <p className="susu-capital-modal__hint muted">
+            {capitalType === "injection" ? CAPITAL_INJECTION_TOOLTIP : CAPITAL_DRAWING_TOOLTIP}
+          </p>
 
           <label className="field">
             <span>Amount</span>
