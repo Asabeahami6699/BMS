@@ -20,7 +20,10 @@ import {
   recordOpeningFeeRecovery
 } from "./savingsOpeningFeeService.js";
 import { getSavingsOpeningFeeGhs } from "./tenantProfileService.js";
-import { applyTransactionToFloat } from "./branchFloatService.js";
+import {
+  applyTransactionToFloat,
+  assertFloatCapacityForTransaction
+} from "./branchFloatService.js";
 import { createAgencyPendingDeposit, usesAgencyDepositFlow } from "./agencyBankingService.js";
 import {
   notifyCustomerTransaction,
@@ -442,9 +445,18 @@ export async function reconcileCustomerApprovedWithdrawalDebits(
   }
 }
 
+export type CreateTransactionOptions = {
+  /**
+   * Field-agent call-over batches are received into the branch vault rather than a personal
+   * counter till, so posting them bypasses teller counter float requirements and till counters.
+   */
+  skipBranchFloat?: boolean;
+};
+
 export async function createTransaction(
   context: TransactionRequestContext,
-  input: unknown
+  input: unknown,
+  options?: CreateTransactionOptions
 ): Promise<Transaction> {
   const payload = createTransactionInputSchema.parse(input);
 
@@ -475,6 +487,16 @@ export async function createTransaction(
 
   if (!canRecordAtBranch(context, payload.transactionBranchId, customer.homeBranchId)) {
     throw new Error("User cannot post transactions outside assigned branch");
+  }
+
+  // Validate till float / physical cash BEFORE mutating Susu cycles, institutional income,
+  // opening fees, or customer ledgers so a missing/insufficient float never leaves partial commits.
+  if (!options?.skipBranchFloat) {
+    await assertFloatCapacityForTransaction(context, {
+      transactionBranchId: payload.transactionBranchId,
+      type: payload.type,
+      amount: payload.amount
+    });
   }
 
   if (payload.type === "withdrawal") {
@@ -710,6 +732,9 @@ export async function createTransaction(
       }
     }
     if (ledgerAmount <= 0) {
+      if (!options?.skipBranchFloat) {
+        await applyTransactionToFloat(context, { ...transaction, amount: payload.amount });
+      }
       return enrichTransactionProduct(context.tenantId, transaction);
     }
   }
@@ -863,11 +888,14 @@ export async function createTransaction(
 
   // Teller till cash & float must reflect the full physical cash handed over (payload.amount),
   // even when Susu Box 1 commission splits part or all of the deposit into institutional income.
-  const floatTransaction =
-    susuAllocation && (transaction.type === "deposit" || transaction.type === "daily_susu")
-      ? { ...transaction, amount: payload.amount }
-      : transaction;
-  await applyTransactionToFloat(context, floatTransaction);
+  // Field-agent call-over batches bypass teller counter float (cash goes directly to the branch vault).
+  if (!options?.skipBranchFloat) {
+    const floatTransaction =
+      susuAllocation && (transaction.type === "deposit" || transaction.type === "daily_susu")
+        ? { ...transaction, amount: payload.amount }
+        : transaction;
+    await applyTransactionToFloat(context, floatTransaction);
+  }
 
   if (QUALIFYING_TX_TYPES.has(transaction.type)) {
     void touchCustomerQualifyingActivity(context.tenantId, transaction.customerId).catch(() => {

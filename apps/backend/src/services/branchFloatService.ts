@@ -812,31 +812,51 @@ export function isFieldAgentTillPayout(transaction: Transaction): boolean {
   );
 }
 
-export async function applyTransactionToFloat(
+export async function assertFloatCapacityForTransaction(
   context: ActorContext,
-  transaction: Transaction
-): Promise<void> {
-  const session = await assertOpenFloatForTransaction(context, transaction.transactionBranchId);
+  input: {
+    transactionBranchId: string;
+    type: Transaction["type"];
+    amount: number;
+  }
+): Promise<BranchFloatSession | null> {
+  const session = await assertOpenFloatForTransaction(context, input.transactionBranchId);
   if (!session) {
-    return;
+    return null;
   }
 
-  if (transaction.type === "deposit" || transaction.type === "daily_susu") {
+  if (input.type === "deposit" || input.type === "daily_susu") {
     const availableFloat = remainingFloatBalance(session);
-    if (transaction.amount > availableFloat + 1e-9) {
+    if (input.amount > availableFloat + 1e-9) {
       throw new Error(
         `Insufficient till float balance. Available float: GHS ${formatAccountAmount(availableFloat)}. Request more float from admin.`
       );
     }
   }
 
-  if (transaction.type === "withdrawal") {
+  if (input.type === "withdrawal") {
     const cashInTill = expectedCash(session);
-    if (transaction.amount > cashInTill + 1e-9) {
+    if (input.amount > cashInTill + 1e-9) {
       throw new Error(
         `Insufficient physical cash in till for this withdrawal. Available: GHS ${formatAccountAmount(cashInTill)}. Collect extra cash first — float alone is not cash.`
       );
     }
+  }
+
+  return session;
+}
+
+export async function applyTransactionToFloat(
+  context: ActorContext,
+  transaction: Transaction
+): Promise<void> {
+  const session = await assertFloatCapacityForTransaction(context, {
+    transactionBranchId: transaction.transactionBranchId,
+    type: transaction.type,
+    amount: transaction.amount
+  });
+  if (!session) {
+    return;
   }
 
   if (transaction.type === "withdrawal") {

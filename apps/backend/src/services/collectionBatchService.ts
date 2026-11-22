@@ -777,7 +777,8 @@ async function postSingleBatchUnlocked(
             notes: line.notes
               ? `${line.notes} · batch ${current.id.slice(0, 8)}`
               : `Batch ${current.id.slice(0, 8)}`
-          }
+          },
+          { skipBranchFloat: true }
         );
         await claim.finish(201, tx);
         transactionId = tx.id;

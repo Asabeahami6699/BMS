@@ -1,5 +1,10 @@
 import type { Transaction } from "@bms/shared";
-import { formatAccountAmount, transactionSchema } from "@bms/shared";
+import {
+  formatAccountAmount,
+  SUSU_COMMISSION_DEBIT_TAG,
+  SUSU_COMMISSION_REFUND_TAG,
+  transactionSchema
+} from "@bms/shared";
 import type { Role } from "@bms/shared";
 import { getSupabaseAdminClient } from "../config/supabaseClient.js";
 import { listUsersByTenant } from "./authStore.js";
@@ -529,6 +534,21 @@ async function computeSuggestedOpeningVault(
   }
 }
 
+function isNonCashSystemEntry(notes: string | undefined): boolean {
+  if (!notes) {
+    return false;
+  }
+  const lower = notes.toLowerCase();
+  return (
+    notes.includes(SUSU_COMMISSION_DEBIT_TAG) ||
+    notes.includes(SUSU_COMMISSION_REFUND_TAG) ||
+    lower.includes("sms_charge:") ||
+    lower.includes("loan_disburse:") ||
+    lower.includes("loan_repay:") ||
+    lower.includes("loan_repay_reverse:")
+  );
+}
+
 async function loadDayActivity(
   tenantId: string,
   branchId: string,
@@ -555,13 +575,33 @@ async function loadDayActivity(
     if (error) {
       throw new Error(`Failed to load transactions: ${error.message}`);
     }
-    transactions = (data ?? []).map((row) => mapTransactionRow(row as Record<string, unknown>));
+    transactions = (data ?? [])
+      .filter((row) => {
+        const r = row as Record<string, unknown>;
+        if (r.reversed_at != null) {
+          return false;
+        }
+        const execStatus = typeof r.execution_status === "string" ? r.execution_status : null;
+        if (
+          execStatus &&
+          execStatus !== "completed" &&
+          execStatus !== "settled"
+        ) {
+          return false;
+        }
+        return true;
+      })
+      .map((row) => mapTransactionRow(row as Record<string, unknown>));
   } else {
     const { listTransactions } = await import("./transactionService.js");
     const all = await listTransactions(tenantId);
     transactions = all.filter(
       (tx) =>
-        tx.transactionBranchId === branchId && tx.createdAt >= start && tx.createdAt <= end
+        tx.transactionBranchId === branchId &&
+        tx.createdAt >= start &&
+        tx.createdAt <= end &&
+        !tx.reversedAt &&
+        (!tx.executionStatus || tx.executionStatus === "completed")
     );
   }
 
@@ -571,11 +611,14 @@ async function loadDayActivity(
   let walkInWithdrawals = 0;
 
   for (const tx of transactions) {
-    const isHall = isBranchCounterPost(tx, userMeta);
+    if (isNonCashSystemEntry(tx.notes)) {
+      continue;
+    }
     const isField = isFieldAgentChannelPost(tx, userMeta);
+    const isHall = isBranchCounterPost(tx, userMeta);
 
     if (tx.type === "withdrawal") {
-      if (isField && !isHall) {
+      if (isField) {
         fieldAgentWithdrawals += tx.amount;
       } else if (isHall) {
         walkInWithdrawals += tx.amount;
@@ -588,7 +631,7 @@ async function loadDayActivity(
       continue;
     }
 
-    if (isField && !isHall) {
+    if (isField) {
       fieldAgentDeposits += tx.amount;
     } else if (isHall) {
       walkInDeposits += tx.amount;
