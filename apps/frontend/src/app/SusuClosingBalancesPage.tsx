@@ -128,6 +128,63 @@ export function SusuClosingBalancesPage({ role }: Props) {
   const capitalDrawingsToday =
     capitalSummary?.dayDrawings ?? snapshot?.capitalDrawingsToday ?? 0;
 
+  const liveExpectedClosingVault = useMemo(() => {
+    if (!snapshot) {
+      return 0;
+    }
+    const parsedOpening =
+      openingVault.trim() !== "" ? parseAccountingAmount(openingVault) : Number.NaN;
+    const effectiveOpening = Number.isFinite(parsedOpening)
+      ? parsedOpening
+      : snapshot.suggestedOpeningVault;
+
+    const parsedCashToBank =
+      cashToBank.trim() !== "" ? parseAccountingAmount(cashToBank) : Number.NaN;
+    const effectiveCashToBank = Number.isFinite(parsedCashToBank)
+      ? Math.max(0, parsedCashToBank)
+      : 0;
+
+    const parsedExpenses =
+      susuExpenses.trim() !== "" ? parseAccountingAmount(susuExpenses) : Number.NaN;
+    const effectiveExpenses = Number.isFinite(parsedExpenses)
+      ? Math.max(0, parsedExpenses)
+      : snapshot.tillExpenses;
+    const extraBranchExpenses = Math.max(0, effectiveExpenses - snapshot.tillExpenses);
+
+    return (
+      Math.round(
+        (effectiveOpening +
+          capitalInjectedToday -
+          capitalDrawingsToday -
+          snapshot.tillPhysicalCash +
+          snapshot.fieldAgentDeposits -
+          snapshot.fieldAgentWithdrawals +
+          snapshot.cashReturnedFromClosedTills -
+          effectiveCashToBank -
+          extraBranchExpenses) *
+          100
+      ) / 100
+    );
+  }, [
+    snapshot,
+    openingVault,
+    cashToBank,
+    susuExpenses,
+    capitalInjectedToday,
+    capitalDrawingsToday
+  ]);
+
+  const liveVaultDifference = useMemo(() => {
+    if (!snapshot || closingVaultCounted.trim() === "") {
+      return null;
+    }
+    const counted = parseAccountingAmount(closingVaultCounted);
+    if (!Number.isFinite(counted) || counted < 0) {
+      return null;
+    }
+    return Math.round((counted - liveExpectedClosingVault) * 100) / 100;
+  }, [snapshot, closingVaultCounted, liveExpectedClosingVault]);
+
   async function handleSave(event: FormEvent) {
     event.preventDefault();
     if (!canEdit) {
@@ -670,12 +727,14 @@ export function SusuClosingBalancesPage({ role }: Props) {
                     <span
                       className={`susu-closing-editor__pill${
                         Math.abs(liveOpeningDelta) >= 0.005
-                          ? " susu-closing-editor__pill--delta"
+                          ? liveOpeningDelta > 0
+                            ? " susu-closing-editor__pill--delta"
+                            : " susu-closing-editor__pill--shortage"
                           : " susu-closing-editor__pill--ok"
                       }`}
                     >
                       {Math.abs(liveOpeningDelta) >= 0.005
-                        ? `Δ ${formatMoney(liveOpeningDelta)}`
+                        ? `Diff ${liveOpeningDelta > 0 ? "+" : "−"} ${formatMoney(Math.abs(liveOpeningDelta))}`
                         : "Matches suggestion"}
                     </span>
                   </div>
@@ -688,6 +747,23 @@ export function SusuClosingBalancesPage({ role }: Props) {
                       placeholder={formatAccountingInput(snapshot.suggestedOpeningVault)}
                     />
                   </label>
+                  {Math.abs(liveOpeningDelta) >= 0.005 ? (
+                    <p
+                      className={`susu-closing-editor__diff ${
+                        liveOpeningDelta > 0
+                          ? "susu-closing-editor__diff--surplus"
+                          : "susu-closing-editor__diff--shortage"
+                      }`}
+                      role="status"
+                    >
+                      <strong>
+                        Difference: {liveOpeningDelta > 0 ? "+" : "−"}{" "}
+                        {formatMoney(Math.abs(liveOpeningDelta))}
+                      </strong>{" "}
+                      ({liveOpeningDelta > 0 ? "above" : "below"} suggested{" "}
+                      {formatMoney(snapshot.suggestedOpeningVault)})
+                    </p>
+                  ) : null}
                   <p className="muted susu-closing-editor__meta">
                     Suggested {formatMoney(snapshot.suggestedOpeningVault)} from prior close.
                     Adjustments notify admin/coordinator.
@@ -728,7 +804,25 @@ export function SusuClosingBalancesPage({ role }: Props) {
                 <section className="susu-closing-editor__block">
                   <div className="susu-closing-editor__block-head">
                     <h4>Safe count</h4>
-                    <span className="susu-closing-editor__pill">Optional</span>
+                    <span
+                      className={`susu-closing-editor__pill${
+                        liveVaultDifference == null
+                          ? ""
+                          : Math.abs(liveVaultDifference) < 0.005
+                            ? " susu-closing-editor__pill--ok"
+                            : liveVaultDifference > 0
+                              ? " susu-closing-editor__pill--delta"
+                              : " susu-closing-editor__pill--shortage"
+                      }`}
+                    >
+                      {liveVaultDifference == null
+                        ? "Optional"
+                        : Math.abs(liveVaultDifference) < 0.005
+                          ? "Balanced"
+                          : liveVaultDifference > 0
+                            ? `Surplus + ${formatMoney(liveVaultDifference)}`
+                            : `Shortage − ${formatMoney(Math.abs(liveVaultDifference))}`}
+                    </span>
                   </div>
                   <label className="field">
                     <span>Vault counted</span>
@@ -736,11 +830,42 @@ export function SusuClosingBalancesPage({ role }: Props) {
                       value={closingVaultCounted}
                       onChange={setClosingVaultCounted}
                       allowEmpty
-                      placeholder={formatAccountingInput(snapshot.expectedClosingVault)}
+                      placeholder={formatAccountingInput(liveExpectedClosingVault)}
                     />
                   </label>
+                  {liveVaultDifference != null ? (
+                    <p
+                      className={`susu-closing-editor__diff ${
+                        Math.abs(liveVaultDifference) < 0.005
+                          ? "susu-closing-editor__diff--ok"
+                          : liveVaultDifference > 0
+                            ? "susu-closing-editor__diff--surplus"
+                            : "susu-closing-editor__diff--shortage"
+                      }`}
+                      role="status"
+                    >
+                      {Math.abs(liveVaultDifference) < 0.005 ? (
+                        <>
+                          <strong>Difference: {formatMoney(0)}</strong> — Counted cash matches
+                          expected closing vault.
+                        </>
+                      ) : liveVaultDifference > 0 ? (
+                        <>
+                          <strong>Difference (Surplus): + {formatMoney(liveVaultDifference)}</strong>{" "}
+                          — Counted cash is above expected {formatMoney(liveExpectedClosingVault)}.
+                        </>
+                      ) : (
+                        <>
+                          <strong>
+                            Difference (Shortage): − {formatMoney(Math.abs(liveVaultDifference))}
+                          </strong>{" "}
+                          — Counted cash is below expected {formatMoney(liveExpectedClosingVault)}.
+                        </>
+                      )}
+                    </p>
+                  ) : null}
                   <p className="muted susu-closing-editor__meta">
-                    Expected {formatMoney(snapshot.expectedClosingVault)}. Counted value becomes
+                    Expected {formatMoney(liveExpectedClosingVault)}. Counted value becomes
                     tomorrow&apos;s opening; variance is notified.
                   </p>
                 </section>

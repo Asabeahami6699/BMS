@@ -1,7 +1,18 @@
-import { formatAccountAmount } from "@bms/shared";
+import {
+  formatAccountAmount,
+  SUSU_COMMISSION_DEBIT_TAG,
+  SUSU_COMMISSION_REFUND_TAG
+} from "@bms/shared";
 import { FormEvent, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import type { AppRole, Branch, BranchFloatSession, BranchFloatSummary } from "./api";
+import { useShallow } from "zustand/react/shallow";
+import type {
+  AppRole,
+  Branch,
+  BranchCounterStatementLine,
+  BranchFloatSession,
+  BranchFloatSummary
+} from "./api";
 import { isFloatTopUpRequest, pendingFloatAmount } from "./api";
 import {
   allocateBranchFloat,
@@ -32,6 +43,26 @@ type TillAction = "request_float" | "extra_float" | "extra_cash" | "expense";
 
 function formatMoney(n: number): string {
   return `GHS ${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function formatCalloverTime(iso: string): string {
+  try {
+    return new Date(iso).toLocaleTimeString(undefined, {
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+  } catch {
+    return "";
+  }
+}
+
+function isFieldPayoutLine(line: BranchCounterStatementLine): boolean {
+  const notes = (line.notes ?? "").toLowerCase();
+  return (
+    notes.includes("teller cash payout") ||
+    notes.includes("agency withdrawal") ||
+    notes.includes("teller payout")
+  );
 }
 
 const REQUIRES_FLOAT = new Set<AppRole>(["teller", "coordinator"]);
@@ -84,6 +115,27 @@ export function BranchCounterFloatPanel({
   onUpdated
 }: Props) {
   const { showToast } = useToast();
+  const {
+    tellerTodayStatement,
+    fallbackStatement,
+    tellerCalloverCheckedBySession,
+    tellerCalloverConfirmedBySession,
+    toggleTellerCalloverTx,
+    setTellerCalloverMany,
+    setTellerCalloverConfirmed,
+    clearTellerCallover
+  } = useBranchCounterStore(
+    useShallow((s) => ({
+      tellerTodayStatement: s.tellerTodayStatement,
+      fallbackStatement: s.statement,
+      tellerCalloverCheckedBySession: s.tellerCalloverCheckedBySession,
+      tellerCalloverConfirmedBySession: s.tellerCalloverConfirmedBySession,
+      toggleTellerCalloverTx: s.toggleTellerCalloverTx,
+      setTellerCalloverMany: s.setTellerCalloverMany,
+      setTellerCalloverConfirmed: s.setTellerCalloverConfirmed,
+      clearTellerCallover: s.clearTellerCallover
+    }))
+  );
   const [expanded, setExpanded] = useState(false);
   const [actualClosing, setActualClosing] = useState("");
   const [varianceNote, setVarianceNote] = useState("");
@@ -141,6 +193,81 @@ export function BranchCounterFloatPanel({
     }
     return { type: "shortage" as const, amount: Math.abs(variance) };
   }, [actualClosing, floatSummary?.expectedCash]);
+
+  const tellerCallover = useMemo(() => {
+    const sessionId = floatSession?.id ?? "";
+    const cashierId = floatSession?.cashierUserId ?? "";
+    const activeStatement =
+      tellerTodayStatement ??
+      (fallbackStatement &&
+      floatSession &&
+      fallbackStatement.summary.date === floatSession.businessDate &&
+      fallbackStatement.summary.branchId === floatSession.branchId
+        ? fallbackStatement
+        : null);
+
+    const rawLines = activeStatement?.lines ?? [];
+    const deposits: BranchCounterStatementLine[] = [];
+    const withdrawals: BranchCounterStatementLine[] = [];
+
+    for (const line of rawLines) {
+      if (cashierId && line.recordedByUserId !== cashierId) {
+        continue;
+      }
+      if (line.type === "susu_reversal" || line.reversedAt) {
+        continue;
+      }
+      if (
+        line.notes?.includes(SUSU_COMMISSION_DEBIT_TAG) ||
+        line.notes?.includes(SUSU_COMMISSION_REFUND_TAG)
+      ) {
+        continue;
+      }
+      if (line.type === "deposit" || line.type === "daily_susu") {
+        deposits.push(line);
+      } else if (line.type === "withdrawal") {
+        withdrawals.push(line);
+      }
+    }
+
+    const checkedIds = new Set(sessionId ? (tellerCalloverCheckedBySession[sessionId] ?? []) : []);
+    const depositIds = deposits.map((d) => d.id);
+    const withdrawalIds = withdrawals.map((w) => w.id);
+    const allIds = [...depositIds, ...withdrawalIds];
+    const checkedDepositsCount = depositIds.filter((id) => checkedIds.has(id)).length;
+    const checkedWithdrawalsCount = withdrawalIds.filter((id) => checkedIds.has(id)).length;
+    const totalCount = allIds.length;
+    const checkedCount = checkedDepositsCount + checkedWithdrawalsCount;
+    const allItemsChecked = totalCount === 0 || checkedCount === totalCount;
+    const confirmed = Boolean(sessionId && tellerCalloverConfirmedBySession[sessionId]);
+    const depositTotal = Math.round(deposits.reduce((sum, l) => sum + l.amount, 0) * 100) / 100;
+    const withdrawalTotal =
+      Math.round(withdrawals.reduce((sum, l) => sum + l.amount, 0) * 100) / 100;
+
+    return {
+      sessionId,
+      deposits,
+      withdrawals,
+      depositIds,
+      withdrawalIds,
+      checkedIds,
+      checkedDepositsCount,
+      checkedWithdrawalsCount,
+      totalCount,
+      checkedCount,
+      allItemsChecked,
+      confirmed,
+      readyToClose: allItemsChecked && confirmed,
+      depositTotal,
+      withdrawalTotal
+    };
+  }, [
+    floatSession,
+    tellerTodayStatement,
+    fallbackStatement,
+    tellerCalloverCheckedBySession,
+    tellerCalloverConfirmedBySession
+  ]);
 
   function openMovement(preferred?: TillAction) {
     const next = preferred && availableActions.includes(preferred) ? preferred : availableActions[0]!;
@@ -296,6 +423,17 @@ export function BranchCounterFloatPanel({
     if (!floatSession) {
       return;
     }
+    if (!tellerCallover.allItemsChecked) {
+      showToast(
+        "Complete your teller call-over by checking all today's deposits and withdrawals first",
+        "error"
+      );
+      return;
+    }
+    if (!tellerCallover.confirmed) {
+      showToast("Tick the call-over confirmation box before closing your till", "error");
+      return;
+    }
     const expected = floatSummary?.expectedCash ?? 0;
     const actual = Number(actualClosing);
     const variance = Math.round((actual - expected) * 100) / 100;
@@ -328,6 +466,7 @@ export function BranchCounterFloatPanel({
           "success"
         );
       }
+      clearTellerCallover(floatSession.id);
       setActualClosing("");
       setVarianceNote("");
       onUpdated();
@@ -626,74 +765,299 @@ export function BranchCounterFloatPanel({
           ) : null}
 
           {floatSession?.status === "open" && needsFloat ? (
-            <form className="branch-float__close-form" onSubmit={(e) => void handleClose(e)}>
-              <h3>End of day balancing</h3>
-              <p className="muted">
-                Count physical cash in your drawer. Expected after deposits, withdrawals and expenses:{" "}
-                <strong>{formatMoney(floatSummary?.expectedCash ?? 0)}</strong>
-              </p>
-              <label className="field">
-                <span>Actual cash counted (GHS)</span>
-                <input
-                  type="number"
-                  className="input-no-spin"
-                  min={0}
-                  step="0.01"
-                  value={actualClosing}
-                  onChange={(e) => setActualClosing(e.target.value)}
-                  required
-                />
-              </label>
-              {closeVariancePreview ? (
-                <p
-                  className={`branch-float__eod-flag branch-float__eod-flag--${closeVariancePreview.type}`}
-                  role="status"
+            <div className="branch-float__eod-wrap">
+              <section className="teller-callover" aria-label="Teller end-of-day call-over">
+                <div className="teller-callover__head">
+                  <div>
+                    <h3>1. Teller call-over (Deposits &amp; Withdrawals)</h3>
+                    <p className="muted teller-callover__lead">
+                      Verify every deposit slip and withdrawal voucher for{" "}
+                      <strong>{floatSession.businessDate}</strong> before closing your till.
+                    </p>
+                  </div>
+                  <span
+                    className={`susu-closing-editor__pill ${
+                      tellerCallover.readyToClose
+                        ? "susu-closing-editor__pill--ok"
+                        : "susu-closing-editor__pill--delta"
+                    }`}
+                  >
+                    {tellerCallover.totalCount === 0
+                      ? tellerCallover.confirmed
+                        ? "Verified (no entries)"
+                        : "Confirm zero entries"
+                      : tellerCallover.allItemsChecked
+                        ? `${tellerCallover.checkedCount}/${tellerCallover.totalCount} checked`
+                        : `${tellerCallover.checkedCount}/${tellerCallover.totalCount} checked`}
+                  </span>
+                </div>
+
+                <div className="teller-callover__recap">
+                  <div>
+                    <span className="muted">Opening + extra cash</span>
+                    <strong>{formatMoney(initialCash + extraCash)}</strong>
+                  </div>
+                  <div>
+                    <span className="muted">
+                      Deposits ({tellerCallover.deposits.length})
+                    </span>
+                    <strong className="teller-callover__val--in">
+                      + {formatMoney(tellerCallover.depositTotal)}
+                    </strong>
+                  </div>
+                  <div>
+                    <span className="muted">
+                      Withdrawals ({tellerCallover.withdrawals.length})
+                    </span>
+                    <strong className="teller-callover__val--out">
+                      − {formatMoney(tellerCallover.withdrawalTotal)}
+                    </strong>
+                  </div>
+                  <div>
+                    <span className="muted">Till expenses</span>
+                    <strong>− {formatMoney(totalExpenses)}</strong>
+                  </div>
+                  <div className="teller-callover__recap-total">
+                    <span className="muted">Expected drawer cash</span>
+                    <strong>{formatMoney(floatSummary?.expectedCash ?? 0)}</strong>
+                  </div>
+                </div>
+
+                <div className="teller-callover__grid">
+                  <div className="teller-callover__col">
+                    <div className="teller-callover__col-head">
+                      <h4>
+                        Deposits ({tellerCallover.checkedDepositsCount}/
+                        {tellerCallover.deposits.length})
+                      </h4>
+                      {tellerCallover.deposits.length > 0 ? (
+                        <button
+                          type="button"
+                          className="button secondary teller-callover__toggle-all"
+                          onClick={() =>
+                            setTellerCalloverMany(
+                              tellerCallover.sessionId,
+                              tellerCallover.depositIds,
+                              tellerCallover.checkedDepositsCount < tellerCallover.deposits.length
+                            )
+                          }
+                        >
+                          {tellerCallover.checkedDepositsCount === tellerCallover.deposits.length
+                            ? "Uncheck all"
+                            : "Check all"}
+                        </button>
+                      ) : null}
+                    </div>
+                    {tellerCallover.deposits.length === 0 ? (
+                      <p className="muted teller-callover__empty">
+                        No counter deposits posted by you today.
+                      </p>
+                    ) : (
+                      <ul className="teller-callover__list">
+                        {tellerCallover.deposits.map((line) => {
+                          const checked = tellerCallover.checkedIds.has(line.id);
+                          return (
+                            <li
+                              key={line.id}
+                              className={`teller-callover__row${checked ? " teller-callover__row--checked" : ""}`}
+                            >
+                              <label className="teller-callover__row-label">
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() =>
+                                    toggleTellerCalloverTx(tellerCallover.sessionId, line.id)
+                                  }
+                                />
+                                <span className="teller-callover__row-main">
+                                  <strong>{line.customerName}</strong>
+                                  <span className="muted teller-callover__row-meta">
+                                    {line.customerAccountNumber ? `${line.customerAccountNumber} · ` : ""}
+                                    {formatCalloverTime(line.createdAt)}
+                                    {line.type === "daily_susu" ? " · Daily Susu" : " · Deposit"}
+                                  </span>
+                                </span>
+                                <span className="teller-callover__row-amt teller-callover__val--in">
+                                  + {formatMoney(line.amount)}
+                                </span>
+                              </label>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </div>
+
+                  <div className="teller-callover__col">
+                    <div className="teller-callover__col-head">
+                      <h4>
+                        Withdrawals ({tellerCallover.checkedWithdrawalsCount}/
+                        {tellerCallover.withdrawals.length})
+                      </h4>
+                      {tellerCallover.withdrawals.length > 0 ? (
+                        <button
+                          type="button"
+                          className="button secondary teller-callover__toggle-all"
+                          onClick={() =>
+                            setTellerCalloverMany(
+                              tellerCallover.sessionId,
+                              tellerCallover.withdrawalIds,
+                              tellerCallover.checkedWithdrawalsCount <
+                                tellerCallover.withdrawals.length
+                            )
+                          }
+                        >
+                          {tellerCallover.checkedWithdrawalsCount ===
+                          tellerCallover.withdrawals.length
+                            ? "Uncheck all"
+                            : "Check all"}
+                        </button>
+                      ) : null}
+                    </div>
+                    {tellerCallover.withdrawals.length === 0 ? (
+                      <p className="muted teller-callover__empty">
+                        No counter withdrawals or cash payouts posted by you today.
+                      </p>
+                    ) : (
+                      <ul className="teller-callover__list">
+                        {tellerCallover.withdrawals.map((line) => {
+                          const checked = tellerCallover.checkedIds.has(line.id);
+                          const isField = isFieldPayoutLine(line);
+                          return (
+                            <li
+                              key={line.id}
+                              className={`teller-callover__row${checked ? " teller-callover__row--checked" : ""}`}
+                            >
+                              <label className="teller-callover__row-label">
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() =>
+                                    toggleTellerCalloverTx(tellerCallover.sessionId, line.id)
+                                  }
+                                />
+                                <span className="teller-callover__row-main">
+                                  <strong>{line.customerName}</strong>
+                                  <span className="muted teller-callover__row-meta">
+                                    {line.customerAccountNumber ? `${line.customerAccountNumber} · ` : ""}
+                                    {formatCalloverTime(line.createdAt)} ·{" "}
+                                    {isField ? "Field payout" : "Walk-in"}
+                                  </span>
+                                </span>
+                                <span className="teller-callover__row-amt teller-callover__val--out">
+                                  − {formatMoney(line.amount)}
+                                </span>
+                              </label>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </div>
+                </div>
+
+                <label
+                  className={`teller-callover__confirm${
+                    !tellerCallover.allItemsChecked ? " teller-callover__confirm--disabled" : ""
+                  }`}
                 >
-                  {closeVariancePreview.type === "balanced" ? (
-                    <>
-                      <strong>Balanced</strong> — drawer matches expected cash. No OS case will open.
-                    </>
-                  ) : closeVariancePreview.type === "overage" ? (
-                    <>
-                      <strong>Overage {formatMoney(closeVariancePreview.amount)}</strong> — will be
-                      flagged automatically on Overages/Shortages (Branch till) when you close.
-                    </>
-                  ) : (
-                    <>
-                      <strong>Shortage {formatMoney(closeVariancePreview.amount)}</strong> — will be
-                      flagged automatically on Overages/Shortages (Branch till) when you close.
-                    </>
-                  )}
+                  <input
+                    type="checkbox"
+                    checked={tellerCallover.confirmed}
+                    disabled={!tellerCallover.allItemsChecked}
+                    onChange={(e) =>
+                      setTellerCalloverConfirmed(tellerCallover.sessionId, e.target.checked)
+                    }
+                  />
+                  <span>
+                    {tellerCallover.totalCount === 0
+                      ? "I confirm I had no counter deposits or withdrawals today and am ready to count my drawer."
+                      : tellerCallover.allItemsChecked
+                        ? "I have called over and verified all today's deposits and withdrawals against my slips and vouchers."
+                        : `Check all ${tellerCallover.totalCount - tellerCallover.checkedCount} remaining item(s) above before confirming call-over.`}
+                  </span>
+                </label>
+              </section>
+
+              <form className="branch-float__close-form" onSubmit={(e) => void handleClose(e)}>
+                <h3>2. End of day balancing</h3>
+                <p className="muted">
+                  Count physical cash in your drawer. Expected after deposits, withdrawals and
+                  expenses: <strong>{formatMoney(floatSummary?.expectedCash ?? 0)}</strong>
                 </p>
-              ) : null}
-              <label className="field">
-                <span>
-                  {closeVariancePreview?.type === "overage"
-                    ? "Overage note (required)"
-                    : closeVariancePreview?.type === "shortage"
-                      ? "Shortage note (required)"
-                      : "Variance note (optional)"}
-                </span>
-                <input
-                  value={varianceNote}
-                  onChange={(e) => setVarianceNote(e.target.value)}
-                  placeholder={
-                    closeVariancePreview?.type === "overage"
-                      ? "Why is there extra cash?"
+                <label className="field">
+                  <span>Actual cash counted (GHS)</span>
+                  <input
+                    type="number"
+                    className="input-no-spin"
+                    min={0}
+                    step="0.01"
+                    value={actualClosing}
+                    onChange={(e) => setActualClosing(e.target.value)}
+                    required
+                  />
+                </label>
+                {closeVariancePreview ? (
+                  <p
+                    className={`branch-float__eod-flag branch-float__eod-flag--${closeVariancePreview.type}`}
+                    role="status"
+                  >
+                    {closeVariancePreview.type === "balanced" ? (
+                      <>
+                        <strong>Balanced</strong> — drawer matches expected cash. No OS case will
+                        open.
+                      </>
+                    ) : closeVariancePreview.type === "overage" ? (
+                      <>
+                        <strong>Overage {formatMoney(closeVariancePreview.amount)}</strong> — will
+                        be flagged automatically on Overages/Shortages (Branch till) when you close.
+                      </>
+                    ) : (
+                      <>
+                        <strong>Shortage {formatMoney(closeVariancePreview.amount)}</strong> — will
+                        be flagged automatically on Overages/Shortages (Branch till) when you close.
+                      </>
+                    )}
+                  </p>
+                ) : null}
+                <label className="field">
+                  <span>
+                    {closeVariancePreview?.type === "overage"
+                      ? "Overage note (required)"
                       : closeVariancePreview?.type === "shortage"
-                        ? "Why is cash short?"
-                        : "Optional"
+                        ? "Shortage note (required)"
+                        : "Variance note (optional)"}
+                  </span>
+                  <input
+                    value={varianceNote}
+                    onChange={(e) => setVarianceNote(e.target.value)}
+                    placeholder={
+                      closeVariancePreview?.type === "overage"
+                        ? "Why is there extra cash?"
+                        : closeVariancePreview?.type === "shortage"
+                          ? "Why is cash short?"
+                          : "Optional"
+                    }
+                    required={
+                      closeVariancePreview?.type === "overage" ||
+                      closeVariancePreview?.type === "shortage"
+                    }
+                  />
+                </label>
+                <button
+                  type="submit"
+                  className="button secondary"
+                  disabled={busy || !tellerCallover.readyToClose}
+                  title={
+                    !tellerCallover.readyToClose
+                      ? "Complete and confirm Step 1 (Teller call-over) above before closing your till"
+                      : undefined
                   }
-                  required={
-                    closeVariancePreview?.type === "overage" ||
-                    closeVariancePreview?.type === "shortage"
-                  }
-                />
-              </label>
-              <button type="submit" className="button secondary" disabled={busy}>
-                Close till for today
-              </button>
-            </form>
+                >
+                  Close till for today
+                </button>
+              </form>
+            </div>
           ) : null}
 
           {floatSession?.status === "closed" && isAdminLike ? (

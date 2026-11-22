@@ -14,6 +14,7 @@ import {
   ALL_BRANCHES_SCOPE,
   createTransaction,
   getBranchCounterBootstrap,
+  getBranchCounterStatement,
   getCustomerLedger,
   getRuntimeBranchId,
   getTenantId,
@@ -45,11 +46,89 @@ type PostPayload = {
   bankProductId?: string;
 };
 
+const TELLER_CALLOVER_STORAGE_PREFIX = "bms:teller-callover:";
+
+type PersistedTellerCallover = {
+  checkedIds: string[];
+  confirmed: boolean;
+};
+
+function readTellerCallover(sessionId: string): PersistedTellerCallover | null {
+  if (typeof window === "undefined" || !sessionId) {
+    return null;
+  }
+  try {
+    const raw = window.sessionStorage.getItem(`${TELLER_CALLOVER_STORAGE_PREFIX}${sessionId}`);
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw) as Partial<PersistedTellerCallover>;
+    return {
+      checkedIds: Array.isArray(parsed.checkedIds)
+        ? parsed.checkedIds.filter((id): id is string => typeof id === "string")
+        : [],
+      confirmed: Boolean(parsed.confirmed)
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeTellerCallover(sessionId: string, value: PersistedTellerCallover): void {
+  if (typeof window === "undefined" || !sessionId) {
+    return;
+  }
+  try {
+    window.sessionStorage.setItem(
+      `${TELLER_CALLOVER_STORAGE_PREFIX}${sessionId}`,
+      JSON.stringify(value)
+    );
+  } catch {
+    /* ignore quota errors */
+  }
+}
+
+function removeTellerCallover(sessionId: string): void {
+  if (typeof window === "undefined" || !sessionId) {
+    return;
+  }
+  try {
+    window.sessionStorage.removeItem(`${TELLER_CALLOVER_STORAGE_PREFIX}${sessionId}`);
+  } catch {
+    /* ignore */
+  }
+}
+
+async function resolveTellerTodayStatement(
+  floatSession: BranchFloatSession | null,
+  bootstrapStatement: BranchCounterStatement | null,
+  fallbackCurrent: BranchCounterStatement | null
+): Promise<BranchCounterStatement | null> {
+  if (!floatSession || floatSession.status !== "open") {
+    return bootstrapStatement;
+  }
+  if (
+    bootstrapStatement &&
+    bootstrapStatement.summary.branchId === floatSession.branchId &&
+    bootstrapStatement.summary.date === floatSession.businessDate
+  ) {
+    return bootstrapStatement;
+  }
+  try {
+    return await getBranchCounterStatement(floatSession.branchId, floatSession.businessDate);
+  } catch {
+    return fallbackCurrent ?? bootstrapStatement;
+  }
+}
+
 type BranchCounterState = {
   customers: Customer[];
   branches: Branch[];
   bankProducts: TenantBankProduct[];
   statement: BranchCounterStatement | null;
+  tellerTodayStatement: BranchCounterStatement | null;
+  tellerCalloverCheckedBySession: Record<string, string[]>;
+  tellerCalloverConfirmedBySession: Record<string, boolean>;
   floatSession: BranchFloatSession | null;
   floatSummary: BranchFloatSummary;
   pendingFloatRequests: BranchFloatSession[];
@@ -85,6 +164,11 @@ type BranchCounterState = {
   postTransaction: (payload: PostPayload) => Promise<Transaction>;
   payFieldPayout: (disclosureId: string) => Promise<void>;
   initBranchScope: (isHeadOfficeRole: boolean) => void;
+  hydrateTellerCallover: (sessionId: string) => void;
+  toggleTellerCalloverTx: (sessionId: string, txId: string) => void;
+  setTellerCalloverMany: (sessionId: string, txIds: string[], checked: boolean) => void;
+  setTellerCalloverConfirmed: (sessionId: string, confirmed: boolean) => void;
+  clearTellerCallover: (sessionId: string) => void;
 };
 
 let fetchInFlight: Promise<void> | null = null;
@@ -151,6 +235,9 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
   branches: [],
   bankProducts: [],
   statement: null,
+  tellerTodayStatement: null,
+  tellerCalloverCheckedBySession: {},
+  tellerCalloverConfirmedBySession: {},
   floatSession: null,
   floatSummary: null,
   pendingFloatRequests: [],
@@ -225,6 +312,11 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
       try {
         const data = await getBranchCounterBootstrap(scopedBranchId, statementDate);
         const branchPatch = reconcileBranchScope(scopedBranchId, data.branches);
+        const tellerTodayStatement = await resolveTellerTodayStatement(
+          data.floatSession,
+          data.statement,
+          get().tellerTodayStatement
+        );
         const now = Date.now();
         catalogFetchedAt = now;
         set({
@@ -232,6 +324,7 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
           branches: data.branches,
           bankProducts: data.bankProducts ?? [],
           statement: data.statement,
+          tellerTodayStatement,
           floatSession: data.floatSession,
           floatSummary: data.floatSummary,
           pendingFloatRequests: data.pendingFloatRequests,
@@ -241,6 +334,9 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
           sessionExpired: false,
           error: null
         });
+        if (data.floatSession?.id) {
+          get().hydrateTellerCallover(data.floatSession.id);
+        }
         if (branchPatch.statementBranchId) {
           setRuntimeBranchId(branchPatch.statementBranchId);
         }
@@ -292,6 +388,11 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
         if (catalogStale) {
           const data = await getBranchCounterBootstrap(scopedBranchId, statementDate);
           const branchPatch = reconcileBranchScope(scopedBranchId, data.branches);
+          const tellerTodayStatement = await resolveTellerTodayStatement(
+            data.floatSession,
+            data.statement,
+            get().tellerTodayStatement
+          );
           const now = Date.now();
           catalogFetchedAt = now;
           set({
@@ -299,6 +400,7 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
             branches: data.branches,
             bankProducts: data.bankProducts ?? [],
             statement: data.statement,
+            tellerTodayStatement,
             floatSession: data.floatSession,
             floatSummary: data.floatSummary,
             pendingFloatRequests: data.pendingFloatRequests,
@@ -308,6 +410,9 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
             sessionExpired: false,
             error: null
           });
+          if (data.floatSession?.id) {
+            get().hydrateTellerCallover(data.floatSession.id);
+          }
           if (branchPatch.statementBranchId) {
             setRuntimeBranchId(branchPatch.statementBranchId);
           }
@@ -315,8 +420,14 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
           const data = await getBranchCounterBootstrap(scopedBranchId, statementDate, {
             hot: true
           });
+          const tellerTodayStatement = await resolveTellerTodayStatement(
+            data.floatSession,
+            data.statement,
+            get().tellerTodayStatement
+          );
           set({
             statement: data.statement,
+            tellerTodayStatement,
             floatSession: data.floatSession,
             floatSummary: data.floatSummary,
             pendingFloatRequests: data.pendingFloatRequests,
@@ -325,6 +436,9 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
             sessionExpired: false,
             error: null
           });
+          if (data.floatSession?.id) {
+            get().hydrateTellerCallover(data.floatSession.id);
+          }
         }
         if (selectedCustomerId) {
           await get().loadLedger(selectedCustomerId, { silent: true });
@@ -503,6 +617,110 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
     } finally {
       set({ payingPayoutId: null });
     }
+  },
+
+  hydrateTellerCallover: (sessionId) => {
+    if (!sessionId) {
+      return;
+    }
+    const existing = get().tellerCalloverCheckedBySession[sessionId];
+    if (existing !== undefined) {
+      return;
+    }
+    const persisted = readTellerCallover(sessionId);
+    if (!persisted) {
+      return;
+    }
+    set((state) => ({
+      tellerCalloverCheckedBySession: {
+        ...state.tellerCalloverCheckedBySession,
+        [sessionId]: persisted.checkedIds
+      },
+      tellerCalloverConfirmedBySession: {
+        ...state.tellerCalloverConfirmedBySession,
+        [sessionId]: persisted.confirmed
+      }
+    }));
+  },
+
+  toggleTellerCalloverTx: (sessionId, txId) => {
+    if (!sessionId || !txId) {
+      return;
+    }
+    const current = get().tellerCalloverCheckedBySession[sessionId] ?? [];
+    const next = current.includes(txId)
+      ? current.filter((id) => id !== txId)
+      : [...current, txId];
+    const nextConfirmed = false;
+    writeTellerCallover(sessionId, { checkedIds: next, confirmed: nextConfirmed });
+    set((state) => ({
+      tellerCalloverCheckedBySession: {
+        ...state.tellerCalloverCheckedBySession,
+        [sessionId]: next
+      },
+      tellerCalloverConfirmedBySession: {
+        ...state.tellerCalloverConfirmedBySession,
+        [sessionId]: nextConfirmed
+      }
+    }));
+  },
+
+  setTellerCalloverMany: (sessionId, txIds, checked) => {
+    if (!sessionId) {
+      return;
+    }
+    const current = new Set(get().tellerCalloverCheckedBySession[sessionId] ?? []);
+    for (const id of txIds) {
+      if (checked) {
+        current.add(id);
+      } else {
+        current.delete(id);
+      }
+    }
+    const next = [...current];
+    const nextConfirmed = false;
+    writeTellerCallover(sessionId, { checkedIds: next, confirmed: nextConfirmed });
+    set((state) => ({
+      tellerCalloverCheckedBySession: {
+        ...state.tellerCalloverCheckedBySession,
+        [sessionId]: next
+      },
+      tellerCalloverConfirmedBySession: {
+        ...state.tellerCalloverConfirmedBySession,
+        [sessionId]: nextConfirmed
+      }
+    }));
+  },
+
+  setTellerCalloverConfirmed: (sessionId, confirmed) => {
+    if (!sessionId) {
+      return;
+    }
+    const checkedIds = get().tellerCalloverCheckedBySession[sessionId] ?? [];
+    writeTellerCallover(sessionId, { checkedIds, confirmed });
+    set((state) => ({
+      tellerCalloverConfirmedBySession: {
+        ...state.tellerCalloverConfirmedBySession,
+        [sessionId]: confirmed
+      }
+    }));
+  },
+
+  clearTellerCallover: (sessionId) => {
+    if (!sessionId) {
+      return;
+    }
+    removeTellerCallover(sessionId);
+    set((state) => {
+      const nextChecked = { ...state.tellerCalloverCheckedBySession };
+      const nextConfirmed = { ...state.tellerCalloverConfirmedBySession };
+      delete nextChecked[sessionId];
+      delete nextConfirmed[sessionId];
+      return {
+        tellerCalloverCheckedBySession: nextChecked,
+        tellerCalloverConfirmedBySession: nextConfirmed
+      };
+    });
   }
 }));
 
