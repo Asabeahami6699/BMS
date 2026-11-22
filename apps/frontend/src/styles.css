@@ -3686,7 +3686,7 @@ select:disabled {
   outline: none;
   box-shadow: none;
   background: transparent;
-  text-align: right;
+  text-align: left;
   font-variant-numeric: tabular-nums;
   font-weight: 600;
   letter-spacing: 0.01em;
