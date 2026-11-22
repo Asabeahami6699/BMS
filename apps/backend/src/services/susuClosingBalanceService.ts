@@ -271,6 +271,125 @@ async function loadTillCashRollup(
   };
 }
 
+const LEGACY_VAULT_MARKER = "\n__BMS_VAULT__:";
+const memoryClosingRecords = new Map<string, SavedClosingRecord & { businessDate: string }>();
+
+function memoryKey(tenantId: string, branchId: string, businessDate: string): string {
+  return `${tenantId}::${branchId}::${businessDate}`;
+}
+
+type LegacyVaultPayload = {
+  openingVault: number;
+  cashToBank: number;
+  closingVaultCounted: number | null;
+};
+
+function encodeLegacyVaultNotes(
+  userNotes: string | undefined,
+  vault: LegacyVaultPayload
+): string {
+  const cleanNotes = stripLegacyVaultMarker(userNotes) ?? "";
+  return `${cleanNotes}${LEGACY_VAULT_MARKER}${JSON.stringify(vault)}`;
+}
+
+function stripLegacyVaultMarker(raw: string | null | undefined): string | undefined {
+  if (raw == null) {
+    return undefined;
+  }
+  const idx = raw.indexOf(LEGACY_VAULT_MARKER);
+  const cleaned = (idx >= 0 ? raw.slice(0, idx) : raw).trim();
+  return cleaned.length > 0 ? cleaned : undefined;
+}
+
+function decodeLegacyVaultNotes(raw: string | null | undefined): {
+  notes?: string;
+  vault?: LegacyVaultPayload;
+} {
+  if (raw == null) {
+    return {};
+  }
+  const idx = raw.indexOf(LEGACY_VAULT_MARKER);
+  if (idx < 0) {
+    const trimmed = raw.trim();
+    return { notes: trimmed.length > 0 ? trimmed : undefined };
+  }
+  const notesPart = raw.slice(0, idx).trim();
+  const jsonPart = raw.slice(idx + LEGACY_VAULT_MARKER.length).trim();
+  try {
+    const parsed = JSON.parse(jsonPart) as Partial<LegacyVaultPayload>;
+    const openingVault =
+      typeof parsed.openingVault === "number" && Number.isFinite(parsed.openingVault)
+        ? roundMoney(Math.max(0, parsed.openingVault))
+        : null;
+    const cashToBank =
+      typeof parsed.cashToBank === "number" && Number.isFinite(parsed.cashToBank)
+        ? roundMoney(Math.max(0, parsed.cashToBank))
+        : 0;
+    const closingVaultCounted =
+      typeof parsed.closingVaultCounted === "number" && Number.isFinite(parsed.closingVaultCounted)
+        ? roundMoney(Math.max(0, parsed.closingVaultCounted))
+        : null;
+    return {
+      notes: notesPart.length > 0 ? notesPart : undefined,
+      vault: openingVault != null ? { openingVault, cashToBank, closingVaultCounted } : undefined
+    };
+  } catch {
+    return { notes: notesPart.length > 0 ? notesPart : undefined };
+  }
+}
+
+function isMissingVaultColumnsError(message: string): boolean {
+  return /opening_vault|cash_to_bank|closing_vault_counted|does not exist|schema cache/i.test(
+    message
+  );
+}
+
+function mapLegacyClosingRow(legacy: Record<string, unknown>): SavedClosingRecord {
+  const decoded = decodeLegacyVaultNotes(
+    legacy.notes != null ? String(legacy.notes) : undefined
+  );
+  return {
+    openingVault:
+      decoded.vault != null
+        ? decoded.vault.openingVault
+        : legacy.initial_cash != null
+          ? Number(legacy.initial_cash)
+          : null,
+    cashToBank: decoded.vault?.cashToBank ?? 0,
+    closingVaultCounted: decoded.vault?.closingVaultCounted ?? null,
+    initialCash: legacy.initial_cash != null ? Number(legacy.initial_cash) : null,
+    susuExpenses: legacy.susu_expenses != null ? Number(legacy.susu_expenses) : null,
+    notes: decoded.notes,
+    recordedBy: legacy.recorded_by != null ? String(legacy.recorded_by) : undefined,
+    updatedAt: legacy.updated_at != null ? String(legacy.updated_at) : undefined,
+    usingSavedInputs: true
+  };
+}
+
+function mapFullClosingRow(data: Record<string, unknown>): SavedClosingRecord {
+  const decoded = decodeLegacyVaultNotes(data.notes != null ? String(data.notes) : undefined);
+  return {
+    openingVault:
+      data.opening_vault != null
+        ? Number(data.opening_vault)
+        : (decoded.vault?.openingVault ?? null),
+    cashToBank:
+      data.cash_to_bank != null && Number(data.cash_to_bank) !== 0
+        ? Number(data.cash_to_bank)
+        : (decoded.vault?.cashToBank ?? Number(data.cash_to_bank ?? 0)),
+    closingVaultCounted:
+      data.closing_vault_counted != null
+        ? Number(data.closing_vault_counted)
+        : (decoded.vault?.closingVaultCounted ?? null),
+    initialCash: data.initial_cash != null ? Number(data.initial_cash) : null,
+    susuExpenses: data.susu_expenses != null ? Number(data.susu_expenses) : null,
+    notes: decoded.notes,
+    recordedBy: data.recorded_by != null ? String(data.recorded_by) : undefined,
+    updatedAt: data.updated_at != null ? String(data.updated_at) : undefined,
+    usingSavedInputs: true
+  };
+}
+
 async function loadSavedClosingRow(
   tenantId: string,
   branchId: string,
@@ -278,7 +397,7 @@ async function loadSavedClosingRow(
 ): Promise<SavedClosingRecord | null> {
   const supabase = getSupabaseAdminClient();
   if (!supabase) {
-    return null;
+    return memoryClosingRecords.get(memoryKey(tenantId, branchId, businessDate)) ?? null;
   }
 
   const { data, error } = await supabase
@@ -292,7 +411,7 @@ async function loadSavedClosingRow(
     .maybeSingle();
 
   if (error) {
-    if (/opening_vault|cash_to_bank|closing_vault_counted|does not exist|schema cache/i.test(error.message)) {
+    if (isMissingVaultColumnsError(error.message)) {
       const { data: legacy, error: legacyErr } = await supabase
         .from("susu_daily_closing_records")
         .select("initial_cash, susu_expenses, notes, recorded_by, updated_at")
@@ -303,48 +422,76 @@ async function loadSavedClosingRow(
       if (legacyErr) {
         throw new Error(`Failed to load closing record: ${legacyErr.message}`);
       }
-      if (!legacy) {
+      return legacy ? mapLegacyClosingRow(legacy as Record<string, unknown>) : null;
+    }
+    throw new Error(`Failed to load closing record: ${error.message}`);
+  }
+
+  return data ? mapFullClosingRow(data as Record<string, unknown>) : null;
+}
+
+async function loadLatestPriorClosingRow(
+  tenantId: string,
+  branchId: string,
+  businessDate: string
+): Promise<{ businessDate: string; record: SavedClosingRecord } | null> {
+  const supabase = getSupabaseAdminClient();
+  if (!supabase) {
+    const matches = Array.from(memoryClosingRecords.entries())
+      .filter(([key, val]) => key.startsWith(`${tenantId}::${branchId}::`) && val.businessDate < businessDate)
+      .sort((a, b) => b[1].businessDate.localeCompare(a[1].businessDate));
+    const latest = matches[0]?.[1];
+    return latest ? { businessDate: latest.businessDate, record: latest } : null;
+  }
+
+  const { data, error } = await supabase
+    .from("susu_daily_closing_records")
+    .select(
+      "business_date, initial_cash, susu_expenses, opening_vault, cash_to_bank, closing_vault_counted, notes, recorded_by, updated_at"
+    )
+    .eq("tenant_id", tenantId)
+    .eq("branch_id", branchId)
+    .lt("business_date", businessDate)
+    .order("business_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    if (isMissingVaultColumnsError(error.message)) {
+      const { data: legacy, error: legacyErr } = await supabase
+        .from("susu_daily_closing_records")
+        .select("business_date, initial_cash, susu_expenses, notes, recorded_by, updated_at")
+        .eq("tenant_id", tenantId)
+        .eq("branch_id", branchId)
+        .lt("business_date", businessDate)
+        .order("business_date", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (legacyErr || !legacy) {
         return null;
       }
       return {
-        openingVault: null,
-        cashToBank: 0,
-        closingVaultCounted: null,
-        initialCash: Number(legacy.initial_cash ?? 0),
-        susuExpenses: Number(legacy.susu_expenses ?? 0),
-        notes: legacy.notes != null ? String(legacy.notes) : undefined,
-        recordedBy: legacy.recorded_by != null ? String(legacy.recorded_by) : undefined,
-        updatedAt: legacy.updated_at != null ? String(legacy.updated_at) : undefined,
-        usingSavedInputs: true
+        businessDate: String(legacy.business_date),
+        record: mapLegacyClosingRow(legacy as Record<string, unknown>)
       };
     }
-    throw new Error(`Failed to load closing record: ${error.message}`);
+    return null;
   }
 
   if (!data) {
     return null;
   }
-
   return {
-    openingVault: data.opening_vault != null ? Number(data.opening_vault) : null,
-    cashToBank: Number(data.cash_to_bank ?? 0),
-    closingVaultCounted:
-      data.closing_vault_counted != null ? Number(data.closing_vault_counted) : null,
-    initialCash: data.initial_cash != null ? Number(data.initial_cash) : null,
-    susuExpenses: data.susu_expenses != null ? Number(data.susu_expenses) : null,
-    notes: data.notes != null ? String(data.notes) : undefined,
-    recordedBy: data.recorded_by != null ? String(data.recorded_by) : undefined,
-    updatedAt: data.updated_at != null ? String(data.updated_at) : undefined,
-    usingSavedInputs: true
+    businessDate: String(data.business_date),
+    record: mapFullClosingRow(data as Record<string, unknown>)
   };
 }
 
 /**
- * Prior day closing vault suggestion:
- * counted vault if set, else recompute expected closing from prior saved inputs + prior activity/tills.
- * For speed/reliability we store expected on save via closing_vault_counted preference;
- * if only opening_vault/cash_to_bank saved, recompute a lightweight prior expected using prior record fields + prior till rollup + prior field activity would be heavy.
- * Locked approach: use closing_vault_counted if present; else if prior record has opening_vault, recompute prior expected with prior day's till+field snapshots.
+ * Prior closing vault carry-forward:
+ * Looks up the most recent saved closing record strictly before `businessDate` (handles weekends,
+ * holidays, and date switches cleanly). Uses `closingVaultCounted` if recorded; otherwise recomputes
+ * that prior day's `expectedClosingVault`.
  */
 async function computeSuggestedOpeningVault(
   tenantId: string,
@@ -352,15 +499,16 @@ async function computeSuggestedOpeningVault(
   branchId: string,
   businessDate: string
 ): Promise<number> {
-  const priorDate = priorBusinessDate(businessDate);
-  const priorSaved = await loadSavedClosingRow(tenantId, branchId, priorDate);
+  const latestPrior = await loadLatestPriorClosingRow(tenantId, branchId, businessDate);
+  const targetDate = latestPrior?.businessDate ?? priorBusinessDate(businessDate);
+  const priorSaved = latestPrior?.record ?? null;
+
   if (priorSaved?.closingVaultCounted != null) {
     return roundMoney(priorSaved.closingVaultCounted);
   }
 
-  // Recompute prior expected closing vault from prior day data.
   try {
-    const priorSnap = await buildSnapshot(tenantId, context, branchId, priorDate, {
+    const priorSnap = await buildSnapshot(tenantId, context, branchId, targetDate, {
       skipPriorSuggestion: true
     });
     return roundMoney(priorSnap.expectedClosingVault);
@@ -580,11 +728,6 @@ export async function saveSusuClosingRecord(
     throw new Error("Cannot save closing record for another branch");
   }
 
-  const supabase = getSupabaseAdminClient();
-  if (!supabase) {
-    throw new Error("Closing records require database storage");
-  }
-
   const before = await buildSnapshot(tenantId, context, input.branchId, input.businessDate);
   const openingVault = roundMoney(Math.max(0, input.openingVault));
   const cashToBank = roundMoney(Math.max(0, input.cashToBank));
@@ -596,47 +739,71 @@ export async function saveSusuClosingRecord(
   const initialCash = roundMoney(
     input.initialCash != null ? Math.max(0, input.initialCash) : before.tillPhysicalCash
   );
-
+  const cleanNotes = stripLegacyVaultMarker(input.notes);
   const now = new Date().toISOString();
-  const row: Record<string, unknown> = {
-    tenant_id: tenantId,
-    branch_id: input.branchId,
-    business_date: input.businessDate,
-    initial_cash: initialCash,
-    susu_expenses: susuExpenses,
-    opening_vault: openingVault,
-    cash_to_bank: cashToBank,
-    closing_vault_counted: closingVaultCounted,
-    notes: input.notes ?? null,
-    recorded_by: context.userId,
-    updated_at: now
-  };
 
-  const { error } = await supabase.from("susu_daily_closing_records").upsert(row, {
-    onConflict: "tenant_id,branch_id,business_date"
-  });
+  const supabase = getSupabaseAdminClient();
+  if (!supabase) {
+    memoryClosingRecords.set(memoryKey(tenantId, input.branchId, input.businessDate), {
+      businessDate: input.businessDate,
+      openingVault,
+      cashToBank,
+      closingVaultCounted,
+      initialCash,
+      susuExpenses,
+      notes: cleanNotes,
+      recordedBy: context.userId,
+      updatedAt: now,
+      usingSavedInputs: true
+    });
+  } else {
+    const row: Record<string, unknown> = {
+      tenant_id: tenantId,
+      branch_id: input.branchId,
+      business_date: input.businessDate,
+      initial_cash: initialCash,
+      susu_expenses: susuExpenses,
+      opening_vault: openingVault,
+      cash_to_bank: cashToBank,
+      closing_vault_counted: closingVaultCounted,
+      notes: cleanNotes ?? null,
+      recorded_by: context.userId,
+      updated_at: now
+    };
 
-  if (error) {
-    // Fallback if migration not applied yet.
-    if (/opening_vault|cash_to_bank|closing_vault_counted|schema cache/i.test(error.message)) {
-      const { error: legacyErr } = await supabase.from("susu_daily_closing_records").upsert(
-        {
-          tenant_id: tenantId,
-          branch_id: input.branchId,
-          business_date: input.businessDate,
-          initial_cash: initialCash,
-          susu_expenses: susuExpenses,
-          notes: input.notes ?? null,
-          recorded_by: context.userId,
-          updated_at: now
-        },
-        { onConflict: "tenant_id,branch_id,business_date" }
-      );
-      if (legacyErr) {
-        throw new Error(`Failed to save closing record: ${legacyErr.message}`);
+    const { error } = await supabase.from("susu_daily_closing_records").upsert(row, {
+      onConflict: "tenant_id,branch_id,business_date"
+    });
+
+    if (error) {
+      // Fallback if migration 087_branch_vault_closing.sql has not been applied yet:
+      // persist opening_vault in initial_cash AND store full vault payload inside notes metadata
+      // so values survive page refreshes and date changes without silent data loss.
+      if (isMissingVaultColumnsError(error.message)) {
+        const legacyNotes = encodeLegacyVaultNotes(cleanNotes, {
+          openingVault,
+          cashToBank,
+          closingVaultCounted
+        });
+        const { error: legacyErr } = await supabase.from("susu_daily_closing_records").upsert(
+          {
+            tenant_id: tenantId,
+            branch_id: input.branchId,
+            business_date: input.businessDate,
+            initial_cash: openingVault,
+            susu_expenses: susuExpenses,
+            notes: legacyNotes,
+            recorded_by: context.userId,
+            updated_at: now
+          },
+          { onConflict: "tenant_id,branch_id,business_date" }
+        );
+        if (legacyErr) {
+          throw new Error(`Failed to save closing record: ${legacyErr.message}`);
+        }
+      } else {
+        throw new Error(`Failed to save closing record: ${error.message}`);
       }
-    } else {
-      throw new Error(`Failed to save closing record: ${error.message}`);
     }
   }
 

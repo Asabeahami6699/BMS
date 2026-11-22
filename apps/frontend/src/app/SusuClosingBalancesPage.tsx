@@ -25,6 +25,7 @@ export function SusuClosingBalancesPage({ role }: Props) {
   const susuExpenses = useSusuClosingBalancesStore((s) => s.susuExpenses);
   const closingVaultCounted = useSusuClosingBalancesStore((s) => s.closingVaultCounted);
   const notes = useSusuClosingBalancesStore((s) => s.notes);
+  const dirty = useSusuClosingBalancesStore((s) => s.dirty);
   const loading = useSusuClosingBalancesStore((s) => s.loading);
   const saving = useSusuClosingBalancesStore((s) => s.saving);
   const error = useSusuClosingBalancesStore((s) => s.error);
@@ -288,6 +289,11 @@ export function SusuClosingBalancesPage({ role }: Props) {
                   </p>
                 </div>
                 <div className="susu-closing-editor__actions">
+                  {dirty ? (
+                    <span className="susu-closing-editor__pill susu-closing-editor__pill--delta">
+                      Unsaved changes
+                    </span>
+                  ) : null}
                   <button
                     type="button"
                     className="button secondary"
