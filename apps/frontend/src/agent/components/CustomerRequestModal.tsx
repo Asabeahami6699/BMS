@@ -177,9 +177,10 @@ export function CustomerRequestModal({
   }, [open, requestType, fulfillmentMode, normalizedPhone, momoNetwork, runMomoLookup]);
 
   function handleMomoNumberChange(value: string) {
-    setMomoNumber(value);
+    const digitsOnly = value.replace(/\D/g, "").slice(0, 12);
+    setMomoNumber(digitsOnly);
     if (!networkManuallyPicked) {
-      const detected = detectNetworkFromPhone(value);
+      const detected = detectNetworkFromPhone(digitsOnly);
       if (detected) {
         setMomoNetwork(detected);
       }
@@ -234,7 +235,7 @@ export function CustomerRequestModal({
   const amountValid =
     requestType === "balance" || (Number(amount) > 0 && Number.isFinite(Number(amount)));
   const momoValid =
-    fulfillmentMode !== "momo" || (momoNumber.trim().length > 0 && momoAccountName.trim().length > 0);
+    fulfillmentMode !== "momo" || (Boolean(normalizedPhone) && momoAccountName.trim().length > 0);
   const nameMismatch =
     lookupState.status === "verified" && !namesLikelyMatch(customerName, lookupState.accountName);
 
@@ -350,7 +351,10 @@ export function CustomerRequestModal({
                   <div className="agent-momo-phone-row">
                     <input
                       type="tel"
-                      inputMode="tel"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      maxLength={12}
+                      autoComplete="tel-national"
                       value={momoNumber}
                       onChange={(e) => handleMomoNumberChange(e.target.value)}
                       placeholder="e.g. 0244123456"
