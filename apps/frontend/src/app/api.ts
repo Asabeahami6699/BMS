@@ -870,6 +870,8 @@ export async function lookupCompanyHost(subdomain: string): Promise<{
   name: string;
   subdomain: string;
   signInHost: string;
+  logoUrl?: string;
+  brandColor?: string;
 }> {
   return fetchJson(`${API_BASE_URL}/api/v1/auth/company-host?subdomain=${encodeURIComponent(subdomain)}`);
 }

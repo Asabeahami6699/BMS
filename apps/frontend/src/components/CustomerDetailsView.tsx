@@ -327,7 +327,9 @@ export function CustomerDetailsView({
           <article className="cif-account-card">
             <div className="cif-account-card__chip" aria-hidden />
             <div className="cif-account-card__content">
-              <p className="cif-account-card__eyebrow">aabanker · Customer account</p>
+              <p className="cif-account-card__eyebrow">
+                {user?.tenantName?.trim() || "aabanker"} · Customer account
+              </p>
               <p className="cif-account-card__number">
                 {customer.accountNumber ?? "Pending assignment"}
               </p>

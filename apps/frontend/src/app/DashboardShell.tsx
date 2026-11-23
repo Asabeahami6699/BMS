@@ -31,6 +31,16 @@ type Props = {
   children: ReactNode;
 };
 
+function brandInitials(name: string): string {
+  const parts = name
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (parts.length === 0) return "CO";
+  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
+  return `${parts[0]![0] ?? ""}${parts[1]![0] ?? ""}`.toUpperCase();
+}
+
 function pathMatchesRoute(currentPath: string, navTo: string): boolean {
   const normalized = navTo.replace(/^\/+/, "").replace(/^app\//, "");
   const target = `/app/${normalized}`;
@@ -217,27 +227,42 @@ export function DashboardShell({
         aria-label="Main navigation"
       >
         <div className="dash-brand">
-          <div className="dash-brand-title-row">
-            {companyLogoUrl ? (
-              <div className="dash-brand-icon dash-brand-icon--logo" aria-hidden>
-                <img src={companyLogoUrl} alt="" />
-              </div>
-            ) : (
-              <BmsBrandIcon />
-            )}
-            <p className="dash-brand-name">aabanker</p>
-            <button
-              type="button"
-              className="dash-sidebar-close"
-              aria-label="Close navigation menu"
-              onClick={() => setMobileNavOpen(false)}
-            >
-              ×
-            </button>
-          </div>
-          <div className="dash-brand-text">
-            {companyName ? <p className="dash-brand-company">{companyName}</p> : null}
-          </div>
+          {(() => {
+            const isTenantBrand = Boolean(
+              companyName && companyName.trim() && companyName.trim().toLowerCase() !== "aabanker platform"
+            );
+            return (
+              <>
+                <div className="dash-brand-title-row">
+                  {companyLogoUrl ? (
+                    <div className="dash-brand-icon dash-brand-icon--logo" aria-hidden>
+                      <img src={companyLogoUrl} alt="" />
+                    </div>
+                  ) : isTenantBrand ? (
+                    <div className="dash-brand-icon dash-brand-icon--monogram" aria-hidden>
+                      <span>{brandInitials(companyName!)}</span>
+                    </div>
+                  ) : (
+                    <BmsBrandIcon />
+                  )}
+                  <p className="dash-brand-name">{isTenantBrand ? companyName : "aabanker"}</p>
+                  <button
+                    type="button"
+                    className="dash-sidebar-close"
+                    aria-label="Close navigation menu"
+                    onClick={() => setMobileNavOpen(false)}
+                  >
+                    ×
+                  </button>
+                </div>
+                <div className="dash-brand-text">
+                  {!isTenantBrand && companyName ? (
+                    <p className="dash-brand-company">{companyName}</p>
+                  ) : null}
+                </div>
+              </>
+            );
+          })()}
         </div>
 
         <nav className="dash-nav">

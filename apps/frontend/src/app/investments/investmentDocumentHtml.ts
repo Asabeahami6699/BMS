@@ -361,10 +361,12 @@ function wrapDocument(title: string, mainHtml: string, railHtml: string): string
 export function buildInvestmentCustomerDetailsHtml(
   investment: InvestmentRecord,
   formConfig: InvestmentFormConfig,
-  images: ImageUrls
+  images: ImageUrls,
+  companyName?: string
 ): string {
+  const brand = companyName?.trim() || "aabanker";
   const header = `<header class="doc-header">
-    <p class="doc-header__eyebrow">aabanker · Investment customer record</p>
+    <p class="doc-header__eyebrow">${escapeHtml(brand)} · Investment customer record</p>
     <p class="doc-header__number">${escapeHtml(investment.investmentNumber)}</p>
     <p class="doc-header__meta">${escapeHtml(investment.customerName)}${investment.customerPhone ? ` · ${escapeHtml(investment.customerPhone)}` : ""}</p>
   </header>`;
@@ -381,10 +383,12 @@ export function buildInvestmentCustomerDetailsHtml(
 export function buildInvestmentApplicationHtml(
   investment: InvestmentRecord,
   formConfig: InvestmentFormConfig,
-  images: ImageUrls
+  images: ImageUrls,
+  companyName?: string
 ): string {
+  const brand = companyName?.trim() || "aabanker";
   const header = `<header class="doc-header">
-    <p class="doc-header__eyebrow">aabanker · Investment application</p>
+    <p class="doc-header__eyebrow">${escapeHtml(brand)} · Investment application</p>
     <p class="doc-header__number">${escapeHtml(investment.investmentNumber)}</p>
     <p class="doc-header__meta">${escapeHtml(investment.customerName)} · ${escapeHtml(investment.productName)}</p>
   </header>`;

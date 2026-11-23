@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import type { UserRecord } from "./api";
-import { resetUserPassword } from "./api";
+import { getAuthSession, resetUserPassword } from "./api";
 import { CredentialsSharePanel } from "../components/CredentialsSharePanel";
 import { Modal } from "../components/Modal";
 import { useToast } from "../components/Toast";
@@ -84,9 +84,10 @@ export function ResetPasswordModal({ open, user, onClose }: Props) {
     if (!user || !passwordRef?.password) {
       return;
     }
+    const brand = getAuthSession()?.user?.tenantName?.trim() || "aabanker";
     const loginUrl = typeof window !== "undefined" ? `${window.location.origin}/login` : "/login";
     const text = [
-      `aabanker login details — ${user.fullName ?? user.email}`,
+      `${brand} login details — ${user.fullName ?? user.email}`,
       "",
       `Full name: ${user.fullName ?? "—"}`,
       `Email (login): ${user.email}`,
@@ -95,7 +96,7 @@ export function ResetPasswordModal({ open, user, onClose }: Props) {
     ].join("\n");
     if (navigator.share) {
       try {
-        await navigator.share({ title: `aabanker login details — ${user.fullName ?? user.email}`, text });
+        await navigator.share({ title: `${brand} login details — ${user.fullName ?? user.email}`, text });
         showToast("Share dialog opened", "success");
         return;
       } catch {
@@ -177,7 +178,7 @@ export function ResetPasswordModal({ open, user, onClose }: Props) {
       {resetDone ? (
         <CredentialsSharePanel
           title={`Updated login details for ${resetDone.fullName}`}
-          shareTitle={`aabanker updated login details — ${resetDone.fullName}`}
+          shareTitle={`${getAuthSession()?.user?.tenantName?.trim() || "aabanker"} updated login details — ${resetDone.fullName}`}
           shareButtonLabel="Share with user"
           defaultRevealed
           fields={[

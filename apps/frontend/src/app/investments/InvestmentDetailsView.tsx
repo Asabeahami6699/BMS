@@ -9,6 +9,7 @@ import { formatInvestmentTenureLabel } from "@bms/shared";
 import { resolveInvestmentIdPhotoUrl, resolveInvestmentPortraitUrl } from "./investmentImages";
 import { investmentSectionsOrdered, visibleInvestmentFields, formatInvestmentMoney } from "./investmentUi";
 import { formatBranchLabel } from "../branchDisplay";
+import { getAuthSession } from "../api";
 
 const SECTION_ICONS: Record<string, ReactNode> = {
   personal: "👤",
@@ -86,7 +87,9 @@ export function InvestmentDetailsView({ investment, formConfig }: Props) {
         <article className="cif-account-card">
           <div className="cif-account-card__chip" aria-hidden />
           <div className="cif-account-card__content">
-            <p className="cif-account-card__eyebrow">aabanker · Investment account</p>
+            <p className="cif-account-card__eyebrow">
+              {getAuthSession()?.user?.tenantName?.trim() || "aabanker"} · Investment account
+            </p>
             <p className="cif-account-card__number">{investment.investmentNumber}</p>
             <p className="cif-account-card__meta">
               <span>{investment.productName}</span>

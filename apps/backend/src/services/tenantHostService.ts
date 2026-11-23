@@ -7,7 +7,28 @@ export type TenantHostMatch = {
   name: string;
   subdomain: string;
   subscriptionStatus: "active" | "inactive";
+  logoUrl?: string;
+  brandColor?: string;
 };
+
+function validLogoUrl(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (
+    trimmed.startsWith("data:image/") ||
+    trimmed.startsWith("https://") ||
+    trimmed.startsWith("http://")
+  ) {
+    return trimmed;
+  }
+  return undefined;
+}
+
+function validBrandColor(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return /^#[0-9A-Fa-f]{6}$/.test(trimmed) ? trimmed : undefined;
+}
 
 function fromStored(tenant: StoredTenant, subdomain: string): TenantHostMatch {
   return {
@@ -26,6 +47,72 @@ function rememberSubdomain(match: TenantHostMatch): TenantHostMatch {
   return match;
 }
 
+type TenantHostRow = {
+  id: string;
+  name: string;
+  subscription_status: string;
+  subdomain?: string | null;
+  logo_url?: string | null;
+  brand_color?: string | null;
+};
+
+async function selectTenantHostRow(
+  supabase: NonNullable<ReturnType<typeof getSupabaseAdminClient>>,
+  column: "subdomain" | "id",
+  value: string
+): Promise<TenantHostRow | null> {
+  const full = await supabase
+    .from("tenants")
+    .select("id, name, subscription_status, subdomain, logo_url, brand_color")
+    .eq(column, value)
+    .maybeSingle();
+  if (!full.error) {
+    return (full.data as TenantHostRow | null) ?? null;
+  }
+  if (/logo_url|brand_color/i.test(full.error.message)) {
+    const mid = await supabase
+      .from("tenants")
+      .select("id, name, subscription_status, subdomain")
+      .eq(column, value)
+      .maybeSingle();
+    if (!mid.error) {
+      return (mid.data as TenantHostRow | null) ?? null;
+    }
+    if (/subdomain/i.test(mid.error.message)) {
+      const basic = await supabase
+        .from("tenants")
+        .select("id, name, subscription_status")
+        .eq("id", value)
+        .maybeSingle();
+      if (basic.error) {
+        throw new Error(`Failed to look up company address: ${basic.error.message}`);
+      }
+      return (basic.data as TenantHostRow | null) ?? null;
+    }
+    throw new Error(`Failed to look up company address: ${mid.error.message}`);
+  }
+  if (/subdomain/i.test(full.error.message)) {
+    const basic = await supabase
+      .from("tenants")
+      .select("id, name, subscription_status, logo_url, brand_color")
+      .eq("id", value)
+      .maybeSingle();
+    if (!basic.error) {
+      return (basic.data as TenantHostRow | null) ?? null;
+    }
+    const minimal = await supabase
+      .from("tenants")
+      .select("id, name, subscription_status")
+      .eq("id", value)
+      .maybeSingle();
+    if (minimal.error) {
+      throw new Error(`Failed to look up company address: ${minimal.error.message}`);
+    }
+    return (minimal.data as TenantHostRow | null) ?? null;
+  }
+  throw new Error(`Failed to look up company address: ${full.error.message}`);
+}
+
 export async function findTenantBySubdomain(raw: string): Promise<TenantHostMatch | null> {
   const parsed = tenantSubdomainSchema.safeParse(raw);
   if (!parsed.success) {
@@ -40,46 +127,9 @@ export async function findTenantBySubdomain(raw: string): Promise<TenantHostMatc
     return local ? fromStored(local, local.subdomain ?? subdomain) : null;
   }
 
-  const selected = await supabase
-    .from("tenants")
-    .select("id, name, subscription_status, subdomain")
-    .eq("subdomain", subdomain)
-    .maybeSingle();
-  let row = selected.data as { id: string; name: string; subscription_status: string; subdomain?: string | null } | null;
-  let error = selected.error;
-  if (error && /subdomain/i.test(error.message)) {
-    const retry = await supabase
-      .from("tenants")
-      .select("id, name, subscription_status")
-      .eq("id", subdomain)
-      .maybeSingle();
-    row = retry.data;
-    error = retry.error;
-  }
-  if (error) {
-    throw new Error(`Failed to look up company address: ${error.message}`);
-  }
+  let row = await selectTenantHostRow(supabase, "subdomain", subdomain);
   if (!row) {
-    const byId = await supabase
-      .from("tenants")
-      .select("id, name, subscription_status, subdomain")
-      .eq("id", subdomain)
-      .maybeSingle();
-    if (byId.error && /subdomain/i.test(byId.error.message)) {
-      const retry = await supabase
-        .from("tenants")
-        .select("id, name, subscription_status")
-        .eq("id", subdomain)
-        .maybeSingle();
-      if (retry.error) {
-        throw new Error(`Failed to look up company address: ${retry.error.message}`);
-      }
-      row = retry.data;
-    } else if (byId.error) {
-      throw new Error(`Failed to look up company address: ${byId.error.message}`);
-    } else {
-      row = byId.data;
-    }
+    row = await selectTenantHostRow(supabase, "id", subdomain);
   }
   if (!row || row.id === "platform") {
     return local ? fromStored(local, local.subdomain ?? subdomain) : null;
@@ -88,7 +138,9 @@ export async function findTenantBySubdomain(raw: string): Promise<TenantHostMatc
     id: row.id,
     name: row.name,
     subdomain: row.subdomain && isTenantSubdomain(row.subdomain) ? row.subdomain.toLowerCase() : subdomain,
-    subscriptionStatus: row.subscription_status === "inactive" ? "inactive" : "active"
+    subscriptionStatus: row.subscription_status === "inactive" ? "inactive" : "active",
+    logoUrl: validLogoUrl(row.logo_url),
+    brandColor: validBrandColor(row.brand_color)
   });
 }
 

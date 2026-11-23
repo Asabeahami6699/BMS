@@ -1,3 +1,4 @@
+import { parseTenantSubdomain } from "@bms/shared";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { ProtectedRoute } from "../auth/ProtectedRoute";
 import { LandingPage } from "../pages/LandingPage";
@@ -6,9 +7,12 @@ import { PlatformApp } from "./PlatformApp";
 import { TenantApp } from "./TenantApp";
 
 export function RootApp() {
+  const isTenantSubdomain =
+    typeof window !== "undefined" && Boolean(parseTenantSubdomain(window.location.hostname));
+
   return (
     <Routes>
-      <Route path="/" element={<LandingPage />} />
+      <Route path="/" element={isTenantSubdomain ? <Navigate to="/login" replace /> : <LandingPage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route
         path="/platform/*"

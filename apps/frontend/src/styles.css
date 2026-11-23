@@ -6636,6 +6636,70 @@ select:disabled {
   font-size: 0.86rem;
 }
 
+.login-card__logo {
+  width: 72px;
+  height: 72px;
+  border-radius: 16px;
+  padding: 6px;
+  background: var(--bg-elevated, var(--bg-surface));
+  border: 1px solid var(--border-soft, var(--border));
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.login-card__logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  border-radius: 10px;
+}
+
+.login-card__monogram {
+  width: 68px;
+  height: 68px;
+  border-radius: 16px;
+  background: var(--primary);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.45rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.14);
+}
+
+.login-card__logo-skeleton {
+  width: 68px;
+  height: 68px;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--text-muted) 18%, transparent);
+}
+
+.login-card__powered {
+  margin: 0.9rem 0 0;
+  text-align: center;
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  opacity: 0.78;
+}
+
+.dash-brand-icon--monogram {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--primary);
+  color: #fff;
+  font-weight: 800;
+  font-size: 0.85rem;
+  letter-spacing: 0.04em;
+  border-radius: 10px;
+}
+
 .login-install {
   margin-top: 1rem;
   display: flex;

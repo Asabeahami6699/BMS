@@ -1,13 +1,25 @@
 import { FormEvent, useEffect, useId, useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
-import { getAuthSession, lookupCompanyHost } from "../app/api";
+import { API_BASE_URL, getAuthSession, lookupCompanyHost } from "../app/api";
+import { brandColorStyle } from "../app/brandColor";
 import { useAuth } from "../auth/AuthContext";
 import { getHomePathForRole } from "../auth/roleRedirect";
 import { parseTenantSubdomain } from "@bms/shared";
 import { BmsBrandIcon } from "../components/BmsBrandIcon";
 import { ThemeToggle } from "../components/ThemeToggle";
+import { applyDocumentBranding, resetDocumentBranding } from "../lib/documentBranding";
 import { toUserFacingError } from "../lib/networkError";
 import { InstallAppButton } from "../pwa/InstallAppButton";
+
+function companyInitials(name: string): string {
+  const parts = name
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (parts.length === 0) return "CO";
+  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
+  return `${parts[0]![0] ?? ""}${parts[1]![0] ?? ""}`.toUpperCase();
+}
 
 export function LoginPage() {
   const { login, user } = useAuth();
@@ -21,6 +33,9 @@ export function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
   const hostSubdomain = parseTenantSubdomain(window.location.hostname);
   const [companyName, setCompanyName] = useState("");
+  const [companyLogoUrl, setCompanyLogoUrl] = useState<string | undefined>(undefined);
+  const [companyBrandColor, setCompanyBrandColor] = useState<string | undefined>(undefined);
+  const [loadingCompany, setLoadingCompany] = useState(Boolean(hostSubdomain));
   const [unknownHost, setUnknownHost] = useState(false);
 
   const session = getAuthSession();
@@ -28,6 +43,8 @@ export function LoginPage() {
     !hostSubdomain ||
     hostSubdomain === (user?.tenantSubdomain || "").toLowerCase() ||
     hostSubdomain === (user?.tenantId || "").toLowerCase();
+
+  const isCompanyHost = Boolean(hostSubdomain && !unknownHost);
 
   const helpText = unknownHost
     ? "This company address is not set up yet."
@@ -37,26 +54,48 @@ export function LoginPage() {
 
   useEffect(() => {
     if (!hostSubdomain) {
+      setLoadingCompany(false);
       return;
     }
     let cancelled = false;
+    setLoadingCompany(true);
     void lookupCompanyHost(hostSubdomain)
       .then((company) => {
         if (!cancelled) {
           setCompanyName(company.name);
+          setCompanyLogoUrl(company.logoUrl);
+          setCompanyBrandColor(company.brandColor);
           setUnknownHost(false);
+          setLoadingCompany(false);
         }
       })
       .catch(() => {
         if (!cancelled) {
           setCompanyName("");
+          setCompanyLogoUrl(undefined);
+          setCompanyBrandColor(undefined);
           setUnknownHost(true);
+          setLoadingCompany(false);
         }
       });
     return () => {
       cancelled = true;
     };
   }, [hostSubdomain]);
+
+  useEffect(() => {
+    if (!isCompanyHost) {
+      resetDocumentBranding();
+      return;
+    }
+    applyDocumentBranding({
+      companyName: companyName || hostSubdomain || undefined,
+      pagePrefix: "Sign in",
+      logoUrl: companyLogoUrl,
+      subdomain: hostSubdomain,
+      apiBaseUrl: API_BASE_URL
+    });
+  }, [isCompanyHost, companyName, companyLogoUrl, hostSubdomain]);
 
   if (!submitting && session?.accessToken && user && ownsHost) {
     return <Navigate to={getHomePathForRole(user.role, user.subscribedModules)} replace />;
@@ -83,25 +122,63 @@ export function LoginPage() {
     }
   }
 
+  const brandStyle = isCompanyHost && companyBrandColor ? brandColorStyle(companyBrandColor) : undefined;
+  const displayCompanyName = companyName || (hostSubdomain ? hostSubdomain.toUpperCase() : "");
+
   return (
-    <main className={`login-page${submitting ? " login-page--busy" : ""}`}>
+    <main
+      className={`login-page${submitting ? " login-page--busy" : ""}${isCompanyHost ? " login-page--tenant" : ""}`}
+      style={brandStyle}
+    >
       <div className="login-theme-toggle">
         <ThemeToggle showLabel />
       </div>
 
-      <p className="login-back">
-        <Link to="/">← Back to aabanker home</Link>
-      </p>
+      {!isCompanyHost ? (
+        <p className="login-back">
+          <Link to="/">← Back to aabanker home</Link>
+        </p>
+      ) : null}
 
       <section className="login-card">
         <div className="login-card__brand">
-          <BmsBrandIcon />
-          <p className="dash-brand-name">aabanker</p>
-          <p className="dash-brand-tag">Banking Management System</p>
+          {isCompanyHost ? (
+            loadingCompany ? (
+              <>
+                <div className="login-card__logo-skeleton" aria-hidden="true" />
+                <p className="dash-brand-name">{displayCompanyName}</p>
+                <p className="dash-brand-tag">Loading workspace…</p>
+              </>
+            ) : (
+              <>
+                {companyLogoUrl ? (
+                  <div className="login-card__logo">
+                    <img src={companyLogoUrl} alt={`${displayCompanyName} logo`} />
+                  </div>
+                ) : (
+                  <div
+                    className="login-card__monogram"
+                    aria-hidden="true"
+                    style={companyBrandColor ? { background: companyBrandColor } : undefined}
+                  >
+                    <span>{companyInitials(displayCompanyName)}</span>
+                  </div>
+                )}
+                <p className="dash-brand-name">{displayCompanyName}</p>
+                <p className="dash-brand-tag">Staff &amp; Operations Portal</p>
+              </>
+            )
+          ) : (
+            <>
+              <BmsBrandIcon />
+              <p className="dash-brand-name">aabanker</p>
+              <p className="dash-brand-tag">Banking Management System</p>
+            </>
+          )}
         </div>
 
         <div className="login-card__title-row">
-          <h1>Sign in{companyName ? ` to ${companyName}` : ""}</h1>
+          <h1>Sign in</h1>
           <div className="login-hint">
             <button
               type="button"
@@ -191,6 +268,10 @@ export function LoginPage() {
         <div className="login-install">
           <InstallAppButton variant="button" />
         </div>
+
+        {isCompanyHost ? (
+          <p className="login-card__powered">Powered by aabanker</p>
+        ) : null}
       </section>
     </main>
   );

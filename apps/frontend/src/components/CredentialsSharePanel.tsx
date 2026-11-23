@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { getAuthSession } from "../app/api";
 import { useToast } from "./Toast";
 
 export type CredentialField = {
@@ -30,9 +31,11 @@ export function CredentialsSharePanel({
 
   const loginUrl = typeof window !== "undefined" ? `${window.location.origin}/login` : "/login";
 
+  const fallbackBrand = getAuthSession()?.user?.tenantName?.trim() || "aabanker — Banking Management System";
+
   function buildShareText(): string {
     const lines = [
-      shareTitle ?? "aabanker — Banking Management System",
+      shareTitle ?? fallbackBrand,
       "",
       ...fields.map((f) => `${f.label}: ${f.value}`),
       `Sign-in URL: ${loginUrl}`,

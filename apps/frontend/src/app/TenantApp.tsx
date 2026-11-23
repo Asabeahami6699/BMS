@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { useShallow } from "zustand/react/shallow";
-import { hasAnyPermission, tenantHasSusuAndLoans } from "@bms/shared";
+import { hasAnyPermission, parseTenantSubdomain, tenantHasSusuAndLoans } from "@bms/shared";
 import { prefetchLoanQualificationSetup } from "./stores/loanQualificationStore";
 import { prefetchSiteManual } from "./stores/siteManualStore";
 import { useAuth } from "../auth/AuthContext";
 import { buildTenantNav } from "../config/tenantModules";
-import { getCompanyProfile, type AppRole, type AuthMe, type CompanyProfile } from "./api";
+import { API_BASE_URL, getCompanyProfile, type AppRole, type AuthMe, type CompanyProfile } from "./api";
+import { applyDocumentBranding, resetDocumentBranding } from "../lib/documentBranding";
 import { BranchManagementCard } from "./BranchManagementCard";
 import { AccountNumberPolicyCard } from "./AccountNumberPolicyCard";
 import { CommissionPolicyCard } from "./CommissionPolicyCard";
@@ -231,6 +232,22 @@ export function TenantApp() {
   }, [user?.tenantId, role]);
 
   const companyName = user?.tenantName ?? user?.tenantId ?? undefined;
+
+  useEffect(() => {
+    if (!user?.tenantId || user.tenantId === "platform") {
+      resetDocumentBranding();
+      return;
+    }
+    const subdomain =
+      user.tenantSubdomain ??
+      (typeof window !== "undefined" ? parseTenantSubdomain(window.location.hostname) : null);
+    applyDocumentBranding({
+      companyName,
+      logoUrl: companyBrand?.logoUrl,
+      subdomain,
+      apiBaseUrl: API_BASE_URL
+    });
+  }, [user?.tenantId, user?.tenantSubdomain, companyName, companyBrand?.logoUrl]);
 
   if (role === "field_agent") {
     return (

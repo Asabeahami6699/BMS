@@ -11,6 +11,7 @@ import type { AppRole, Branch, RoleDefinition, UserRecord } from "./api";
 import {
   assignRole,
   createUser,
+  getAuthSession,
   unassignRole,
   updateUser
 } from "./api";
@@ -331,7 +332,7 @@ export function UserFormModal({ open, mode, user, branches, createDefaults, onCl
       {createdCredentials ? (
         <CredentialsSharePanel
           title={`Login details for ${createdCredentials.fullName || createdCredentials.email}`}
-          shareTitle={`aabanker login details — ${createdCredentials.fullName || createdCredentials.email}`}
+          shareTitle={`${getAuthSession()?.user?.tenantName?.trim() || "aabanker"} login details — ${createdCredentials.fullName || createdCredentials.email}`}
           shareButtonLabel="Share with user"
           defaultRevealed
           fields={[

@@ -7,6 +7,7 @@ import {
   buildInvestmentCustomerDetailsHtml
 } from "./investmentDocumentHtml";
 import { formatInvestmentMoney } from "./investmentUi";
+import { getAuthSession } from "../api";
 
 function certificateHtml(investment: InvestmentRecord): string {
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Investment Certificate — ${investment.investmentNumber}</title>
@@ -162,7 +163,8 @@ export async function printInvestmentApplication(
   formConfig: InvestmentFormConfig
 ): Promise<void> {
   const images = await embedInvestmentImages(investment);
-  printHtml(buildInvestmentApplicationHtml(investment, formConfig, images));
+  const companyName = getAuthSession()?.user?.tenantName?.trim();
+  printHtml(buildInvestmentApplicationHtml(investment, formConfig, images, companyName));
 }
 
 export function downloadInvestmentCertificatePdf(investment: InvestmentRecord): void {
@@ -174,7 +176,8 @@ export async function downloadInvestmentApplicationPdf(
   formConfig: InvestmentFormConfig
 ): Promise<void> {
   const images = await embedInvestmentImages(investment);
-  const html = buildInvestmentApplicationHtml(investment, formConfig, images);
+  const companyName = getAuthSession()?.user?.tenantName?.trim();
+  const html = buildInvestmentApplicationHtml(investment, formConfig, images, companyName);
   const blob = await htmlToPdfBlob(html);
   downloadBlob(blob, `${investment.investmentNumber}-application.pdf`);
 }
@@ -184,7 +187,8 @@ export async function downloadInvestmentCustomerDetailsPdf(
   formConfig: InvestmentFormConfig
 ): Promise<void> {
   const images = await embedInvestmentImages(investment);
-  const html = buildInvestmentCustomerDetailsHtml(investment, formConfig, images);
+  const companyName = getAuthSession()?.user?.tenantName?.trim();
+  const html = buildInvestmentCustomerDetailsHtml(investment, formConfig, images, companyName);
   const blob = await htmlToPdfBlob(html);
   downloadBlob(blob, `${investment.investmentNumber}-customer-record.pdf`);
 }
