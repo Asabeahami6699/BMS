@@ -82,7 +82,38 @@ export function DashboardShell({
   const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set());
   const [openSubgroups, setOpenSubgroups] = useState<Set<string>>(() => new Set());
   const [profileOpen, setProfileOpen] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [currentPath]);
+
+  useEffect(() => {
+    if (!mobileNavOpen) {
+      return;
+    }
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        setMobileNavOpen(false);
+      }
+    }
+    const mq = window.matchMedia("(min-width: 981px)");
+    function onMediaChange(e: MediaQueryListEvent) {
+      if (e.matches) {
+        setMobileNavOpen(false);
+      }
+    }
+    document.addEventListener("keydown", onKeyDown);
+    mq.addEventListener("change", onMediaChange);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      document.removeEventListener("keydown", onKeyDown);
+      mq.removeEventListener("change", onMediaChange);
+    };
+  }, [mobileNavOpen]);
 
   useEffect(() => {
     const activeGroups = new Set<string>();
@@ -173,7 +204,18 @@ export function DashboardShell({
         brandColor ? brandColorStyle(brandColor) : undefined
       }
     >
-      <aside className="dash-sidebar" aria-label="Main navigation">
+      {mobileNavOpen ? (
+        <div
+          className="dash-sidebar-backdrop"
+          aria-hidden="true"
+          onClick={() => setMobileNavOpen(false)}
+        />
+      ) : null}
+
+      <aside
+        className={`dash-sidebar${mobileNavOpen ? " is-mobile-open" : ""}`}
+        aria-label="Main navigation"
+      >
         <div className="dash-brand">
           <div className="dash-brand-title-row">
             {companyLogoUrl ? (
@@ -184,6 +226,14 @@ export function DashboardShell({
               <BmsBrandIcon />
             )}
             <p className="dash-brand-name">aabanker</p>
+            <button
+              type="button"
+              className="dash-sidebar-close"
+              aria-label="Close navigation menu"
+              onClick={() => setMobileNavOpen(false)}
+            >
+              ×
+            </button>
           </div>
           <div className="dash-brand-text">
             {companyName ? <p className="dash-brand-company">{companyName}</p> : null}
@@ -199,6 +249,7 @@ export function DashboardShell({
                   to={item.to}
                   title={item.label}
                   aria-label={item.label}
+                  onClick={() => setMobileNavOpen(false)}
                   className={({ isActive }) => `dash-nav-link${isActive ? " active" : ""}`}
                 >
                   <span className="dash-nav-icon" aria-hidden>
@@ -243,6 +294,7 @@ export function DashboardShell({
                             to={child.to}
                             title={child.label}
                             aria-label={child.label}
+                            onClick={() => setMobileNavOpen(false)}
                             className={({ isActive }) => `dash-nav-sublink${isActive ? " active" : ""}`}
                           >
                             <span className="dash-nav-sublink-icon" aria-hidden>
@@ -283,6 +335,7 @@ export function DashboardShell({
                                   to={sub.to}
                                   title={sub.label}
                                   aria-label={sub.label}
+                                  onClick={() => setMobileNavOpen(false)}
                                   className={({ isActive }) =>
                                     `dash-nav-sublink dash-nav-sublink--nested${isActive ? " active" : ""}`
                                   }
@@ -315,6 +368,22 @@ export function DashboardShell({
         <div className="dash-header-shell">
           <header className="dash-header">
             <div className="dash-header-start">
+              <button
+                type="button"
+                className="dash-mobile-menu-btn"
+                aria-label={mobileNavOpen ? "Close navigation menu" : "Open navigation menu"}
+                aria-expanded={mobileNavOpen}
+                onClick={() => setMobileNavOpen((open) => !open)}
+              >
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path
+                    d="M4 7h16M4 12h16M4 17h16"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </button>
               <GlobalSearch canSearchCustomers={canSearchCustomers} canSearchUsers={canSearchUsers} />
             </div>
 

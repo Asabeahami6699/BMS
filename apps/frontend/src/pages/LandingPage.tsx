@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { BMS_CONTACT_EMAIL } from "../app/chatApi";
 import { getAuthSession } from "../app/api";
@@ -276,8 +277,19 @@ export function LandingPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const session = getAuthSession();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setMobileMenuOpen(false);
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [mobileMenuOpen]);
 
   function handlePrimaryCta() {
+    setMobileMenuOpen(false);
     if (session?.accessToken && user) {
       navigate(getHomePathForRole(user.role, user.subscribedModules));
       return;
@@ -287,8 +299,8 @@ export function LandingPage() {
 
   return (
     <div className="landing">
-      <header className="landing-nav landing-animate-in landing-animate-in--nav">
-        <Link to="/" className="landing-nav-brand">
+      <header className={`landing-nav landing-animate-in landing-animate-in--nav${mobileMenuOpen ? " is-menu-open" : ""}`}>
+        <Link to="/" className="landing-nav-brand" onClick={() => setMobileMenuOpen(false)}>
           <BmsBrandIcon />
           <span>
             <strong>aabanker</strong>
@@ -297,13 +309,13 @@ export function LandingPage() {
         </Link>
 
         <nav className="landing-nav-links" aria-label="Primary">
-          <a href="#platform">Platform</a>
-          <a href="#banking">Banking</a>
-          <a href="#universal-ops">Staff hub</a>
-          <a href="#loans">Loans</a>
-          <a href="#investments">Investments</a>
-          <a href="#features">Features</a>
-          <a href="#contact">Contact</a>
+          <a href="#platform" onClick={() => setMobileMenuOpen(false)}>Platform</a>
+          <a href="#banking" onClick={() => setMobileMenuOpen(false)}>Banking</a>
+          <a href="#universal-ops" onClick={() => setMobileMenuOpen(false)}>Staff hub</a>
+          <a href="#loans" onClick={() => setMobileMenuOpen(false)}>Loans</a>
+          <a href="#investments" onClick={() => setMobileMenuOpen(false)}>Investments</a>
+          <a href="#features" onClick={() => setMobileMenuOpen(false)}>Features</a>
+          <a href="#contact" onClick={() => setMobileMenuOpen(false)}>Contact</a>
         </nav>
 
         <div className="landing-nav-actions">
@@ -317,12 +329,61 @@ export function LandingPage() {
               <Link to="/login" className="landing-link-btn">
                 Sign in
               </Link>
-              <button type="button" className="button" onClick={handlePrimaryCta}>
+              <button type="button" className="button landing-nav-cta-desktop" onClick={handlePrimaryCta}>
                 Get started
               </button>
             </>
           )}
+          <button
+            type="button"
+            className="landing-mobile-menu-btn"
+            aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
+            aria-expanded={mobileMenuOpen}
+            onClick={() => setMobileMenuOpen((open) => !open)}
+          >
+            {mobileMenuOpen ? (
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+            )}
+          </button>
         </div>
+
+        {mobileMenuOpen ? (
+          <nav className="landing-mobile-drawer" aria-label="Mobile navigation">
+            <a href="#platform" onClick={() => setMobileMenuOpen(false)}>Platform</a>
+            <a href="#banking" onClick={() => setMobileMenuOpen(false)}>Banking</a>
+            <a href="#universal-ops" onClick={() => setMobileMenuOpen(false)}>Staff hub</a>
+            <a href="#loans" onClick={() => setMobileMenuOpen(false)}>Loans</a>
+            <a href="#investments" onClick={() => setMobileMenuOpen(false)}>Investments</a>
+            <a href="#features" onClick={() => setMobileMenuOpen(false)}>Features</a>
+            <a href="#contact" onClick={() => setMobileMenuOpen(false)}>Contact</a>
+            <div className="landing-mobile-drawer__actions">
+              {session?.accessToken && user ? (
+                <button type="button" className="button" onClick={handlePrimaryCta}>
+                  Go to dashboard
+                </button>
+              ) : (
+                <>
+                  <Link
+                    to="/login"
+                    className="button secondary"
+                    onClick={() => setMobileMenuOpen(false)}
+                  >
+                    Sign in
+                  </Link>
+                  <button type="button" className="button" onClick={handlePrimaryCta}>
+                    Get started
+                  </button>
+                </>
+              )}
+            </div>
+          </nav>
+        ) : null}
       </header>
 
       <section className="landing-hero">
