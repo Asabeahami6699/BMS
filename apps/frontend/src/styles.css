@@ -20122,3 +20122,69 @@ button.cif-ledger__row:hover {
   }
 }
 
+/* Field agent MoMo account name lookup */
+.agent-momo-box {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.8rem 0.9rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--bg-surface-elevated);
+}
+
+.agent-momo-phone-row {
+  display: flex;
+  gap: 0.45rem;
+  align-items: stretch;
+}
+
+.agent-momo-phone-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.agent-momo-phone-row .button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.agent-momo-status {
+  margin: 0;
+  padding: 0.45rem 0.65rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.agent-momo-status--loading {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.agent-momo-status--verified {
+  background: var(--success-soft);
+  border: 1px solid color-mix(in srgb, var(--success) 32%, transparent);
+  color: var(--success);
+}
+
+[data-theme="light"] .agent-momo-status--verified {
+  color: #047857;
+}
+
+.agent-momo-status--warn {
+  background: var(--warning-soft);
+  border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
+  color: var(--warning);
+}
+
+[data-theme="light"] .agent-momo-status--warn {
+  color: #b45309;
+}
+
+.agent-momo-status--fallback {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-soft);
+  color: var(--text-muted);
+}
+
+

@@ -1,7 +1,9 @@
 import { requestBalanceDisclosureSchema, requestCustomerApprovalSchema } from "@bms/shared";
 import { Router, type Request, type Response } from "express";
+import { momoLookupRateLimit } from "../middleware/rateLimit.js";
 import { requirePermission } from "../middleware/requirePermission.js";
 import { validateBody } from "../middleware/validateBody.js";
+import { resolveGhanaMomoAccountName } from "../services/momoLookupService.js";
 import {
   listAgentBalanceDisclosures,
   listAgentWithdrawalActivity,
@@ -345,3 +347,28 @@ fieldAgentsRouter.post("/me/callover/report", requirePermission("transactions.re
     });
   }
 });
+
+fieldAgentsRouter.get(
+  "/momo/resolve",
+  requirePermission("customers.read"),
+  momoLookupRateLimit,
+  async (req, res) => {
+    const context = req.userContext;
+    if (!context) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+
+    const phone = typeof req.query.phone === "string" ? req.query.phone : "";
+    const network = typeof req.query.network === "string" ? req.query.network : undefined;
+
+    try {
+      const result = await resolveGhanaMomoAccountName({ phone, network });
+      res.json(result);
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Failed to verify MoMo number"
+      });
+    }
+  }
+);

@@ -67,3 +67,13 @@ export const aiRateLimit = rateLimit({
   keyGenerator: clientKey,
   message: { error: "Too many AI requests. Try again shortly." }
 });
+
+export const momoLookupRateLimit = rateLimit({
+  windowMs: 60_000,
+  limit: 30,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  keyGenerator: (req: Request) =>
+    `momo:${req.userContext?.userId ?? req.ip ?? "unknown"}`,
+  message: { error: "Too many MoMo verification requests. Wait a moment and try again." }
+});

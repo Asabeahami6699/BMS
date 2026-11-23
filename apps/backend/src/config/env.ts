@@ -35,6 +35,8 @@ const envSchema = z.object({
   ARKESEL_API_KEY: z.string().min(1).optional(),
   ARKESEL_SENDER_ID: z.string().min(1).max(11).optional(),
   ARKESEL_SMS_BASE_URL: z.string().url().default("https://sms.arkesel.com"),
+  /** Live Ghana Paystack secret key (sk_live_...) for MoMo / bank account name resolution. */
+  PAYSTACK_SECRET_KEY: z.string().min(1).optional(),
   /** MoMo number companies pay subscription fees to (platform owner). */
   PLATFORM_MOMO_NUMBER: z.string().min(1).optional(),
   PLATFORM_MOMO_ACCOUNT_NAME: z.string().min(1).optional(),
@@ -135,6 +137,14 @@ export function getOllamaConfig() {
 
 export function hasArkeselSmsConfig(): boolean {
   return Boolean(env.ARKESEL_API_KEY);
+}
+
+export function hasPaystackConfig(): boolean {
+  return Boolean(env.PAYSTACK_SECRET_KEY);
+}
+
+export function getPaystackSecretKey(): string {
+  return env.PAYSTACK_SECRET_KEY ?? "";
 }
 
 export function getArkeselSmsConfig() {

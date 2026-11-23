@@ -4820,3 +4820,29 @@ export async function processInvestmentMaturities(): Promise<InvestmentRecord[]>
   );
   return body.renewed;
 }
+
+export type MomoNetworkCode = "MTN" | "VOD" | "ATL";
+
+export type MomoLookupResult = {
+  configured: boolean;
+  verified: boolean;
+  phone: string;
+  network: MomoNetworkCode;
+  networkLabel: string;
+  accountName: string | null;
+  message?: string;
+};
+
+export async function resolveMomoAccountName(
+  phone: string,
+  network?: MomoNetworkCode
+): Promise<MomoLookupResult> {
+  const params = new URLSearchParams({ phone });
+  if (network) {
+    params.set("network", network);
+  }
+  return fetchJson<MomoLookupResult>(
+    `${API_BASE_URL}/api/v1/field-agents/momo/resolve?${params.toString()}`,
+    { headers: authHeaders() }
+  );
+}

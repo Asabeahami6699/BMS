@@ -23,3 +23,5 @@ services:
         sync: false
       - key: FRONTEND_URL
         sync: false
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
