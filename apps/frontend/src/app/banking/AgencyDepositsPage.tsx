@@ -38,6 +38,7 @@ import { ensureTillReadyForAgencyDeposit } from "../../lib/agencyTillGate";
 import { BranchCounterCashCalculator } from "../BranchCounterCashCalculator";
 
 import { DynamicWorkflowForm } from "./DynamicWorkflowForm";
+import { PartnerAccountVerifyBar } from "./PartnerAccountVerifyBar";
 
 import {
   isSusuCustomer,
@@ -1136,6 +1137,22 @@ export function AgencyDepositsPage() {
                     </div>
                   </div>
                 ) : null}
+
+                <PartnerAccountVerifyBar
+                  product={selectedProduct}
+                  fields={visibleCaptureFields}
+                  accountNumber={String(workflowData.account_number ?? "")}
+                  currentAccountHolderName={String(workflowData.account_holder_name ?? "")}
+                  disabled={posting}
+                  onApplyAccountHolderName={(name) => {
+                    setWorkflowData((prev) =>
+                      applyWorkflowAutoFields(captureFields, {
+                        ...prev,
+                        account_holder_name: name
+                      })
+                    );
+                  }}
+                />
 
                 <DynamicWorkflowForm
                   fields={visibleCaptureFields}

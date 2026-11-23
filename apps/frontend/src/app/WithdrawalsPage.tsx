@@ -22,7 +22,6 @@ import { DeclineRequestModal } from "./DeclineRequestModal";
 import { useWithdrawalsLiveSync } from "./hooks/useWithdrawalsLiveSync";
 import { useBankProductsStore } from "./stores/bankProductsStore";
 import { selectWithdrawalKpis, useWithdrawalsStore } from "./stores/withdrawalsStore";
-import { WithdrawalMomoApproveModal } from "./WithdrawalMomoApproveModal";
 
 type Props = {
   role: AppRole;
@@ -32,6 +31,9 @@ type Props = {
 };
 
 function statusLabel(row: BalanceDisclosure): string {
+  if (row.fulfillmentMode === "momo" && row.status === "completed") {
+    return "Paid (MoMo)";
+  }
   if (row.agentDeliveredAt) {
     return "Agent delivered";
   }
@@ -146,7 +148,6 @@ export function WithdrawalsPage({ role, variant = "susu" }: Props) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"" | BalanceDisclosure["status"]>("");
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [momoRequest, setMomoRequest] = useState<BalanceDisclosure | null>(null);
   const [declineTarget, setDeclineTarget] = useState<BalanceDisclosure | null>(null);
   const bankProducts = useBankProductsStore((s) => s.products);
   const hydrateBankProducts = useBankProductsStore((s) => s.hydrate);
@@ -219,26 +220,30 @@ export function WithdrawalsPage({ role, variant = "susu" }: Props) {
   }, [dateScopedWithdrawals, search, statusFilter, isAgency, user?.role]);
 
   function handleApprove(row: BalanceDisclosure) {
-    if (row.fulfillmentMode === "momo") {
-      setMomoRequest(row);
-      return;
-    }
     void handleCashApprove(row);
   }
 
   async function handleCashApprove(row: BalanceDisclosure) {
     setBusyId(row.id);
     try {
-      const bankProductId = bankProductByRequest[row.id] ?? withdrawalProducts[0]?.id;
+      const isMomo = row.fulfillmentMode === "momo";
+      const bankProductId = isMomo
+        ? undefined
+        : bankProductByRequest[row.id] ?? withdrawalProducts[0]?.id;
       const approved = await approveBalanceDisclosure(row.id, {
         ...(bankProductId ? { bankProductId } : {}),
-        workflowData: workflowDataByRequest[row.id]
+        ...(isMomo ? {} : { workflowData: workflowDataByRequest[row.id] })
       });
       patchWithdrawal(approved);
-      showToast("Withdrawal verified — teller may pay cash", "success");
+      showToast(
+        isMomo
+          ? "MoMo withdrawal approved — teller may Pay now"
+          : "Withdrawal verified — teller may pay cash",
+        "success"
+      );
       await refreshSilent();
     } catch (err) {
-      showToast(toUserFacingError(err, "Verification failed"), "error");
+      showToast(toUserFacingError(err, "Approval failed"), "error");
     } finally {
       setBusyId(null);
     }
@@ -429,8 +434,27 @@ export function WithdrawalsPage({ role, variant = "susu" }: Props) {
             },
             {
               key: "fulfillment",
-              label: "Fulfillment",
-              render: (row) => fulfillmentLabel(row.fulfillmentMode)
+              label: "Fulfillment & details",
+              render: (row) => (
+                <div className="withdrawal-gate-details">
+                  <strong>{fulfillmentLabel(row.fulfillmentMode)}</strong>
+                  {row.fulfillmentMode === "momo" || row.momoNumber || row.momoAccountName ? (
+                    <small className="withdrawal-gate-details__momo">
+                      MoMo: {row.momoAccountName || "—"} · {row.momoNumber || "—"}
+                    </small>
+                  ) : null}
+                  {row.requestReason ? (
+                    <small className="muted withdrawal-gate-details__reason">
+                      Reason: {row.requestReason}
+                    </small>
+                  ) : null}
+                  {row.payoutReference ? (
+                    <small className="muted withdrawal-gate-details__ref">
+                      Ref: {row.payoutReference}
+                    </small>
+                  ) : null}
+                </div>
+              )
             },
             {
               key: "status",
@@ -506,41 +530,47 @@ export function WithdrawalsPage({ role, variant = "susu" }: Props) {
               : [];
             const isOpen = expandedRequestId === row.id;
 
+            const showVerificationToggle = row.fulfillmentMode !== "momo";
+
             return (
               <div className="withdrawal-verify-panel">
-                <button
-                  type="button"
-                  className="button secondary"
-                  onClick={() => {
-                    if (isOpen) {
-                      setExpandedRequestId(null);
-                      return;
-                    }
-                    setExpandedRequestId(row.id);
-                    setWorkflowDataByRequest((prev) => ({
-                      ...prev,
-                      [row.id]: prefillWithdrawalVerificationData(row, prev[row.id])
-                    }));
-                  }}
-                >
-                  {isOpen ? "Hide details" : "Verification details"}
-                </button>
-                {isOpen ? (
+                {showVerificationToggle ? (
+                  <button
+                    type="button"
+                    className="button secondary"
+                    onClick={() => {
+                      if (isOpen) {
+                        setExpandedRequestId(null);
+                        return;
+                      }
+                      setExpandedRequestId(row.id);
+                      setWorkflowDataByRequest((prev) => ({
+                        ...prev,
+                        [row.id]: prefillWithdrawalVerificationData(row, prev[row.id])
+                      }));
+                    }}
+                  >
+                    {isOpen ? "Hide details" : "Verification details"}
+                  </button>
+                ) : null}
+                {showVerificationToggle && isOpen ? (
                   <div className="withdrawal-queue-card__details">
                     {row.requestReason ? (
                       <p className="muted">Reason: {row.requestReason}</p>
                     ) : null}
-                    <DynamicWorkflowForm
-                      fields={verificationFields}
-                      values={workflowDataByRequest[row.id] ?? {}}
-                      disabled={busyId === row.id}
-                      onChange={(key, value) =>
-                        setWorkflowDataByRequest((prev) => ({
-                          ...prev,
-                          [row.id]: { ...(prev[row.id] ?? {}), [key]: value }
-                        }))
-                      }
-                    />
+                    {verificationFields.length > 0 ? (
+                      <DynamicWorkflowForm
+                        fields={verificationFields}
+                        values={workflowDataByRequest[row.id] ?? {}}
+                        disabled={busyId === row.id}
+                        onChange={(key, value) =>
+                          setWorkflowDataByRequest((prev) => ({
+                            ...prev,
+                            [row.id]: { ...(prev[row.id] ?? {}), [key]: value }
+                          }))
+                        }
+                      />
+                    ) : null}
                   </div>
                 ) : null}
                 <div className="platform-actions-buttons">
@@ -566,16 +596,6 @@ export function WithdrawalsPage({ role, variant = "susu" }: Props) {
           }}
         />
       </section>
-
-      <WithdrawalMomoApproveModal
-        open={momoRequest !== null}
-        request={momoRequest}
-        onClose={() => setMomoRequest(null)}
-        onApproved={() => {
-          void refreshSilent();
-          setMomoRequest(null);
-        }}
-      />
 
       <DeclineRequestModal
         open={declineTarget !== null}

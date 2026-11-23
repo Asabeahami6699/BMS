@@ -865,7 +865,7 @@ export function isMomoBankProduct(
   product: Pick<TenantBankProduct, "code" | "name" | "bankLabel">
 ): boolean {
   const text = bankProductMatchText(product);
-  return /\b(momo|mtn|vodafone|airtel|tigo|mobile\s*money|mobilemoney)\b/.test(text);
+  return /\b(momo|mtn|vodafone|telecel|airtel|tigo|mobile\s*money|mobilemoney)\b/.test(text);
 }
 
 function isBmsInternalBankLabel(bankLabel: string): boolean {

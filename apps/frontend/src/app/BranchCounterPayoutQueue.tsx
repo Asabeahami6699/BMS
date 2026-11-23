@@ -46,7 +46,12 @@ export function BranchCounterPayoutQueue({ permissions }: Props) {
       await ensureTransactionStepUpForRole(user?.role, requestStepUp);
       await payFieldPayout(row.id);
       setConfirmId(null);
-      showToast(`Paid ${formatGhs(row.withdrawalAmount ?? 0)}`, "success");
+      showToast(
+        row.fulfillmentMode === "momo"
+          ? `Paid ${formatGhs(row.withdrawalAmount ?? 0)} (MoMo)`
+          : `Paid ${formatGhs(row.withdrawalAmount ?? 0)}`,
+        "success"
+      );
     } catch (error) {
       showToast(toUserFacingError(error, "Pay now failed"), "error");
     }
@@ -63,11 +68,12 @@ export function BranchCounterPayoutQueue({ permissions }: Props) {
       </header>
 
       {pendingFieldPayouts.length === 0 ? (
-        <p className="muted">No field withdrawals waiting for cash payout.</p>
+        <p className="muted">No field withdrawals waiting for payout.</p>
       ) : (
         <ul className="branch-counter-payout-queue__list">
           {pendingFieldPayouts.map((row) => {
             const amount = Number(row.withdrawalAmount ?? 0);
+            const isMomo = row.fulfillmentMode === "momo";
             const cashOk =
               floatSummary?.canTransact &&
               (floatSummary.expectedCash ?? 0) + 1e-9 >= amount;
@@ -80,10 +86,20 @@ export function BranchCounterPayoutQueue({ permissions }: Props) {
                     <span className="branch-counter-payout-queue__acct muted">
                       {accountNumberFor(row)}
                     </span>
+                    {isMomo ? (
+                      <span className="status-pill status-pill--active branch-counter-payout-queue__momo-pill">
+                        MoMo
+                      </span>
+                    ) : null}
                     <span className="branch-counter-payout-queue__amount">
                       {formatGhs(amount)}
                     </span>
                   </div>
+                  {isMomo ? (
+                    <small className="branch-counter-payout-queue__momo-meta">
+                      MoMo: {row.momoAccountName || "—"} · {row.momoNumber || "—"}
+                    </small>
+                  ) : null}
                   {!cashOk ? (
                     <small className="branch-counter-payout-queue__warn">
                       Need GHS {formatAccountAmount(amount)} till cash

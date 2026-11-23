@@ -13,6 +13,7 @@ import { toUserFacingError } from "../../lib/networkError";
 import { initiateAgencyWithdrawal } from "../api";
 import { isSusuCustomer } from "./agencyDepositCustomer";
 import { DynamicWorkflowForm } from "./DynamicWorkflowForm";
+import { PartnerAccountVerifyBar } from "./PartnerAccountVerifyBar";
 import {
   selectActiveAgencyCustomers,
   useAgencyTellerStore
@@ -474,17 +475,32 @@ export function InitiateAgencyWithdrawalPanel({ onInitiated }: Props) {
                 </div>
 
                 {verificationFields.length > 0 ? (
-                  <DynamicWorkflowForm
-                    fields={verificationFields}
-                    values={workflowData}
-                    disabled={submitting}
-                    onChange={(key, value) => {
-                      setWorkflowData((prev) => ({ ...prev, [key]: value }));
-                      if (key === "amount") {
-                        setAmount(String(value));
-                      }
-                    }}
-                  />
+                  <>
+                    <PartnerAccountVerifyBar
+                      product={selectedProduct}
+                      fields={verificationFields}
+                      accountNumber={String(workflowData.account_number ?? "")}
+                      currentAccountHolderName={String(workflowData.account_holder_name ?? "")}
+                      disabled={submitting}
+                      onApplyAccountHolderName={(name) => {
+                        setWorkflowData((prev) => ({
+                          ...prev,
+                          account_holder_name: name
+                        }));
+                      }}
+                    />
+                    <DynamicWorkflowForm
+                      fields={verificationFields}
+                      values={workflowData}
+                      disabled={submitting}
+                      onChange={(key, value) => {
+                        setWorkflowData((prev) => ({ ...prev, [key]: value }));
+                        if (key === "amount") {
+                          setAmount(String(value));
+                        }
+                      }}
+                    />
+                  </>
                 ) : null}
 
                 <button

@@ -435,7 +435,11 @@ async function loadDisclosuresByStatus(
 
   const customers = await listCustomers(tenantId);
   const customerById = new Map(customers.map((c) => [c.id, c]));
-  const { isFieldAgentRequester } = await import("./balanceDisclosureService.js");
+  const { resolveFieldAgentUserIds } = await import("./balanceDisclosureService.js");
+  const fieldAgentIds = await resolveFieldAgentUserIds(
+    tenantId,
+    rows.map((r) => String(r.field_agent_id ?? ""))
+  );
 
   const mapped = rows.map((row) => {
     const workflowData =
@@ -461,7 +465,7 @@ async function loadDisclosuresByStatus(
       customerName,
       customerPhone: linkedCustomer?.phone,
       customerAccountNumber: linkedCustomer?.accountNumber,
-      isFieldAgentRequest: isFieldAgentRequester(String(row.field_agent_id)),
+      isFieldAgentRequest: fieldAgentIds.has(String(row.field_agent_id)),
       requestType: "withdrawal",
       status: row.status,
       withdrawalAmount: row.withdrawal_amount != null ? Number(row.withdrawal_amount) : undefined,
@@ -474,6 +478,9 @@ async function loadDisclosuresByStatus(
       tellerPaidBy: row.teller_paid_by ?? undefined,
       tellerPaidAt: row.teller_paid_at ?? undefined,
       requestReason: row.request_reason ?? undefined,
+      momoNumber: row.momo_number ?? undefined,
+      momoAccountName: row.momo_account_name ?? undefined,
+      payoutReference: row.payout_reference ?? undefined,
       bankProductId: row.bank_product_id != null ? String(row.bank_product_id) : undefined,
       workflowData
     });
@@ -494,18 +501,17 @@ async function loadWithdrawalsPendingCsVerify(
   tenantId: string,
   branchId?: string
 ): Promise<BalanceDisclosure[]> {
-  const { isFieldAgentRequester } = await import("./balanceDisclosureService.js");
   const pending = await loadDisclosuresByStatus(tenantId, "pending", branchId);
   return pending.filter(
     (row) =>
       isAgencyCashWithdrawal(row.fulfillmentMode) &&
       !isManualPartnerWithdrawal(row) &&
       // Field-agent Susu cash is coordinator → teller, not CS.
-      !isFieldAgentRequester(row.fieldAgentId)
+      !row.isFieldAgentRequest
   );
 }
 
-/** Cash withdrawals ready for teller payout (CS/coordinator verified, or legacy bank_executed). */
+/** Approved withdrawals (cash & MoMo) ready for teller Pay now payout. */
 export async function loadWithdrawalsPendingTellerPay(
   tenantId: string,
   branchId?: string
@@ -516,9 +522,7 @@ export async function loadWithdrawalsPendingTellerPay(
   ]);
   const byId = new Map<string, BalanceDisclosure>();
   for (const row of [...csApproved, ...legacyBankExecuted]) {
-    if (isAgencyCashWithdrawal(row.fulfillmentMode)) {
-      byId.set(row.id, row);
-    }
+    byId.set(row.id, row);
   }
   return [...byId.values()];
 }
@@ -1153,12 +1157,22 @@ export async function tellerPayWithdrawal(
   if (!row || row.request_type !== "withdrawal") {
     throw new Error("Withdrawal request not found");
   }
-  if (row.fulfillment_mode === "momo") {
-    throw new Error("MoMo withdrawals are not paid at teller counter");
-  }
   if (row.status !== "cs_approved" && row.status !== "bank_executed") {
-    throw new Error("Withdrawal must be Customer Service verified before teller cash payout");
+    throw new Error("Withdrawal must be approved before teller payout");
   }
+
+  const isMomo = row.fulfillment_mode === "momo";
+  const momoAccountName =
+    typeof row.momo_account_name === "string" && row.momo_account_name.trim()
+      ? row.momo_account_name.trim()
+      : undefined;
+  const momoNumber =
+    typeof row.momo_number === "string" && row.momo_number.trim()
+      ? row.momo_number.trim()
+      : undefined;
+  const momoSummary = isMomo
+    ? `${momoAccountName ?? "Recipient"} (${momoNumber ?? "—"})`
+    : "";
 
   const customer = await getCustomerById(context.tenantId, row.customer_id);
   if (!customer) {
@@ -1209,7 +1223,7 @@ export async function tellerPayWithdrawal(
           amount,
           homeBranchId: customer.homeBranchId,
           bankProductId: row.bank_product_id ?? null,
-          notesSuffix: "teller payout",
+          notesSuffix: isMomo ? `teller MoMo payout (${momoSummary})` : "teller payout",
           skipCustomerLedgerDebit: false
         });
       }
@@ -1242,7 +1256,9 @@ export async function tellerPayWithdrawal(
     recordedByUserId: context.userId,
     fieldAgentId: row.field_agent_id,
     createdAt: new Date().toISOString(),
-    notes: `Teller cash payout · field agent · req ${disclosureId.slice(0, 8)}`,
+    notes: isMomo
+      ? `Teller MoMo payout · ${momoSummary} · req ${disclosureId.slice(0, 8)}`
+      : `Teller cash payout · field agent · req ${disclosureId.slice(0, 8)}`,
     executionStatus: "completed"
   });
 
@@ -1257,7 +1273,13 @@ export async function tellerPayWithdrawal(
         teller_paid_by: context.userId,
         teller_paid_at: now,
         paid_at: now,
-        linked_transaction_id: transactionId
+        linked_transaction_id: transactionId,
+        ...(isMomo
+          ? {
+              agent_delivered_by: context.userId,
+              agent_delivered_at: now
+            }
+          : {})
       })
       .eq("id", disclosureId);
   }
@@ -1267,9 +1289,11 @@ export async function tellerPayWithdrawal(
       tenantId: context.tenantId,
       userId: row.field_agent_id,
       customerId: row.customer_id,
-      kind: "withdrawal_request_approved",
-      title: "Office cash ready to deliver",
-      body: `${customer.fullName}: GHS ${formatAccountAmount(amount)} paid at till. Collect and deliver on your next visit.`
+      kind: isMomo ? "withdrawal_momo_sent" : "withdrawal_request_approved",
+      title: isMomo ? "MoMo withdrawal paid" : "Office cash ready to deliver",
+      body: isMomo
+        ? `${customer.fullName}: GHS ${formatAccountAmount(amount)} paid at teller for MoMo (${momoSummary}).`
+        : `${customer.fullName}: GHS ${formatAccountAmount(amount)} paid at till. Collect and deliver on your next visit.`
     });
   } catch {
     // Non-blocking
@@ -1286,9 +1310,13 @@ export async function tellerPayWithdrawal(
     status: "completed",
     withdrawalAmount: amount,
     fulfillmentMode: row.fulfillment_mode ?? undefined,
+    momoNumber,
+    momoAccountName,
     tellerPaidBy: context.userId,
     tellerPaidAt: now,
     paidAt: now,
+    agentDeliveredBy: isMomo ? context.userId : undefined,
+    agentDeliveredAt: isMomo ? now : undefined,
     requestedAt: row.requested_at
   });
 }

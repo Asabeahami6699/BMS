@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ADDON_LABELS,
   MODULE_LABELS,
@@ -9,9 +9,17 @@ import {
   type TenantAddon,
   type TenantProductModule
 } from "@bms/shared";
+import { resolveMomoAccountName, type MomoLookupResult, type MomoNetworkCode } from "../api";
 import { useToast } from "../../components/Toast";
 import { useSubscriptionBillingStore } from "../stores/subscriptionBillingStore";
 import { usePageLoading } from "../hooks/usePageLoading";
+import {
+  detectGhanaMomoNetwork,
+  isCompleteGhanaMomoPhone,
+  MOMO_NETWORK_OPTIONS,
+  sanitizeDigitsOnly
+} from "../../lib/momoPhone";
+import { toUserFacingError } from "../../lib/networkError";
 
 type Props = {
   subscribedModules: TenantProductModule[] | undefined;
@@ -42,7 +50,35 @@ export function SettingsSubscriptionPage({
   const [momoReference, setMomoReference] = useState("");
   const [payerName, setPayerName] = useState("");
   const [payerNumber, setPayerNumber] = useState("");
+  const [payerNetwork, setPayerNetwork] = useState<MomoNetworkCode>("MTN");
+  const [payerLookupBusy, setPayerLookupBusy] = useState(false);
+  const [payerLookup, setPayerLookup] = useState<MomoLookupResult | null>(null);
+  const [payerLookupError, setPayerLookupError] = useState<string | null>(null);
+  const payerLookupSeqRef = useRef(0);
   const [notes, setNotes] = useState("");
+
+  async function runPayerMomoLookup(phone: string, network: MomoNetworkCode) {
+    if (!isCompleteGhanaMomoPhone(phone)) return;
+    const seq = ++payerLookupSeqRef.current;
+    setPayerLookupBusy(true);
+    setPayerLookupError(null);
+    try {
+      const result = await resolveMomoAccountName(phone, network);
+      if (seq !== payerLookupSeqRef.current) return;
+      setPayerLookup(result);
+      if (result.verified && result.accountName) {
+        setPayerName(result.accountName);
+      }
+    } catch (err) {
+      if (seq !== payerLookupSeqRef.current) return;
+      setPayerLookup(null);
+      setPayerLookupError(toUserFacingError(err, "Could not verify MoMo number"));
+    } finally {
+      if (seq === payerLookupSeqRef.current) {
+        setPayerLookupBusy(false);
+      }
+    }
+  }
 
   usePageLoading(loading || submitting, "settings-subscription");
 
@@ -388,15 +424,91 @@ export function SettingsSubscriptionPage({
                     </label>
                     <div className="subscription-claim-row">
                       <label className="field">
-                        <span>Payer name</span>
-                        <input value={payerName} onChange={(e) => setPayerName(e.target.value)} required />
+                        <span>MoMo number used</span>
+                        <div className="momo-lookup-row">
+                          <select
+                            aria-label="Payer MoMo network"
+                            className="momo-lookup-network"
+                            value={payerNetwork}
+                            disabled={submitting || payerLookupBusy}
+                            onChange={(e) => {
+                              const next = e.target.value as MomoNetworkCode;
+                              setPayerNetwork(next);
+                              setPayerLookup(null);
+                              setPayerLookupError(null);
+                              if (isCompleteGhanaMomoPhone(payerNumber)) {
+                                void runPayerMomoLookup(payerNumber, next);
+                              }
+                            }}
+                          >
+                            {MOMO_NETWORK_OPTIONS.map((opt) => (
+                              <option key={opt.code} value={opt.code}>
+                                {opt.displayName}
+                              </option>
+                            ))}
+                          </select>
+                          <input
+                            type="tel"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            autoComplete="tel"
+                            maxLength={12}
+                            value={payerNumber}
+                            onChange={(e) => {
+                              const digits = sanitizeDigitsOnly(e.target.value, 12);
+                              setPayerNumber(digits);
+                              setPayerLookup(null);
+                              setPayerLookupError(null);
+                              const detected = detectGhanaMomoNetwork(digits);
+                              const nextNet = detected ?? payerNetwork;
+                              if (detected) {
+                                setPayerNetwork(detected);
+                              }
+                              if (isCompleteGhanaMomoPhone(digits)) {
+                                void runPayerMomoLookup(digits, nextNet);
+                              }
+                            }}
+                            placeholder="0244123456"
+                            required
+                          />
+                          <button
+                            type="button"
+                            className="button secondary momo-lookup-btn"
+                            disabled={submitting || payerLookupBusy || !isCompleteGhanaMomoPhone(payerNumber)}
+                            onClick={() => void runPayerMomoLookup(payerNumber, payerNetwork)}
+                          >
+                            {payerLookupBusy ? "Checking…" : "Verify"}
+                          </button>
+                        </div>
+                        {payerLookupBusy ? (
+                          <div className="momo-lookup-status momo-lookup-status--loading">
+                            Looking up MoMo holder name…
+                          </div>
+                        ) : payerLookup?.verified && payerLookup.accountName ? (
+                          <div className="momo-lookup-status momo-lookup-status--verified">
+                            <span>✓</span>
+                            <span>
+                              Verified ({payerLookup.networkLabel}): <strong>{payerLookup.accountName}</strong>
+                            </span>
+                          </div>
+                        ) : payerLookupError ? (
+                          <div className="momo-lookup-status momo-lookup-status--warn">
+                            {payerLookupError}
+                          </div>
+                        ) : payerLookup && !payerLookup.verified && payerLookup.message ? (
+                          <div className="momo-lookup-status momo-lookup-status--warn">
+                            {payerLookup.message}
+                          </div>
+                        ) : null}
                       </label>
                       <label className="field">
-                        <span>MoMo number used</span>
+                        <span>Payer name</span>
                         <input
-                          value={payerNumber}
-                          onChange={(e) => setPayerNumber(e.target.value)}
-                          placeholder="0244…"
+                          value={payerName}
+                          onChange={(e) => setPayerName(e.target.value)}
+                          placeholder={
+                            payerLookupBusy ? "Looking up account name…" : "Auto-fills or type name"
+                          }
                           required
                         />
                       </label>

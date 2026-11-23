@@ -1,12 +1,18 @@
 import { formatAccountAmount } from "@bms/shared";
 import { useEffect, useRef, useState } from "react";
-import type { BalanceDisclosure } from "./api";
-import { approveBalanceDisclosure } from "./api";
+import type { BalanceDisclosure, MomoLookupResult, MomoNetworkCode } from "./api";
+import { approveBalanceDisclosure, resolveMomoAccountName } from "./api";
 import { CameraCaptureModal } from "../components/CameraCaptureModal";
 import { Modal } from "../components/Modal";
 import { useToast } from "../components/Toast";
 import { compressImageDataUrl, isDataUrlWithinLimit } from "../lib/imageCompress";
 import { generateMomoReceiptDataUrl } from "../lib/generateMomoReceipt";
+import {
+  detectGhanaMomoNetwork,
+  isCompleteGhanaMomoPhone,
+  MOMO_NETWORK_OPTIONS,
+  namesRoughlyMatch
+} from "../lib/momoPhone";
 import { toUserFacingError } from "../lib/networkError";
 
 type Props = {
@@ -24,7 +30,36 @@ export function WithdrawalMomoApproveModal({ open, request, onClose, onApproved 
   const [receiptPreview, setReceiptPreview] = useState<string | undefined>();
   const [cameraOpen, setCameraOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [momoNetwork, setMomoNetwork] = useState<MomoNetworkCode>("MTN");
+  const [lookupBusy, setLookupBusy] = useState(false);
+  const [lookupResult, setLookupResult] = useState<MomoLookupResult | null>(null);
+  const [lookupError, setLookupError] = useState<string | null>(null);
+  const lookupSeqRef = useRef(0);
   const uploadRef = useRef<HTMLInputElement>(null);
+
+  async function runMomoVerification(phone: string, network: MomoNetworkCode) {
+    if (!isCompleteGhanaMomoPhone(phone)) {
+      setLookupResult(null);
+      setLookupError("MoMo number is not a valid 10-digit Ghana mobile number.");
+      return;
+    }
+    const seq = ++lookupSeqRef.current;
+    setLookupBusy(true);
+    setLookupError(null);
+    try {
+      const result = await resolveMomoAccountName(phone, network);
+      if (seq !== lookupSeqRef.current) return;
+      setLookupResult(result);
+    } catch (error) {
+      if (seq !== lookupSeqRef.current) return;
+      setLookupResult(null);
+      setLookupError(toUserFacingError(error, "Could not verify MoMo account name"));
+    } finally {
+      if (seq === lookupSeqRef.current) {
+        setLookupBusy(false);
+      }
+    }
+  }
 
   useEffect(() => {
     if (open) {
@@ -32,8 +67,19 @@ export function WithdrawalMomoApproveModal({ open, request, onClose, onApproved 
       setProofPreview(undefined);
       setProofName(undefined);
       setReceiptPreview(undefined);
+      setLookupResult(null);
+      setLookupError(null);
+      lookupSeqRef.current += 1;
+
+      if (request?.fulfillmentMode === "momo" && request.momoNumber) {
+        const detected = detectGhanaMomoNetwork(request.momoNumber) ?? "MTN";
+        setMomoNetwork(detected);
+        if (isCompleteGhanaMomoPhone(request.momoNumber)) {
+          void runMomoVerification(request.momoNumber, detected);
+        }
+      }
     }
-  }, [open, request?.id]);
+  }, [open, request?.id, request?.fulfillmentMode, request?.momoNumber]);
 
   useEffect(() => {
     if (!open || !request || request.fulfillmentMode !== "momo") {
@@ -104,6 +150,19 @@ export function WithdrawalMomoApproveModal({ open, request, onClose, onApproved 
     return null;
   }
 
+  const verifiedName = lookupResult?.verified ? lookupResult.accountName : null;
+  const submittedNameMismatch = Boolean(
+    verifiedName &&
+      request.momoAccountName &&
+      !namesRoughlyMatch(verifiedName, request.momoAccountName)
+  );
+  const customerNameMismatch = Boolean(
+    verifiedName &&
+      !submittedNameMismatch &&
+      request.customerName &&
+      !namesRoughlyMatch(verifiedName, request.customerName)
+  );
+
   return (
     <>
       <Modal
@@ -114,6 +173,82 @@ export function WithdrawalMomoApproveModal({ open, request, onClose, onApproved 
       >
         <p className="muted">Upload proof from your MoMo app. A receipt is generated for the field agent alert.</p>
         {request.requestReason ? <p className="muted">Agent reason: {request.requestReason}</p> : null}
+
+        {request.momoNumber ? (
+          <div className="momo-verify-panel" aria-live="polite">
+            <div className="momo-verify-panel__head">
+              <div>
+                <span className="momo-verify-panel__eyebrow">Recipient MoMo check</span>
+                <strong className="momo-verify-panel__number">
+                  {request.momoNumber} · Submitted: {request.momoAccountName || "—"}
+                </strong>
+              </div>
+              <div className="momo-verify-panel__controls">
+                <select
+                  aria-label="MoMo network"
+                  value={momoNetwork}
+                  disabled={submitting || lookupBusy}
+                  onChange={(e) => {
+                    const next = e.target.value as MomoNetworkCode;
+                    setMomoNetwork(next);
+                    if (request.momoNumber) {
+                      void runMomoVerification(request.momoNumber, next);
+                    }
+                  }}
+                >
+                  {MOMO_NETWORK_OPTIONS.map((opt) => (
+                    <option key={opt.code} value={opt.code}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="button secondary momo-lookup-btn"
+                  disabled={submitting || lookupBusy}
+                  onClick={() => {
+                    if (request.momoNumber) {
+                      void runMomoVerification(request.momoNumber, momoNetwork);
+                    }
+                  }}
+                >
+                  {lookupBusy ? "Checking…" : "Verify"}
+                </button>
+              </div>
+            </div>
+
+            {lookupBusy ? (
+              <div className="momo-lookup-status momo-lookup-status--loading">
+                Checking registered MoMo account name…
+              </div>
+            ) : verifiedName ? (
+              <div className="momo-lookup-status momo-lookup-status--verified">
+                <span>✓</span>
+                <span>
+                  Verified ({lookupResult?.networkLabel}): <strong>{verifiedName}</strong>
+                </span>
+              </div>
+            ) : lookupError ? (
+              <div className="momo-lookup-status momo-lookup-status--warn">{lookupError}</div>
+            ) : lookupResult && !lookupResult.verified && lookupResult.message ? (
+              <div className="momo-lookup-status momo-lookup-status--warn">
+                {lookupResult.message}
+              </div>
+            ) : null}
+
+            {submittedNameMismatch ? (
+              <div className="momo-lookup-status momo-lookup-status--danger">
+                Registered MoMo name (<strong>{verifiedName}</strong>) does not match the name submitted by the
+                agent (<strong>{request.momoAccountName}</strong>). Confirm the number before sending money.
+              </div>
+            ) : customerNameMismatch ? (
+              <div className="momo-lookup-status momo-lookup-status--warn">
+                Registered MoMo name (<strong>{verifiedName}</strong>) differs from customer name (
+                <strong>{request.customerName}</strong>). Confirm this recipient before sending.
+              </div>
+            ) : null}
+          </div>
+        ) : null}
 
         <label className="field">
           <span>Transaction reference (optional)</span>

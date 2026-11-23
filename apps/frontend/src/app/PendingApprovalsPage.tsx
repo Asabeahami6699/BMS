@@ -11,7 +11,6 @@ import { approveBalanceDisclosure, rejectBalanceDisclosure } from "./api";
 import { BalanceApproveModal } from "./BalanceApproveModal";
 import { DeclineRequestModal } from "./DeclineRequestModal";
 import { RegistrationReviewModal } from "./RegistrationReviewModal";
-import { WithdrawalMomoApproveModal } from "./WithdrawalMomoApproveModal";
 import { Modal } from "../components/Modal";
 import { useToast } from "../components/Toast";
 import { toUserFacingError } from "../lib/networkError";
@@ -67,7 +66,6 @@ export function PendingApprovalsPage() {
 
   const [tab, setTab] = useState<TabId>("withdrawals");
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [momoRequest, setMomoRequest] = useState<BalanceDisclosure | null>(null);
   const [balanceApproveTarget, setBalanceApproveTarget] = useState<BalanceDisclosure | null>(null);
   const [declineTarget, setDeclineTarget] = useState<BalanceDisclosure | null>(null);
   const [callConfirmTarget, setCallConfirmTarget] = useState<BalanceDisclosure | null>(null);
@@ -110,9 +108,7 @@ export function PendingApprovalsPage() {
       removePendingRequest(row.id);
       if (approved.requestType === "withdrawal") {
         showToast(
-          approved.fulfillmentMode === "momo"
-            ? `MoMo sent — ${approved.customerName ?? "Customer"}: ${approved.withdrawalAmount != null ? formatGhs(approved.withdrawalAmount) : "—"}`
-            : `Approved for Pay now — ${approved.customerName ?? "Customer"}: ${approved.withdrawalAmount != null ? formatGhs(approved.withdrawalAmount) : "—"}`,
+          `Approved for Pay now — ${approved.customerName ?? "Customer"}: ${approved.withdrawalAmount != null ? formatGhs(approved.withdrawalAmount) : "—"}`,
           "success"
         );
       } else {
@@ -132,10 +128,6 @@ export function PendingApprovalsPage() {
   function handleApprove(row: BalanceDisclosure) {
     if (row.requestType === "balance") {
       setBalanceApproveTarget(row);
-      return;
-    }
-    if (row.fulfillmentMode === "momo") {
-      setMomoRequest(row);
       return;
     }
     setCallConfirmed(false);
@@ -205,8 +197,8 @@ export function PendingApprovalsPage() {
           <p className="pending-approvals-hero__eyebrow">Susu · Approvals</p>
           <h1>Pending approvals</h1>
           <p className="muted">
-            Review field-agent withdrawals and registrations. For cash withdrawals, call the customer
-            on their registration phone, then approve — teller Pay now comes next.
+            Review field-agent withdrawals and registrations. Call the customer on their
+            registration phone, then approve — teller Pay now debits the customer account and till.
           </p>
         </div>
         <div className="pending-approvals-hero__actions">
@@ -345,7 +337,7 @@ export function PendingApprovalsPage() {
                         disabled={busyId === row.id}
                         onClick={() => handleApprove(row)}
                       >
-                        {row.fulfillmentMode === "momo" ? "Approve MoMo…" : "Approve"}
+                        Approve
                       </button>
                       <button
                         type="button"
@@ -459,6 +451,14 @@ export function PendingApprovalsPage() {
             ) : (
               <p className="muted">No registration phone on file — verify identity carefully.</p>
             )}
+            {callConfirmTarget.fulfillmentMode === "momo" ? (
+              <p className="muted">
+                MoMo recipient:{" "}
+                <strong>
+                  {callConfirmTarget.momoAccountName || "—"} · {callConfirmTarget.momoNumber || "—"}
+                </strong>
+              </p>
+            ) : null}
             <label className="pending-approvals-call-confirm__check">
               <input
                 type="checkbox"
@@ -490,18 +490,6 @@ export function PendingApprovalsPage() {
               setBalanceApproveTarget(null)
             );
           }
-        }}
-      />
-
-      <WithdrawalMomoApproveModal
-        open={momoRequest !== null}
-        request={momoRequest}
-        onClose={() => setMomoRequest(null)}
-        onApproved={() => {
-          if (momoRequest) {
-            removePendingRequest(momoRequest.id);
-          }
-          void refreshSilent();
         }}
       />
 

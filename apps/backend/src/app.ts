@@ -12,6 +12,7 @@ import {
   moneyMutationRateLimit
 } from "./middleware/rateLimit.js";
 import { authRouter } from "./routes/auth.routes.js";
+import { accountLookupRouter } from "./routes/accountLookup.routes.js";
 import { branchesRouter } from "./routes/branches.routes.js";
 import { accountNumberPolicyRouter } from "./routes/accountNumberPolicy.routes.js";
 import { commissionPolicyRouter } from "./routes/commissionPolicy.routes.js";
@@ -139,6 +140,7 @@ export function createApp() {
 
   app.use("/health", healthRouter);
   app.use("/api/v1/auth", authRouter);
+  app.use("/api/v1/account-lookup", accountLookupRouter);
   app.use("/api/v1/chat", chatRouter);
   app.use("/api/v1/chat/inbox", chatInboxRouter);
   app.use("/api/v1/platform", adminMutationRateLimit, platformRouter);

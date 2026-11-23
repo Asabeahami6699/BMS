@@ -80,7 +80,7 @@ export function TellerPayoutDetailModal({ open, row, busy, onClose, onPay }: Pro
             Cancel
           </button>
           <button type="button" className="btn primary" disabled={busy} onClick={onPay}>
-            {busy ? "Paying…" : "Pay cash"}
+            {busy ? "Paying…" : "Pay now"}
           </button>
         </>
       }
@@ -98,6 +98,14 @@ export function TellerPayoutDetailModal({ open, row, busy, onClose, onPay }: Pro
           <dt>Fulfillment</dt>
           <dd>{fulfillmentLabel(row.fulfillmentMode)}</dd>
         </div>
+        {row.fulfillmentMode === "momo" ? (
+          <div>
+            <dt>MoMo recipient</dt>
+            <dd>
+              {row.momoAccountName || "—"} · {row.momoNumber || "—"}
+            </dd>
+          </div>
+        ) : null}
         <div>
           <dt>Amount</dt>
           <dd>{formatWorkspaceMoney(row.withdrawalAmount ?? 0)}</dd>

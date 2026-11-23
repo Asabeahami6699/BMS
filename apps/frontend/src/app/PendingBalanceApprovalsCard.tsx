@@ -7,7 +7,6 @@ import { BalanceApproveModal } from "./BalanceApproveModal";
 import { DeclineRequestModal } from "./DeclineRequestModal";
 import { useToast } from "../components/Toast";
 import { toUserFacingError } from "../lib/networkError";
-import { WithdrawalMomoApproveModal } from "./WithdrawalMomoApproveModal";
 import { useCoordinatorLiveSync } from "./hooks/useCoordinatorLiveSync";
 import { useCoordinatorStore } from "./stores/coordinatorStore";
 
@@ -39,7 +38,6 @@ export function PendingBalanceApprovalsCard() {
   const removePendingRequest = useCoordinatorStore((s) => s.removePendingRequest);
 
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [momoRequest, setMomoRequest] = useState<BalanceDisclosure | null>(null);
   const [balanceApproveTarget, setBalanceApproveTarget] = useState<BalanceDisclosure | null>(null);
   const [declineTarget, setDeclineTarget] = useState<BalanceDisclosure | null>(null);
   const visible = pending.filter((row) => {
@@ -73,9 +71,7 @@ export function PendingBalanceApprovalsCard() {
       removePendingRequest(row.id);
       if (approved.requestType === "withdrawal") {
         showToast(
-          approved.fulfillmentMode === "momo"
-            ? `MoMo withdrawal completed — ${approved.customerName ?? "Customer"}: ${approved.withdrawalAmount != null ? formatGhs(approved.withdrawalAmount) : "—"}`
-            : `Approved — teller Pay now next. Call ${approved.customerPhone ?? "customer"} if not already verified. ${approved.customerName ?? "Customer"}: ${approved.withdrawalAmount != null ? formatGhs(approved.withdrawalAmount) : "—"}`,
+          `Approved — teller Pay now next. Call ${approved.customerPhone ?? "customer"} if not already verified. ${approved.customerName ?? "Customer"}: ${approved.withdrawalAmount != null ? formatGhs(approved.withdrawalAmount) : "—"}`,
           "success"
         );
       } else {
@@ -95,10 +91,6 @@ export function PendingBalanceApprovalsCard() {
   function handleApprove(row: BalanceDisclosure) {
     if (row.requestType === "balance") {
       setBalanceApproveTarget(row);
-      return;
-    }
-    if (row.fulfillmentMode === "momo") {
-      setMomoRequest(row);
       return;
     }
     void handleApproveCash(row);
@@ -138,9 +130,8 @@ export function PendingBalanceApprovalsCard() {
           </button>
         </div>
         <p className="muted">
-          Field-agent cash: call the customer on their registration phone, then approve. That queues
-          teller Pay now (no ledger yet) — Customer Service is not in this path. For MoMo, upload the
-          transaction screenshot — a receipt goes to the agent&apos;s alerts.
+          Field-agent withdrawals (cash &amp; MoMo): call the customer on their registration phone,
+          then approve. That queues teller Pay now, which debits the customer account and till.
         </p>
         {loading && visible.length === 0 ? <p className="muted">Loading…</p> : null}
         <div className="lines">
@@ -197,7 +188,7 @@ export function PendingBalanceApprovalsCard() {
                     disabled={busyId === row.id}
                     onClick={() => handleApprove(row)}
                   >
-                    {row.fulfillmentMode === "momo" ? "Approve MoMo…" : "Approve"}
+                    Approve
                   </button>
                   <button
                     type="button"
@@ -233,18 +224,6 @@ export function PendingBalanceApprovalsCard() {
               setBalanceApproveTarget(null)
             );
           }
-        }}
-      />
-
-      <WithdrawalMomoApproveModal
-        open={momoRequest !== null}
-        request={momoRequest}
-        onClose={() => setMomoRequest(null)}
-        onApproved={() => {
-          if (momoRequest) {
-            removePendingRequest(momoRequest.id);
-          }
-          void refreshSilent();
         }}
       />
     </>

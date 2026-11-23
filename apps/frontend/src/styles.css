@@ -20187,4 +20187,183 @@ button.cif-ledger__row:hover {
   color: var(--text-muted);
 }
 
+/* Shared MoMo & Ghana Bank Account Name Lookup UI */
+.momo-lookup-row {
+  display: flex;
+  gap: 0.45rem;
+  align-items: stretch;
+  flex-wrap: wrap;
+}
+
+.momo-lookup-row input {
+  flex: 1 1 150px;
+  min-width: 0;
+}
+
+.momo-lookup-network {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 110px;
+}
+
+.momo-lookup-btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.momo-lookup-status {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  margin-top: 0.45rem;
+  padding: 0.48rem 0.7rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.83rem;
+  line-height: 1.38;
+}
+
+.momo-lookup-status--loading {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.momo-lookup-status--verified {
+  background: var(--success-soft);
+  border: 1px solid color-mix(in srgb, var(--success) 32%, transparent);
+  color: var(--success);
+}
+
+[data-theme="light"] .momo-lookup-status--verified {
+  color: #047857;
+}
+
+.momo-lookup-status--warn {
+  background: var(--warning-soft);
+  border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
+  color: var(--warning);
+}
+
+[data-theme="light"] .momo-lookup-status--warn {
+  color: #b45309;
+}
+
+.momo-lookup-status--danger {
+  background: var(--danger-soft, rgba(239, 68, 68, 0.12));
+  border: 1px solid color-mix(in srgb, var(--danger, #ef4444) 38%, transparent);
+  color: var(--danger, #ef4444);
+}
+
+[data-theme="light"] .momo-lookup-status--danger {
+  color: #b91c1c;
+}
+
+.momo-verify-panel,
+.partner-verify-bar {
+  margin: 0.75rem 0 0.9rem;
+  padding: 0.75rem 0.85rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-soft);
+  background: var(--bg-surface);
+}
+
+.momo-verify-panel__head,
+.partner-verify-bar__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.momo-verify-panel__eyebrow,
+.partner-verify-bar__eyebrow {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.momo-verify-panel__number {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.92rem;
+}
+
+.partner-verify-bar__hint {
+  display: block;
+  margin-top: 0.12rem;
+  font-size: 0.8rem;
+}
+
+.momo-verify-panel__controls,
+.partner-verify-bar__controls {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.momo-verify-panel__controls select,
+.partner-verify-bar__controls select {
+  width: auto;
+  min-width: 130px;
+}
+
+.partner-verify-bar__bank-select {
+  min-width: 180px;
+}
+
+.partner-verify-bar__apply-btn {
+  margin-left: auto;
+  padding: 0.25rem 0.55rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.partner-verify-bar__apply-btn:hover {
+  opacity: 0.85;
+}
+
+.withdrawal-gate-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+  min-width: 170px;
+}
+
+.withdrawal-gate-details__momo {
+  display: block;
+  font-size: 0.82rem;
+  color: var(--text-primary);
+  line-height: 1.35;
+}
+
+.withdrawal-gate-details__reason,
+.withdrawal-gate-details__ref {
+  display: block;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.branch-counter-payout-queue__momo-pill {
+  font-size: 0.72rem;
+  padding: 0.1rem 0.45rem;
+}
+
+.branch-counter-payout-queue__momo-meta {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.82rem;
+  color: var(--text-primary);
+}
+
+
 

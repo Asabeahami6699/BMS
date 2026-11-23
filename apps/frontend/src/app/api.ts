@@ -4833,6 +4833,23 @@ export type MomoLookupResult = {
   message?: string;
 };
 
+export type GhanaBankOption = {
+  code: string;
+  name: string;
+  slug?: string;
+};
+
+export type BankAccountLookupResult = {
+  configured: boolean;
+  verified: boolean;
+  kind: "bank" | "momo";
+  accountNumber: string;
+  bankCode: string | null;
+  bankName: string;
+  accountName: string | null;
+  message?: string;
+};
+
 export async function resolveMomoAccountName(
   phone: string,
   network?: MomoNetworkCode
@@ -4842,7 +4859,34 @@ export async function resolveMomoAccountName(
     params.set("network", network);
   }
   return fetchJson<MomoLookupResult>(
-    `${API_BASE_URL}/api/v1/field-agents/momo/resolve?${params.toString()}`,
+    `${API_BASE_URL}/api/v1/account-lookup/momo?${params.toString()}`,
+    { headers: authHeaders() }
+  );
+}
+
+export async function listGhanaBanks(): Promise<{
+  configured: boolean;
+  banks: GhanaBankOption[];
+}> {
+  return fetchJson<{ configured: boolean; banks: GhanaBankOption[] }>(
+    `${API_BASE_URL}/api/v1/account-lookup/banks`,
+    { headers: authHeaders() }
+  );
+}
+
+export async function resolveBankAccountName(
+  accountNumber: string,
+  options?: { bankCode?: string; bankName?: string }
+): Promise<BankAccountLookupResult> {
+  const params = new URLSearchParams({ accountNumber });
+  if (options?.bankCode) {
+    params.set("bankCode", options.bankCode);
+  }
+  if (options?.bankName) {
+    params.set("bankName", options.bankName);
+  }
+  return fetchJson<BankAccountLookupResult>(
+    `${API_BASE_URL}/api/v1/account-lookup/bank?${params.toString()}`,
     { headers: authHeaders() }
   );
 }

@@ -193,8 +193,15 @@ export function TellerDeskPage({ displayName }: Props) {
                       </span>
                     </div>
                     <div className="role-workspace__queue-meta muted">
-                      <span className="role-workspace__pill">Withdrawal</span>
+                      <span className="role-workspace__pill">
+                        {row.fulfillmentMode === "momo" ? "MoMo withdrawal" : "Withdrawal"}
+                      </span>
                       <span className="role-workspace__pill">{customerCategory}</span>
+                      {row.fulfillmentMode === "momo" && (row.momoAccountName || row.momoNumber) ? (
+                        <span className="role-workspace__pill">
+                          MoMo: {row.momoAccountName || "—"} · {row.momoNumber || "—"}
+                        </span>
+                      ) : null}
                       {partnerAccount ? (
                         <span className="role-workspace__pill">Acct {partnerAccount}</span>
                       ) : null}
@@ -216,7 +223,7 @@ export function TellerDeskPage({ displayName }: Props) {
                       disabled={busyId === row.id}
                       onClick={() => setPayoutDetail(row)}
                     >
-                      Pay cash
+                      Pay now
                     </button>
                   </div>
                 </article>

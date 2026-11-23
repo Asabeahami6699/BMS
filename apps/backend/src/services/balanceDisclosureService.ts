@@ -1,10 +1,14 @@
-import { approveCustomerRequestSchema,
+import {
+  approveCustomerRequestSchema,
   balanceDisclosureSchema,
+  formatAccountAmount,
+  hasTenantModule,
   rejectBalanceDisclosureSchema,
   requestCustomerApprovalSchema,
   roleMayApprove,
   type BalanceDisclosure,
-  type CustomerRequestType, formatAccountAmount } from "@bms/shared";
+  type CustomerRequestType
+} from "@bms/shared";
 import { randomUUID } from "node:crypto";
 import { getSupabaseAdminClient } from "../config/supabaseClient.js";
 import { getApprovalWorkflow } from "./approvalWorkflowService.js";
@@ -16,17 +20,65 @@ import {
 import { computeCustomerBalance } from "./ledgerService.js";
 import { findUserById } from "./authStore.js";
 import { createAgentNotification, notifyTenantStaff } from "./notificationService.js";
+import { loadTenantModules } from "./tenantModuleService.js";
 import {
   postWithdrawalForApprovedDisclosure,
   type TransactionRequestContext
 } from "./transactionService.js";
 
-/** Susu field-agent app requests — coordinator reviews; teller Pay now. CS is not in this path. */
+/** Sync in-memory fallback check; prefer resolveFieldAgentUserIds / isFieldAgentRequesterAsync when Supabase is active. */
 export function isFieldAgentRequester(userId: string | null | undefined): boolean {
   if (!userId) {
     return false;
   }
   return findUserById(userId)?.role === "field_agent";
+}
+
+/** Resolve which requester user IDs belong to field_agent accounts (works in both Supabase and memory mode). */
+export async function resolveFieldAgentUserIds(
+  tenantId: string,
+  userIds: Array<string | null | undefined>
+): Promise<Set<string>> {
+  const unique = [...new Set(userIds.filter((id): id is string => Boolean(id && id.trim())))];
+  const result = new Set<string>();
+  if (unique.length === 0) {
+    return result;
+  }
+
+  const supabase = getSupabaseAdminClient();
+  if (supabase) {
+    const { data, error } = await supabase
+      .from("users")
+      .select("id, role")
+      .eq("tenant_id", tenantId)
+      .in("id", unique);
+    if (!error && Array.isArray(data)) {
+      for (const u of data) {
+        if (u.role === "field_agent" && typeof u.id === "string") {
+          result.add(u.id);
+        }
+      }
+      return result;
+    }
+  }
+
+  for (const id of unique) {
+    if (findUserById(id)?.role === "field_agent") {
+      result.add(id);
+    }
+  }
+  return result;
+}
+
+export async function isFieldAgentRequesterAsync(
+  tenantId: string,
+  userId: string | null | undefined
+): Promise<boolean> {
+  if (!userId) {
+    return false;
+  }
+  const set = await resolveFieldAgentUserIds(tenantId, [userId]);
+  return set.has(userId);
 }
 
 const DEFAULT_VISIBLE_HOURS = 6;
@@ -134,6 +186,7 @@ function mapRow(
     customerPhone?: string;
     customerAccountNumber?: string;
     fieldAgentName?: string;
+    isFieldAgentRequest?: boolean;
   }
 ): BalanceDisclosure {
   const parsed = balanceDisclosureSchema.parse({
@@ -145,7 +198,8 @@ function mapRow(
     customerPhone: extras?.customerPhone,
     customerAccountNumber: extras?.customerAccountNumber,
     fieldAgentName: extras?.fieldAgentName,
-    isFieldAgentRequest: isFieldAgentRequester(row.field_agent_id),
+    isFieldAgentRequest:
+      extras?.isFieldAgentRequest ?? isFieldAgentRequester(row.field_agent_id),
     requestType: row.request_type ?? "balance",
     status: row.status,
     balanceAmount: row.balance_amount != null ? Number(row.balance_amount) : undefined,
@@ -197,11 +251,8 @@ function canMarkAgentDelivered(row: DisclosureRow): boolean {
     return false;
   }
   // Cash: teller Pay now completed → agent delivers to customer.
+  // MoMo: completed once teller pays and sends to customer's MoMo wallet.
   if (isCashFulfillmentMode(row.fulfillment_mode) && row.status === "completed") {
-    return true;
-  }
-  // MoMo: agent may confirm customer received the transfer.
-  if (row.fulfillment_mode === "momo" && row.status === "approved") {
     return true;
   }
   return false;
@@ -363,6 +414,10 @@ async function enrichDisclosures(
   tenantId: string,
   rows: DisclosureRow[]
 ): Promise<BalanceDisclosure[]> {
+  const fieldAgentIds = await resolveFieldAgentUserIds(
+    tenantId,
+    rows.map((r) => r.field_agent_id)
+  );
   const result: BalanceDisclosure[] = [];
   for (const row of rows) {
     const customer = await getCustomerById(tenantId, row.customer_id);
@@ -374,7 +429,8 @@ async function enrichDisclosures(
         customerName: customer?.fullName,
         customerPhone: customer?.phone,
         customerAccountNumber: customer?.accountNumber,
-        fieldAgentName: customer?.assignedFieldAgentName ?? customer?.createdByFieldAgentName
+        fieldAgentName: customer?.assignedFieldAgentName ?? customer?.createdByFieldAgentName,
+        isFieldAgentRequest: fieldAgentIds.has(row.field_agent_id)
       })
     );
   }
@@ -627,7 +683,8 @@ async function fetchWithdrawalsForTenant(tenantId: string, limit = 300): Promise
 
 function enrichWithdrawalsLight(
   rows: DisclosureRow[],
-  customers: Awaited<ReturnType<typeof listCustomers>>
+  customers: Awaited<ReturnType<typeof listCustomers>>,
+  fieldAgentIds: Set<string>
 ): BalanceDisclosure[] {
   const customerById = new Map(customers.map((c) => [c.id, c]));
   const agentNameById = new Map<string, string>();
@@ -646,7 +703,8 @@ function enrichWithdrawalsLight(
       fieldAgentName:
         agentNameById.get(row.field_agent_id) ??
         customer?.assignedFieldAgentName ??
-        customer?.createdByFieldAgentName
+        customer?.createdByFieldAgentName,
+      isFieldAgentRequest: fieldAgentIds.has(row.field_agent_id)
     });
   });
 }
@@ -690,7 +748,11 @@ export async function listTenantWithdrawalDisclosures(
     listCustomers(tenantId)
   ]);
   const scoped = filterWithdrawalsByScope(rows, customers, scope);
-  return enrichWithdrawalsLight(scoped, customers);
+  const fieldAgentIds = await resolveFieldAgentUserIds(
+    tenantId,
+    scoped.map((r) => r.field_agent_id)
+  );
+  return enrichWithdrawalsLight(scoped, customers, fieldAgentIds);
 }
 
 function withdrawalApprovalNotes(
@@ -752,10 +814,13 @@ export async function approveBalanceDisclosure(
     }
 
     const isMomo = row.fulfillment_mode === "momo";
-    const fieldAgentRequest = isFieldAgentRequester(row.field_agent_id);
+    const fieldAgentRequest = await isFieldAgentRequesterAsync(tenantId, row.field_agent_id);
+    const tenantModules = await loadTenantModules(tenantId);
+    const hasBankingModule = hasTenantModule(tenantModules, "banking");
     const hasCsApproval = context.permissions?.includes("agency.withdrawals.approve");
-    // Field-agent Susu cash: always coordinator/admin → teller queue (never CS agency path).
-    const postsDirectly = fieldAgentRequest || !hasCsApproval;
+    // Field-agent requests, MoMo withdrawals, and Susu-only tenants (no Banking module)
+    // always authorize directly to teller Pay now — never routed through Agency CS bank products.
+    const postsDirectly = fieldAgentRequest || isMomo || !hasBankingModule || !hasCsApproval;
 
     if (!isMomo && fieldAgentRequest) {
       if (context.role !== "admin" && context.role !== "coordinator") {
@@ -765,76 +830,8 @@ export async function approveBalanceDisclosure(
       }
     }
 
-    if (isMomo && postsDirectly) {
-      if (!approvalPayload.transactionProofImage?.trim()) {
-        throw new Error("Upload the MoMo transaction screenshot before approving.");
-      }
-      if (!approvalPayload.generatedReceiptImage?.trim()) {
-        throw new Error("Receipt image is required for MoMo payout.");
-      }
-
-      const paidAt = approvedAt.toISOString();
-      const payoutReference = approvalPayload.payoutReference?.trim() ?? null;
-
-      await postWithdrawalForApprovedDisclosure({
-        tenantId,
-        customerId: row.customer_id,
-        homeBranchId: customer.homeBranchId,
-        amount,
-        disclosureId,
-        recordedByUserId: coordinatorId,
-        fieldAgentId: row.field_agent_id,
-        notes: withdrawalApprovalNotes(disclosureId, row.fulfillment_mode, payoutReference)
-      });
-
-      const balanceAfterWithdrawal = await computeCustomerBalance(tenantId, row.customer_id);
-
-      const patch = {
-        status: "approved" as const,
-        balance_amount: balanceAfterWithdrawal,
-        approved_at: approvedAt.toISOString(),
-        approved_by: coordinatorId,
-        payout_reference: payoutReference,
-        transaction_proof_image: approvalPayload.transactionProofImage ?? null,
-        generated_receipt_image: approvalPayload.generatedReceiptImage ?? null,
-        paid_at: paidAt
-      };
-
-      const supabase = getSupabaseAdminClient();
-      if (supabase) {
-        const { error } = await supabase
-          .from("customer_balance_disclosures")
-          .update(patch)
-          .eq("tenant_id", tenantId)
-          .eq("id", disclosureId);
-        if (error) {
-          throw disclosureDbError("Failed to approve withdrawal", error.message);
-        }
-      } else {
-        Object.assign(row, patch);
-      }
-
-      const updated: DisclosureRow = { ...row, ...patch, status: "approved" };
-      const ref = payoutReference ? ` Ref: ${payoutReference}.` : "";
-      await createAgentNotification({
-        tenantId,
-        userId: row.field_agent_id,
-        customerId: row.customer_id,
-        kind: "withdrawal_momo_sent",
-        title: "MoMo withdrawal sent",
-        body: `${customer.fullName}: GHS ${formatAccountAmount(amount)} sent to ${row.momo_account_name} (${row.momo_number}).${ref} Receipt attached.`,
-        imageUrl: patch.generated_receipt_image ?? undefined
-      });
-
-      return mapRow(updated, {
-        customerName: customer.fullName,
-        customerPhone: customer.phone,
-        customerAccountNumber: customer.accountNumber
-      });
-    }
-
-    if (!isMomo && postsDirectly) {
-      // Cash: authorize only — teller Pay now debits ledger and till. No vault field withdrawal.
+    if (postsDirectly) {
+      // Cash & MoMo: authorize only — teller Pay now debits customer ledger and till cash.
       const approvedAtIso = approvedAt.toISOString();
       const patch = {
         status: "cs_approved" as const,
@@ -860,14 +857,21 @@ export async function approveBalanceDisclosure(
       }
 
       const updated: DisclosureRow = { ...row, ...patch, status: "cs_approved" };
+      const momoSummary = isMomo
+        ? `${row.momo_account_name ?? "Recipient"} (${row.momo_number ?? "—"})`
+        : "";
 
       await createAgentNotification({
         tenantId,
         userId: row.field_agent_id,
         customerId: row.customer_id,
         kind: "withdrawal_request_approved",
-        title: "Withdrawal approved — awaiting office cash",
-        body: `${customer.fullName}: GHS ${formatAccountAmount(amount)} approved. Collect from the office after teller Pay now, then deliver next visit.`
+        title: isMomo
+          ? "MoMo withdrawal approved — awaiting teller Pay now"
+          : "Withdrawal approved — awaiting office cash",
+        body: isMomo
+          ? `${customer.fullName}: GHS ${formatAccountAmount(amount)} approved for MoMo (${momoSummary}). Teller Pay now will complete payout.`
+          : `${customer.fullName}: GHS ${formatAccountAmount(amount)} approved. Collect from the office after teller Pay now, then deliver next visit.`
       });
 
       try {
@@ -876,8 +880,12 @@ export async function approveBalanceDisclosure(
           roles: ["teller", "admin"],
           kind: "withdrawal_ready_for_teller",
           customerId: row.customer_id,
-          title: "Field withdrawal ready — Pay now",
-          body: `${customer.fullName}: GHS ${formatAccountAmount(amount)} — pay from Branch counter till, then agent delivers next visit.`
+          title: isMomo
+            ? "Field MoMo withdrawal ready — Pay now"
+            : "Field withdrawal ready — Pay now",
+          body: isMomo
+            ? `${customer.fullName}: GHS ${formatAccountAmount(amount)} → MoMo ${momoSummary} — pay from Branch counter till.`
+            : `${customer.fullName}: GHS ${formatAccountAmount(amount)} — pay from Branch counter till, then agent delivers next visit.`
         });
       } catch {
         // Non-blocking
