@@ -338,7 +338,7 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
           get().hydrateTellerCallover(data.floatSession.id);
         }
         if (branchPatch.statementBranchId) {
-          setRuntimeBranchId(branchPatch.statementBranchId);
+          setRuntimeBranchId(branchPatch.statementBranchId, { silent: true });
         }
         if (
           selectedCustomerId &&
@@ -414,7 +414,7 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
             get().hydrateTellerCallover(data.floatSession.id);
           }
           if (branchPatch.statementBranchId) {
-            setRuntimeBranchId(branchPatch.statementBranchId);
+            setRuntimeBranchId(branchPatch.statementBranchId, { silent: true });
           }
         } else {
           const data = await getBranchCounterBootstrap(scopedBranchId, statementDate, {

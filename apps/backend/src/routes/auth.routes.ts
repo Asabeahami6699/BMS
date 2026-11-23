@@ -42,10 +42,43 @@ authRouter.get("/company-host", async (req, res) => {
   }
 });
 
+async function buildAuthMePayload<T extends { userId: string; tenantId: string; role: string }>(
+  context: T
+) {
+  let susuNavVisibility;
+  let approvalWorkflow: ApprovalWorkflow | undefined;
+  if (context.tenantId && context.tenantId !== "platform") {
+    try {
+      approvalWorkflow = await getApprovalWorkflow(context.tenantId);
+    } catch {
+      approvalWorkflow = undefined;
+    }
+  }
+  if (context.tenantId && context.tenantId !== "platform" && context.role !== "field_agent") {
+    try {
+      const rows = await resolveEffectiveSusuNavVisibility(context.tenantId);
+      susuNavVisibility = approvalWorkflow ? applyApprovalWorkflowToSusuNav(rows, approvalWorkflow) : rows;
+    } catch {
+      susuNavVisibility = undefined;
+    }
+  }
+
+  return {
+    ...context,
+    susuNavVisibility,
+    approvalWorkflow,
+    transactionPin: await getTransactionPinStatus(context.userId, context.tenantId, context.role)
+  };
+}
+
 authRouter.post("/login", loginRateLimit, async (req, res) => {
   try {
     const result = await loginWithCredentials(req.body);
-    res.json(result);
+    const enrichedUser = await buildAuthMePayload(result.user);
+    res.json({
+      ...result,
+      user: enrichedUser
+    });
   } catch (error) {
     res.status(401).json({ error: error instanceof Error ? error.message : "Login failed" });
   }
@@ -65,31 +98,7 @@ authRouter.get("/me", async (req, res) => {
     return;
   }
 
-  const context = req.userContext;
-  let susuNavVisibility;
-  let approvalWorkflow: ApprovalWorkflow | undefined;
-  if (context.tenantId && context.tenantId !== "platform") {
-    try {
-      approvalWorkflow = await getApprovalWorkflow(context.tenantId);
-    } catch {
-      approvalWorkflow = undefined;
-    }
-  }
-  if (context.tenantId && context.tenantId !== "platform" && context.role !== "field_agent") {
-    try {
-      const rows = await resolveEffectiveSusuNavVisibility(context.tenantId);
-      susuNavVisibility = approvalWorkflow ? applyApprovalWorkflowToSusuNav(rows, approvalWorkflow) : rows;
-    } catch {
-      susuNavVisibility = undefined;
-    }
-  }
-
-  res.json({
-    ...context,
-    susuNavVisibility,
-    approvalWorkflow,
-    transactionPin: await getTransactionPinStatus(context.userId, context.tenantId, context.role)
-  });
+  res.json(await buildAuthMePayload(req.userContext));
 });
 
 authRouter.post("/refresh", async (req, res) => {

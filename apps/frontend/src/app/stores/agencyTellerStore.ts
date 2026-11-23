@@ -150,7 +150,7 @@ export const useAgencyTellerStore = create<AgencyTellerState>((set, get) => ({
           loading: false
         });
         if (nextBranchId) {
-          setRuntimeBranchId(nextBranchId);
+          setRuntimeBranchId(nextBranchId, { silent: true });
         }
         set({ depositsLoading: true });
         void loadDepositsForBranch(nextBranchId, date)

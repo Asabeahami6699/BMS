@@ -158,7 +158,7 @@ export function TenantApp() {
     }
     if (user.scopeType === "branch" && user.branchId) {
       setSelectedBranch(user.branchId);
-      setRuntimeBranchId(user.branchId);
+      setRuntimeBranchId(user.branchId, { silent: true });
       return;
     }
     const stored = getRuntimeBranchId();

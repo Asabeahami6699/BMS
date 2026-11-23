@@ -58,7 +58,7 @@ export function LoginPage() {
     };
   }, [hostSubdomain]);
 
-  if (session?.accessToken && user && ownsHost) {
+  if (!submitting && session?.accessToken && user && ownsHost) {
     return <Navigate to={getHomePathForRole(user.role, user.subscribedModules)} replace />;
   }
 
@@ -79,7 +79,6 @@ export function LoginPage() {
       navigate(homePath, { replace: true });
     } catch (error) {
       setStatus(toUserFacingError(error, "Sign in failed. Check your email and password."));
-    } finally {
       setSubmitting(false);
     }
   }

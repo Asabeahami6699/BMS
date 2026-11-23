@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
-import { getAuthMe, getAuthSession, setRuntimeBranchId } from "../app/api";
+import { getAuthSession, setRuntimeBranchId } from "../app/api";
 import { useNetworkStatus } from "../lib/useNetworkStatus";
 import { useAgentCollectionStore } from "./stores/agentCollectionStore";
 import { useToast } from "../components/Toast";
@@ -23,7 +23,7 @@ import { useAgentCustomerStore } from "./stores/agentCustomerStore";
 import { useAgentWithdrawalActivityStore } from "./stores/agentWithdrawalActivityStore";
 
 export function FieldAgentApp() {
-  const { user, logout } = useAuth();
+  const { user, logout, refreshMe } = useAuth();
   const navigate = useNavigate();
   const { showToast } = useToast();
   const [pendingCount, setPendingCount] = useState(getPendingCount());
@@ -69,13 +69,13 @@ export function FieldAgentApp() {
   useEffect(() => {
     const cached = getAuthSession()?.user;
     if (cached?.branchId) {
-      setRuntimeBranchId(cached.branchId);
+      setRuntimeBranchId(cached.branchId, { silent: true });
     }
     if (online) {
-      void getAuthMe()
+      void refreshMe()
         .then((me) => {
-          if (me.branchId) {
-            setRuntimeBranchId(me.branchId);
+          if (me?.branchId) {
+            setRuntimeBranchId(me.branchId, { silent: true });
           }
         })
         .catch(() => undefined);
@@ -83,7 +83,7 @@ export function FieldAgentApp() {
       void useAgentBalanceStore.getState().refreshSilent();
       void useAgentWithdrawalActivityStore.getState().refreshSilent();
     }
-  }, [online]);
+  }, [online, refreshMe]);
 
   useEffect(() => {
     function onOnline() {

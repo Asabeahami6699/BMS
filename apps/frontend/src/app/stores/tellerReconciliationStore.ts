@@ -69,7 +69,7 @@ export const useTellerReconciliationStore = create<State>((set, get) => ({
     const branchId = options?.branchId ?? options?.fallbackBranchId ?? get().branchId;
     if (branchId) {
       set({ branchId });
-      setRuntimeBranchId(branchId);
+      setRuntimeBranchId(branchId, { silent: true });
     }
     if (options?.date) {
       set({ businessDate: options.date });

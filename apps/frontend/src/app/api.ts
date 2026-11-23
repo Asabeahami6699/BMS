@@ -991,14 +991,15 @@ function withBranchScope(url: string): string {
   return parsed.toString();
 }
 
-export function setRuntimeBranchId(branchId: string): void {
+export function setRuntimeBranchId(branchId: string, options?: { silent?: boolean }): void {
+  const prev = getRuntimeBranchId();
   runtimeContext.branchId = branchId;
   try {
     localStorage.setItem(BRANCH_CONTEXT_STORAGE_KEY, branchId);
   } catch {
     /* ignore */
   }
-  if (typeof window !== "undefined") {
+  if (!options?.silent && branchId !== prev && typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent(BRANCH_CONTEXT_CHANGED_EVENT, { detail: branchId }));
   }
 }
