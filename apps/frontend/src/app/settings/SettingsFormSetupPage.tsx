@@ -17,6 +17,10 @@ import {
   type RegistrationFormPrintContext
 } from "../registrationFormPrint";
 import { downloadDailyTallySheet, printDailyTallySheet } from "../dailyTallySheetPrint";
+import {
+  downloadWalkInDepositSlipSheet,
+  printWalkInDepositSlipSheet
+} from "../walkInDepositSlipPrint";
 
 const FIELD_ROWS: { key: keyof RegistrationFormFields; label: string; hint: string }[] = [
   { key: "email", label: "Email", hint: "Default is optional." },
@@ -170,6 +174,31 @@ export function SettingsFormSetupPage() {
     }
   }
 
+  function handlePrintWalkInDepositSlips() {
+    try {
+      printWalkInDepositSlipSheet({
+        companyName: printContext.companyName,
+        companyLogoUrl: printContext.companyLogoUrl,
+        companyPhone: printContext.companyPhone
+      });
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Could not open the print dialog", "error");
+    }
+  }
+
+  function handleDownloadWalkInDepositSlips() {
+    try {
+      downloadWalkInDepositSlipSheet({
+        companyName: printContext.companyName,
+        companyLogoUrl: printContext.companyLogoUrl,
+        companyPhone: printContext.companyPhone
+      });
+      showToast("Walk-in deposit slip sheet downloaded", "success");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Could not download the deposit slips", "error");
+    }
+  }
+
   function patchForm(id: RegistrationAccountForm["id"], patch: Partial<RegistrationAccountForm>) {
     setFormSetup({
       ...setup,
@@ -301,6 +330,24 @@ export function SettingsFormSetupPage() {
           </button>
           <button type="button" className="button secondary" onClick={handleDownloadTallySheet}>
             Download tally sheet
+          </button>
+        </div>
+      </section>
+
+      <section className="form-setup-print" aria-label="Walk-in deposit slips">
+        <div>
+          <h3>Walk-in deposit slip (6 per A4 sheet)</h3>
+          <p className="muted">
+            2 rows × 3 columns (6 cut-out slips on one A4 landscape sheet) with company name &amp; logo, account
+            number, account name, amount in words, amount in figures, and signature or thumbprint.
+          </p>
+        </div>
+        <div className="form-setup-print__actions">
+          <button type="button" className="button" onClick={handlePrintWalkInDepositSlips}>
+            Print walk-in slips
+          </button>
+          <button type="button" className="button secondary" onClick={handleDownloadWalkInDepositSlips}>
+            Download walk-in slips
           </button>
         </div>
       </section>
