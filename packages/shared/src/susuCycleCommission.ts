@@ -98,12 +98,16 @@ export const susuCustomerCycleSchema = z.object({
   commissionEarned: money,
   commissionCollected: money,
   commissionOutstanding: money,
+  withdrawnAmount: money.optional().default(0),
+  balanceBroughtForward: money.optional().default(0),
+  bbfWithdrawn: money.optional().default(0),
   collectionsCount: z.number().int().nonnegative(),
   contributionDays: z.number().int().nonnegative(),
   openedAt: z.string(),
   firstCollectionAt: z.string().nullable().optional(),
   maturedAt: z.string().nullable().optional(),
   closedAt: z.string().nullable().optional(),
+  cancelledAt: z.string().nullable().optional(),
   rolledFromCycleId: z.string().uuid().nullable().optional(),
   createdAt: z.string().optional(),
   updatedAt: z.string().optional()
@@ -294,6 +298,11 @@ export const susuPassbookCardSchema = z.object({
   grossContributions: money,
   customerSavingsCredited: money,
   expectedGross: money,
+  withdrawnAmount: money.optional().default(0),
+  balanceBroughtForward: money.optional().default(0),
+  bbfRemaining: money.optional().default(0),
+  cancelled: z.boolean().optional().default(false),
+  cancelledAt: z.string().nullable().optional(),
   checkedBoxes: z.number().int().nonnegative(),
   partialBoxNumber: z.number().int().positive().nullable(),
   partialBoxAmount: money,
@@ -309,6 +318,7 @@ export const susuCustomerPassbookSchema = z.object({
   pendingDailyContributionAmount: z.number().positive().nullable().optional(),
   cycleDays: z.number().int().positive(),
   activeCardNumber: z.number().int().positive(),
+  activeBalanceBroughtForward: money.optional().default(0),
   cards: z.array(susuPassbookCardSchema),
   totalGrossCollected: money.optional(),
   totalCommissionCollected: money.optional(),
@@ -408,6 +418,12 @@ export function buildSusuCustomerPassbook(input: {
     commissionOutstanding: number;
     grossContributions: number;
     customerSavingsCredited: number;
+    withdrawnAmount: number;
+    balanceBroughtForward: number;
+    bbfWithdrawn: number;
+    cancelled: boolean;
+    cancelledAt: string | null;
+    closedAt: string | null;
     openedAt: string | null;
     maturedAt: string | null;
     boxes: SusuPassbookBox[];
@@ -485,8 +501,14 @@ export function buildSusuCustomerPassbook(input: {
       commissionOutstanding: commissionAgreedAmount,
       grossContributions: 0,
       customerSavingsCredited: 0,
+      withdrawnAmount: roundMoney(persisted?.withdrawnAmount ?? 0),
+      balanceBroughtForward: roundMoney(persisted?.balanceBroughtForward ?? 0),
+      bbfWithdrawn: roundMoney(persisted?.bbfWithdrawn ?? 0),
+      cancelled: persisted?.status === "closed" || Boolean(persisted?.cancelledAt),
+      cancelledAt: persisted?.cancelledAt ?? (persisted?.status === "closed" ? persisted?.closedAt ?? null : null),
+      closedAt: persisted?.closedAt ?? null,
       openedAt: persisted?.openedAt ?? openedAt,
-      maturedAt: null,
+      maturedAt: persisted?.maturedAt ?? null,
       boxes
     };
   }
@@ -503,6 +525,7 @@ export function buildSusuCustomerPassbook(input: {
 
   for (const col of sortedCollections) {
     let remaining = roundMoney(col.grossAmount);
+    const colTimeMs = new Date(col.createdAt).getTime();
     const hasActualLedger = typeof col.ledgerAmount === "number" && Number.isFinite(col.ledgerAmount);
     let remainingActualFee = hasActualLedger
       ? roundMoney(Math.max(0, col.grossAmount - col.ledgerAmount!))
@@ -511,6 +534,19 @@ export function buildSusuCustomerPassbook(input: {
 
     while (remaining > EPS && safety < 24) {
       safety += 1;
+
+      // If the current page was cancelled/closed before this collection occurred,
+      // do not fill its remaining empty boxes — advance to the next fresh card.
+      const closedBoundaryIso = currentCard.cancelledAt ?? currentCard.closedAt;
+      if (currentCard.cancelled && closedBoundaryIso) {
+        const closedMs = new Date(closedBoundaryIso).getTime();
+        if (Number.isFinite(colTimeMs) && Number.isFinite(closedMs) && colTimeMs > closedMs + 1000) {
+          currentCard.status = "closed";
+          currentCard = createCard(currentCard.cycleNumber + 1, col.createdAt);
+          cards.push(currentCard);
+          continue;
+        }
+      }
 
       if (currentCard.daily <= 0) {
         // Zero daily plan fallback: mark next empty box with the payment amount.
@@ -690,29 +726,62 @@ export function buildSusuCustomerPassbook(input: {
     }
   }
 
-  // Reconcile closed status from persisted cycles (e.g. settled at withdrawal) without losing boxes.
+  // Append any persisted newer cycles (e.g. a brand-new empty Page #50 carrying BBF after Page #49 closed).
+  const persistedSorted = [...(input.cycles ?? [])].sort((a, b) => a.cycleNumber - b.cycleNumber);
+  for (const persisted of persistedSorted) {
+    if (!cards.some((c) => c.cycleNumber === persisted.cycleNumber)) {
+      cards.push(createCard(persisted.cycleNumber, persisted.openedAt ?? null));
+    }
+  }
+  cards.sort((a, b) => a.cycleNumber - b.cycleNumber);
+
+  // Reconcile persisted cycle status, withdrawal-settled fees, cancellations, and BBF without losing boxes.
   const usedActualLedger = sortedCollections.some(
     (c) => typeof c.ledgerAmount === "number" && Number.isFinite(c.ledgerAmount)
   );
   for (const card of cards) {
     const persisted = persistedByNumber.get(card.cycleNumber);
-    if (persisted?.status === "closed") {
-      card.status = "closed";
+    if (persisted) {
+      card.withdrawnAmount = roundMoney(persisted.withdrawnAmount ?? 0);
+      card.balanceBroughtForward = roundMoney(persisted.balanceBroughtForward ?? 0);
+      card.bbfWithdrawn = roundMoney(persisted.bbfWithdrawn ?? 0);
       if (persisted.commissionCollected > card.commissionCollected) {
         card.commissionCollected = roundMoney(persisted.commissionCollected);
         card.commissionOutstanding = roundMoney(
           Math.max(0, card.commissionAgreedAmount - card.commissionCollected)
         );
       }
-    } else if (usedActualLedger && !persisted && card.commissionCollected === 0) {
+      if (persisted.status === "closed" || persisted.cancelledAt) {
+        card.status = "closed";
+        card.cancelled = true;
+        card.cancelledAt = persisted.cancelledAt ?? persisted.closedAt ?? null;
+        card.commissionOutstanding = roundMoney(persisted.commissionOutstanding ?? 0);
+      }
+    } else if (usedActualLedger && card.commissionCollected === 0) {
       // Historical pre-policy page with no persisted cycle row: don't claim an unpaid fee.
       card.commissionOutstanding = 0;
     }
   }
 
+  // If the latest card was closed/cancelled (including legacy closures prior to BBF persistence)
+  // and the customer still holds a positive ledger balance, display the brand-new next card
+  // at 0/cycleDays boxes carrying that remaining balance as Balance Brought Forward (BBF).
+  const lastCard = cards[cards.length - 1];
+  const remainingAccountBalance = roundMoney(input.reconciliation?.accountBalance ?? 0);
+  if (lastCard && (lastCard.status === "closed" || lastCard.cancelled) && remainingAccountBalance > EPS) {
+    const nextFresh = createCard(lastCard.cycleNumber + 1, lastCard.cancelledAt ?? lastCard.closedAt ?? null);
+    nextFresh.status = "open";
+    nextFresh.cancelled = false;
+    nextFresh.cancelledAt = null;
+    nextFresh.balanceBroughtForward = remainingAccountBalance;
+    nextFresh.bbfWithdrawn = 0;
+    cards.push(nextFresh);
+  }
+
   const finalCards: SusuPassbookCard[] = cards.map((card) => {
     const checkedBoxes = card.boxes.filter((b) => b.status === "checked").length;
     const partialBox = card.boxes.find((b) => b.status === "partial") ?? null;
+    const bbfRemaining = roundMoney(Math.max(0, card.balanceBroughtForward - card.bbfWithdrawn));
     return {
       cycleId: card.cycleId,
       cycleNumber: card.cycleNumber,
@@ -727,6 +796,11 @@ export function buildSusuCustomerPassbook(input: {
       grossContributions: card.grossContributions,
       customerSavingsCredited: card.customerSavingsCredited,
       expectedGross: roundMoney(card.daily * card.cycleDays),
+      withdrawnAmount: card.withdrawnAmount,
+      balanceBroughtForward: card.balanceBroughtForward,
+      bbfRemaining,
+      cancelled: card.cancelled,
+      cancelledAt: card.cancelledAt,
       checkedBoxes,
       partialBoxNumber: partialBox?.boxNumber ?? null,
       partialBoxAmount: partialBox?.filledAmount ?? 0,
@@ -739,6 +813,9 @@ export function buildSusuCustomerPassbook(input: {
   const openCard = finalCards.find((c) => c.status === "open");
   const activeCardNumber =
     openCard?.cycleNumber ?? finalCards[finalCards.length - 1]?.cycleNumber ?? 1;
+  const activeBalanceBroughtForward = roundMoney(
+    finalCards.reduce((sum, c) => sum + (c.status !== "closed" ? c.bbfRemaining : 0), 0)
+  );
 
   const totalGrossCollected = roundMoney(
     finalCards.reduce((sum, c) => sum + c.grossContributions, 0)
@@ -758,6 +835,7 @@ export function buildSusuCustomerPassbook(input: {
       : {}),
     cycleDays: defaultCycleDays,
     activeCardNumber,
+    activeBalanceBroughtForward,
     cards: finalCards,
     totalGrossCollected,
     totalCommissionCollected,

@@ -74,6 +74,16 @@ async function preparePhoto(dataUrl: string | undefined): Promise<string | undef
   return compressed;
 }
 
+function initialsFor(name: string): string {
+  const parts = name
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
+  return `${parts[0]![0] ?? ""}${parts[parts.length - 1]![0] ?? ""}`.toUpperCase();
+}
+
 function RegistrationPreview({
   form,
   isOffice,
@@ -99,83 +109,190 @@ function RegistrationPreview({
   accountLabel: string;
   fields: RegistrationFormSetup["fields"];
 }) {
-  const kinAddress = form.kinUseCustomerAddress
-    ? [form.location, form.houseNumber].filter(Boolean).join(", ")
-    : [form.kinLocation, form.kinHouseNumber].filter(Boolean).join(", ");
+  const customerAddress =
+    [form.location, fields.houseNumber === "hidden" ? "" : form.houseNumber].filter(Boolean).join(", ") || "—";
+  const kinAddress =
+    (form.kinUseCustomerAddress
+      ? [form.location, form.houseNumber].filter(Boolean).join(", ")
+      : [form.kinLocation, form.kinHouseNumber].filter(Boolean).join(", ")) || "—";
+  const dailyContribution = parseDailyContribution(form.dailyContributionAmount);
+  const showIdPhoto = fields.idCardPhoto !== "hidden" && Boolean(idCardPhotoUrl);
+  const showCustomerPhoto = fields.customerPhoto !== "hidden" && Boolean(photoUrl);
+  const showPhotosSection = showIdPhoto || showCustomerPhoto;
+
   return (
     <div className="agent-reg-preview">
-      <dl>
-        {isOffice ? (
-          <>
-            <dt>Home branch</dt>
-            <dd>{branchLabel || "—"}</dd>
-            <dt>Assigned field agent</dt>
-            <dd>{agentLabel || "—"}</dd>
-          </>
-        ) : null}
-        <dt>Full name</dt>
-        <dd>{form.fullName}</dd>
-        <dt>Phone</dt>
-        <dd>{form.phone}</dd>
-        {fields.email !== "hidden" && form.email ? (
-          <>
-            <dt>Email</dt>
-            <dd>{form.email}</dd>
-          </>
-        ) : null}
-        {fields.dateOfBirth !== "hidden" ? (
-          <>
-            <dt>Date of birth</dt>
-            <dd>{form.dateOfBirth || "—"}</dd>
-          </>
-        ) : null}
-        {fields.occupation !== "hidden" ? (
-          <>
-            <dt>Occupation</dt>
-            <dd>{form.occupation || "—"}</dd>
-          </>
-        ) : null}
-        <dt>Address</dt>
-        <dd>
-          {[form.location, fields.houseNumber === "hidden" ? "" : form.houseNumber].filter(Boolean).join(", ") || "—"}
-        </dd>
-        <dt>Account type</dt>
-        <dd>{accountLabel}</dd>
-        {isSavings && openingFee > 0 ? (
-          <>
-            <dt>Opening fee</dt>
-            <dd>
-              {savingsOpeningFeeCollected
-                ? `${money(openingFee)} collected now`
-                : `Not collected — deduct up to ${money(openingFee)} later`}
-            </dd>
-          </>
-        ) : null}
-        {fields.idCardNumber !== "hidden" ? (
-          <>
-            <dt>ID card number</dt>
-            <dd>{form.idCardNumber || "—"}</dd>
-          </>
-        ) : null}
-        {fields.nextOfKin !== "hidden" ? (
-          <>
-            <dt>Next of kin</dt>
-            <dd>
-              {[form.kinName, form.kinPhone, kinAddress].filter(Boolean).join(" · ") || "—"}
-            </dd>
-          </>
-        ) : null}
-        {fields.dailyContribution !== "hidden" ? (
-          <>
-            <dt>Daily contribution</dt>
-            <dd>GHS {formatAccountAmount(parseDailyContribution(form.dailyContributionAmount))}</dd>
-          </>
-        ) : null}
-      </dl>
-      <div className="agent-reg-preview__photos">
-        {fields.idCardPhoto !== "hidden" && idCardPhotoUrl ? <img src={idCardPhotoUrl} alt="ID card preview" /> : null}
-        {fields.customerPhoto !== "hidden" && photoUrl ? <img src={photoUrl} alt="Customer photo preview" /> : null}
+      <div className="agent-reg-preview__hero">
+        <div className="agent-reg-preview__avatar" aria-hidden="true">
+          {showCustomerPhoto && photoUrl ? (
+            <img src={photoUrl} alt="" />
+          ) : (
+            <span>{initialsFor(form.fullName)}</span>
+          )}
+        </div>
+        <div className="agent-reg-preview__hero-body">
+          <div className="agent-reg-preview__hero-top">
+            <h3 className="agent-reg-preview__name">{form.fullName || "New customer"}</h3>
+            <span className="agent-reg-preview__pill">{accountLabel}</span>
+          </div>
+          <div className="agent-reg-preview__hero-meta">
+            <span>{form.phone || "—"}</span>
+            {customerAddress !== "—" ? (
+              <>
+                <span className="agent-reg-preview__sep" aria-hidden="true">·</span>
+                <span>{customerAddress}</span>
+              </>
+            ) : null}
+          </div>
+          <div className="agent-reg-preview__hero-chips">
+            {fields.dailyContribution !== "hidden" ? (
+              <span className="agent-reg-preview__chip agent-reg-preview__chip--accent">
+                Daily: GHS {formatAccountAmount(dailyContribution)}
+              </span>
+            ) : null}
+            {isSavings && openingFee > 0 ? (
+              <span className="agent-reg-preview__chip">
+                {savingsOpeningFeeCollected
+                  ? `Opening fee ${money(openingFee)} collected`
+                  : `Opening fee ${money(openingFee)} deferred`}
+              </span>
+            ) : null}
+            {isOffice && branchLabel ? (
+              <span className="agent-reg-preview__chip">{branchLabel}</span>
+            ) : null}
+          </div>
+        </div>
       </div>
+
+      <div className="agent-reg-preview__sections">
+        {isOffice ? (
+          <section className="agent-reg-preview__card">
+            <h4 className="agent-reg-preview__card-title">Branch &amp; servicing</h4>
+            <dl className="agent-reg-preview__grid">
+              <div>
+                <dt>Home branch</dt>
+                <dd>{branchLabel || "—"}</dd>
+              </div>
+              <div>
+                <dt>Assigned field agent</dt>
+                <dd>{agentLabel || "—"}</dd>
+              </div>
+            </dl>
+          </section>
+        ) : null}
+
+        <section className="agent-reg-preview__card">
+          <h4 className="agent-reg-preview__card-title">Personal &amp; contact</h4>
+          <dl className="agent-reg-preview__grid">
+            <div>
+              <dt>Full name</dt>
+              <dd>{form.fullName || "—"}</dd>
+            </div>
+            <div>
+              <dt>Phone</dt>
+              <dd>{form.phone || "—"}</dd>
+            </div>
+            {fields.email !== "hidden" && form.email ? (
+              <div>
+                <dt>Email</dt>
+                <dd>{form.email}</dd>
+              </div>
+            ) : null}
+            {fields.dateOfBirth !== "hidden" ? (
+              <div>
+                <dt>Date of birth</dt>
+                <dd>{form.dateOfBirth || "—"}</dd>
+              </div>
+            ) : null}
+            {fields.occupation !== "hidden" ? (
+              <div>
+                <dt>Occupation</dt>
+                <dd>{form.occupation || "—"}</dd>
+              </div>
+            ) : null}
+            <div className="agent-reg-preview__span-2">
+              <dt>Address</dt>
+              <dd>{customerAddress}</dd>
+            </div>
+          </dl>
+        </section>
+
+        <section className="agent-reg-preview__card">
+          <h4 className="agent-reg-preview__card-title">Account &amp; identity</h4>
+          <dl className="agent-reg-preview__grid">
+            <div>
+              <dt>Account type</dt>
+              <dd>{accountLabel}</dd>
+            </div>
+            {fields.dailyContribution !== "hidden" ? (
+              <div>
+                <dt>Daily contribution</dt>
+                <dd>GHS {formatAccountAmount(dailyContribution)}</dd>
+              </div>
+            ) : null}
+            {fields.idCardNumber !== "hidden" ? (
+              <div>
+                <dt>ID card number</dt>
+                <dd className="agent-reg-preview__mono">{form.idCardNumber || "—"}</dd>
+              </div>
+            ) : null}
+            {isSavings && openingFee > 0 ? (
+              <div className="agent-reg-preview__span-2">
+                <dt>Opening fee</dt>
+                <dd>
+                  {savingsOpeningFeeCollected
+                    ? `${money(openingFee)} collected now`
+                    : `Not collected — deduct up to ${money(openingFee)} later`}
+                </dd>
+              </div>
+            ) : null}
+          </dl>
+        </section>
+
+        {fields.nextOfKin !== "hidden" ? (
+          <section className="agent-reg-preview__card">
+            <h4 className="agent-reg-preview__card-title">Next of kin</h4>
+            <dl className="agent-reg-preview__grid">
+              <div>
+                <dt>Name</dt>
+                <dd>{form.kinName || "—"}</dd>
+              </div>
+              <div>
+                <dt>Phone</dt>
+                <dd>{form.kinPhone || "—"}</dd>
+              </div>
+              <div className="agent-reg-preview__span-2">
+                <dt>Address</dt>
+                <dd>{kinAddress}</dd>
+              </div>
+            </dl>
+          </section>
+        ) : null}
+      </div>
+
+      {showPhotosSection ? (
+        <section className="agent-reg-preview__card">
+          <h4 className="agent-reg-preview__card-title">Uploaded photos</h4>
+          <div className="agent-reg-preview__photos">
+            {showCustomerPhoto && photoUrl ? (
+              <figure className="agent-reg-preview__photo-card">
+                <div className="agent-reg-preview__photo-frame agent-reg-preview__photo-frame--portrait">
+                  <img src={photoUrl} alt="Customer photo preview" />
+                </div>
+                <figcaption>Customer photo</figcaption>
+              </figure>
+            ) : null}
+            {showIdPhoto && idCardPhotoUrl ? (
+              <figure className="agent-reg-preview__photo-card">
+                <div className="agent-reg-preview__photo-frame agent-reg-preview__photo-frame--id">
+                  <img src={idCardPhotoUrl} alt="ID card preview" />
+                </div>
+                <figcaption>ID card</figcaption>
+              </figure>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 }

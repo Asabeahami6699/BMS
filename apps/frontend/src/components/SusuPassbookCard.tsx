@@ -33,7 +33,7 @@ function cardStatusLabel(status: SusuPassbookCardModel["status"]): string {
     return "Completed";
   }
   if (status === "closed") {
-    return "Closed";
+    return "Cancelled";
   }
   return "Active";
 }
@@ -164,14 +164,22 @@ export function SusuPassbookCard({ customerId, customerName, compact = false }: 
   const feeBoxNum = activeCard.boxes.find((b) => b.isFeeBox)?.boxNumber ?? null;
   const latestCardNumber = cards[cards.length - 1]?.cycleNumber ?? activeCard.cycleNumber;
   const pendingNextDaily = passbook.pendingDailyContributionAmount ?? null;
+  const isCancelledCard = Boolean(activeCard.cancelled || activeCard.status === "closed");
+  const cardBbf = Number(activeCard.balanceBroughtForward ?? 0);
+  const cardBbfRemaining = Number(activeCard.bbfRemaining ?? cardBbf);
 
   return (
-    <section className={`susu-passbook ${compact ? "is-compact" : ""}`} aria-label="Susu passbook">
+    <section
+      className={`susu-passbook ${compact ? "is-compact" : ""} ${isCancelledCard ? "is-cancelled-card" : ""}`}
+      aria-label="Susu passbook"
+    >
       <div className="susu-passbook-head">
         <div className="susu-passbook-title-group">
           <div className="susu-passbook-title-row">
             <h4 className="susu-passbook-title">Susu passbook</h4>
-            <span className={`susu-passbook-status is-${activeCard.status}`}>
+            <span
+              className={`susu-passbook-status is-${activeCard.status}${isCancelledCard ? " is-cancelled" : ""}`}
+            >
               {cardStatusLabel(activeCard.status)}
             </span>
           </div>
@@ -196,19 +204,28 @@ export function SusuPassbookCard({ customerId, customerName, compact = false }: 
             <div className="susu-passbook-switcher" role="tablist" aria-label="Susu passbook pages">
               {cards.map((card) => {
                 const isSelected = card.cycleNumber === activeCard.cycleNumber;
+                const tabCancelled = Boolean(card.cancelled || card.status === "closed");
                 return (
                   <button
                     key={card.cycleNumber}
                     type="button"
                     role="tab"
                     aria-selected={isSelected}
-                    className={`susu-passbook-tab ${isSelected ? "is-active" : ""} is-${card.status}`}
+                    className={`susu-passbook-tab ${isSelected ? "is-active" : ""} is-${card.status}${tabCancelled ? " is-cancelled" : ""}`}
                     onClick={() => setSelectedCycleNumber(card.cycleNumber)}
                   >
                     <span>Page #{card.cycleNumber}</span>
                     <span className="susu-passbook-tab-count">
                       {card.checkedBoxes}/{card.cycleDays}
                     </span>
+                    {!tabCancelled && (card.bbfRemaining ?? 0) > 0.005 ? (
+                      <span
+                        className="susu-passbook-tab-bbf"
+                        title={`Balance brought forward: ${formatMoney(card.bbfRemaining ?? 0)}`}
+                      >
+                        BBF
+                      </span>
+                    ) : null}
                   </button>
                 );
               })}
@@ -229,12 +246,37 @@ export function SusuPassbookCard({ customerId, customerName, compact = false }: 
         </div>
       </div>
 
+      {cardBbf > 0.005 ? (
+        <div className="susu-passbook-bbf" role="note">
+          <div className="susu-passbook-bbf__main">
+            <span className="susu-passbook-bbf__badge">BBF</span>
+            <div>
+              <strong>
+                Balance brought forward: {formatMoney(cardBbfRemaining)}
+                {cardBbfRemaining + 0.005 < cardBbf
+                  ? ` (of ${formatMoney(cardBbf)} brought forward)`
+                  : ""}
+              </strong>
+              <small>
+                Carried over from previous cancelled page(s). Does not auto-mark boxes on Page #
+                {activeCard.cycleNumber}; future withdrawals use BBF first with GHS 0 extra fee.
+              </small>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <div className="susu-passbook-progress">
         <div className="susu-passbook-progress-meta">
           <strong>
             {activeCard.checkedBoxes} / {activeCard.cycleDays} boxes checked
           </strong>
-          {activeCard.partialBoxNumber && activeCard.partialBoxAmount > 0 ? (
+          {isCancelledCard ? (
+            <span className="susu-passbook-cancelled-note">
+              Cancelled · settled by withdrawal
+              {activeCard.cancelledAt ? ` (${formatShortDate(activeCard.cancelledAt)})` : ""}
+            </span>
+          ) : activeCard.partialBoxNumber && activeCard.partialBoxAmount > 0 ? (
             <span className="susu-passbook-partial-note">
               Box {activeCard.partialBoxNumber}: GHS {formatShortMoney(activeCard.partialBoxAmount)} /{" "}
               {formatShortMoney(dailyPlan)} (partial)
@@ -271,7 +313,7 @@ export function SusuPassbookCard({ customerId, customerName, compact = false }: 
           <span>Page #{activeCard.cycleNumber} fee</span>
           <strong>
             {formatMoney(activeCard.commissionCollected)}
-            {activeCard.commissionOutstanding > 0.005 ? (
+            {!isCancelledCard && activeCard.commissionOutstanding > 0.005 ? (
               <small> ({formatMoney(activeCard.commissionOutstanding)} due)</small>
             ) : null}
           </strong>
@@ -301,12 +343,13 @@ export function SusuPassbookCard({ customerId, customerName, compact = false }: 
         </div>
       ) : null}
 
-      <div
-        className={`susu-passbook-grid ${compact ? "is-compact" : ""}`}
-        role="list"
-        aria-label={`Page #${activeCard.cycleNumber} contribution boxes`}
-      >
-        {activeCard.boxes.map((box) => {
+      <div className={`susu-passbook-grid-wrap${isCancelledCard ? " is-cancelled" : ""}`}>
+        <div
+          className={`susu-passbook-grid ${compact ? "is-compact" : ""}`}
+          role="list"
+          aria-label={`Page #${activeCard.cycleNumber} contribution boxes`}
+        >
+          {activeCard.boxes.map((box) => {
           const fillPct =
             box.targetAmount > 0
               ? Math.min(100, Math.round((box.filledAmount / box.targetAmount) * 100))
@@ -376,6 +419,16 @@ export function SusuPassbookCard({ customerId, customerName, compact = false }: 
             </div>
           );
         })}
+        </div>
+        {isCancelledCard ? (
+          <div className="susu-passbook-cancel-overlay" aria-hidden="true">
+            <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+              <line x1="2" y1="98" x2="98" y2="2" stroke="currentColor" strokeWidth="1.6" />
+              <line x1="2" y1="2" x2="98" y2="98" stroke="currentColor" strokeWidth="0.9" strokeOpacity="0.45" />
+            </svg>
+            <span className="susu-passbook-cancel-stamp">Cancelled</span>
+          </div>
+        ) : null}
       </div>
 
       <div className="susu-passbook-legend">
@@ -391,6 +444,11 @@ export function SusuPassbookCard({ customerId, customerName, compact = false }: 
         <span className="susu-passbook-legend-item">
           <i className="susu-passbook-dot is-empty" /> Open box
         </span>
+        {isCancelledCard ? (
+          <span className="susu-passbook-legend-item susu-passbook-legend-item--cancelled">
+            <i className="susu-passbook-dot is-cancelled" /> Cancelled page
+          </span>
+        ) : null}
       </div>
     </section>
   );

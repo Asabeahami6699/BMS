@@ -25,6 +25,7 @@ import {
 } from "./institutionalIncomeService.js";
 import { listBranches } from "./branchService.js";
 import {
+  getCustomerWithdrawableBalance,
   getPendingDailyContribution,
   promotePendingDailyContributionToActive
 } from "./customerService.js";
@@ -86,12 +87,16 @@ function mapCycle(row: Record<string, unknown>): SusuCustomerCycle {
     commissionEarned: Number(row.commission_earned ?? 0),
     commissionCollected: Number(row.commission_collected ?? 0),
     commissionOutstanding: Number(row.commission_outstanding ?? 0),
+    withdrawnAmount: Number(row.withdrawn_amount ?? 0),
+    balanceBroughtForward: Number(row.balance_brought_forward ?? 0),
+    bbfWithdrawn: Number(row.bbf_withdrawn ?? 0),
     collectionsCount: Number(row.collections_count ?? 0),
     contributionDays: Number(row.contribution_days ?? 0),
     openedAt: row.opened_at,
     firstCollectionAt: row.first_collection_at ?? null,
     maturedAt: row.matured_at ?? null,
     closedAt: row.closed_at ?? null,
+    cancelledAt: row.cancelled_at ?? null,
     rolledFromCycleId: row.rolled_from_cycle_id ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at
@@ -309,6 +314,7 @@ async function openCycle(options: {
   branchId: string;
   dailyContributionAmount: number;
   rolledFromCycleId?: string;
+  balanceBroughtForward?: number;
 }): Promise<SusuCustomerCycle> {
   const policy = await getActiveSusuCommissionPolicy(options.context.tenantId);
   if (!policy.enabled || policy.commissionBasis === "none") {
@@ -358,12 +364,16 @@ async function openCycle(options: {
     commissionEarned: agreed,
     commissionCollected: 0,
     commissionOutstanding: agreed,
+    withdrawnAmount: 0,
+    balanceBroughtForward: roundMoney(Math.max(0, options.balanceBroughtForward ?? 0)),
+    bbfWithdrawn: 0,
     collectionsCount: 0,
     contributionDays: 0,
     openedAt: now,
     firstCollectionAt: null,
     maturedAt: null,
     closedAt: null,
+    cancelledAt: null,
     rolledFromCycleId: options.rolledFromCycleId ?? null,
     createdAt: now,
     updatedAt: now
@@ -399,39 +409,54 @@ async function openCycle(options: {
   const resolvedPolicyId = String(latestPolicy?.id ?? policyId);
   const resolvedVersion = Number(latestPolicy?.version ?? policy.version);
 
-  const { data, error } = await supabase
+  const baseInsert = {
+    id: cycle.id,
+    tenant_id: cycle.tenantId,
+    customer_id: cycle.customerId,
+    branch_id: cycle.branchId,
+    policy_id: resolvedPolicyId,
+    policy_version: resolvedVersion,
+    cycle_number: cycle.cycleNumber,
+    status: cycle.status,
+    daily_contribution_amount: cycle.dailyContributionAmount,
+    cycle_days: cycle.cycleDays,
+    commission_basis: cycle.commissionBasis,
+    commission_agreed_amount: cycle.commissionAgreedAmount,
+    deduction_timing: cycle.deductionTiming,
+    rollover_treatment: cycle.rolloverTreatment,
+    partial_allocation: cycle.partialAllocation,
+    early_withdrawal_policy: cycle.earlyWithdrawalPolicy,
+    gross_contributions: 0,
+    customer_savings_credited: 0,
+    commission_earned: cycle.commissionEarned,
+    commission_collected: 0,
+    commission_outstanding: cycle.commissionOutstanding,
+    collections_count: 0,
+    contribution_days: 0,
+    opened_at: now,
+    rolled_from_cycle_id: cycle.rolledFromCycleId,
+    created_at: now,
+    updated_at: now
+  };
+
+  let { data, error } = await supabase
     .from("susu_customer_cycles")
     .insert({
-      id: cycle.id,
-      tenant_id: cycle.tenantId,
-      customer_id: cycle.customerId,
-      branch_id: cycle.branchId,
-      policy_id: resolvedPolicyId,
-      policy_version: resolvedVersion,
-      cycle_number: cycle.cycleNumber,
-      status: cycle.status,
-      daily_contribution_amount: cycle.dailyContributionAmount,
-      cycle_days: cycle.cycleDays,
-      commission_basis: cycle.commissionBasis,
-      commission_agreed_amount: cycle.commissionAgreedAmount,
-      deduction_timing: cycle.deductionTiming,
-      rollover_treatment: cycle.rolloverTreatment,
-      partial_allocation: cycle.partialAllocation,
-      early_withdrawal_policy: cycle.earlyWithdrawalPolicy,
-      gross_contributions: 0,
-      customer_savings_credited: 0,
-      commission_earned: cycle.commissionEarned,
-      commission_collected: 0,
-      commission_outstanding: cycle.commissionOutstanding,
-      collections_count: 0,
-      contribution_days: 0,
-      opened_at: now,
-      rolled_from_cycle_id: cycle.rolledFromCycleId,
-      created_at: now,
-      updated_at: now
+      ...baseInsert,
+      withdrawn_amount: 0,
+      balance_brought_forward: cycle.balanceBroughtForward,
+      bbf_withdrawn: 0,
+      cancelled_at: null
     })
     .select("*")
     .single();
+  if (error && /withdrawn_amount|balance_brought_forward|bbf_withdrawn|cancelled_at/i.test(error.message)) {
+    ({ data, error } = await supabase
+      .from("susu_customer_cycles")
+      .insert(baseInsert)
+      .select("*")
+      .single());
+  }
   if (error) {
     throw new Error(`Failed to open Susu cycle: ${error.message}`);
   }
@@ -495,12 +520,16 @@ export async function lockCurrentOpenCycleRateIfNeeded(options: {
     commissionEarned: options.activeCard.commissionAgreedAmount,
     commissionCollected: options.activeCard.commissionCollected,
     commissionOutstanding: options.activeCard.commissionOutstanding,
+    withdrawnAmount: roundMoney(options.activeCard.withdrawnAmount ?? 0),
+    balanceBroughtForward: roundMoney(options.activeCard.balanceBroughtForward ?? 0),
+    bbfWithdrawn: 0,
     collectionsCount: new Set(options.activeCard.boxes.flatMap((b) => b.transactionIds)).size,
     contributionDays: options.activeCard.checkedBoxes,
     openedAt: options.activeCard.openedAt ?? now,
     firstCollectionAt: options.activeCard.openedAt ?? now,
     maturedAt: null,
     closedAt: null,
+    cancelledAt: null,
     rolledFromCycleId: null,
     createdAt: now,
     updatedAt: now
@@ -596,28 +625,44 @@ async function saveCycle(cycle: SusuCustomerCycle): Promise<SusuCustomerCycle> {
     );
     return next;
   }
-  const { data, error } = await supabase
+  const basePatch = {
+    status: next.status,
+    daily_contribution_amount: next.dailyContributionAmount,
+    commission_agreed_amount: next.commissionAgreedAmount,
+    gross_contributions: next.grossContributions,
+    customer_savings_credited: next.customerSavingsCredited,
+    commission_earned: next.commissionEarned,
+    commission_collected: next.commissionCollected,
+    commission_outstanding: next.commissionOutstanding,
+    collections_count: next.collectionsCount,
+    contribution_days: next.contributionDays,
+    first_collection_at: next.firstCollectionAt,
+    matured_at: next.maturedAt,
+    closed_at: next.closedAt,
+    updated_at: now
+  };
+  let { data, error } = await supabase
     .from("susu_customer_cycles")
     .update({
-      status: next.status,
-      daily_contribution_amount: next.dailyContributionAmount,
-      commission_agreed_amount: next.commissionAgreedAmount,
-      gross_contributions: next.grossContributions,
-      customer_savings_credited: next.customerSavingsCredited,
-      commission_earned: next.commissionEarned,
-      commission_collected: next.commissionCollected,
-      commission_outstanding: next.commissionOutstanding,
-      collections_count: next.collectionsCount,
-      contribution_days: next.contributionDays,
-      first_collection_at: next.firstCollectionAt,
-      matured_at: next.maturedAt,
-      closed_at: next.closedAt,
-      updated_at: now
+      ...basePatch,
+      withdrawn_amount: roundMoney(next.withdrawnAmount ?? 0),
+      balance_brought_forward: roundMoney(next.balanceBroughtForward ?? 0),
+      bbf_withdrawn: roundMoney(next.bbfWithdrawn ?? 0),
+      cancelled_at: next.cancelledAt ?? null
     })
     .eq("id", next.id)
     .eq("tenant_id", next.tenantId)
     .select("*")
     .single();
+  if (error && /withdrawn_amount|balance_brought_forward|bbf_withdrawn|cancelled_at/i.test(error.message)) {
+    ({ data, error } = await supabase
+      .from("susu_customer_cycles")
+      .update(basePatch)
+      .eq("id", next.id)
+      .eq("tenant_id", next.tenantId)
+      .select("*")
+      .single());
+  }
   if (error) {
     throw new Error(`Failed to update Susu cycle: ${error.message}`);
   }
@@ -699,11 +744,30 @@ export async function applySusuCollectionToCycle(
 
   let cycle = await getOpenCycle(context.tenantId, options.customerId);
   if (!cycle) {
+    // If the customer's previous cycle was closed before BBF persistence existed and they
+    // still hold positive leftover balance, carry it forward onto the newly opened card.
+    const existingCycles = await listCustomerCycles(context.tenantId, options.customerId);
+    const lastExisting = existingCycles[existingCycles.length - 1] ?? null;
+    let carryBbf = 0;
+    if (lastExisting && lastExisting.status === "closed") {
+      const ledgerTotals = await loadCustomerLedgerTotals(
+        context.tenantId,
+        options.customerId
+      ).catch(() => ({
+        totalCredits: 0,
+        totalDebits: 0,
+        accountBalance: 0,
+        creditedTransactionIds: new Set<string>()
+      }));
+      carryBbf = roundMoney(Math.max(0, ledgerTotals.accountBalance));
+    }
     cycle = await openCycle({
       context,
       customerId: options.customerId,
       branchId: options.branchId,
-      dailyContributionAmount: fallbackDaily
+      dailyContributionAmount: fallbackDaily,
+      rolledFromCycleId: lastExisting?.id ?? null,
+      balanceBroughtForward: carryBbf
     });
     if (cycle.dailyContributionAmount > 0) {
       fallbackDaily = cycle.dailyContributionAmount;
@@ -892,7 +956,20 @@ export type SusuWithdrawalCommissionResult = {
   note?: string;
 };
 
-/** Resolve deferred / early-withdrawal commission before paying out a Susu customer. */
+/**
+ * Resolve FIFO withdrawal settlement, red-line page cancellation, Balance Brought Forward (BBF),
+ * and deferred / early-withdrawal commission (charged ON TOP of the requested withdrawal amount
+ * when the customer's withdrawable balance covers it).
+ *
+ * Order of settlement (oldest first):
+ * 1. Existing Balance Brought Forward (BBF) on open/matured cards -> 0 extra commission.
+ * 2. Prior unallocated historical completed savings before tracked cycles -> 0 extra commission.
+ * 3. Completed (matured) pages oldest-first -> collect deferred fee once if still outstanding;
+ *    fully settled pages are marked closed/cancelled (red line).
+ * 4. Active incomplete (open) page -> ONLY touched if withdrawal exceeds steps 1–3.
+ *    Breaking the active page deducts its commission per earlyWithdrawalPolicy, cancels it
+ *    (red line), and opens a brand-new next card carrying any leftover balance as BBF (0 boxes marked).
+ */
 export async function resolveSusuWithdrawalCommission(
   context: Ctx,
   options: {
@@ -903,107 +980,304 @@ export async function resolveSusuWithdrawalCommission(
     disclosureId?: string;
   }
 ): Promise<SusuWithdrawalCommissionResult> {
-  const cycle = await getOpenCycle(context.tenantId, options.customerId);
-  // Also check matured-but-not-closed cycles with outstanding
-  let active = cycle;
-  if (!active) {
-    const supabase = getSupabaseAdminClient();
-    if (supabase) {
-      const { data } = await supabase
-        .from("susu_customer_cycles")
-        .select("*")
-        .eq("tenant_id", context.tenantId)
-        .eq("customer_id", options.customerId)
-        .in("status", ["open", "matured"])
-        .order("cycle_number", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      active = data ? mapCycle(data as Record<string, unknown>) : null;
-    } else {
-      active =
-        (memoryCycles.get(context.tenantId) ?? []).find(
-          (c) =>
-            c.customerId === options.customerId &&
-            (c.status === "open" || c.status === "matured") &&
-            c.commissionOutstanding > 0
-        ) ?? null;
+  const EPS = 0.005;
+  const requested = roundMoney(Math.max(0, options.requestedWithdrawalAmount));
+  if (requested <= EPS) {
+    return { commissionToCollect: 0, blocked: false, cycle: null };
+  }
+
+  const [allCycles, ledgerTotals, withdrawableBalance] = await Promise.all([
+    listCustomerCycles(context.tenantId, options.customerId),
+    loadCustomerLedgerTotals(context.tenantId, options.customerId).catch(() => ({
+      totalCredits: 0,
+      totalDebits: 0,
+      accountBalance: 0
+    })),
+    getCustomerWithdrawableBalance(context.tenantId, options.customerId).catch(() => 0)
+  ]);
+
+  const activeCycles = allCycles
+    .filter((c) => c.status === "open" || c.status === "matured")
+    .sort((a, b) => a.cycleNumber - b.cycleNumber);
+
+  if (activeCycles.length === 0) {
+    return { commissionToCollect: 0, blocked: false, cycle: null };
+  }
+
+  const currentAccountBalance = roundMoney(Math.max(0, ledgerTotals.accountBalance));
+  const persistedAvailable = roundMoney(
+    activeCycles.reduce(
+      (sum, c) =>
+        sum +
+        Math.max(0, roundMoney((c.balanceBroughtForward ?? 0) - (c.bbfWithdrawn ?? 0))) +
+        Math.max(0, roundMoney(c.customerSavingsCredited - (c.withdrawnAmount ?? 0))),
+      0
+    )
+  );
+  const priorUnallocatedSavings = roundMoney(
+    Math.max(0, currentAccountBalance - persistedAvailable)
+  );
+
+  // Plan mutations first — commit nothing if blocked or if withdrawable < requested + commission.
+  type PlannedMutation = {
+    cycle: SusuCustomerCycle;
+    nextCycle: SusuCustomerCycle;
+    commissionToCollect: number;
+    noteLabel: string;
+  };
+
+  const now = new Date().toISOString();
+  const mutationsById = new Map<string, PlannedMutation>();
+  let remaining = requested;
+  let totalCommission = 0;
+
+  const getDraft = (c: SusuCustomerCycle): SusuCustomerCycle =>
+    mutationsById.get(c.id)?.nextCycle ?? { ...c };
+
+  const setDraft = (
+    original: SusuCustomerCycle,
+    nextCycle: SusuCustomerCycle,
+    addCommission = 0,
+    noteLabel = ""
+  ) => {
+    const prev = mutationsById.get(original.id);
+    mutationsById.set(original.id, {
+      cycle: original,
+      nextCycle,
+      commissionToCollect: roundMoney((prev?.commissionToCollect ?? 0) + addCommission),
+      noteLabel: noteLabel || prev?.noteLabel || ""
+    });
+  };
+
+  // Stage 1: Spend existing Balance Brought Forward (BBF) first — already fee-settled (0 commission).
+  for (const c of activeCycles) {
+    if (remaining <= EPS) break;
+    const draft = getDraft(c);
+    const bbfAvail = roundMoney(
+      Math.max(0, (draft.balanceBroughtForward ?? 0) - (draft.bbfWithdrawn ?? 0))
+    );
+    if (bbfAvail <= EPS) continue;
+    const takeBbf = roundMoney(Math.min(remaining, bbfAvail));
+    remaining = roundMoney(remaining - takeBbf);
+    setDraft(c, {
+      ...draft,
+      bbfWithdrawn: roundMoney((draft.bbfWithdrawn ?? 0) + takeBbf)
+    });
+  }
+
+  // Stage 2: Spend prior unallocated historical completed savings (pages predating cycle rows).
+  if (remaining > EPS && priorUnallocatedSavings > EPS) {
+    const takePrior = roundMoney(Math.min(remaining, priorUnallocatedSavings));
+    remaining = roundMoney(remaining - takePrior);
+  }
+
+  // Stage 3: Spend completed (matured) tracked pages oldest-first.
+  // Real Susu card rule: as soon as ANY withdrawal touches a completed page's savings,
+  // that page is cancelled immediately (red line), its deferred fee is settled once,
+  // and any leftover balance from that page is carried forward as BBF onto the next page
+  // (or onto a brand-new next card if no next page exists yet).
+  let cycleNeedingFreshNextCard: SusuCustomerCycle | null = null;
+  let nextCardBbf = 0;
+  let bbfCarriedNote: { cycleNumber: number; amount: number } | null = null;
+
+  const maturedCycles = activeCycles.filter((c) => c.status === "matured");
+  for (const c of maturedCycles) {
+    if (remaining <= EPS) break;
+    const draft = getDraft(c);
+    const avail = roundMoney(Math.max(0, draft.customerSavingsCredited - (draft.withdrawnAmount ?? 0)));
+    if (avail <= EPS) continue;
+
+    const fee = draft.commissionOutstanding > EPS ? roundMoney(draft.commissionOutstanding) : 0;
+    const netPrincipalCapacity = roundMoney(Math.max(0, avail - fee));
+    const take = roundMoney(Math.min(remaining, netPrincipalCapacity));
+    if (take <= EPS && fee <= EPS) continue;
+
+    remaining = roundMoney(remaining - take);
+    totalCommission = roundMoney(totalCommission + fee);
+
+    const newWithdrawn = roundMoney((draft.withdrawnAmount ?? 0) + take + fee);
+    const leftover = roundMoney(Math.max(0, avail - take - fee));
+    const closedMatured: SusuCustomerCycle = {
+      ...draft,
+      withdrawnAmount: newWithdrawn,
+      commissionCollected: roundMoney(draft.commissionCollected + fee),
+      commissionOutstanding: 0,
+      status: "closed",
+      closedAt: draft.closedAt ?? now,
+      cancelledAt: draft.cancelledAt ?? now
+    };
+    setDraft(
+      c,
+      closedMatured,
+      fee,
+      `Susu cycle #${c.cycleNumber} commission on withdrawal`
+    );
+
+    if (leftover > EPS) {
+      const nextPage = activeCycles.find(
+        (candidate) =>
+          candidate.cycleNumber > c.cycleNumber && getDraft(candidate).status !== "closed"
+      );
+      if (nextPage) {
+        const nextDraft = getDraft(nextPage);
+        setDraft(nextPage, {
+          ...nextDraft,
+          balanceBroughtForward: roundMoney((nextDraft.balanceBroughtForward ?? 0) + leftover)
+        });
+        bbfCarriedNote = { cycleNumber: nextPage.cycleNumber, amount: leftover };
+      } else {
+        const actualPostWithdrawalBalance = roundMoney(
+          Math.max(0, currentAccountBalance - requested - totalCommission)
+        );
+        cycleNeedingFreshNextCard = closedMatured;
+        nextCardBbf = roundMoney(Math.min(leftover, actualPostWithdrawalBalance));
+      }
     }
   }
 
-  if (!active || active.commissionOutstanding <= 0) {
-    return { commissionToCollect: 0, blocked: false, cycle: active };
+  // Stage 4: Only touch the active incomplete open page if withdrawal exceeded BBF + all completed pages.
+  if (remaining > EPS) {
+    const openCycle = activeCycles.find((c) => c.status === "open") ?? null;
+    if (
+      openCycle &&
+      (openCycle.grossContributions > EPS || openCycle.customerSavingsCredited > EPS)
+    ) {
+      const draft = getDraft(openCycle);
+      const early = draft.contributionDays < draft.cycleDays;
+      if (early && draft.earlyWithdrawalPolicy === "block") {
+        return {
+          commissionToCollect: 0,
+          blocked: true,
+          blockReason: "Early withdrawal is blocked until the Susu cycle matures.",
+          cycle: openCycle
+        };
+      }
+
+      let openFee = 0;
+      if (draft.commissionOutstanding > EPS) {
+        if (early && draft.earlyWithdrawalPolicy === "waive") {
+          openFee = 0;
+        } else if (early && draft.earlyWithdrawalPolicy === "deduct_pro_rata") {
+          const ratio = Math.min(1, draft.contributionDays / Math.max(1, draft.cycleDays));
+          openFee = roundMoney(
+            Math.max(0, draft.commissionAgreedAmount * ratio - draft.commissionCollected)
+          );
+        } else {
+          openFee = roundMoney(draft.commissionOutstanding);
+        }
+      }
+
+      totalCommission = roundMoney(totalCommission + openFee);
+
+      const openAvail = roundMoney(
+        Math.max(0, draft.customerSavingsCredited - (draft.withdrawnAmount ?? 0))
+      );
+      const unspentBbfOnOpen = roundMoney(
+        Math.max(0, (draft.balanceBroughtForward ?? 0) - (draft.bbfWithdrawn ?? 0))
+      );
+      const takenFromOpen = roundMoney(Math.min(openAvail, remaining));
+      const computedLeftover = roundMoney(
+        Math.max(0, unspentBbfOnOpen + openAvail - takenFromOpen - openFee)
+      );
+      const actualPostWithdrawalBalance = roundMoney(
+        Math.max(0, currentAccountBalance - requested - totalCommission)
+      );
+      nextCardBbf = roundMoney(Math.min(computedLeftover, actualPostWithdrawalBalance));
+
+      const brokenOpenCycle: SusuCustomerCycle = {
+        ...draft,
+        withdrawnAmount: roundMoney((draft.withdrawnAmount ?? 0) + takenFromOpen + openFee),
+        commissionCollected: roundMoney(draft.commissionCollected + openFee),
+        commissionOutstanding: 0,
+        commissionEarned:
+          early && draft.earlyWithdrawalPolicy === "waive"
+            ? draft.commissionCollected
+            : draft.commissionEarned,
+        status: "closed",
+        closedAt: now,
+        cancelledAt: now
+      };
+      cycleNeedingFreshNextCard = brokenOpenCycle;
+
+      setDraft(
+        openCycle,
+        brokenOpenCycle,
+        openFee,
+        `Susu cycle #${openCycle.cycleNumber} commission on early withdrawal`
+      );
+    }
   }
 
-  const early = active.contributionDays < active.cycleDays;
-  if (early && active.earlyWithdrawalPolicy === "block") {
-    return {
-      commissionToCollect: 0,
-      blocked: true,
-      blockReason: "Early withdrawal is blocked until the Susu cycle matures.",
-      cycle: active
-    };
+  // On-top affordability check BEFORE committing any database mutations or institutional income.
+  const totalRequired = roundMoney(requested + totalCommission);
+  if (totalCommission > EPS && withdrawableBalance + EPS < totalRequired) {
+    throw new Error(
+      `Insufficient withdrawable balance. Withdrawal GHS ${requested.toFixed(2)} + Susu commission GHS ${totalCommission.toFixed(2)} = GHS ${totalRequired.toFixed(2)}, available GHS ${roundMoney(withdrawableBalance).toFixed(2)}.`
+    );
   }
 
-  let toCollect = active.commissionOutstanding;
-  if (early && active.earlyWithdrawalPolicy === "waive") {
-    const waived = await saveCycle({
-      ...active,
-      commissionOutstanding: 0,
-      commissionEarned: active.commissionCollected,
-      status: active.status === "open" ? "closed" : active.status,
-      closedAt: active.closedAt ?? new Date().toISOString()
+  // Commit all planned cycle updates & institutional commission entries.
+  let latestUpdatedCycle: SusuCustomerCycle | null = null;
+  for (const mutation of mutationsById.values()) {
+    if (mutation.commissionToCollect > EPS) {
+      const idempotencyKey = options.transactionId
+        ? `susu_commission:withdrawal:${options.transactionId}:${mutation.cycle.cycleNumber}`
+        : options.disclosureId
+          ? `susu_commission:withdrawal-disclosure:${options.disclosureId}:${mutation.cycle.cycleNumber}`
+          : `susu_commission:withdrawal:${mutation.cycle.id}:${Date.now()}`;
+
+      await postCommissionIncome(context, {
+        branchId: options.branchId || mutation.cycle.branchId,
+        customerId: options.customerId,
+        amount: mutation.commissionToCollect,
+        transactionId: options.transactionId,
+        cycleId: mutation.cycle.id,
+        note: mutation.noteLabel || `Susu cycle #${mutation.cycle.cycleNumber} commission on withdrawal`,
+        idempotencyKey
+      });
+    }
+    latestUpdatedCycle = await saveCycle(mutation.nextCycle);
+  }
+
+  // If the last page was cancelled with leftover balance (or the active open page was broken),
+  // immediately open the brand-new next card carrying BBF — starting fresh at 0 / cycleDays boxes.
+  if (cycleNeedingFreshNextCard) {
+    const registeredDaily = await resolveRegisteredDailyContribution(
+      context.tenantId,
+      options.customerId,
+      cycleNeedingFreshNextCard.dailyContributionAmount
+    );
+    latestUpdatedCycle = await openCycle({
+      context,
+      customerId: options.customerId,
+      branchId: options.branchId || cycleNeedingFreshNextCard.branchId,
+      dailyContributionAmount: registeredDaily || cycleNeedingFreshNextCard.dailyContributionAmount,
+      rolledFromCycleId: cycleNeedingFreshNextCard.id,
+      balanceBroughtForward: nextCardBbf
     });
-    return { commissionToCollect: 0, blocked: false, cycle: waived, note: "Commission waived on early withdrawal" };
-  }
-  if (early && active.earlyWithdrawalPolicy === "deduct_pro_rata") {
-    const ratio = Math.min(1, active.contributionDays / Math.max(1, active.cycleDays));
-    toCollect = roundMoney(active.commissionAgreedAmount * ratio - active.commissionCollected);
-    toCollect = Math.max(0, toCollect);
-  }
-
-  // withdrawal timing or early deduct_full / maturity leftover
-  if (
-    active.deductionTiming !== "withdrawal" &&
-    !early &&
-    active.commissionOutstanding > 0 &&
-    active.deductionTiming === "cycle_maturity"
-  ) {
-    // already should have been taken at maturity; collect remainder if any
+    if (nextCardBbf > EPS) {
+      bbfCarriedNote = {
+        cycleNumber: latestUpdatedCycle.cycleNumber,
+        amount: nextCardBbf
+      };
+    }
   }
 
-  if (toCollect <= 0) {
-    return { commissionToCollect: 0, blocked: false, cycle: active };
+  const noteParts: string[] = [];
+  if (totalCommission > EPS) {
+    noteParts.push(`Commission GHS ${totalCommission.toFixed(2)} deducted`);
   }
-
-  const idempotencyKey = options.transactionId
-    ? `susu_commission:withdrawal:${options.transactionId}`
-    : options.disclosureId
-      ? `susu_commission:withdrawal-disclosure:${options.disclosureId}`
-      : `susu_commission:withdrawal:${active.id}:${Date.now()}`;
-
-  await postCommissionIncome(context, {
-    branchId: options.branchId || active.branchId,
-    customerId: options.customerId,
-    amount: toCollect,
-    transactionId: options.transactionId,
-    cycleId: active.id,
-    note: `Susu cycle #${active.cycleNumber} commission on withdrawal`,
-    idempotencyKey
-  });
-
-  const updated = await saveCycle({
-    ...active,
-    commissionCollected: roundMoney(active.commissionCollected + toCollect),
-    commissionOutstanding: roundMoney(Math.max(0, active.commissionOutstanding - toCollect)),
-    status: "closed",
-    closedAt: new Date().toISOString()
-  });
+  if (bbfCarriedNote && bbfCarriedNote.amount > EPS) {
+    noteParts.push(
+      `BBF GHS ${bbfCarriedNote.amount.toFixed(2)} carried to Page #${bbfCarriedNote.cycleNumber}`
+    );
+  }
 
   return {
-    commissionToCollect: toCollect,
+    commissionToCollect: totalCommission,
     blocked: false,
-    cycle: updated,
-    note: `Commission GHS ${toCollect.toFixed(2)} deducted`
+    cycle: latestUpdatedCycle ?? activeCycles[activeCycles.length - 1] ?? null,
+    note: noteParts.length > 0 ? noteParts.join(" · ") : undefined
   };
 }
 
@@ -1157,8 +1431,14 @@ async function loadCustomerNonReversedSusuCollections(
 async function loadCustomerLedgerTotals(
   tenantId: string,
   customerId: string
-): Promise<{ totalCredits: number; totalDebits: number; accountBalance: number }> {
+): Promise<{
+  totalCredits: number;
+  totalDebits: number;
+  accountBalance: number;
+  creditedTransactionIds: Set<string>;
+}> {
   const supabase = getSupabaseAdminClient();
+  const creditedTransactionIds = new Set<string>();
   if (!supabase) {
     const { getCustomerLedger } = await import("./ledgerService.js");
     const entries = await getCustomerLedger(tenantId, customerId);
@@ -1167,6 +1447,9 @@ async function loadCustomerLedgerTotals(
     for (const e of entries) {
       if (e.entryType === "credit") {
         totalCredits += Number(e.amount ?? 0);
+        if (e.transactionId) {
+          creditedTransactionIds.add(String(e.transactionId));
+        }
       } else {
         totalDebits += Number(e.amount ?? 0);
       }
@@ -1176,13 +1459,14 @@ async function loadCustomerLedgerTotals(
     return {
       totalCredits: roundMoney(totalCredits),
       totalDebits: roundMoney(totalDebits),
-      accountBalance: roundMoney(accountBalance)
+      accountBalance: roundMoney(accountBalance),
+      creditedTransactionIds
     };
   }
 
   const { data, error } = await supabase
     .from("ledger_entries")
-    .select("entry_type, amount, balance_after")
+    .select("transaction_id, entry_type, amount, balance_after")
     .eq("tenant_id", tenantId)
     .eq("customer_id", customerId)
     .order("created_at", { ascending: true })
@@ -1196,6 +1480,9 @@ async function loadCustomerLedgerTotals(
     const amt = Number(row.amount ?? 0);
     if (row.entry_type === "credit") {
       totalCredits += amt;
+      if (row.transaction_id) {
+        creditedTransactionIds.add(String(row.transaction_id));
+      }
     } else {
       totalDebits += amt;
     }
@@ -1207,7 +1494,8 @@ async function loadCustomerLedgerTotals(
   return {
     totalCredits: roundMoney(totalCredits),
     totalDebits: roundMoney(totalDebits),
-    accountBalance: roundMoney(accountBalance)
+    accountBalance: roundMoney(accountBalance),
+    creditedTransactionIds
   };
 }
 
@@ -1315,7 +1603,13 @@ export async function getCustomerSusuCycleSummary(
     getPendingDailyContribution(tenantId, customerId).catch(() => null),
     loadCustomerLedgerTotals(tenantId, customerId)
   ]);
-  const { collections, totalSeparateCommissionDebits } = loaded;
+  const { collections: rawCollections, totalSeparateCommissionDebits } = loaded;
+  // Exclude orphaned pre-ledger customer_transactions that were never posted to ledger_entries
+  // so legacy/unposted test deposits never fabricate phantom passbook pages.
+  const collections =
+    ledgerTotals.creditedTransactionIds.size > 0
+      ? rawCollections.filter((c) => ledgerTotals.creditedTransactionIds.has(c.id))
+      : rawCollections;
   const openCycle = cycles.find((c) => c.status === "open") ?? null;
   const passbookNetCredited = roundMoney(
     collections.reduce((sum, c) => sum + (c.ledgerAmount ?? c.grossAmount), 0)

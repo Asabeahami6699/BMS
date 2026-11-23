@@ -12,6 +12,7 @@ import {
   type SusuDailyContributionMode,
   type UpdateSusuCommissionPolicyInput
 } from "@bms/shared";
+import { Modal } from "../components/Modal";
 import { useToast } from "../components/Toast";
 import type { AppRole } from "./api";
 import { useSusuCycleCommissionStore } from "./stores/susuCycleCommissionStore";
@@ -59,6 +60,7 @@ export function SusuCycleCommissionPage({ role }: Props) {
     );
   const canEdit = role === "admin";
   const [draft, setDraft] = useState<UpdateSusuCommissionPolicyInput | null>(null);
+  const [guideOpen, setGuideOpen] = useState(false);
 
   useEffect(() => {
     hydrate({ force: true });
@@ -173,6 +175,13 @@ export function SusuCycleCommissionPage({ role }: Props) {
           ) : null}
         </div>
         <div className="cycle-fees-hero__actions">
+          <button
+            type="button"
+            className="button secondary"
+            onClick={() => setGuideOpen(true)}
+          >
+            How deductions work
+          </button>
           {canEdit ? (
             <button type="button" className="button" disabled={saving} onClick={() => void handleSave()}>
               {saving ? "Saving…" : "Save policy"}
@@ -462,6 +471,154 @@ export function SusuCycleCommissionPage({ role }: Props) {
           </p>
         </section>
       </div>
+
+      <Modal
+        open={guideOpen}
+        onClose={() => setGuideOpen(false)}
+        title="Susu cycle & commission deduction guide"
+        subtitle="Reference for full, partial, early withdrawals, red-line cancelled pages, and Balance Brought Forward (BBF)."
+        panelClassName="modal-panel--70"
+        footer={
+          <button type="button" className="button" onClick={() => setGuideOpen(false)}>
+            Got it
+          </button>
+        }
+      >
+        <div className="cycle-guide">
+          <section className="cycle-guide__section">
+            <h3>1. When commission is deducted</h3>
+            <ul>
+              <li>
+                <strong>First collection (Box #1):</strong> Commission is taken as soon as the customer
+                starts a new card. Remaining boxes (Box #2–#{draft.cycleDays}) go 100% to customer
+                savings.
+              </li>
+              <li>
+                <strong>Cycle maturity (Box #{draft.cycleDays}):</strong> Full deposits credit to
+                savings during the cycle; the agreed fee is deducted when the final box of the card
+                completes.
+              </li>
+              <li>
+                <strong>Customer withdrawal (Deferred):</strong> No fee is taken while depositing.
+                Commission is settled when the customer withdraws, using strict{" "}
+                <strong>FIFO (oldest pages first)</strong> below.
+              </li>
+            </ul>
+          </section>
+
+          <section className="cycle-guide__section">
+            <h3>2. Full vs. partial withdrawal (FIFO order)</h3>
+            <p className="muted">
+              When a customer has completed earlier pages (e.g. Pages #1–#48) plus an incomplete
+              active page (e.g. Page #49 at 22/{draft.cycleDays} boxes), withdrawals draw in this
+              exact order:
+            </p>
+            <ol>
+              <li>
+                <strong>Balance Brought Forward (BBF) first:</strong> Any leftover balance carried
+                from previously cancelled cards is spent first with <strong>GHS 0 extra fee</strong>.
+              </li>
+              <li>
+                <strong>Completed pages oldest-first (Pages #1 → #48):</strong> As soon as any
+                withdrawal touches a completed page (even a partial withdrawal, e.g. GHS 100 from a
+                GHS 155 Page #1), that page is <strong>cancelled immediately with a red line</strong>
+                , its fee (GHS 5) is settled once, and its remaining balance (GHS 50) is written as{" "}
+                <strong>BBF (Balance Brought Forward)</strong> at the top of the next page (Page #2).
+                If the withdrawal fits inside BBF + completed pages, the active incomplete page is{" "}
+                <strong>not touched</strong> — it stays open and its deferred commission remains
+                untouched.
+              </li>
+              <li>
+                <strong>Jumping into the incomplete active page (Page #49):</strong> If the
+                withdrawal exceeds BBF + all completed pages and dips into incomplete Page #49, the
+                customer has broken the cycle. Earlier pages (#1–#48) and broken Page #49 are{" "}
+                <strong>cancelled with a red line</strong>, and Page #49&apos;s commission is applied
+                according to the <em>Early withdrawal</em> rule.
+              </li>
+            </ol>
+          </section>
+
+          <section className="cycle-guide__section">
+            <h3>3. Commission charged &ldquo;on top&rdquo; of withdrawal</h3>
+            <p>
+              When commission applies at withdrawal, it is charged <strong>on top</strong> of the
+              requested payout amount whenever the customer&apos;s withdrawable balance covers both:
+            </p>
+            <div className="cycle-guide__example">
+              <strong>Example:</strong> Customer requests <strong>GHS 30.00</strong> and Page #49 has
+              a <strong>GHS 5.00</strong> cycle fee → customer receives <strong>GHS 30.00</strong>,
+              and the account is debited <strong>GHS 35.00</strong> (<code>30 + 5</code>). If
+              available balance is below GHS 35.00, the withdrawal is declined with the exact shortfall.
+            </div>
+          </section>
+
+          <section className="cycle-guide__section">
+            <h3>4. Cancelled pages (red line) &amp; Balance Brought Forward (BBF)</h3>
+            <ul>
+              <li>
+                <strong>Red line crossing cancelled pages:</strong> Every settled or early-broken
+                page is marked <strong>Cancelled</strong> with a diagonal red line across the boxes
+                so no further deposits tick into that page.
+              </li>
+              <li>
+                <strong>Balance Brought Forward (BBF):</strong> Any money remaining from the broken
+                page after deducting the withdrawal and fee moves to the top of the brand-new next
+                card (e.g. Page #50) as a <strong>BBF</strong> banner.
+              </li>
+              <li>
+                <strong>New card starts fresh at 0 / {draft.cycleDays}:</strong> BBF{" "}
+                <strong>never</strong> auto-checks boxes on Page #50. It simply tells staff there is
+                carried-over balance from previous cancelled pages while the customer begins a new
+                cycle.
+              </li>
+            </ul>
+          </section>
+
+          <section className="cycle-guide__section">
+            <h3>5. Policy options reference</h3>
+            <div className="cycle-guide__grid">
+              <div>
+                <h4>Early withdrawal (breaking an incomplete page)</h4>
+                <ul>
+                  <li>
+                    <strong>Deduct full fee:</strong> Takes the full agreed cycle commission.
+                  </li>
+                  <li>
+                    <strong>Pro-rata fee:</strong> Charges proportionally based on boxes checked ÷{" "}
+                    {draft.cycleDays}.
+                  </li>
+                  <li>
+                    <strong>Waive fee:</strong> Cancels the page with GHS 0 fee.
+                  </li>
+                  <li>
+                    <strong>Block early withdrawal:</strong> Prevents dipping into an incomplete page
+                    until all {draft.cycleDays} boxes finish.
+                  </li>
+                </ul>
+              </div>
+              <div>
+                <h4>Partial payment &amp; rollover rules</h4>
+                <ul>
+                  <li>
+                    <strong>Commission first:</strong> Underpayments on Box #1 satisfy the fee before
+                    savings.
+                  </li>
+                  <li>
+                    <strong>Savings first:</strong> Underpayments credit savings first; fee waits.
+                  </li>
+                  <li>
+                    <strong>Proportional:</strong> Splits underpayment between fee and savings.
+                  </li>
+                  <li>
+                    <strong>Rollover (Deduct / Defer / Waive):</strong> Controls how unpaid fees on a
+                    completed card are handled when the customer rolls into the next card.
+                  </li>
+                </ul>
+              </div>
+            </div>
+          </section>
+        </div>
+      </Modal>
     </div>
   );
 }
