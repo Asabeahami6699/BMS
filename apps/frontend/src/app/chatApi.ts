@@ -24,15 +24,27 @@ export type ChatThread = {
 
 const THREAD_STORAGE_KEY = "bms.chat.threadId";
 const COMPANY_STORAGE_KEY = "bms.chat.companyName";
+const VISITOR_TOKEN_STORAGE_KEY = "bms.chat.visitorToken";
 
 export function getStoredChatThreadId(): string | null {
   return localStorage.getItem(THREAD_STORAGE_KEY);
 }
 
-export function setStoredChatThreadId(threadId: string, companyName?: string): void {
+export function getStoredChatVisitorToken(): string | null {
+  return localStorage.getItem(VISITOR_TOKEN_STORAGE_KEY);
+}
+
+export function setStoredChatThreadId(
+  threadId: string,
+  companyName?: string,
+  visitorToken?: string
+): void {
   localStorage.setItem(THREAD_STORAGE_KEY, threadId);
   if (companyName) {
     localStorage.setItem(COMPANY_STORAGE_KEY, companyName);
+  }
+  if (visitorToken) {
+    localStorage.setItem(VISITOR_TOKEN_STORAGE_KEY, visitorToken);
   }
 }
 
@@ -43,6 +55,7 @@ export function getStoredChatCompanyName(): string | null {
 export function clearStoredChatThreadId(): void {
   localStorage.removeItem(THREAD_STORAGE_KEY);
   localStorage.removeItem(COMPANY_STORAGE_KEY);
+  localStorage.removeItem(VISITOR_TOKEN_STORAGE_KEY);
 }
 
 export class ChatThreadNotFoundError extends Error {
@@ -57,7 +70,7 @@ export async function startChatThread(payload: {
   companyName: string;
   visitorEmail: string;
   message: string;
-}): Promise<{ thread: ChatThread; messages: ChatMessage[] }> {
+}): Promise<{ thread: ChatThread; messages: ChatMessage[]; visitorToken?: string }> {
   const response = await fetch(`${API_BASE_URL}/api/v1/chat/threads`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -67,14 +80,22 @@ export async function startChatThread(payload: {
     const body = (await response.json().catch(() => ({}))) as { error?: string };
     throw new Error(body.error ?? "Failed to start chat");
   }
-  const data = (await response.json()) as { thread: ChatThread; messages: ChatMessage[] };
-  setStoredChatThreadId(data.thread.id, data.thread.companyName);
+  const data = (await response.json()) as {
+    thread: ChatThread;
+    messages: ChatMessage[];
+    visitorToken?: string;
+  };
+  setStoredChatThreadId(data.thread.id, data.thread.companyName, data.visitorToken);
   return data;
 }
 
 async function parseChatError(response: Response, fallback: string): Promise<Error> {
   const body = (await response.json().catch(() => ({}))) as { error?: string };
-  if (response.status === 404 || body.error?.toLowerCase().includes("not found")) {
+  if (
+    response.status === 404 ||
+    response.status === 403 ||
+    body.error?.toLowerCase().includes("not found")
+  ) {
     return new ChatThreadNotFoundError();
   }
   return new Error(body.error ?? fallback);
@@ -82,7 +103,10 @@ async function parseChatError(response: Response, fallback: string): Promise<Err
 
 export async function fetchVisitorMessages(threadId: string, since?: string): Promise<ChatMessage[]> {
   const query = since ? `?since=${encodeURIComponent(since)}` : "";
-  const response = await fetch(`${API_BASE_URL}/api/v1/chat/threads/${threadId}/messages${query}`);
+  const visitorToken = getStoredChatVisitorToken();
+  const response = await fetch(`${API_BASE_URL}/api/v1/chat/threads/${threadId}/messages${query}`, {
+    headers: visitorToken ? { "X-Chat-Visitor-Token": visitorToken } : undefined
+  });
   if (!response.ok) {
     throw await parseChatError(response, "Failed to load messages");
   }
@@ -91,9 +115,13 @@ export async function fetchVisitorMessages(threadId: string, since?: string): Pr
 }
 
 export async function sendVisitorChatMessage(threadId: string, message: string): Promise<ChatMessage> {
+  const visitorToken = getStoredChatVisitorToken();
   const response = await fetch(`${API_BASE_URL}/api/v1/chat/threads/${threadId}/messages`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(visitorToken ? { "X-Chat-Visitor-Token": visitorToken } : {})
+    },
     body: JSON.stringify({ message })
   });
   if (!response.ok) {

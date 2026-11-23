@@ -2,6 +2,7 @@ import type { ChatMessage, ChatThread } from "@bms/shared";
 
 export type StoredThread = ChatThread & {
   unreadForAdmin: number;
+  visitorTokenHash?: string | null;
 };
 
 const threads = new Map<string, StoredThread>();

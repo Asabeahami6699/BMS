@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { applyApprovalWorkflowToSusuNav, setTransactionPinSchema, verifyTransactionPinSchema, tenantSignInHost, type ApprovalWorkflow } from "@bms/shared";
+import { loginRateLimit } from "../middleware/rateLimit.js";
 import { validateBody } from "../middleware/validateBody.js";
 import {
   changeOwnPassword,
@@ -41,7 +42,7 @@ authRouter.get("/company-host", async (req, res) => {
   }
 });
 
-authRouter.post("/login", async (req, res) => {
+authRouter.post("/login", loginRateLimit, async (req, res) => {
   try {
     const result = await loginWithCredentials(req.body);
     res.json(result);

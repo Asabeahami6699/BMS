@@ -47,11 +47,26 @@ export function verifySupabaseAccessToken(token: string, jwtSecret: string): Sup
   }
 
   const [header, payload, signature] = parts;
+  if (!header || !payload || !signature) {
+    return null;
+  }
+
+  try {
+    const parsedHeader = JSON.parse(base64UrlDecode(header).toString("utf8")) as {
+      alg?: unknown;
+    };
+    if (parsedHeader.alg !== "HS256") {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+
   const signed = `${header}.${payload}`;
   const expected = createHmac("sha256", jwtSecret).update(signed).digest();
   let actual: Buffer;
   try {
-    actual = base64UrlDecode(signature!);
+    actual = base64UrlDecode(signature);
   } catch {
     return null;
   }

@@ -163,12 +163,18 @@ reportsRouter.get("/coordinator-bootstrap", requirePermission("reports.read"), a
   }
 });
 
+function csvSafeCell(value: string | number): string {
+  const raw = String(value);
+  const neutralized = /^[=+\-@\t\r]/.test(raw) ? `'${raw}` : raw;
+  return `"${neutralized.replace(/"/g, '""')}"`;
+}
+
 function toCsv(headers: string[], rows: Array<Array<string | number>>): string {
   const headerLine = headers.join(",");
   const body = rows
     .map((row) =>
       row
-        .map((value) => `"${String(value).replace(/"/g, '""')}"`)
+        .map(csvSafeCell)
         .join(",")
     )
     .join("\n");

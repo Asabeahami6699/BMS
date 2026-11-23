@@ -6,7 +6,8 @@ import {
 } from "@bms/shared";
 
 import { Router } from "express";
-import { resolveRequestBranchFilter } from "../middleware/branchScope.js";
+import { assertBranchAccess, BranchAccessError, resolveRequestBranchFilter } from "../middleware/branchScope.js";
+import { writeAuditLog } from "../services/auditService.js";
 
 import { z } from "zod";
 
@@ -55,6 +56,12 @@ const createUserSchema = withBranchAssignmentRefine(
 
 
 
+function csvSafeCell(value: unknown): string {
+  const raw = String(value ?? "");
+  const neutralized = /^[=+\-@\t\r]/.test(raw) ? `'${raw}` : raw;
+  return `"${neutralized.replace(/"/g, '""')}"`;
+}
+
 async function toUsersCsv(
   tenantId: string,
   rows: Array<{
@@ -85,7 +92,7 @@ async function toUsersCsv(
         row.status
       ]
 
-        .map((value) => `"${String(value).replace(/"/g, '""')}"`)
+        .map(csvSafeCell)
 
         .join(",")
 
@@ -477,9 +484,44 @@ usersRouter.get("/:userId/password-reference", requirePermission("users.update")
   }
   const userId = Array.isArray(req.params.userId) ? req.params.userId[0] : req.params.userId;
   try {
+    const target = await getTenantUser(context.tenantId, userId);
+    if (!target) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+    if (
+      context.role !== "admin" &&
+      context.role !== "super_admin" &&
+      (target.role === "admin" || target.role === "super_admin")
+    ) {
+      res.status(403).json({ error: "Only administrators can view administrator credentials" });
+      return;
+    }
+    if (context.scopeType === "branch") {
+      if (target.scopeType === "head_office") {
+        res.status(403).json({ error: "Branch-scoped users cannot view head-office credentials" });
+        return;
+      }
+      assertBranchAccess(context, target.branchId);
+    }
+
     const ref = await getTenantUserPasswordReference(context.tenantId, userId);
+    void writeAuditLog({
+      tenantId: context.tenantId,
+      actorUserId: context.userId,
+      actorRole: context.role,
+      method: "GET",
+      path: req.originalUrl,
+      statusCode: 200,
+      branchId: context.branchId,
+      ipAddress: req.ip
+    }).catch(() => undefined);
     res.json(ref);
   } catch (error) {
+    if (error instanceof BranchAccessError) {
+      res.status(403).json({ error: error.message });
+      return;
+    }
     res.status(400).json({
       error: error instanceof Error ? error.message : "Failed to load password reference"
     });

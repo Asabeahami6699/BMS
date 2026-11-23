@@ -1,5 +1,7 @@
 import { Router } from "express";
+import { publicChatRateLimit } from "../middleware/rateLimit.js";
 import {
+  ChatAccessDeniedError,
   getAdminThreadMessages,
   getVisitorMessages,
   listAdminInbox,
@@ -11,7 +13,7 @@ import {
 
 export const chatRouter = Router();
 
-chatRouter.post("/threads", async (req, res) => {
+chatRouter.post("/threads", publicChatRateLimit, async (req, res) => {
   try {
     const result = await startVisitorThread(req.body);
     res.status(201).json(result);
@@ -23,18 +25,28 @@ chatRouter.post("/threads", async (req, res) => {
 chatRouter.get("/threads/:threadId/messages", async (req, res) => {
   try {
     const since = typeof req.query.since === "string" ? req.query.since : undefined;
-    const messages = await getVisitorMessages(String(req.params.threadId), since);
+    const visitorToken = req.header("x-chat-visitor-token") ?? undefined;
+    const messages = await getVisitorMessages(String(req.params.threadId), since, visitorToken);
     res.json({ messages });
   } catch (error) {
+    if (error instanceof ChatAccessDeniedError) {
+      res.status(403).json({ error: error.message });
+      return;
+    }
     res.status(404).json({ error: error instanceof Error ? error.message : "Thread not found" });
   }
 });
 
-chatRouter.post("/threads/:threadId/messages", async (req, res) => {
+chatRouter.post("/threads/:threadId/messages", publicChatRateLimit, async (req, res) => {
   try {
-    const message = await sendVisitorMessage(String(req.params.threadId), req.body);
+    const visitorToken = req.header("x-chat-visitor-token") ?? undefined;
+    const message = await sendVisitorMessage(String(req.params.threadId), req.body, visitorToken);
     res.status(201).json(message);
   } catch (error) {
+    if (error instanceof ChatAccessDeniedError) {
+      res.status(403).json({ error: error.message });
+      return;
+    }
     res.status(400).json({ error: error instanceof Error ? error.message : "Failed to send message" });
   }
 });

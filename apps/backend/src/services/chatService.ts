@@ -1,3 +1,4 @@
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   sendChatMessageSchema,
   startChatThreadSchema,
@@ -18,7 +19,34 @@ import {
 import { generatePublicChatReply } from "./ai/aiService.js";
 
 function newId(prefix: string): string {
-  return `${prefix}_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
+  return `${prefix}_${randomUUID().replace(/-/g, "")}`;
+}
+
+function hashVisitorToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+function verifyVisitorToken(expectedHash: string | null | undefined, providedToken?: string): boolean {
+  // Backwards compatibility for pre-existing threads created before visitor tokens were added.
+  if (!expectedHash) {
+    return true;
+  }
+  if (!providedToken?.trim()) {
+    return false;
+  }
+  const actualBuf = Buffer.from(hashVisitorToken(providedToken.trim()), "hex");
+  const expectedBuf = Buffer.from(expectedHash, "hex");
+  if (actualBuf.length !== expectedBuf.length) {
+    return false;
+  }
+  return timingSafeEqual(actualBuf, expectedBuf);
+}
+
+export class ChatAccessDeniedError extends Error {
+  constructor(message = "Invalid chat session token") {
+    super(message);
+    this.name = "ChatAccessDeniedError";
+  }
 }
 
 async function persistChatMessage(message: ChatMessage, unreadForAdmin?: number): Promise<void> {
@@ -134,7 +162,8 @@ async function hydrateThreadFromSupabase(threadId: string): Promise<boolean> {
       visitorEmail: row.visitor_email,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
-      unreadForAdmin: row.unread_for_admin ?? 0
+      unreadForAdmin: row.unread_for_admin ?? 0,
+      visitorTokenHash: typeof row.visitor_token_hash === "string" ? row.visitor_token_hash : null
     },
     (messageRows ?? []).map(mapMessageRow)
   );
@@ -154,7 +183,9 @@ async function ensureThread(threadId: string): Promise<StoredThread | undefined>
   return getThread(threadId);
 }
 
-export async function startVisitorThread(raw: unknown): Promise<{ thread: ChatThread; messages: ChatMessage[] }> {
+export async function startVisitorThread(
+  raw: unknown
+): Promise<{ thread: ChatThread; messages: ChatMessage[]; visitorToken: string }> {
   const parsed = startChatThreadSchema.safeParse(raw);
   if (!parsed.success) {
     throw new Error("Invalid chat registration details");
@@ -162,13 +193,16 @@ export async function startVisitorThread(raw: unknown): Promise<{ thread: ChatTh
 
   const now = new Date().toISOString();
   const threadId = newId("chat");
+  const visitorToken = randomBytes(32).toString("hex");
+  const visitorTokenHash = hashVisitorToken(visitorToken);
   const thread = createThread({
     id: threadId,
     visitorName: parsed.data.visitorName,
     companyName: parsed.data.companyName,
     visitorEmail: parsed.data.visitorEmail,
     createdAt: now,
-    updatedAt: now
+    updatedAt: now,
+    visitorTokenHash
   });
 
   const welcome: ChatMessage = {
@@ -192,13 +226,23 @@ export async function startVisitorThread(raw: unknown): Promise<{ thread: ChatTh
 
   const supabase = getSupabaseAdminClient();
   if (supabase) {
-    const { error: threadError } = await supabase.from("live_chat_threads").insert({
+    let { error: threadError } = await supabase.from("live_chat_threads").insert({
       id: threadId,
       visitor_name: parsed.data.visitorName,
       company_name: parsed.data.companyName,
       visitor_email: parsed.data.visitorEmail,
-      unread_for_admin: 2
+      unread_for_admin: 2,
+      visitor_token_hash: visitorTokenHash
     });
+    if (threadError && /visitor_token_hash|column.*does not exist/i.test(threadError.message)) {
+      ({ error: threadError } = await supabase.from("live_chat_threads").insert({
+        id: threadId,
+        visitor_name: parsed.data.visitorName,
+        company_name: parsed.data.companyName,
+        visitor_email: parsed.data.visitorEmail,
+        unread_for_admin: 2
+      }));
+    }
     if (threadError) {
       console.warn(`[chat] Supabase thread insert failed: ${threadError.message}`);
     } else {
@@ -216,18 +260,34 @@ export async function startVisitorThread(raw: unknown): Promise<{ thread: ChatTh
 
   const allMessages = listMessages(threadId);
   const last = allMessages[allMessages.length - 1];
-  return { thread: { ...thread, lastMessage: last?.body ?? visitorMsg.body }, messages: allMessages };
+  const { visitorTokenHash: _hidden, ...publicThread } = thread;
+  return {
+    thread: { ...publicThread, lastMessage: last?.body ?? visitorMsg.body },
+    messages: allMessages,
+    visitorToken
+  };
 }
 
-export async function getVisitorMessages(threadId: string, since?: string): Promise<ChatMessage[]> {
+export async function getVisitorMessages(
+  threadId: string,
+  since?: string,
+  visitorToken?: string
+): Promise<ChatMessage[]> {
   const thread = await ensureThread(threadId);
   if (!thread) {
     throw new Error("Chat thread not found");
   }
+  if (!verifyVisitorToken(thread.visitorTokenHash, visitorToken)) {
+    throw new ChatAccessDeniedError();
+  }
   return listMessages(threadId, since);
 }
 
-export async function sendVisitorMessage(threadId: string, raw: unknown): Promise<ChatMessage> {
+export async function sendVisitorMessage(
+  threadId: string,
+  raw: unknown,
+  visitorToken?: string
+): Promise<ChatMessage> {
   const parsed = sendChatMessageSchema.safeParse(raw);
   if (!parsed.success) {
     throw new Error("Invalid message");
@@ -236,6 +296,9 @@ export async function sendVisitorMessage(threadId: string, raw: unknown): Promis
   const thread = await ensureThread(threadId);
   if (!thread) {
     throw new Error("Chat thread not found");
+  }
+  if (!verifyVisitorToken(thread.visitorTokenHash, visitorToken)) {
+    throw new ChatAccessDeniedError();
   }
 
   const message: ChatMessage = {
@@ -284,7 +347,7 @@ export async function listAdminInbox(): Promise<ChatThread[]> {
     }
   }
 
-  return listThreadsForAdmin();
+  return listThreadsForAdmin().map(({ visitorTokenHash: _hidden, ...thread }) => thread);
 }
 
 export async function getAdminThreadMessages(threadId: string, since?: string): Promise<ChatMessage[]> {

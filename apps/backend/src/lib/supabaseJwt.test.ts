@@ -26,4 +26,19 @@ describe("supabaseJwt", () => {
     expect(verifySupabaseAccessToken(token, secret)).toBeNull();
     expect(decodeSupabaseAccessTokenClaims(token)).toBeNull();
   });
+
+  it("rejects tampered signatures and alg=none tokens", () => {
+    const secret = "test-jwt-secret";
+    const valid = signTestJwt(
+      { sub: "auth-user-1", exp: Math.floor(Date.now() / 1000) + 3600 },
+      secret
+    );
+    expect(verifySupabaseAccessToken(valid, "wrong-secret")).toBeNull();
+
+    const noneHeader = Buffer.from(JSON.stringify({ alg: "none", typ: "JWT" })).toString("base64url");
+    const body = Buffer.from(
+      JSON.stringify({ sub: "auth-user-1", exp: Math.floor(Date.now() / 1000) + 3600 })
+    ).toString("base64url");
+    expect(verifySupabaseAccessToken(`${noneHeader}.${body}.`, secret)).toBeNull();
+  });
 });

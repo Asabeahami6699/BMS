@@ -178,6 +178,12 @@ export async function bootstrapSupabaseSeed(options: { resetPassword?: boolean }
   }
 
   const superAdmin = getSuperAdminCredentials();
+  if (process.env.NODE_ENV === "production" && superAdmin.password === "ChangeMe123!") {
+    console.warn(
+      "[security] SUPER_ADMIN_PASSWORD is still set to the default value in production. " +
+        "Set a strong unique SUPER_ADMIN_PASSWORD environment variable immediately."
+    );
+  }
 
   try {
     await bootstrapSupabaseSeedRemote(supabase, superAdmin, options);

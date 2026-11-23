@@ -19,7 +19,7 @@ import {
 } from "@bms/shared";
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { z } from "zod";
-import { getSupabaseJwtSecret } from "../config/env.js";
+import { env, getSupabaseJwtSecret } from "../config/env.js";
 import { getPermissionsForRole } from "../config/permissions.js";
 import {
   loadTenantPermissionInputs,
@@ -239,14 +239,6 @@ export async function loginWithCredentials(
       password: parsed.data.password
     });
     if (signInError || !signInData.session) {
-      const localUser = findUserByEmail(email);
-      if (localUser && verifyPassword(parsed.data.password, localUser.passwordHash)) {
-        assertTenantActive(localUser.tenantId);
-        await assertLoginMatchesHost(localUser.tenantId, parsed.data.tenantSubdomain);
-        const accessToken = createSession(localUser.id);
-        const userContext = await enrichTenantContext(toUserContext(localUser));
-        return { accessToken, user: userContext as UserContext & { email: string; fullName?: string } };
-      }
       throw new Error("Invalid email or password");
     }
 
@@ -409,36 +401,77 @@ async function loadUserContextByAuthUserId(
   return userContextFromProfile(supabase, profile as UserProfileRow, emailFallback);
 }
 
+const revokedAccessTokens = new Map<string, number>();
+
+function hashAccessToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+function pruneRevokedTokens(): void {
+  const now = Date.now();
+  for (const [digest, expiresAt] of revokedAccessTokens.entries()) {
+    if (expiresAt <= now) {
+      revokedAccessTokens.delete(digest);
+    }
+  }
+}
+
+function isAccessTokenRevoked(token: string): boolean {
+  const expiresAt = revokedAccessTokens.get(hashAccessToken(token));
+  if (!expiresAt) {
+    return false;
+  }
+  if (expiresAt <= Date.now()) {
+    revokedAccessTokens.delete(hashAccessToken(token));
+    return false;
+  }
+  return true;
+}
+
 async function resolveAuthUserIdFromAccessToken(
   supabase: SupabaseClient,
   token: string
 ): Promise<{ authUserId: string; email?: string } | undefined> {
+  if (isAccessTokenRevoked(token)) {
+    return undefined;
+  }
+
+  let networkError: unknown = null;
   try {
     const { data, error } = await supabase.auth.getUser(token);
     if (!error && data.user?.id) {
       return { authUserId: data.user.id, email: data.user.email };
     }
+    if (error && isSupabaseAuthNetworkError(error)) {
+      networkError = error;
+    } else {
+      // Token was explicitly rejected by Supabase Auth (invalid/forged/expired/revoked).
+      return undefined;
+    }
   } catch (error) {
     if (!isSupabaseAuthNetworkError(error)) {
       throw error;
     }
+    networkError = error;
   }
 
+  // Only allow offline verification during a verified Supabase Auth network outage,
+  // and ONLY with cryptographic HS256 signature verification via SUPABASE_JWT_SECRET.
   const jwtSecret = getSupabaseJwtSecret();
-  const claims = jwtSecret
-    ? verifySupabaseAccessToken(token, jwtSecret)
-    : decodeSupabaseAccessTokenClaims(token);
+  if (!jwtSecret) {
+    if (!loggedAuthFallback) {
+      loggedAuthFallback = true;
+      console.warn(
+        "[auth] Supabase Auth API unreachable and SUPABASE_JWT_SECRET is not set. " +
+          "Refusing unsigned JWT claims; set SUPABASE_JWT_SECRET for secure offline verification."
+      );
+    }
+    throw networkError instanceof Error ? networkError : new Error("Supabase Auth unreachable");
+  }
 
+  const claims = verifySupabaseAccessToken(token, jwtSecret);
   if (!claims) {
     return undefined;
-  }
-
-  if (!jwtSecret && !loggedAuthFallback) {
-    loggedAuthFallback = true;
-    console.warn(
-      "[auth] Supabase Auth API unreachable — using JWT claims without signature verification. " +
-        "Set SUPABASE_JWT_SECRET in apps/backend/.env (Supabase → Settings → API → JWT Secret) for secure offline verification."
-    );
   }
 
   return { authUserId: claims.sub, email: claims.email };
@@ -447,6 +480,10 @@ async function resolveAuthUserIdFromAccessToken(
 export async function resolveUserFromAccessToken(
   token: string
 ): Promise<(UserContext & { email?: string; fullName?: string }) | undefined> {
+  if (isAccessTokenRevoked(token)) {
+    return undefined;
+  }
+
   const supabase = getSupabaseAdminClient();
   if (supabase && !token.startsWith("sess_")) {
     const resolved = await resolveAuthUserIdFromAccessToken(supabase, token);
@@ -468,6 +505,26 @@ export async function resolveUserFromAccessToken(
 export function logoutAccessToken(token: string): void {
   if (token.startsWith("sess_")) {
     revokeSession(token);
+    return;
+  }
+  if (!token) {
+    return;
+  }
+  pruneRevokedTokens();
+  const claims = decodeSupabaseAccessTokenClaims(token);
+  // Keep in denylist until token expiry (or 1 hour fallback), capped to avoid unbounded memory growth.
+  const expiresAt = claims?.exp ? claims.exp * 1000 : Date.now() + 60 * 60_000;
+  if (revokedAccessTokens.size >= 10_000) {
+    const oldest = revokedAccessTokens.keys().next().value;
+    if (oldest) {
+      revokedAccessTokens.delete(oldest);
+    }
+  }
+  revokedAccessTokens.set(hashAccessToken(token), expiresAt);
+
+  const supabase = getSupabaseAdminClient();
+  if (supabase) {
+    void supabase.auth.admin.signOut(token, "local").catch(() => undefined);
   }
 }
 
@@ -1159,13 +1216,20 @@ function passwordRefKey(tenantId: string, userId: string): string {
   return `${tenantId}:${userId}`;
 }
 
-function getPasswordRefCipherKey(): Buffer {
+function getLegacyPasswordRefCipherKey(): Buffer {
   const secret =
     process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() ||
     getSupabaseJwtSecret()?.trim() ||
     process.env.JWT_SECRET?.trim() ||
     "bms-local-password-ref-key";
   return createHash("sha256").update(secret).digest();
+}
+
+function getPasswordRefCipherKey(): Buffer {
+  if (env.PASSWORD_REF_ENCRYPTION_KEY?.trim()) {
+    return createHash("sha256").update(env.PASSWORD_REF_ENCRYPTION_KEY.trim()).digest();
+  }
+  return getLegacyPasswordRefCipherKey();
 }
 
 function encryptPasswordReference(plain: string): string {
@@ -1177,6 +1241,21 @@ function encryptPasswordReference(plain: string): string {
   return `v1:${iv.toString("base64")}:${tag.toString("base64")}:${encrypted.toString("base64")}`;
 }
 
+function tryDecryptPasswordReferenceWithKey(
+  iv: Buffer,
+  tag: Buffer,
+  data: Buffer,
+  key: Buffer
+): string | null {
+  try {
+    const decipher = createDecipheriv("aes-256-gcm", key, iv);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(data), decipher.final()]).toString("utf8");
+  } catch {
+    return null;
+  }
+}
+
 function decryptPasswordReference(encoded: string): string | null {
   try {
     const parts = encoded.split(":");
@@ -1186,9 +1265,16 @@ function decryptPasswordReference(encoded: string): string | null {
     const iv = Buffer.from(parts[1]!, "base64");
     const tag = Buffer.from(parts[2]!, "base64");
     const data = Buffer.from(parts[3]!, "base64");
-    const decipher = createDecipheriv("aes-256-gcm", getPasswordRefCipherKey(), iv);
-    decipher.setAuthTag(tag);
-    return Buffer.concat([decipher.update(data), decipher.final()]).toString("utf8");
+    const primaryKey = getPasswordRefCipherKey();
+    const primary = tryDecryptPasswordReferenceWithKey(iv, tag, data, primaryKey);
+    if (primary !== null) {
+      return primary;
+    }
+    const legacyKey = getLegacyPasswordRefCipherKey();
+    if (!legacyKey.equals(primaryKey)) {
+      return tryDecryptPasswordReferenceWithKey(iv, tag, data, legacyKey);
+    }
+    return null;
   } catch {
     return null;
   }

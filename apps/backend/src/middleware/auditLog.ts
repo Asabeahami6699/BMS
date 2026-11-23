@@ -11,7 +11,7 @@ export function auditLog(req: Request, res: Response, next: NextFunction): void 
   }
 
   res.on("finish", () => {
-    const tenantId = req.userContext?.tenantId ?? req.header("x-tenant-id");
+    const tenantId = req.userContext?.tenantId;
     if (!tenantId) {
       return;
     }

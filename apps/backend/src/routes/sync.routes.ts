@@ -1,12 +1,15 @@
 import { syncBatchSchema } from "@bms/shared";
 import { Router } from "express";
-import { requirePermission } from "../middleware/requirePermission.js";
+import { requireAnyPermission } from "../middleware/requirePermission.js";
 import { submitCustomerRegistration } from "../services/customerService.js";
 import { addCollectionBatchLine } from "../services/collectionBatchService.js";
 
 export const syncRouter = Router();
 
-syncRouter.post("/batch", requirePermission("customers.create"), async (req, res) => {
+syncRouter.post(
+  "/batch",
+  requireAnyPermission("customers.create", "transactions.read", "transactions.create.deposit"),
+  async (req, res) => {
   const context = req.userContext;
   if (!context) {
     res.status(401).json({ error: "Unauthorized" });
@@ -24,6 +27,14 @@ syncRouter.post("/batch", requirePermission("customers.create"), async (req, res
   for (const item of parsed.data.items) {
     try {
       if (item.type === "customer_registration") {
+        if (!context.permissions.includes("customers.create")) {
+          results.push({
+            clientId: item.clientId,
+            ok: false,
+            error: "Insufficient permission to register customers"
+          });
+          continue;
+        }
         const customer = await submitCustomerRegistration(
           context.tenantId,
           context.userId,
@@ -33,6 +44,17 @@ syncRouter.post("/batch", requirePermission("customers.create"), async (req, res
         );
         results.push({ clientId: item.clientId, ok: true, resourceId: customer.id });
       } else {
+        if (
+          context.role !== "field_agent" &&
+          !context.permissions.includes("transactions.create.deposit")
+        ) {
+          results.push({
+            clientId: item.clientId,
+            ok: false,
+            error: "Insufficient permission to record collections"
+          });
+          continue;
+        }
         const collections = await addCollectionBatchLine(
           {
             tenantId: context.tenantId,
@@ -58,5 +80,6 @@ syncRouter.post("/batch", requirePermission("customers.create"), async (req, res
   }
 
   res.json({ results });
-});
+  }
+);
 

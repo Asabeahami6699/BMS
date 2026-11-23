@@ -1,6 +1,7 @@
 import cors from "cors";
 import express from "express";
 import helmet from "helmet";
+import { env } from "./config/env.js";
 import { auditLog } from "./middleware/auditLog.js";
 import { authenticate } from "./middleware/authenticate.js";
 import { attachBranchScope } from "./middleware/branchScope.js";
@@ -48,11 +49,86 @@ import { emailSettingsRouter } from "./routes/emailSettings.routes.js";
 import { notificationPlatformRouter } from "./routes/notificationPlatform.routes.js";
 import { subscriptionRouter } from "./routes/subscription.routes.js";
 
+function isAllowedCorsOrigin(origin: string | undefined): boolean {
+  // Non-browser clients (health checks, mobile WebViews, server-to-server) have no Origin header.
+  if (!origin) {
+    return true;
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(origin);
+  } catch {
+    return false;
+  }
+
+  const normalized = parsed.origin.toLowerCase();
+  const hostname = parsed.hostname.toLowerCase();
+
+  // Explicit env allowlist (FRONTEND_URL + CORS_ALLOWED_ORIGINS)
+  const configured = new Set<string>();
+  if (env.FRONTEND_URL) {
+    try {
+      configured.add(new URL(env.FRONTEND_URL).origin.toLowerCase());
+    } catch {
+      // ignore invalid URL
+    }
+  }
+  if (env.CORS_ALLOWED_ORIGINS) {
+    for (const raw of env.CORS_ALLOWED_ORIGINS.split(",")) {
+      const trimmed = raw.trim();
+      if (!trimmed) continue;
+      try {
+        configured.add(new URL(trimmed).origin.toLowerCase());
+      } catch {
+        configured.add(trimmed.toLowerCase());
+      }
+    }
+  }
+  if (configured.has(normalized)) {
+    return true;
+  }
+
+  // Primary product domain and all tenant subdomains (e.g. ese.aabanker.com)
+  if (
+    parsed.protocol === "https:" &&
+    (hostname === "aabanker.com" || hostname.endsWith(".aabanker.com"))
+  ) {
+    return true;
+  }
+
+  // Allow Vercel preview/production deployments unless explicit CORS_ALLOWED_ORIGINS locks them out
+  if (
+    !env.CORS_ALLOWED_ORIGINS &&
+    parsed.protocol === "https:" &&
+    hostname.endsWith(".vercel.app")
+  ) {
+    return true;
+  }
+
+  // Local development & tenant localhost subdomains (e.g. ese.localhost:5173)
+  if (
+    (parsed.protocol === "http:" || parsed.protocol === "https:") &&
+    (hostname === "localhost" || hostname.endsWith(".localhost") || hostname === "127.0.0.1")
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 export function createApp() {
   const app = express();
   app.set("trust proxy", 1);
   app.use(helmet());
-  app.use(cors());
+  app.use(
+    cors({
+      origin(origin, callback) {
+        callback(null, isAllowedCorsOrigin(origin));
+      },
+      credentials: true
+    })
+  );
   // Registrations include optional base64 photos; default 100kb is too small.
   app.use(express.json({ limit: "6mb" }));
   app.use(globalRateLimit);
