@@ -338,7 +338,7 @@ export function SettingsFormSetupPage() {
         <div>
           <h3>Walk-in deposit slip (6 per A4 sheet)</h3>
           <p className="muted">
-            2 rows × 3 columns (6 cut-out slips on one A4 landscape sheet) with company name &amp; logo, account
+            2 across × 3 down (6 cut-out slips on one upright A4 portrait sheet) with company name &amp; logo, account
             number, account name, amount in words, amount in figures, and signature or thumbprint.
           </p>
         </div>

@@ -6,7 +6,7 @@ export type WalkInDepositSlipOptions = {
   companyPhone?: string;
 };
 
-const SLIP_COUNT = 6; // 2 rows x 3 columns per A4 sheet
+const SLIP_COUNT = 6; // 2 columns x 3 rows on one A4 portrait sheet
 
 const DOCUMENT_STYLES = `
   * { box-sizing: border-box; }
@@ -20,17 +20,18 @@ const DOCUMENT_STYLES = `
     font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
   }
   @page {
-    size: A4 landscape;
+    size: A4 portrait;
     margin: 5mm;
   }
   .sheet {
-    width: 287mm;
-    height: 199mm;
+    width: 200mm;
+    height: 283mm;
     margin: 0 auto;
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    grid-template-rows: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: repeat(3, minmax(0, 1fr));
     gap: 3mm;
+    overflow: hidden;
     page-break-inside: avoid;
     break-inside: avoid;
   }
@@ -41,28 +42,29 @@ const DOCUMENT_STYLES = `
     }
     .sheet {
       background: #fff;
-      width: 297mm;
-      height: 210mm;
+      width: 210mm;
+      height: 297mm;
       padding: 5mm;
       box-shadow: 0 6px 24px rgba(0, 0, 0, 0.14);
     }
   }
   .slip-cut {
     border: 0.75pt dashed #888;
-    padding: 1.6mm;
+    padding: 1.5mm;
     display: flex;
     min-width: 0;
     min-height: 0;
+    overflow: hidden;
   }
   .slip {
     flex: 1 1 auto;
     border: 1.2pt solid #000;
     border-radius: 1.5mm;
-    padding: 2.8mm 3.2mm 2.5mm;
+    padding: 2.6mm 3.2mm 2.3mm;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
-    gap: 1.8mm;
+    gap: 1.5mm;
     min-width: 0;
     min-height: 0;
     background: #fff;
@@ -71,7 +73,7 @@ const DOCUMENT_STYLES = `
     display: flex;
     align-items: center;
     gap: 2.4mm;
-    padding-bottom: 1.8mm;
+    padding-bottom: 1.6mm;
     border-bottom: 1.2pt solid #000;
   }
   .slip__logo {
@@ -87,7 +89,7 @@ const DOCUMENT_STYLES = `
   }
   .slip__company {
     margin: 0;
-    font-size: 8.8pt;
+    font-size: 9pt;
     font-weight: 800;
     text-transform: uppercase;
     letter-spacing: 0.03em;
@@ -101,11 +103,11 @@ const DOCUMENT_STYLES = `
     align-items: center;
     justify-content: space-between;
     gap: 2mm;
-    margin-top: 0.9mm;
+    margin-top: 0.8mm;
   }
   .slip__badge {
     display: inline-block;
-    font-size: 6.4pt;
+    font-size: 6.5pt;
     font-weight: 800;
     text-transform: uppercase;
     letter-spacing: 0.06em;
@@ -121,21 +123,21 @@ const DOCUMENT_STYLES = `
   }
   .slip__date-line {
     display: inline-block;
-    width: 19mm;
+    width: 21mm;
     border-bottom: 0.75pt solid #000;
     vertical-align: bottom;
   }
   .slip__fields {
     display: flex;
     flex-direction: column;
-    gap: 2.3mm;
+    gap: 2mm;
     flex: 1 1 auto;
     justify-content: center;
   }
   .slip__field {
     display: flex;
     flex-direction: column;
-    gap: 0.8mm;
+    gap: 0.7mm;
   }
   .slip__field--inline {
     display: grid;
@@ -144,7 +146,7 @@ const DOCUMENT_STYLES = `
     gap: 1.8mm;
   }
   .slip__label {
-    font-size: 6.7pt;
+    font-size: 6.8pt;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -153,13 +155,13 @@ const DOCUMENT_STYLES = `
   }
   .slip__line {
     border-bottom: 0.8pt solid #000;
-    min-height: 4.5mm;
+    min-height: 4.3mm;
     width: 100%;
   }
   .slip__lines-2 {
     display: flex;
     flex-direction: column;
-    gap: 1.8mm;
+    gap: 1.6mm;
   }
   .slip__amount-row {
     display: grid;
@@ -172,7 +174,7 @@ const DOCUMENT_STYLES = `
     align-items: center;
     border: 1pt solid #000;
     border-radius: 1mm;
-    height: 7.4mm;
+    height: 7mm;
     overflow: hidden;
   }
   .slip__currency {
@@ -195,17 +197,17 @@ const DOCUMENT_STYLES = `
     grid-template-columns: 1fr 19mm;
     gap: 2.8mm;
     align-items: end;
-    padding-top: 1.4mm;
+    padding-top: 1.2mm;
     border-top: 0.6pt dotted #666;
   }
   .slip__sig-wrap {
     display: flex;
     flex-direction: column;
-    gap: 1mm;
+    gap: 0.9mm;
   }
   .slip__sig-line {
     border-bottom: 0.8pt solid #000;
-    height: 10.5mm;
+    height: 9.5mm;
   }
   .slip__sig-caption {
     font-size: 6.3pt;
@@ -217,11 +219,11 @@ const DOCUMENT_STYLES = `
   .slip__thumb {
     border: 0.85pt solid #000;
     border-radius: 1mm;
-    height: 14.2mm;
+    height: 13.2mm;
     display: flex;
     align-items: flex-end;
     justify-content: center;
-    padding-bottom: 0.8mm;
+    padding-bottom: 0.7mm;
     font-size: 5.7pt;
     font-weight: 700;
     text-transform: uppercase;
@@ -229,13 +231,16 @@ const DOCUMENT_STYLES = `
     color: #333;
   }
   @media print {
-    body {
+    html, body {
+      width: 200mm;
+      height: 283mm;
+      overflow: hidden;
       background: #fff;
       padding: 0;
     }
     .sheet {
       width: 100%;
-      height: calc(210mm - 10mm);
+      height: 283mm;
       padding: 0;
       box-shadow: none;
     }
