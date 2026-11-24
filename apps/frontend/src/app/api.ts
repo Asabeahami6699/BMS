@@ -445,12 +445,21 @@ export type FieldAgentTodayCollection = {
   entryCount?: number;
 };
 
+export type PriorUnsubmittedBatchSummary = {
+  id: string;
+  businessDate: string;
+  status: "draft" | "pending_approval" | "posted" | "rejected";
+  totalAmount: number;
+  lineCount: number;
+};
+
 export type FieldAgentTodayCollections = {
   customerIds: string[];
   totalAmount: number;
   items: FieldAgentTodayCollection[];
   batchStatus?: "draft" | "pending_approval" | "posted" | "rejected";
   batchId?: string;
+  priorUnsubmittedBatches?: PriorUnsubmittedBatchSummary[];
 };
 
 export type CalloverVarianceType = "match" | "shortage" | "overage" | "unresolved";
@@ -1453,7 +1462,7 @@ export async function addCollectionBatchLine(payload: {
 }
 
 export async function submitCollectionBatchForApproval(
-  payload: SubmitCalloverReportInput
+  payload: Partial<SubmitCalloverReportInput> & { businessDate?: string; reportDate?: string }
 ): Promise<{ batchId: string; status: string; calloverReportId: string }> {
   return fetchJson<{ batchId: string; status: string; calloverReportId: string }>(
     `${API_BASE_URL}/api/v1/field-agents/me/collection-batches/submit-for-approval`,
@@ -2678,6 +2687,7 @@ export type BranchCounterBootstrapResponse = {
   bankProducts: import("@bms/shared").TenantBankProduct[];
   statement: BranchCounterStatement | null;
   floatSession: BranchFloatSession | null;
+  priorOpenFloatSession?: BranchFloatSession | null;
   floatSummary: BranchFloatSummary;
   pendingFloatRequests: BranchFloatSession[];
   pendingFieldPayouts?: BalanceDisclosure[];
@@ -2737,6 +2747,7 @@ export async function listPendingBranchFloats(): Promise<BranchFloatSession[]> {
 export async function listBranchFloatSessions(options?: {
   date?: string;
   status?: BranchFloatSession["status"];
+  includePriorOpen?: boolean;
 }): Promise<BranchFloatSession[]> {
   const params = new URLSearchParams();
   if (options?.date) {
@@ -2744,6 +2755,9 @@ export async function listBranchFloatSessions(options?: {
   }
   if (options?.status) {
     params.set("status", options.status);
+  }
+  if (options?.includePriorOpen) {
+    params.set("includePriorOpen", "true");
   }
   const query = params.toString();
   const res = await fetchJson<{ sessions: BranchFloatSession[] }>(
@@ -3045,6 +3059,13 @@ export type SusuClosingBalanceSnapshot = {
   notes?: string;
   recordedBy?: string;
   updatedAt?: string;
+  priorDayStatus?: {
+    businessDate: string;
+    closingSaved: boolean;
+    unclosedTillCount: number;
+    unpostedBatchCount: number;
+    unsubmittedDraftBatchCount: number;
+  };
 };
 
 export type BranchCapitalEntryType = "injection" | "drawing";

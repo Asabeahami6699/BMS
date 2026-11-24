@@ -335,11 +335,14 @@ transactionsRouter.get("/branch-float/sessions", requirePermission("transactions
   }
   const businessDate = typeof req.query.date === "string" ? req.query.date : undefined;
   const status = typeof req.query.status === "string" ? req.query.status : undefined;
+  const includePriorOpen =
+    req.query.includePriorOpen === "true" || req.query.includePriorOpen === "1";
   try {
     res.json({
       sessions: await listBranchFloatSessions(context.tenantId, {
         businessDate,
-        status: status as FloatSessionStatus | undefined
+        status: status as FloatSessionStatus | undefined,
+        includePriorOpen
       })
     });
   } catch (error) {

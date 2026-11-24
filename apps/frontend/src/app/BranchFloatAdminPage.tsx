@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useMemo } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import type { AppRole, BranchFloatSession } from "./api";
 import { isFloatTopUpRequest, pendingFloatAmount } from "./api";
@@ -54,8 +54,12 @@ export function BranchFloatAdminPage({ role }: Props) {
   const allocate = useTillFloatAdminStore((s) => s.allocate);
   const push = useTillFloatAdminStore((s) => s.push);
   const settle = useTillFloatAdminStore((s) => s.settle);
+  const closeSession = useTillFloatAdminStore((s) => s.closeSession);
   const approveExtraCash = useTillFloatAdminStore((s) => s.approveExtraCash);
   const approveExpense = useTillFloatAdminStore((s) => s.approveExpense);
+  const [closingTarget, setClosingTarget] = useState<BranchFloatSession | null>(null);
+  const [closingCash, setClosingCash] = useState("");
+  const [closingNote, setClosingNote] = useState("");
 
   usePageLoading(loading || busy, "branch-float");
 
@@ -146,7 +150,48 @@ export function BranchFloatAdminPage({ role }: Props) {
     }
   }
 
+  const todayIso = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const priorOpenSessions = useMemo(
+    () => todaySessions.filter((s) => s.status === "open" && s.businessDate < todayIso),
+    [todaySessions, todayIso]
+  );
   const closedAwaitingSettle = todaySessions.filter((s) => s.status === "closed");
+
+  function expectedCashForSession(s: BranchFloatSession): number {
+    if (s.expectedClosing != null) return s.expectedClosing;
+    return Math.max(
+      0,
+      Math.round(
+        (s.initialCash +
+          s.extraCash +
+          s.totalDeposits +
+          s.totalDailySusu -
+          s.totalWithdrawals -
+          (s.totalFieldWithdrawals ?? 0) -
+          s.totalExpenses) *
+          100
+      ) / 100
+    );
+  }
+
+  async function handleClosePrior(e: FormEvent) {
+    e.preventDefault();
+    if (!closingTarget) return;
+    const actual = Number(closingCash);
+    if (!Number.isFinite(actual) || actual < 0) {
+      showToast("Enter the physical cash counted", "error");
+      return;
+    }
+    try {
+      await closeSession(closingTarget, actual, closingNote.trim() || undefined);
+      showToast(`Closed ${closingTarget.businessDate} till`, "success");
+      setClosingTarget(null);
+      setClosingCash("");
+      setClosingNote("");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Could not close till", "error");
+    }
+  }
 
   return (
     <div className="branch-float-admin">
@@ -174,6 +219,106 @@ export function BranchFloatAdminPage({ role }: Props) {
         <p className="muted">Only admin or coordinator can manage till float.</p>
       ) : (
         <>
+          {priorOpenSessions.length > 0 ? (
+            <section className="overview-panel eod-guard-panel" role="alert">
+              <div className="eod-guard-panel__head">
+                <div>
+                  <h2 className="overview-panel__title">
+                    Prior unclosed tills ({priorOpenSessions.length})
+                  </h2>
+                  <p className="overview-panel__lead muted">
+                    These tellers cannot open a new till today until their earlier session is closed.
+                    Admin or coordinator can close on behalf of an absent teller.
+                  </p>
+                </div>
+              </div>
+              <div className="eod-guard-list">
+                {priorOpenSessions.map((session) => {
+                  const exp = expectedCashForSession(session);
+                  return (
+                    <div key={session.id} className="eod-guard-list__row">
+                      <div>
+                        <strong>{userLabel(session.cashierUserId)}</strong>
+                        <span className="muted">
+                          {" "}
+                          · {branchLabel(session.branchId)} ·{" "}
+                          <span className="eod-guard-date">{session.businessDate}</span> · Expected
+                          cash {formatMoney(exp)}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        className="button secondary"
+                        disabled={busy}
+                        onClick={() => {
+                          setClosingTarget(session);
+                          setClosingCash(exp.toFixed(2));
+                          setClosingNote("");
+                        }}
+                      >
+                        Close {session.businessDate} till
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          ) : null}
+
+          <Modal
+            open={Boolean(closingTarget)}
+            onClose={() => !busy && setClosingTarget(null)}
+            title={`Close unclosed till (${closingTarget?.businessDate ?? ""})`}
+            subtitle={closingTarget ? `${userLabel(closingTarget.cashierUserId)} · ${branchLabel(closingTarget.branchId)}` : undefined}
+            panelClassName="modal-panel--till-movement"
+            footer={
+              <>
+                <button
+                  type="button"
+                  className="button secondary"
+                  disabled={busy}
+                  onClick={() => setClosingTarget(null)}
+                >
+                  Cancel
+                </button>
+                <button type="submit" form="admin-close-prior-till" className="button" disabled={busy}>
+                  {busy ? "Closing…" : "Close till"}
+                </button>
+              </>
+            }
+          >
+            <form
+              id="admin-close-prior-till"
+              className="till-movement-form"
+              onSubmit={(e) => void handleClosePrior(e)}
+            >
+              <p className="muted till-movement-form__hint">
+                Expected cash:{" "}
+                <strong>{closingTarget ? formatMoney(expectedCashForSession(closingTarget)) : "—"}</strong>.
+                Any difference automatically records a Branch Till overage/shortage case.
+              </p>
+              <label className="field">
+                <span>Physical cash counted (GHS)</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={closingCash}
+                  onChange={(e) => setClosingCash(e.target.value)}
+                  required
+                />
+              </label>
+              <label className="field">
+                <span>Note (optional)</span>
+                <input
+                  type="text"
+                  value={closingNote}
+                  onChange={(e) => setClosingNote(e.target.value)}
+                  placeholder="e.g. Closed on behalf of absent teller"
+                />
+              </label>
+            </form>
+          </Modal>
           <section className="overview-panel branch-float-admin__push">
             <div className="branch-float-admin__push-header">
               <div>

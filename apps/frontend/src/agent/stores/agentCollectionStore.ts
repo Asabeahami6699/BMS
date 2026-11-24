@@ -2,7 +2,8 @@ import { create } from "zustand";
 import {
   getFieldAgentTodayCollections,
   type FieldAgentTodayCollection,
-  type FieldAgentTodayCollections
+  type FieldAgentTodayCollections,
+  type PriorUnsubmittedBatchSummary
 } from "../../app/api";
 import { getOfflineQueue } from "../../lib/offlineQueue";
 
@@ -12,6 +13,7 @@ type AgentCollectionState = {
   totalAmount: number;
   batchStatus?: FieldAgentTodayCollections["batchStatus"];
   batchId?: string;
+  priorUnsubmittedBatches: PriorUnsubmittedBatchSummary[];
   loading: boolean;
   pendingLocalIds: string[];
   refreshToday: () => Promise<void>;
@@ -49,7 +51,13 @@ function buildState(
   pendingLocal: FieldAgentTodayCollection[]
 ): Pick<
   AgentCollectionState,
-  "customerIds" | "items" | "totalAmount" | "pendingLocalIds" | "batchStatus" | "batchId"
+  | "customerIds"
+  | "items"
+  | "totalAmount"
+  | "pendingLocalIds"
+  | "batchStatus"
+  | "batchId"
+  | "priorUnsubmittedBatches"
 > {
   const serverItems = server.items;
   const byCustomer = new Map<string, FieldAgentTodayCollection>();
@@ -72,6 +80,7 @@ function buildState(
     totalAmount: server.totalAmount > 0 ? server.totalAmount : items.reduce((sum, i) => sum + i.amount, 0),
     batchStatus: server.batchStatus,
     batchId: server.batchId,
+    priorUnsubmittedBatches: server.priorUnsubmittedBatches ?? [],
     pendingLocalIds: pendingLocal
       .map((i) => i.customerId)
       .filter((id) => !serverItems.some((s) => s.customerId === id))
@@ -84,6 +93,7 @@ export const useAgentCollectionStore = create<AgentCollectionState>((set, get) =
   totalAmount: 0,
   batchStatus: undefined,
   batchId: undefined,
+  priorUnsubmittedBatches: [],
   loading: false,
   pendingLocalIds: [],
 

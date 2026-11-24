@@ -73,12 +73,22 @@ export type FieldAgentTodayCollection = {
   entryCount?: number;
 };
 
+export type PriorUnsubmittedBatchSummary = {
+  id: string;
+  businessDate: string;
+  status: CollectionBatchStatus;
+  totalAmount: number;
+  lineCount: number;
+};
+
 export type FieldAgentTodayCollections = {
   customerIds: string[];
   totalAmount: number;
   items: FieldAgentTodayCollection[];
   batchStatus?: CollectionBatchStatus;
   batchId?: string;
+  /** Earlier-date draft/rejected batches with recorded lines that were never submitted. */
+  priorUnsubmittedBatches?: PriorUnsubmittedBatchSummary[];
 };
 
 type AgentContext = {
@@ -398,10 +408,66 @@ async function getOrCreateDraftBatch(
   return batch;
 }
 
+async function listAgentPriorUnsubmittedBatches(
+  tenantId: string,
+  fieldAgentId: string,
+  beforeDate: string
+): Promise<PriorUnsubmittedBatchSummary[]> {
+  const supabase = getSupabaseAdminClient();
+  if (supabase) {
+    const { data, error } = await supabase
+      .from("field_agent_collection_batches")
+      .select("id, business_date, status, total_amount, line_count")
+      .eq("tenant_id", tenantId)
+      .eq("field_agent_id", fieldAgentId)
+      .lt("business_date", beforeDate)
+      .in("status", ["draft", "rejected"])
+      .gt("line_count", 0)
+      .order("business_date", { ascending: true })
+      .limit(14);
+    if (error) {
+      return [];
+    }
+    return (data ?? []).map((row) => ({
+      id: String(row.id),
+      businessDate: String(row.business_date).slice(0, 10),
+      status: row.status as CollectionBatchStatus,
+      totalAmount: Number(row.total_amount ?? 0),
+      lineCount: Number(row.line_count ?? 0)
+    }));
+  }
+
+  const out: PriorUnsubmittedBatchSummary[] = [];
+  for (const b of memoryBatches.values()) {
+    if (
+      b.tenantId === tenantId &&
+      b.fieldAgentId === fieldAgentId &&
+      b.businessDate < beforeDate &&
+      (b.status === "draft" || b.status === "rejected") &&
+      b.lineCount > 0
+    ) {
+      out.push({
+        id: b.id,
+        businessDate: b.businessDate,
+        status: b.status,
+        totalAmount: b.totalAmount,
+        lineCount: b.lineCount
+      });
+    }
+  }
+  return out.sort((a, b) => a.businessDate.localeCompare(b.businessDate));
+}
+
 export async function getAgentTodayCollections(context: AgentContext): Promise<FieldAgentTodayCollections> {
   const businessDate = todayDate();
-  const batch = await loadBatchRow(context.tenantId, context.userId, businessDate);
-  return toTodayCollections(batch);
+  const [batch, priorUnsubmittedBatches] = await Promise.all([
+    loadBatchRow(context.tenantId, context.userId, businessDate),
+    listAgentPriorUnsubmittedBatches(context.tenantId, context.userId, businessDate)
+  ]);
+  return {
+    ...toTodayCollections(batch),
+    priorUnsubmittedBatches
+  };
 }
 
 export async function addCollectionBatchLine(
@@ -465,10 +531,24 @@ export async function addCollectionBatchLine(
 
 export async function submitCollectionBatchForApproval(
   context: AgentContext,
-  calloverInput: SubmitCalloverInput
+  calloverInput: Partial<SubmitCalloverInput> & { businessDate?: string }
 ): Promise<{ batchId: string; status: CollectionBatchStatus; calloverReportId: string }> {
-  const businessDate = todayDate();
-  const batch = await loadBatchHeader(context.tenantId, context.userId, businessDate);
+  const requestedDate =
+    typeof calloverInput?.businessDate === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(calloverInput.businessDate.trim())
+      ? calloverInput.businessDate.trim()
+      : todayDate();
+  const businessDate = requestedDate;
+  const hasExplicitLines = Array.isArray(calloverInput?.lines) && calloverInput.lines.length > 0;
+  let batch: BatchHeader | null = null;
+  let loadedBatchLines: CollectionBatchLine[] = [];
+  if (hasExplicitLines) {
+    batch = await loadBatchHeader(context.tenantId, context.userId, businessDate);
+  } else {
+    const fullBatch = await loadBatchRow(context.tenantId, context.userId, businessDate);
+    batch = fullBatch;
+    loadedBatchLines = fullBatch?.lines ?? [];
+  }
   if (!batch || batch.lineCount <= 0) {
     throw new Error("Record at least one collection before sending for approval");
   }
@@ -476,7 +556,45 @@ export async function submitCollectionBatchForApproval(
     throw new Error("This batch cannot be submitted in its current status");
   }
 
-  const callover = await submitCalloverReport(context.tenantId, context.userId, calloverInput);
+  let effectiveLines = calloverInput.lines;
+  let effectiveSummary = calloverInput.summary;
+  if (!hasExplicitLines) {
+    const byCustomer = new Map<string, number>();
+    for (const line of loadedBatchLines) {
+      byCustomer.set(
+        line.customerId,
+        Math.round(((byCustomer.get(line.customerId) ?? 0) + line.amount) * 100) / 100
+      );
+    }
+    const customers = await Promise.all(
+      [...byCustomer.keys()].map(async (cid) => {
+        const c = await getCustomerById(context.tenantId, cid).catch(() => null);
+        return [cid, c?.fullName ?? cid] as const;
+      })
+    );
+    const nameMap = new Map(customers);
+    effectiveLines = [...byCustomer.entries()].map(([customerId, amount]) => ({
+      customerId,
+      customerName: nameMap.get(customerId) ?? customerId,
+      documentAmount: amount,
+      appAmount: amount,
+      varianceType: "match" as const
+    }));
+    const total = Math.round(effectiveLines.reduce((s, l) => s + l.appAmount, 0) * 100) / 100;
+    effectiveSummary = {
+      totalDocument: total,
+      totalApp: total,
+      totalVariance: 0,
+      unresolvedCount: 0
+    };
+  }
+
+  const callover = await submitCalloverReport(context.tenantId, context.userId, {
+    ...calloverInput,
+    lines: effectiveLines,
+    summary: effectiveSummary,
+    reportDate: calloverInput.reportDate ?? businessDate
+  });
   await markBatchPendingApproval(batch, callover.id, calloverInput.agentNotes);
 
   void notifyTenantStaff({
@@ -579,20 +697,23 @@ export async function listPendingCollectionBatches(
       .from("field_agent_collection_batches")
       .select("*")
       .eq("tenant_id", context.tenantId)
-      .eq("business_date", businessDate)
+      .lte("business_date", businessDate)
       .eq("status", "pending_approval");
 
     if (options?.fieldAgentId) {
       query = query.eq("field_agent_id", options.fieldAgentId);
     }
 
-    const { data, error } = await query.order("submitted_at", { ascending: false });
+    const { data, error } = await query
+      .order("business_date", { ascending: true })
+      .order("submitted_at", { ascending: false });
     if (error) {
       throw new Error(`Failed to list pending batches: ${error.message}`);
     }
 
     for (const row of data ?? []) {
-      const batch = await loadBatchRow(context.tenantId, row.field_agent_id, businessDate);
+      const rowDate = String(row.business_date).slice(0, 10);
+      const batch = await loadBatchRow(context.tenantId, row.field_agent_id, rowDate);
       if (!batch) {
         continue;
       }
@@ -616,7 +737,7 @@ export async function listPendingCollectionBatches(
   for (const batch of memoryBatches.values()) {
     if (
       batch.tenantId === context.tenantId &&
-      batch.businessDate === businessDate &&
+      batch.businessDate <= businessDate &&
       batch.status === "pending_approval" &&
       (!options?.fieldAgentId || batch.fieldAgentId === options.fieldAgentId)
     ) {
@@ -635,7 +756,7 @@ export async function listPendingCollectionBatches(
       });
     }
   }
-  return results;
+  return results.sort((a, b) => a.businessDate.localeCompare(b.businessDate));
 }
 
 export async function getCollectionBatchById(

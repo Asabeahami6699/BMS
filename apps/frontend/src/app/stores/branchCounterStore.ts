@@ -130,6 +130,7 @@ type BranchCounterState = {
   tellerCalloverCheckedBySession: Record<string, string[]>;
   tellerCalloverConfirmedBySession: Record<string, boolean>;
   floatSession: BranchFloatSession | null;
+  priorOpenFloatSession: BranchFloatSession | null;
   floatSummary: BranchFloatSummary;
   pendingFloatRequests: BranchFloatSession[];
   pendingFieldPayouts: BalanceDisclosure[];
@@ -239,6 +240,7 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
   tellerCalloverCheckedBySession: {},
   tellerCalloverConfirmedBySession: {},
   floatSession: null,
+  priorOpenFloatSession: null,
   floatSummary: null,
   pendingFloatRequests: [],
   pendingFieldPayouts: [],
@@ -326,6 +328,7 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
           statement: data.statement,
           tellerTodayStatement,
           floatSession: data.floatSession,
+          priorOpenFloatSession: data.priorOpenFloatSession ?? null,
           floatSummary: data.floatSummary,
           pendingFloatRequests: data.pendingFloatRequests,
           pendingFieldPayouts: data.pendingFieldPayouts ?? [],
@@ -402,6 +405,7 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
             statement: data.statement,
             tellerTodayStatement,
             floatSession: data.floatSession,
+            priorOpenFloatSession: data.priorOpenFloatSession ?? null,
             floatSummary: data.floatSummary,
             pendingFloatRequests: data.pendingFloatRequests,
             pendingFieldPayouts: data.pendingFieldPayouts ?? [],
@@ -429,6 +433,7 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
             statement: data.statement,
             tellerTodayStatement,
             floatSession: data.floatSession,
+            priorOpenFloatSession: data.priorOpenFloatSession ?? null,
             floatSummary: data.floatSummary,
             pendingFloatRequests: data.pendingFloatRequests,
             pendingFieldPayouts: data.pendingFieldPayouts ?? [],
@@ -581,6 +586,7 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
           set({
             statement: data.statement,
             floatSession: data.floatSession,
+            priorOpenFloatSession: data.priorOpenFloatSession ?? null,
             floatSummary: data.floatSummary,
             pendingFloatRequests: data.pendingFloatRequests,
             pendingFieldPayouts: data.pendingFieldPayouts ?? [],

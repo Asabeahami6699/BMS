@@ -15,6 +15,10 @@ const calloverLineSchema = z.object({
 });
 
 const submitCalloverSchema = z.object({
+  reportDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
   lines: z.array(calloverLineSchema).min(1),
   summary: z.object({
     totalDocument: z.number().nonnegative(),
@@ -184,7 +188,7 @@ export async function submitCalloverReport(
 ): Promise<{ id: string; status: string; hasDifferences: boolean }> {
   const payload = submitCalloverSchema.parse(input);
   const id = randomUUID();
-  const reportDate = new Date().toISOString().slice(0, 10);
+  const reportDate = payload.reportDate ?? new Date().toISOString().slice(0, 10);
   const createdAt = new Date().toISOString();
   const diffLines = payload.lines.filter((l) => l.varianceType !== "match");
   const hasDifferences = payload.summary.unresolvedCount > 0 || diffLines.length > 0;

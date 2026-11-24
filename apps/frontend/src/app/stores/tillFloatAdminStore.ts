@@ -4,6 +4,7 @@ import {
   allocateBranchFloat,
   approveBranchFloatExpense,
   approveBranchFloatExtraCash,
+  closeBranchFloat,
   getTenantId,
   isFloatTopUpRequest,
   listBranchFloatSessions,
@@ -63,6 +64,7 @@ type TillFloatAdminState = {
   allocate: (session: BranchFloatSession) => Promise<void>;
   push: () => Promise<void>;
   settle: (session: BranchFloatSession) => Promise<void>;
+  closeSession: (session: BranchFloatSession, actualClosing: number, varianceNote?: string) => Promise<void>;
   approveExtraCash: (session: BranchFloatSession) => Promise<void>;
   approveExpense: (session: BranchFloatSession) => Promise<void>;
 };
@@ -113,7 +115,7 @@ export const useTillFloatAdminStore = create<TillFloatAdminState>((set, get) => 
       try {
         const [pendingRows, sessions] = await Promise.all([
           listPendingBranchFloats(),
-          listBranchFloatSessions({ date: todayIso() }),
+          listBranchFloatSessions({ date: todayIso(), includePriorOpen: true }),
           useBranchesStore.getState().refresh(),
           useUsersStore.getState().refresh()
         ]);
@@ -151,7 +153,7 @@ export const useTillFloatAdminStore = create<TillFloatAdminState>((set, get) => 
       try {
         const [pendingRows, sessions] = await Promise.all([
           listPendingBranchFloats(),
-          listBranchFloatSessions({ date: todayIso() })
+          listBranchFloatSessions({ date: todayIso(), includePriorOpen: true })
         ]);
         set({
           pending: pendingRows,
@@ -265,6 +267,21 @@ export const useTillFloatAdminStore = create<TillFloatAdminState>((set, get) => 
       await get().refreshSilent();
     } catch (error) {
       const message = toUserFacingError(error, "Failed to settle");
+      set({ error: message });
+      throw new Error(message);
+    } finally {
+      set({ busy: false });
+    }
+  },
+
+  closeSession: async (session, actualClosing, varianceNote) => {
+    set({ busy: true, error: null });
+    try {
+      await closeBranchFloat(session.id, { actualClosing, varianceNote });
+      await get().refreshSilent();
+      void useBranchCounterStore.getState().refreshSilent();
+    } catch (error) {
+      const message = toUserFacingError(error, "Failed to close till");
       set({ error: message });
       throw new Error(message);
     } finally {

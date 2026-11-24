@@ -560,6 +560,11 @@ export function CalloverBatchesPage({ role }: Props) {
                     <div className="callover-batch-card__identity">
                       <div className="callover-batch-card__title-row">
                         <h2>{batch.fieldAgentName}</h2>
+                        {batch.businessDate < businessDate ? (
+                          <span className="callover-batch-card__badge callover-batch-card__badge--shortage">
+                            Overdue · {batch.businessDate}
+                          </span>
+                        ) : null}
                         <span
                           className={`callover-batch-card__badge${
                             hasDiffs || !totalsMatch || cash.tone === "muted"

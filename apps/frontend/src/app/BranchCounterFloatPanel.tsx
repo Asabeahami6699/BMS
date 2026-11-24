@@ -98,6 +98,7 @@ export function BranchCounterFloatPanel({
   const {
     tellerTodayStatement,
     fallbackStatement,
+    priorOpenFloatSession,
     tellerCalloverCheckedBySession,
     tellerCalloverConfirmedBySession,
     clearTellerCallover
@@ -105,6 +106,7 @@ export function BranchCounterFloatPanel({
     useShallow((s) => ({
       tellerTodayStatement: s.tellerTodayStatement,
       fallbackStatement: s.statement,
+      priorOpenFloatSession: s.priorOpenFloatSession,
       tellerCalloverCheckedBySession: s.tellerCalloverCheckedBySession,
       tellerCalloverConfirmedBySession: s.tellerCalloverConfirmedBySession,
       clearTellerCallover: s.clearTellerCallover
@@ -113,6 +115,9 @@ export function BranchCounterFloatPanel({
   const [expanded, setExpanded] = useState(false);
   const [actualClosing, setActualClosing] = useState("");
   const [varianceNote, setVarianceNote] = useState("");
+  const [priorCloseOpen, setPriorCloseOpen] = useState(false);
+  const [priorActualClosing, setPriorActualClosing] = useState("");
+  const [priorVarianceNote, setPriorVarianceNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [allocateAmount, setAllocateAmount] = useState<Record<string, string>>({});
   const [allocateInitialCash, setAllocateInitialCash] = useState<Record<string, string>>({});
@@ -464,10 +469,136 @@ export function BranchCounterFloatPanel({
     }
   }
 
+  async function handleClosePriorTill(event: FormEvent) {
+    event.preventDefault();
+    if (!priorOpenFloatSession) {
+      return;
+    }
+    const actual = Number(priorActualClosing);
+    if (!Number.isFinite(actual) || actual < 0) {
+      showToast("Enter the physical cash counted for the prior till", "error");
+      return;
+    }
+    setBusy(true);
+    try {
+      await closeBranchFloat(priorOpenFloatSession.id, {
+        actualClosing: actual,
+        varianceNote: priorVarianceNote.trim() || undefined
+      });
+      showToast(`Closed ${priorOpenFloatSession.businessDate} till — you can now open today's till`, "success");
+      setPriorCloseOpen(false);
+      setPriorActualClosing("");
+      setPriorVarianceNote("");
+      onUpdated();
+    } catch (error) {
+      showToast(toUserFacingError(error, "Could not close prior till"), "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const priorExpectedCash = useMemo(() => {
+    if (!priorOpenFloatSession) return 0;
+    if (priorOpenFloatSession.expectedClosing != null) return priorOpenFloatSession.expectedClosing;
+    return Math.max(
+      0,
+      Math.round(
+        (priorOpenFloatSession.initialCash +
+          priorOpenFloatSession.extraCash +
+          priorOpenFloatSession.totalDeposits +
+          priorOpenFloatSession.totalDailySusu -
+          priorOpenFloatSession.totalWithdrawals -
+          (priorOpenFloatSession.totalFieldWithdrawals ?? 0) -
+          priorOpenFloatSession.totalExpenses) *
+          100
+      ) / 100
+    );
+  }, [priorOpenFloatSession]);
+
   const copy = ACTION_COPY[action];
 
   return (
     <section className={`branch-float card branch-float--${expanded ? "expanded" : "collapsed"}`}>
+      {priorOpenFloatSession ? (
+        <div className="eod-guard-banner" role="alert">
+          <div className="eod-guard-banner__body">
+            <strong>Unclosed till from {priorOpenFloatSession.businessDate}</strong>
+            <p className="muted">
+              Your previous till is still open (expected cash{" "}
+              <strong>{formatMoney(priorExpectedCash)}</strong>). Close it before opening today&apos;s
+              till.
+            </p>
+          </div>
+          <div className="eod-guard-banner__actions">
+            <button
+              type="button"
+              className="button"
+              disabled={busy}
+              onClick={() => {
+                setPriorActualClosing(priorExpectedCash.toFixed(2));
+                setPriorVarianceNote("");
+                setPriorCloseOpen(true);
+              }}
+            >
+              Close {priorOpenFloatSession.businessDate} till
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      <Modal
+        open={priorCloseOpen && Boolean(priorOpenFloatSession)}
+        onClose={() => !busy && setPriorCloseOpen(false)}
+        title={`Close unclosed till (${priorOpenFloatSession?.businessDate ?? ""})`}
+        subtitle="Count and record the physical cash from this prior session so you can open today's till."
+        panelClassName="modal-panel--till-movement"
+        footer={
+          <>
+            <button
+              type="button"
+              className="button secondary"
+              disabled={busy}
+              onClick={() => setPriorCloseOpen(false)}
+            >
+              Cancel
+            </button>
+            <button type="submit" form="close-prior-till-form" className="button" disabled={busy}>
+              {busy ? "Closing…" : "Confirm & close till"}
+            </button>
+          </>
+        }
+      >
+        <form
+          id="close-prior-till-form"
+          className="till-movement-form"
+          onSubmit={(e) => void handleClosePriorTill(e)}
+        >
+          <p className="muted till-movement-form__hint">
+            Expected cash in drawer: <strong>{formatMoney(priorExpectedCash)}</strong>. Any
+            difference automatically opens a Branch Till overage/shortage case.
+          </p>
+          <label className="field">
+            <span>Physical cash counted (GHS)</span>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={priorActualClosing}
+              onChange={(e) => setPriorActualClosing(e.target.value)}
+              required
+            />
+          </label>
+          <label className="field">
+            <span>Note (optional)</span>
+            <input
+              type="text"
+              value={priorVarianceNote}
+              onChange={(e) => setPriorVarianceNote(e.target.value)}
+              placeholder="Reason for late close or variance"
+            />
+          </label>
+        </form>
+      </Modal>
       <div className="branch-float__top">
         <button
           type="button"

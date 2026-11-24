@@ -11,6 +11,7 @@ import { listCustomers } from "./customerService.js";
 import {
   floatSessionSummary,
   getFloatSessionForCashier,
+  getPriorOpenFloatSessionForCashier,
   listPendingFloatRequests,
   type BranchFloatSession
 } from "./branchFloatService.js";
@@ -27,6 +28,8 @@ export type BranchCounterBootstrap = {
     summary: ReturnType<typeof summarizeBranchCounterStatement>;
   } | null;
   floatSession: BranchFloatSession | null;
+  /** Oldest unclosed till from a prior business date for this cashier (Targeted EOD Guard). */
+  priorOpenFloatSession: BranchFloatSession | null;
   floatSummary: ReturnType<typeof floatSessionSummary>;
   pendingFloatRequests: BranchFloatSession[];
   /** Coordinator/CS-approved field cash withdrawals awaiting teller Pay now. */
@@ -82,13 +85,17 @@ export async function getBranchCounterBootstrap(
     }
 
     let floatSession: BranchFloatSession | null = null;
+    let priorOpenFloatSession: BranchFloatSession | null = null;
     if (options.cashierUserId) {
-      floatSession = await getFloatSessionForCashier(
-        tenantId,
-        options.cashierUserId,
-        date,
-        resolvedBranchId ?? undefined
-      );
+      [floatSession, priorOpenFloatSession] = await Promise.all([
+        getFloatSessionForCashier(
+          tenantId,
+          options.cashierUserId,
+          date,
+          resolvedBranchId ?? undefined
+        ),
+        getPriorOpenFloatSessionForCashier(tenantId, options.cashierUserId, date)
+      ]);
     }
 
     const pendingFloatRequests = options.includePending
@@ -107,6 +114,7 @@ export async function getBranchCounterBootstrap(
       bankProducts: [],
       statement,
       floatSession,
+      priorOpenFloatSession,
       floatSummary: floatSessionSummary(floatSession),
       pendingFloatRequests,
       pendingFieldPayouts
@@ -155,16 +163,20 @@ export async function getBranchCounterBootstrap(
   }
 
   let floatSession: BranchFloatSession | null = null;
+  let priorOpenFloatSession: BranchFloatSession | null = null;
   if (!options.minimal && options.cashierUserId) {
     const resolvedBranchId = options.branchId
       ? await resolveBranchId(tenantId, options.branchId)
       : undefined;
-    floatSession = await getFloatSessionForCashier(
-      tenantId,
-      options.cashierUserId,
-      date,
-      resolvedBranchId ?? undefined
-    );
+    [floatSession, priorOpenFloatSession] = await Promise.all([
+      getFloatSessionForCashier(
+        tenantId,
+        options.cashierUserId,
+        date,
+        resolvedBranchId ?? undefined
+      ),
+      getPriorOpenFloatSessionForCashier(tenantId, options.cashierUserId, date)
+    ]);
   }
 
   const pendingFloatRequests =
@@ -190,6 +202,7 @@ export async function getBranchCounterBootstrap(
     bankProducts: tellerBankProducts,
     statement,
     floatSession,
+    priorOpenFloatSession,
     floatSummary: floatSessionSummary(floatSession),
     pendingFloatRequests,
     pendingFieldPayouts

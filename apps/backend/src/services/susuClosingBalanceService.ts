@@ -60,6 +60,14 @@ export type SusuClosingBalanceSnapshot = {
   notes?: string;
   recordedBy?: string;
   updatedAt?: string;
+  /** Targeted EOD Guard checklist for the immediately preceding business day. */
+  priorDayStatus?: {
+    businessDate: string;
+    closingSaved: boolean;
+    unclosedTillCount: number;
+    unpostedBatchCount: number;
+    unsubmittedDraftBatchCount: number;
+  };
 };
 
 type TillCashRollup = {
@@ -507,31 +515,144 @@ async function loadLatestPriorClosingRow(
  * holidays, and date switches cleanly). Uses `closingVaultCounted` if recorded; otherwise recomputes
  * that prior day's `expectedClosingVault`.
  */
+function nextBusinessDate(dateStr: string): string {
+  const d = new Date(`${dateStr}T12:00:00.000Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Targeted EOD Guard vault carry-forward:
+ * Starts from the latest saved prior closing row (counted vault if present, otherwise expected),
+ * then chains day-by-day through every intermediate unsaved day up to yesterday (max 31 days)
+ * so missed closing sheets never drop a day's physical cash movement.
+ */
 async function computeSuggestedOpeningVault(
   tenantId: string,
   context: RoleContext,
   branchId: string,
   businessDate: string
 ): Promise<number> {
+  const yesterday = priorBusinessDate(businessDate);
   const latestPrior = await loadLatestPriorClosingRow(tenantId, branchId, businessDate);
-  const targetDate = latestPrior?.businessDate ?? priorBusinessDate(businessDate);
   const priorSaved = latestPrior?.record ?? null;
 
-  if (priorSaved?.closingVaultCounted != null) {
-    return roundMoney(priorSaved.closingVaultCounted);
+  let runningVault = 0;
+  let chainStartDate = yesterday;
+
+  if (latestPrior && priorSaved) {
+    if (priorSaved.closingVaultCounted != null) {
+      runningVault = roundMoney(priorSaved.closingVaultCounted);
+    } else {
+      try {
+        const savedSnap = await buildSnapshot(tenantId, context, branchId, latestPrior.businessDate, {
+          skipPriorSuggestion: true
+        });
+        runningVault = roundMoney(savedSnap.expectedClosingVault);
+      } catch {
+        runningVault = priorSaved.openingVault != null ? roundMoney(priorSaved.openingVault) : 0;
+      }
+    }
+    if (latestPrior.businessDate >= yesterday) {
+      return runningVault;
+    }
+    chainStartDate = nextBusinessDate(latestPrior.businessDate);
   }
 
-  try {
-    const priorSnap = await buildSnapshot(tenantId, context, branchId, targetDate, {
-      skipPriorSuggestion: true
-    });
-    return roundMoney(priorSnap.expectedClosingVault);
-  } catch {
-    if (priorSaved?.openingVault != null) {
-      return roundMoney(priorSaved.openingVault);
+  // Walk intermediate unsaved dates forward up to yesterday (cap at 31 days for speed).
+  let cursor = chainStartDate;
+  let steps = 0;
+  while (cursor <= yesterday && steps < 31) {
+    steps += 1;
+    try {
+      const [activity, till, capital] = await Promise.all([
+        loadDayActivity(tenantId, branchId, cursor),
+        loadTillCashRollup(tenantId, branchId, cursor),
+        loadDayBranchCapitalTotals(tenantId, branchId, cursor)
+      ]);
+      const dayDelta = roundMoney(
+        capital.dayInjections -
+          capital.dayDrawings -
+          till.physicalCash +
+          activity.fieldAgentDeposits -
+          activity.fieldAgentWithdrawals +
+          till.cashReturnedFromClosedTills
+      );
+      runningVault = roundMoney(runningVault + dayDelta);
+    } catch {
+      // Keep running total if a single historical day query fails.
     }
-    return 0;
+    cursor = nextBusinessDate(cursor);
   }
+
+  return roundMoney(runningVault);
+}
+
+async function loadPriorDayEodStatus(
+  tenantId: string,
+  branchId: string,
+  businessDate: string
+): Promise<NonNullable<SusuClosingBalanceSnapshot["priorDayStatus"]>> {
+  const priorDate = priorBusinessDate(businessDate);
+  const supabase = getSupabaseAdminClient();
+  const [savedPrior, unclosedTillCount] = await Promise.all([
+    loadSavedClosingRow(tenantId, branchId, priorDate).catch(() => null),
+    (async () => {
+      try {
+        const { listPriorUnclosedFloatSessions } = await import("./branchFloatService.js");
+        const openTills = await listPriorUnclosedFloatSessions(tenantId, businessDate, branchId);
+        return openTills.length;
+      } catch {
+        return 0;
+      }
+    })()
+  ]);
+
+  let unpostedBatchCount = 0;
+  let unsubmittedDraftBatchCount = 0;
+  if (supabase) {
+    try {
+      const [{ data: branchAgents }, { data: priorBatches }] = await Promise.all([
+        supabase
+          .from("users")
+          .select("id, branch_id")
+          .eq("tenant_id", tenantId)
+          .eq("role", "field_agent"),
+        supabase
+          .from("field_agent_collection_batches")
+          .select("field_agent_id, status, line_count")
+          .eq("tenant_id", tenantId)
+          .eq("business_date", priorDate)
+          .in("status", ["pending_approval", "draft", "rejected"])
+          .gt("line_count", 0)
+      ]);
+      const branchAgentIds = new Set(
+        (branchAgents ?? [])
+          .filter((u) => !u.branch_id || String(u.branch_id) === branchId)
+          .map((u) => String(u.id))
+      );
+      for (const row of priorBatches ?? []) {
+        if (!branchAgentIds.has(String(row.field_agent_id))) {
+          continue;
+        }
+        if (row.status === "pending_approval") {
+          unpostedBatchCount += 1;
+        } else {
+          unsubmittedDraftBatchCount += 1;
+        }
+      }
+    } catch {
+      // Non-blocking
+    }
+  }
+
+  return {
+    businessDate: priorDate,
+    closingSaved: Boolean(savedPrior?.usingSavedInputs),
+    unclosedTillCount,
+    unpostedBatchCount,
+    unsubmittedDraftBatchCount
+  };
 }
 
 function isNonCashSystemEntry(notes: string | undefined): boolean {
@@ -666,6 +787,10 @@ async function buildSnapshot(
       : 0
     : await computeSuggestedOpeningVault(tenantId, context, branchId, businessDate);
 
+  const priorDayStatus = options?.skipPriorSuggestion
+    ? undefined
+    : await loadPriorDayEodStatus(tenantId, branchId, businessDate).catch(() => undefined);
+
   const openingVault =
     saved?.openingVault != null ? roundMoney(saved.openingVault) : suggestedOpeningVault;
   const cashToBank = saved?.cashToBank != null ? roundMoney(saved.cashToBank) : 0;
@@ -753,7 +878,8 @@ async function buildSnapshot(
     usingSavedInputs: Boolean(saved?.usingSavedInputs),
     notes: saved?.notes,
     recordedBy: saved?.recordedBy,
-    updatedAt: saved?.updatedAt
+    updatedAt: saved?.updatedAt,
+    priorDayStatus
   };
 }
 

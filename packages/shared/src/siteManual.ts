@@ -67,11 +67,23 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
   {
     id: "gs-login",
     department: "getting_started",
-    title: "Sign in to your company workspace",
+    title: "Sign in to your company workspace (white-label subdomain & PWA)",
     howTo: "How to sign in",
-    keywords: ["login", "sign in", "password", "tenant"],
+    keywords: [
+      "login",
+      "sign in",
+      "password",
+      "tenant",
+      "subdomain",
+      "white label",
+      "branding",
+      "logo",
+      "pwa",
+      "install"
+    ],
     body: [
-      "Open your company subdomain or the platform login page.",
+      "Open your company subdomain (e.g. yourcompany.aabanker.com). The login screen, browser tab title, favicon, sidebar, customer receipts/cards, and installable mobile/desktop app icon (PWA) automatically display your company’s name, logo, and brand color configured under Settings → Organization.",
+      "The root platform host (aabanker.com) remains branded as aabanker for platform administration.",
       "Enter the staff email and password issued by your admin.",
       "Field agents land in the mobile agent app; office roles land in the dashboard."
     ]
@@ -105,7 +117,7 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
   {
     id: "susu-passbook",
     department: "susu",
-    title: "Susu passbook (virtual 31-box contribution pages) & account statements",
+    title: "Susu passbook (virtual 31-box cards, BBF, cancelled pages & rate changes)",
     howTo: "How the Susu passbook works",
     keywords: [
       "susu passbook",
@@ -117,6 +129,11 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
       "checked boxes",
       "partial",
       "overflow",
+      "bbf",
+      "balance brought forward",
+      "cancelled page",
+      "red line",
+      "daily rate",
       "page switcher",
       "statement",
       "account statement",
@@ -127,18 +144,19 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
     body: [
       "Every Susu account includes a virtual Susu passbook showing its contribution boxes (dynamic to your company’s cycle length, e.g. 31 boxes per page).",
       "Where to find it: open any Susu customer’s Account statement (Susu → Customers → Actions → Account statement), open Customer Details, or tap Susu passbook on an active Susu customer card in the Field agent app.",
-      "Automatic box counting (1 real ledger transaction): both Field agent Daily Susu collections (posted via Callover) and walk-in Branch counter deposits on Susu accounts convert into checked boxes using gross contribution ÷ daily contribution plan. Example: on a GHS 20/day plan, a GHS 100 payment records 1 transaction and auto-checks 5 boxes (Box 1 = institution Fee, Boxes 2–5 = customer savings). A later GHS 60 payment auto-checks Boxes 6, 7, and 8. Loan disbursements credited via the Susu↔Loans bridge are excluded so they never distort passbook boxes.",
+      "Automatic box counting (1 real ledger transaction): both Field agent Daily Susu collections (posted via Callover) and walk-in Branch counter deposits on Susu accounts convert into checked boxes using gross contribution ÷ daily contribution plan. Example: on a GHS 20/day plan, a GHS 100 payment records 1 transaction and auto-checks 5 boxes (Box 1 = institution Fee, Boxes 2–5 = customer savings). Loan disbursements and non-contribution adjustments are excluded so passbook boxes always stay ledger-accurate.",
       "Partial boxes (non-multiples): if a customer pays GHS 30 on a GHS 20 plan, 1 full box checks off and the next box shows a progress fill of 10 / 20 (partial) until the remaining GHS 10 is paid.",
       "Overflow into the next page: if a customer is at Box 29 (28 boxes filled) and pays GHS 100 (5 boxes), Boxes 29, 30, and 31 complete Page #1 (marked Completed) and the remaining GHS 40 automatically opens Page #2 and checks Boxes 1 and 2 (collecting Page #2’s Box 1 fee if first-collection timing is enabled).",
-      "Visual cues: Box 1 is badged Fee under first-collection timing (or the final box, e.g. Box 31, under cycle-maturity timing). Checked boxes show a green tick, date, and amount; partial boxes show a progress bar.",
-      "Page switcher: use Page #1, Page #2, etc. at the top of the Susu passbook to inspect past completed pages as well as the current active page.",
+      "Cancelled pages & Balance Brought Forward (BBF): when a customer withdraws from a completed page (e.g. withdrawing GHS 200 from a GHS 600 completed Page #1), Page #1 is immediately marked Cancelled with a red strike-through line (matching real-world Susu book practice) and the leftover GHS 400 rolls forward as Balance Brought Forward (BBF) at the top of Page #2. BBF never auto-checks contribution boxes — Page #2 still starts at 0/31 boxes — and BBF is always spent first on future withdrawals with GHS 0 additional fee.",
+      "Scheduled daily contribution changes (Susu only): admins can update a Susu customer’s daily rate from Customer Details. The new rate is scheduled automatically for the next card so the current active page finishes cleanly at its original rate.",
+      "Visual cues & page switcher: Box 1 is badged Fee under first-collection timing (or the final box, e.g. Box 31, under cycle-maturity timing). Use Page #1, Page #2, etc. at the top of the passbook to inspect active, completed, and red-line cancelled pages.",
       "Account statements also let staff filter by date range, print a PDF statement, or download the full ledger as CSV."
     ]
   },
   {
     id: "susu-callover-batches",
     department: "susu",
-    title: "Callover batches (reviewing and posting field agent daily Susu)",
+    title: "Callover batches (reviewing, overdue reminders & posting field agent daily Susu)",
     howTo: "How to approve callover batches",
     keywords: [
       "callover",
@@ -149,12 +167,16 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
       "coordinator",
       "post",
       "collections",
-      "cash handover"
+      "cash handover",
+      "overdue",
+      "prior day"
     ],
     modules: ["susu_management"],
     body: [
       "Field agents collect Daily Susu in the mobile app and submit their batch via Call over (Daily Susu is not posted directly at Branch counter).",
       "Go to Susu → Callover batches to review pending agent submissions for your branch.",
+      "Overdue batch guard: any submitted batch from an earlier date that was not posted yet is automatically pinned at the top of the queue with an Overdue badge so it is never hidden behind today’s date.",
+      "If a field agent forgot to submit yesterday’s draft collections, their Field agent Home screen highlights the overdue batch with a 1-tap Submit button so they can send it without losing a single collection.",
       "Count the physical cash handed over by the agent and compare it against the batch total.",
       "Approve and post the batch: each customer’s account is credited, their Susu passbook boxes check off automatically, Susu cycle commission is applied per policy, and customer SMS receipts fire if enabled.",
       "If physical cash handed over differs from the submitted batch total, the difference automatically creates a Field agent case under Susu → Overages/Shortages."
@@ -186,7 +208,7 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
   {
     id: "susu-cycle-commission",
     department: "susu",
-    title: "Susu cycle fees (institutional commission setup)",
+    title: "Susu cycle fees & FIFO withdrawal deduction rules",
     howTo: "How to configure Susu cycle fees",
     keywords: [
       "susu cycle fees",
@@ -195,6 +217,9 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
       "first day",
       "maturity",
       "withdrawal fee",
+      "fifo",
+      "bbf",
+      "red line",
       "31 days",
       "fee box",
       "early withdrawal",
@@ -203,12 +228,12 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
     ],
     modules: ["susu_management"],
     body: [
-      "Go to Susu → Susu cycle fees to configure how your institution earns Susu commission on customer cycles.",
-      "Cycle length: choose the number of contribution boxes per page (standard Susu is 31 days/boxes).",
-      "Commission basis: pick Customer’s registered daily amount (1 day’s contribution — e.g. GHS 20 on a GHS 20 plan), a Fixed amount for everyone, a Percentage of total cycle contributions, or No commission.",
-      "Deduction timing: choose First collection(s) (deducted upfront on Box 1 so customer savings ledger receives the net credit while the passbook tracks full gross boxes), Cycle maturity (deducted when the page completes at Box 31), or Customer withdrawal (deducted when the customer withdraws).",
-      "Partial-payment allocation (for first-collection timing): decide whether an underpayment satisfies Commission first, Savings first, or Proportional.",
-      "Early withdrawal policy: choose whether withdrawing before a page matures will Deduct full fee, Deduct pro-rata (based on contribution boxes completed), Waive the fee, or Block early withdrawal.",
+      "Go to Susu → Susu cycle fees to configure how your institution earns Susu commission on customer cycles. Click How deductions work at the top of that page anytime for a worked staff reference.",
+      "Cycle length & basis: choose the contribution boxes per page (standard Susu is 31 days) and commission basis (Customer’s registered daily amount, Fixed amount, Percentage, or No commission).",
+      "Deduction timing: choose First collection(s) (deducted upfront on Box 1), Cycle maturity (deducted when the page completes at Box 31), or Customer withdrawal (deducted when the customer withdraws).",
+      "Strict FIFO withdrawal settlement: every Susu withdrawal settles in strict oldest-first order — (1) Balance Brought Forward (BBF) first at GHS 0 fee, (2) Completed pages oldest-first (any touched completed page is cancelled with a red line, its remaining fee if any is collected, and any leftover rolls forward as BBF onto the next page), and (3) Active incomplete page last only if the withdrawal overflows past BBF and all completed pages.",
+      "Commission charged on top: when a withdrawal triggers a Susu fee, the fee is charged on top of the customer’s requested amount so the customer receives their full requested payout (unless total available balance cannot cover both, in which case remaining balance is settled cleanly).",
+      "Early withdrawal policy (when touching an incomplete page): choose Deduct full fee, Deduct pro-rata (by boxes completed), Waive the fee, or Block early withdrawal.",
       "Changes apply cleanly as a versioned policy; earned commission posts automatically to Susu → Susu income."
     ]
   },
@@ -272,15 +297,26 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
   {
     id: "susu-withdrawal-gate-momo",
     department: "susu",
-    title: "Withdrawal gate (MoMo & remote withdrawal approvals)",
-    howTo: "How to approve MoMo withdrawals",
-    keywords: ["withdrawal gate", "momo", "mobile money", "payout", "customer service", "proof"],
+    title: "Withdrawal gate (MoMo, Bank & remote withdrawal approvals + live name lookup)",
+    howTo: "How to approve MoMo, Bank, and Cash withdrawals",
+    keywords: [
+      "withdrawal gate",
+      "momo",
+      "mobile money",
+      "bank transfer",
+      "paystack",
+      "name lookup",
+      "verify",
+      "pay now",
+      "payout",
+      "customer service"
+    ],
     modules: ["susu_management"],
     body: [
-      "Go to Susu → Withdrawal gate to review pending MoMo withdrawal requests.",
-      "Verify the customer’s available withdrawable balance, phone number, and payout details before approving.",
-      "MoMo payouts are settled outside the branch cash till with payout proof/reference recorded on the request.",
-      "Remote field-agent cash withdrawals follow the separate Coordinator → Branch counter (Pay now) flow so physical drawer cash stays accurate."
+      "Go to Susu → Withdrawal gate to review pending MoMo, Bank transfer, and remote Cash withdrawal requests.",
+      "Live Ghana account name lookup: click Verify next to a MoMo number or Ghana bank account to confirm the registered holder name via Paystack before approving.",
+      "Unified 2-step flow (Approve → Teller Pay now): approving a request verifies it and queues it on Branch counter → Pay now without debiting the customer yet and without requiring a manual proof screenshot upload.",
+      "When the teller clicks Pay now on Branch counter (with an open till holding sufficient cash), the system debits the customer account, reduces till cash, and marks the payout delivered in one atomic step."
     ]
   },
   {
@@ -316,14 +352,26 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
   {
     id: "susu-till-eod",
     department: "susu",
-    title: "End-of-day till balancing",
+    title: "End-of-day till balancing & prior-day till guard",
     howTo: "How to close and balance the till",
-    keywords: ["close till", "balance", "expected cash", "variance", "eod", "end of day"],
+    keywords: [
+      "close till",
+      "balance",
+      "expected cash",
+      "variance",
+      "eod",
+      "end of day",
+      "unclosed till",
+      "prior day",
+      "absent teller"
+    ],
     modules: ["susu_management"],
     body: [
-      "Expected cash in till = initial cash + extra cash + deposits − withdrawals − expenses. Day capital is not what you count.",
+      "Expected cash in till = initial cash + extra cash + deposits − withdrawals − field Pay now − expenses. Day capital is not what you count.",
       "Count physical cash in the drawer and enter Actual cash counted. The screen flags Balanced, Overage, or Shortage automatically as you type.",
       "Close till. Non-zero variance opens a Branch till case on Overages/Shortages automatically (separate from field agent cases). A note is required for overage or shortage.",
+      "Prior-day till guard: a teller cannot request or be pushed a new day’s till while their earlier day’s till is still open. Branch counter shows an amber banner with a 1-click Close prior till modal so the teller can count and close it first.",
+      "Absent teller safety valve: if a teller is away and left a prior till open, Admin or Coordinator can close that prior till directly from the Prior unclosed tills card at the top of Susu → Till float.",
       "Admin/coordinator settles the closed float session and reconciles any till overage/shortage on the OS page."
     ]
   },
@@ -345,7 +393,7 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
   {
     id: "susu-closing-balances",
     department: "susu",
-    title: "Branch vault closing balances",
+    title: "Branch vault closing balances & multi-day carry-forward",
     howTo: "How to close the branch vault",
     keywords: [
       "closing balances",
@@ -355,12 +403,16 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
       "opening vault",
       "till",
       "field agent",
-      "branch worksheet"
+      "branch worksheet",
+      "missed closing",
+      "prior day",
+      "eod guard"
     ],
     modules: ["susu_management"],
     body: [
       "Go to Susu → Closing balances. Pick branch and business date.",
-      "Opening vault auto-fills from yesterday’s close (vault counted if saved, otherwise expected closing vault). Admin/coordinator may adjust — the difference is notified.",
+      "Opening vault auto-fills from the latest saved closing balance and automatically chains forward across any unsaved intermediate days using real branch cash movements — so if a closing count was skipped yesterday, no cash movement is lost.",
+      "Prior-day EOD checklist banner: whenever yesterday’s vault closing count was not saved, prior teller tills remain open, or field agent batches remain unposted/unsubmitted, a warning banner appears at the top with 1-click shortcuts to Open yesterday & close, Review open tills, or Post pending batches.",
       "Tills: cash issued = initial + extra cash (not float). Closed tills return to vault; open tills show as still in drawers.",
       "Field deposits increase the vault; field withdrawals decrease it. Walk-in activity stays inside till cash.",
       "Enter cash to bank (Susu worksheet only — Banking Treasury post comes later), optional vault count, and save.",
@@ -529,41 +581,51 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
   {
     id: "agent-collect",
     department: "field_agent",
-    title: "Field agent daily collection & Susu passbook",
+    title: "Field agent daily collection, late batch reminders & Susu passbook",
     howTo: "How field agents collect",
-    keywords: ["field agent", "collect", "offline", "sync", "daily susu", "passbook", "susu passbook"],
+    keywords: [
+      "field agent",
+      "collect",
+      "offline",
+      "sync",
+      "daily susu",
+      "passbook",
+      "susu passbook",
+      "unsubmitted batch",
+      "prior day"
+    ],
     modules: ["susu_management"],
     body: [
       "Open the Field agent app → Collect.",
       "Select the customer, enter the daily Susu amount (single day, multi-day, or partial payment), and save. (Branch counter does not post Daily Susu.)",
       "Offline collections queue on the device and sync automatically when the phone is back online.",
-      "Use Call over to submit the day's batch for coordinator approval and posting.",
-      "Tap Susu passbook on any active Susu customer card under Customers to show the customer their checked boxes, partial progress, Fee box, and past completed pages."
+      "Use Call over to submit the day's batch for coordinator approval and posting. If a previous day’s draft batch was never submitted, an amber reminder card appears at the top of the Home screen with a 1-tap Submit button.",
+      "Tap Susu passbook on any active Susu customer card under Customers to show the customer their checked boxes, partial progress, Balance Brought Forward (BBF), Fee box, and past completed or red-line cancelled pages."
     ]
   },
   {
     id: "agent-withdrawal-pay-now",
     department: "susu",
-    title: "Field agent cash withdrawal (Pay now)",
-    howTo: "How remote customer cash withdrawals work",
+    title: "Remote cash, MoMo & Bank withdrawals (Approve → Pay now)",
+    howTo: "How remote customer withdrawals work",
     keywords: [
       "withdrawal",
       "pay now",
       "field agent",
       "teller",
       "coordinator",
+      "momo",
+      "bank transfer",
       "registration phone"
     ],
     modules: ["susu_management"],
     body: [
-      "Field agent requests cash withdrawal (customer is far from the office; agent will deliver next visit).",
-      "Coordinator reviews the request, calls the customer on the registration phone, then Approves.",
-      "Customer Service is not in the field-agent cash path (agency walk-in withdrawals still use CS → teller).",
-      "Approve does not debit the account and does not move vault cash — it queues Branch counter → Pay now.",
-      "Teller opens till with enough physical cash (use Extra cash from vault if needed), then Pay now.",
-      "Pay now debits the customer and reduces till cash (shown separately from walk-in withdrawals on EOD).",
-      "Agent collects the cash from the office and delivers on the next visit.",
-      "MoMo stays separate: coordinator pays outside the till with proof.",
+      "Field agent (or Customer Service) requests a Cash, MoMo, or Bank withdrawal on behalf of a customer.",
+      "Coordinator reviews the request, calls the customer on the registration phone (and can click Verify to confirm the registered Ghana MoMo or bank holder name via Paystack), then clicks Approve.",
+      "Approve does not debit the account and does not move vault cash — it queues the payout on Branch counter → Pay now.",
+      "Teller opens till with enough physical cash (use Extra cash from vault if needed) and clicks Pay now.",
+      "Pay now debits the customer account, reduces till cash (shown separately from walk-in withdrawals on EOD), and marks the withdrawal delivered — no manual proof upload required.",
+      "For cash delivery, the agent collects the cash from the office and delivers it on the next visit.",
       "Vault closing does not count Pay now again as a field withdrawal — cash already left via cash issued to till."
     ]
   },

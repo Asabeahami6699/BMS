@@ -291,6 +291,41 @@ export async function getFloatSessionForCashier(
   );
 }
 
+/** Targeted EOD guard: returns the oldest unclosed (`open`) till for this cashier before `beforeDate`. */
+export async function getPriorOpenFloatSessionForCashier(
+  tenantId: string,
+  cashierUserId: string,
+  beforeDate: string
+): Promise<BranchFloatSession | null> {
+  const sessions = await listSessions(tenantId);
+  const priorOpen = sessions
+    .filter(
+      (s) =>
+        s.cashierUserId === cashierUserId &&
+        s.status === "open" &&
+        s.businessDate < beforeDate
+    )
+    .sort((a, b) => a.businessDate.localeCompare(b.businessDate));
+  return priorOpen[0] ?? null;
+}
+
+/** Returns all `open` tills from dates strictly before `beforeDate` (oldest first). */
+export async function listPriorUnclosedFloatSessions(
+  tenantId: string,
+  beforeDate: string,
+  branchId?: string
+): Promise<BranchFloatSession[]> {
+  const sessions = await listSessions(tenantId);
+  return sessions
+    .filter(
+      (s) =>
+        s.status === "open" &&
+        s.businessDate < beforeDate &&
+        (!branchId || s.branchId === branchId)
+    )
+    .sort((a, b) => a.businessDate.localeCompare(b.businessDate));
+}
+
 export async function getMyBranchFloatSession(
   context: ActorContext,
   options?: { businessDate?: string; branchId?: string }
@@ -321,6 +356,17 @@ export async function requestBranchFloat(
   }
 
   const businessDate = input.businessDate?.trim() || todayDate();
+  const priorOpen = await getPriorOpenFloatSessionForCashier(
+    context.tenantId,
+    context.userId,
+    businessDate
+  );
+  if (priorOpen) {
+    throw new Error(
+      `Your till from ${priorOpen.businessDate} is still open (expected cash GHS ${formatAccountAmount(expectedCash(priorOpen))}). Close your ${priorOpen.businessDate} till before opening a new day.`
+    );
+  }
+
   const existing = await getFloatSessionForCashier(
     context.tenantId,
     context.userId,
@@ -534,6 +580,17 @@ export async function pushBranchFloat(
   }
 
   const businessDate = input.businessDate?.trim() || todayDate();
+  const priorOpen = await getPriorOpenFloatSessionForCashier(
+    context.tenantId,
+    input.cashierUserId,
+    businessDate
+  );
+  if (priorOpen) {
+    throw new Error(
+      `This teller still has an open till from ${priorOpen.businessDate} (expected cash GHS ${formatAccountAmount(expectedCash(priorOpen))}). Close the ${priorOpen.businessDate} till before opening a new day.`
+    );
+  }
+
   const openingFloat = Math.max(0, input.openingFloat);
   const initialCash = Math.max(0, input.initialCash ?? 0);
   let session = await getFloatSessionForCashier(
@@ -621,13 +678,15 @@ export function canApproveTillMovements(role: string): boolean {
 
 export async function listBranchFloatSessions(
   tenantId: string,
-  options?: { businessDate?: string; status?: FloatSessionStatus }
+  options?: { businessDate?: string; status?: FloatSessionStatus; includePriorOpen?: boolean }
 ): Promise<BranchFloatSession[]> {
   const date = options?.businessDate?.trim() || todayDate();
   const sessions = await listSessions(tenantId);
   return sessions
     .filter((s) => {
-      if (s.businessDate !== date) {
+      const isPriorOpen =
+        Boolean(options?.includePriorOpen) && s.status === "open" && s.businessDate < date;
+      if (s.businessDate !== date && !isPriorOpen) {
         return false;
       }
       if (options?.status && s.status !== options.status) {
@@ -635,7 +694,14 @@ export async function listBranchFloatSessions(
       }
       return true;
     })
-    .sort((a, b) => b.requestedAt.localeCompare(a.requestedAt));
+    .sort((a, b) => {
+      const aPrior = a.businessDate < date && a.status === "open" ? 0 : 1;
+      const bPrior = b.businessDate < date && b.status === "open" ? 0 : 1;
+      if (aPrior !== bPrior) {
+        return aPrior - bPrior;
+      }
+      return b.requestedAt.localeCompare(a.requestedAt);
+    });
 }
 
 export async function closeBranchFloat(
@@ -648,7 +714,11 @@ export async function closeBranchFloat(
   if (!session) {
     throw new Error("Float session not found");
   }
-  if (session.cashierUserId !== context.userId && context.role !== "admin") {
+  const canCloseOnBehalf =
+    context.role === "admin" ||
+    (context.role === "coordinator" &&
+      (!context.branchId || context.branchId === session.branchId));
+  if (session.cashierUserId !== context.userId && !canCloseOnBehalf) {
     throw new Error("You can only close your own float session");
   }
   if (session.status !== "open") {

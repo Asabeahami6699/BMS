@@ -20849,5 +20849,95 @@ button.cif-ledger__row:hover {
   }
 }
 
+/* Targeted End-of-Day (EOD) guard banners */
+.eod-guard-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.85rem 1.25rem;
+  padding: 0.9rem 1.05rem;
+  margin-bottom: 1rem;
+  border-radius: 12px;
+  border: 1px solid rgba(217, 119, 6, 0.42);
+  background: rgba(245, 158, 11, 0.1);
+}
+
+.eod-guard-banner__body {
+  flex: 1 1 260px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.eod-guard-banner__body > strong {
+  color: #b45309;
+  font-size: 0.92rem;
+}
+
+[data-theme="dark"] .eod-guard-banner__body > strong {
+  color: #fbbf24;
+}
+
+.eod-guard-banner__body > p {
+  margin: 0;
+  font-size: 0.86rem;
+}
+
+.eod-guard-banner__list {
+  margin: 0.2rem 0 0;
+  padding-left: 1.15rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.86rem;
+}
+
+.eod-guard-banner__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.eod-guard-panel {
+  border-color: rgba(217, 119, 6, 0.45) !important;
+  background: rgba(245, 158, 11, 0.08) !important;
+}
+
+.eod-guard-panel__head {
+  margin-bottom: 0.75rem;
+}
+
+.eod-guard-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.eod-guard-list__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem 1rem;
+  padding: 0.6rem 0.8rem;
+  border-radius: 10px;
+  background: var(--surface, #fff);
+  border: 1px solid var(--border-subtle, var(--border));
+  font-size: 0.88rem;
+}
+
+.eod-guard-date {
+  font-weight: 600;
+  color: #b45309;
+}
+
+[data-theme="dark"] .eod-guard-date {
+  color: #fbbf24;
+}
+
+
 
 

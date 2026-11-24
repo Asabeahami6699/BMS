@@ -300,6 +300,67 @@ export function SusuClosingBalancesPage({ role }: Props) {
         <p className="muted">Loading closing balance…</p>
       ) : snapshot ? (
         <>
+          {snapshot.priorDayStatus &&
+          (!snapshot.priorDayStatus.closingSaved ||
+            snapshot.priorDayStatus.unclosedTillCount > 0 ||
+            snapshot.priorDayStatus.unpostedBatchCount > 0 ||
+            snapshot.priorDayStatus.unsubmittedDraftBatchCount > 0) ? (
+            <div className="eod-guard-banner" role="alert">
+              <div className="eod-guard-banner__body">
+                <strong>
+                  Prior-day items still open ({snapshot.priorDayStatus.businessDate})
+                </strong>
+                <ul className="eod-guard-banner__list">
+                  {!snapshot.priorDayStatus.closingSaved ? (
+                    <li>
+                      Vault closing count for {snapshot.priorDayStatus.businessDate} was not saved
+                      (opening vault is chained automatically from prior activity).
+                    </li>
+                  ) : null}
+                  {snapshot.priorDayStatus.unclosedTillCount > 0 ? (
+                    <li>
+                      {snapshot.priorDayStatus.unclosedTillCount} prior teller till(s) still open —
+                      cash has not been returned to vault.
+                    </li>
+                  ) : null}
+                  {snapshot.priorDayStatus.unpostedBatchCount > 0 ? (
+                    <li>
+                      {snapshot.priorDayStatus.unpostedBatchCount} submitted field agent batch(es)
+                      still waiting to be posted.
+                    </li>
+                  ) : null}
+                  {snapshot.priorDayStatus.unsubmittedDraftBatchCount > 0 ? (
+                    <li>
+                      {snapshot.priorDayStatus.unsubmittedDraftBatchCount} field agent draft
+                      batch(es) from {snapshot.priorDayStatus.businessDate} not yet submitted.
+                    </li>
+                  ) : null}
+                </ul>
+              </div>
+              <div className="eod-guard-banner__actions">
+                {!snapshot.priorDayStatus.closingSaved ? (
+                  <button
+                    type="button"
+                    className="button"
+                    onClick={() => setBusinessDate(snapshot.priorDayStatus!.businessDate)}
+                  >
+                    Open {snapshot.priorDayStatus.businessDate} &amp; close
+                  </button>
+                ) : null}
+                {snapshot.priorDayStatus.unclosedTillCount > 0 ? (
+                  <Link to="/app/susu/till-float" className="button secondary">
+                    Review open tills
+                  </Link>
+                ) : null}
+                {snapshot.priorDayStatus.unpostedBatchCount > 0 ? (
+                  <Link to="/app/susu/callover-batches" className="button secondary">
+                    Post pending batches
+                  </Link>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
           <div className="kpi-grid agents-page__kpis">
             <article className="kpi-card kpi-card--primary">
               <span className="kpi-label">Opening vault</span>

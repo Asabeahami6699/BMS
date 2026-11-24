@@ -1,15 +1,78 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useShallow } from "zustand/react/shallow";
+import { submitCollectionBatchForApproval } from "../../app/api";
+import { useToast } from "../../components/Toast";
+import { toUserFacingError } from "../../lib/networkError";
 import { AgentCashVariancePanel } from "../components/AgentCashVariancePanel";
+import { useAgentCollectionStore } from "../stores/agentCollectionStore";
 import { useAgentCustomerStore, selectCustomerStats } from "../stores/agentCustomerStore";
 
 export function AgentHomePage() {
+  const { showToast } = useToast();
   const online = typeof navigator === "undefined" ? true : navigator.onLine;
   const stats = useAgentCustomerStore(useShallow(selectCustomerStats));
   const hydrated = useAgentCustomerStore((s) => s.hydrated);
+  const priorUnsubmittedBatches = useAgentCollectionStore((s) => s.priorUnsubmittedBatches);
+  const refreshToday = useAgentCollectionStore((s) => s.refreshToday);
+  const [submittingDate, setSubmittingDate] = useState<string | null>(null);
+
+  async function handleSubmitPriorBatch(businessDate: string) {
+    setSubmittingDate(businessDate);
+    try {
+      await submitCollectionBatchForApproval({
+        businessDate,
+        reportDate: businessDate,
+        lines: [],
+        agentNotes: `Late submission for ${businessDate} collection batch`
+      });
+      showToast(`Submitted ${businessDate} batch for coordinator approval`, "success");
+      await refreshToday();
+    } catch (error) {
+      showToast(toUserFacingError(error, "Could not submit prior batch"), "error");
+    } finally {
+      setSubmittingDate(null);
+    }
+  }
 
   return (
     <div className="agent-page">
+      {priorUnsubmittedBatches.length > 0 ? (
+        <article className="card agent-card eod-guard-banner" role="alert">
+          <div className="eod-guard-banner__body">
+            <strong>Unsubmitted prior collections</strong>
+            <p className="muted">
+              You have collection batch(es) from earlier day(s) not yet sent to the coordinator.
+              Submit them so customer accounts are credited.
+            </p>
+            <div className="eod-guard-list">
+              {priorUnsubmittedBatches.map((b) => (
+                <div key={b.id} className="eod-guard-list__row">
+                  <span>
+                    <strong>{b.businessDate}</strong> · GHS{" "}
+                    {b.totalAmount.toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2
+                    })}{" "}
+                    ({b.lineCount} line{b.lineCount === 1 ? "" : "s"})
+                  </span>
+                  <button
+                    type="button"
+                    className="button"
+                    disabled={!online || submittingDate !== null}
+                    onClick={() => void handleSubmitPriorBatch(b.businessDate)}
+                  >
+                    {submittingDate === b.businessDate
+                      ? "Submitting…"
+                      : `Submit ${b.businessDate}`}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </article>
+      ) : null}
+
       <article className="card agent-card">
         <h2>Field agent</h2>
         <p className="muted">Collect contributions, manage customers, and call over your day.</p>
