@@ -1,14 +1,16 @@
 import { formatAccountAmount } from "@bms/shared";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useShallow } from "zustand/react/shallow";
 import type { AppRole, FieldAgentRosterRow } from "./api";
 import { AdminDataTable, filterRowsBySearch } from "../components/AdminDataTable";
 import { Modal } from "../components/Modal";
 import { useToast } from "../components/Toast";
+import { AgentCommissionStatementModal } from "./AgentCommissionStatementModal";
 import { AgentCustomersModal } from "./AgentCustomersModal";
 import { useAgentsLiveSync } from "./hooks/useAgentsLiveSync";
 import { selectAgentsKpis, useAgentsStore } from "./stores/agentsStore";
+import { useSusuRiskAlertsStore } from "./stores/susuRiskAlertsStore";
 
 type Props = { role: AppRole };
 
@@ -20,12 +22,14 @@ function AgentDetailModal({
   agent,
   open,
   onClose,
-  onViewCustomers
+  onViewCustomers,
+  onViewCommission
 }: {
   agent: FieldAgentRosterRow | null;
   open: boolean;
   onClose: () => void;
   onViewCustomers?: () => void;
+  onViewCommission?: () => void;
 }) {
   if (!agent) {
     return null;
@@ -39,9 +43,16 @@ function AgentDetailModal({
       onClose={onClose}
       panelClassName="modal-panel--70"
       footer={
-        <button type="button" className="button secondary" onClick={onClose}>
-          Close
-        </button>
+        <>
+          {onViewCommission ? (
+            <button type="button" className="button secondary" onClick={onViewCommission}>
+              Commission breakdown
+            </button>
+          ) : null}
+          <button type="button" className="button secondary" onClick={onClose}>
+            Close
+          </button>
+        </>
       }
     >
       <div className="agents-detail">
@@ -150,7 +161,19 @@ export function FieldAgentsPage({ role }: Props) {
   const [search, setSearch] = useState("");
   const [detailAgent, setDetailAgent] = useState<FieldAgentRosterRow | null>(null);
   const [customersAgent, setCustomersAgent] = useState<FieldAgentRosterRow | null>(null);
+  const [commissionAgent, setCommissionAgent] = useState<FieldAgentRosterRow | null>(null);
   const refresh = useAgentsStore((s) => s.refresh);
+  const zeroCollectionAgents = useSusuRiskAlertsStore((s) => s.zeroCollectionAgents);
+  const hydrateRiskAlerts = useSusuRiskAlertsStore((s) => s.hydrate);
+
+  useEffect(() => {
+    hydrateRiskAlerts();
+  }, [hydrateRiskAlerts]);
+
+  const filteredZeroAgents = useMemo(() => {
+    if (!branchFilter) return zeroCollectionAgents;
+    return zeroCollectionAgents.filter((a) => a.branchId === branchFilter);
+  }, [zeroCollectionAgents, branchFilter]);
 
   const filtered = useMemo(
     () =>
@@ -248,6 +271,37 @@ export function FieldAgentsPage({ role }: Props) {
           <p className="kpi-value">{formatMoney(kpis.totalCollections)}</p>
         </article>
       </div>
+
+      {filteredZeroAgents.length > 0 ? (
+        <section className="overview-panel eod-guard-panel" style={{ marginBottom: "1rem" }}>
+          <div className="eod-guard-panel__head">
+            <h3 className="overview-panel__title">
+              Zero collections recorded today ({filteredZeroAgents.length} agent
+              {filteredZeroAgents.length === 1 ? "" : "s"})
+            </h3>
+            <p className="muted" style={{ margin: "0.2rem 0 0", fontSize: "0.84rem" }}>
+              Active field agents with assigned Susu savers who have GHS 0 recorded so far today —
+              follow up to confirm route activity or offline sync.
+            </p>
+          </div>
+          <div className="eod-guard-list">
+            {filteredZeroAgents.map((a) => (
+              <div key={a.agentId} className="eod-guard-list__row">
+                <div>
+                  <strong>{a.fullName}</strong>
+                  <span className="muted">
+                    {" "}
+                    · {a.activeCustomerCount} active customer
+                    {a.activeCustomerCount === 1 ? "" : "s"} · Daily target{" "}
+                    {formatMoney(a.expectedDailyTarget)}
+                  </span>
+                </div>
+                <span className="eod-guard-date">GHS 0.00 today</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {branches.length > 0 ? (
         <label className="field agents-page__branch-filter">
@@ -368,6 +422,18 @@ export function FieldAgentsPage({ role }: Props) {
             setCustomersAgent(detailAgent);
           }
         }}
+        onViewCommission={() => {
+          if (detailAgent) {
+            setCommissionAgent(detailAgent);
+          }
+        }}
+      />
+
+      <AgentCommissionStatementModal
+        open={commissionAgent !== null}
+        userId={commissionAgent?.userId ?? null}
+        staffName={commissionAgent?.displayName}
+        onClose={() => setCommissionAgent(null)}
       />
 
       <AgentCustomersModal

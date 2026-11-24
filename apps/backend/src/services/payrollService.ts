@@ -16,11 +16,16 @@ import { getSupabaseAdminClient } from "../config/supabaseClient.js";
 import { isMissingSupabaseResource } from "../lib/supabaseSchema.js";
 import { getCommissionPolicy } from "./commissionPolicyService.js";
 import {
+  effectiveCommissionFormula,
   effectiveCommissionPercent,
   getUserPayrollProfile,
   listStaffPayrollSetup,
   profileDeductions
 } from "./userPayrollProfileService.js";
+
+import { listTransactions } from "./transactionService.js";
+import { getRolePayrollDefault } from "./rolePayrollDefaultService.js";
+import { listUsersByTenant } from "./authStore.js";
 
 const payslipStore = new Map<string, Payslip[]>();
 let warnedMissingPayslipsTable = false;
@@ -217,7 +222,7 @@ export async function runPayrollForTenant(
 
 export async function runPayroll(input: unknown): Promise<Payslip[]> {
   const parsed: RunPayrollInput = runPayrollInputSchema.parse(input);
-  const policy = getCommissionPolicy(parsed.tenantId);
+  const policy = await getCommissionPolicy(parsed.tenantId);
   const periodId = parsed.period.id;
 
   if (parsed.collections.length === 0) {
@@ -243,6 +248,7 @@ export async function runPayroll(input: unknown): Promise<Payslip[]> {
       monthlyBonus,
       collections: collection.amount,
       commissionPercent: effectivePercent,
+      commissionFormula: effectiveCommissionFormula(collection.role, policy, profile),
       commissionsApply: roleReceivesCommission(collection.role),
       policyEnabled: policy.enabled,
       bonusRules: policy.bonusRules,
@@ -284,6 +290,160 @@ export async function listTenantPayslips(
 export async function getPayslipById(tenantId: string, payslipId: string): Promise<Payslip | undefined> {
   const all = await loadPayslipsFromDb(tenantId);
   return all.find((payslip) => payslip.id === payslipId);
+}
+
+export type StaffCommissionDailyRow = {
+  date: string;
+  transactionCount: number;
+  totalAmount: number;
+};
+
+export type StaffCommissionStatement = {
+  period: ReturnType<typeof currentPayrollPeriod>;
+  currency: string;
+  userId: string;
+  fullName: string;
+  email: string;
+  role: string;
+  policyEnabled: boolean;
+  method: "cycle_share" | "percentage";
+  cycleDays: number;
+  multiplier: number;
+  effectivePercent: number;
+  isOverride: boolean;
+  totalCollected: number;
+  dailyBreakdown: StaffCommissionDailyRow[];
+  baseCommission: number;
+  tierBonus: number;
+  totalCommission: number;
+  openShortagesTotal: number;
+  openShortageCount: number;
+  netAfterShortages: number;
+};
+
+export async function getStaffCommissionStatement(
+  tenantId: string,
+  userId: string,
+  period = currentPayrollPeriod()
+): Promise<StaffCommissionStatement> {
+  const policy = await getCommissionPolicy(tenantId);
+  const profile = await getUserPayrollProfile(tenantId, userId);
+
+  let fullName = userId;
+  let email = "";
+  let role = "field_agent";
+
+  const supabase = getSupabaseAdminClient();
+  if (supabase) {
+    const { data: userRow } = await supabase
+      .from("users")
+      .select("id, full_name, email, role")
+      .eq("tenant_id", tenantId)
+      .eq("id", userId)
+      .maybeSingle();
+    if (userRow) {
+      fullName = String(userRow.full_name ?? userRow.email ?? userId);
+      email = String(userRow.email ?? "");
+      role = String(userRow.role ?? "field_agent");
+    }
+  } else {
+    const u = listUsersByTenant(tenantId).find((item) => item.id === userId);
+    if (u) {
+      fullName = u.fullName ?? u.email;
+      email = u.email;
+      role = u.role;
+    }
+  }
+
+  const roleDefault = await getRolePayrollDefault(tenantId, role as Role);
+  const effectivePercent = effectiveCommissionPercent(role as Role, policy, profile);
+  const formula = effectiveCommissionFormula(role as Role, policy, profile);
+  const isOverride = profile?.commissionPercentOverride != null;
+
+  const transactions = await listTransactions(tenantId);
+  const periodTxs = transactions.filter(
+    (tx) =>
+      tx.fieldAgentId === userId &&
+      ((tx.type === "daily_susu" && !tx.reversedAt) || tx.type === "deposit") &&
+      tx.createdAt >= period.startIso &&
+      tx.createdAt <= period.endIso
+  );
+
+  const byDate = new Map<string, { count: number; total: number }>();
+  let totalCollected = 0;
+  for (const tx of periodTxs) {
+    const day = tx.createdAt.slice(0, 10);
+    const cur = byDate.get(day) ?? { count: 0, total: 0 };
+    cur.count += 1;
+    cur.total = Math.round((cur.total + tx.amount) * 100) / 100;
+    byDate.set(day, cur);
+    totalCollected = Math.round((totalCollected + tx.amount) * 100) / 100;
+  }
+
+  const dailyBreakdown: StaffCommissionDailyRow[] = [...byDate.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([date, info]) => ({
+      date,
+      transactionCount: info.count,
+      totalAmount: info.total
+    }));
+
+  const preview = computeStaffPayrollPreview({
+    baseSalary: profile?.baseSalary ?? roleDefault.baseSalary,
+    monthlyBonus: profile?.monthlyBonus ?? roleDefault.monthlyBonus,
+    collections: totalCollected,
+    commissionPercent: effectivePercent,
+    commissionFormula: formula,
+    commissionsApply: roleReceivesCommission(role as Role),
+    policyEnabled: policy.enabled,
+    bonusRules: policy.bonusRules,
+    deductions: profileDeductions(profile ?? roleDefault)
+  });
+
+  let openShortagesTotal = 0;
+  let openShortageCount = 0;
+  if (supabase) {
+    const { data: variances } = await supabase
+      .from("field_agent_cash_variances")
+      .select("remaining_amount")
+      .eq("tenant_id", tenantId)
+      .eq("field_agent_id", userId)
+      .eq("variance_type", "shortage")
+      .in("status", ["open", "partially_resolved"]);
+    for (const v of variances ?? []) {
+      const rem = Number(v.remaining_amount ?? 0);
+      if (rem > 0) {
+        openShortagesTotal = Math.round((openShortagesTotal + rem) * 100) / 100;
+        openShortageCount += 1;
+      }
+    }
+  }
+
+  const totalCommission = Math.round((preview.projectedCommission + preview.projectedTierBonus) * 100) / 100;
+  const netAfterShortages = Math.round((totalCommission - openShortagesTotal) * 100) / 100;
+
+  return {
+    period,
+    currency: policy.currency,
+    userId,
+    fullName,
+    email,
+    role,
+    policyEnabled: policy.enabled,
+    method: formula?.method ?? "percentage",
+    cycleDays: policy.fieldAgentCycleDays,
+    multiplier: policy.fieldAgentCycleMultiplier,
+    effectivePercent,
+    isOverride,
+    totalCollected,
+    dailyBreakdown,
+    baseCommission: preview.projectedCommission,
+    tierBonus: preview.projectedTierBonus,
+    totalCommission,
+    openShortagesTotal,
+    openShortageCount,
+    netAfterShortages
+  };
 }
 
 export function seedDemoPayslip(tenantId: string, userId: string, role: Role, periodId = "2026-06"): Payslip {

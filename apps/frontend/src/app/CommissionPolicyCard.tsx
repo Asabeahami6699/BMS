@@ -1,3 +1,7 @@
+import {
+  computeFieldAgentBaseCommission,
+  effectiveFieldAgentPercentFromPolicy
+} from "@bms/shared";
 import { useMemo, useState } from "react";
 import type { AppRole, CommissionPolicy } from "./api";
 import { updateCommissionPolicy } from "./api";
@@ -10,6 +14,24 @@ type Props = {
 };
 
 type BonusRule = CommissionPolicy["bonusRules"][number];
+
+const METHOD_OPTIONS: Array<{
+  value: CommissionPolicy["fieldAgentCommissionMethod"];
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "cycle_share",
+    label: "Cycle share formula (Total ÷ Days × Multiplier)",
+    description:
+      "Divide total amount collected by cycle days (e.g. 31) and multiply by agent share (e.g. 0.5)."
+  },
+  {
+    value: "percentage",
+    label: "Flat percentage (%)",
+    description: "Pay a straight percentage of total collections."
+  }
+];
 
 const BASIS_OPTIONS: Array<{
   value: CommissionPolicy["basis"];
@@ -39,7 +61,7 @@ function computeSampleCommission(
   if (!policy.enabled || sampleCollections <= 0) {
     return { base: 0, bonuses: 0, total: 0 };
   }
-  const base = (sampleCollections * policy.fieldAgentCommissionPercent) / 100;
+  const base = computeFieldAgentBaseCommission(sampleCollections, policy);
   const bonuses = policy.bonusRules.reduce((sum, rule) => {
     return sampleCollections >= rule.threshold ? sum + rule.amount : sum;
   }, 0);
@@ -57,7 +79,7 @@ export function CommissionPolicyCard({ role }: Props) {
   const setSaving = useCommissionStore((s) => s.setSaving);
   const refreshSilent = useCommissionStore((s) => s.refreshSilent);
   const refresh = useCommissionStore((s) => s.refresh);
-  const [sampleCollections, setSampleCollections] = useState(10_000);
+  const [sampleCollections, setSampleCollections] = useState(31_000);
 
   const canEdit = role === "admin";
   const initialLoad = loading && policy == null;
@@ -84,6 +106,9 @@ export function CommissionPolicyCard({ role }: Props) {
     try {
       const updated = await updateCommissionPolicy({
         ...policy,
+        fieldAgentCommissionMethod: policy.fieldAgentCommissionMethod ?? "cycle_share",
+        fieldAgentCycleDays: Math.max(1, Number(policy.fieldAgentCycleDays || 31)),
+        fieldAgentCycleMultiplier: Math.max(0, Number(policy.fieldAgentCycleMultiplier ?? 0.5)),
         fieldAgentCommissionPercent: Number(policy.fieldAgentCommissionPercent),
         coordinatorCommissionPercent: Number(policy.coordinatorCommissionPercent),
         bonusRules: policy.bonusRules.map((r) => ({
@@ -198,11 +223,27 @@ export function CommissionPolicyCard({ role }: Props) {
             <span className="kpi-icon" aria-hidden>
               🚶
             </span>
-            <span className="kpi-label">Field agent rate</span>
+            <span className="kpi-label">Field agent formula</span>
           </div>
           <p className="kpi-value">
-            {policy.fieldAgentCommissionPercent}%
-            <span className="kpi-meta"> of {policy.basis === "gross_collections" ? "gross" : "net"}</span>
+            {policy.fieldAgentCommissionMethod === "cycle_share" ? (
+              <>
+                ÷ {policy.fieldAgentCycleDays} × {policy.fieldAgentCycleMultiplier}
+                <span className="kpi-meta">
+                  {" "}
+                  (≈ {effectiveFieldAgentPercentFromPolicy(policy).toFixed(2)}% of{" "}
+                  {policy.basis === "gross_collections" ? "gross" : "net"})
+                </span>
+              </>
+            ) : (
+              <>
+                {policy.fieldAgentCommissionPercent}%
+                <span className="kpi-meta">
+                  {" "}
+                  of {policy.basis === "gross_collections" ? "gross" : "net"}
+                </span>
+              </>
+            )}
           </p>
         </article>
         <article className="kpi-card">
@@ -278,24 +319,94 @@ export function CommissionPolicyCard({ role }: Props) {
             </div>
           </fieldset>
 
+          <fieldset className="commission-basis-fieldset" disabled={!canEdit}>
+            <legend>Field agent calculation method</legend>
+            <div className="commission-basis-grid">
+              {METHOD_OPTIONS.map((opt) => (
+                <label
+                  key={opt.value}
+                  className={`commission-basis-card${policy.fieldAgentCommissionMethod === opt.value ? " commission-basis-card--active" : ""}`}
+                >
+                  <input
+                    type="radio"
+                    name="commission-method"
+                    value={opt.value}
+                    checked={policy.fieldAgentCommissionMethod === opt.value}
+                    disabled={!canEdit}
+                    onChange={() => setPolicy({ ...policy, fieldAgentCommissionMethod: opt.value })}
+                  />
+                  <strong>{opt.label}</strong>
+                  <p className="muted">{opt.description}</p>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+
+          {policy.fieldAgentCommissionMethod === "cycle_share" ? (
+            <div className="commissions-fields-grid">
+              <label className="field">
+                <span>Cycle days (divisor)</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={366}
+                  step={1}
+                  value={policy.fieldAgentCycleDays}
+                  disabled={!canEdit || !policy.enabled}
+                  onChange={(e) =>
+                    setPolicy({
+                      ...policy,
+                      fieldAgentCycleDays: Math.max(1, Number(e.target.value))
+                    })
+                  }
+                />
+                <small className="muted">Default: 31 days</small>
+              </label>
+              <label className="field">
+                <span>Commission multiplier</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={10}
+                  step={0.05}
+                  value={policy.fieldAgentCycleMultiplier}
+                  disabled={!canEdit || !policy.enabled}
+                  onChange={(e) =>
+                    setPolicy({
+                      ...policy,
+                      fieldAgentCycleMultiplier: Math.max(0, Number(e.target.value))
+                    })
+                  }
+                />
+                <small className="muted">
+                  Default: 0.5 · Equivalent to{" "}
+                  {effectiveFieldAgentPercentFromPolicy(policy).toFixed(2)}% of total collected
+                </small>
+              </label>
+            </div>
+          ) : (
+            <div className="commissions-fields-grid">
+              <label className="field">
+                <span>Field agent commission (%)</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={0.1}
+                  value={policy.fieldAgentCommissionPercent}
+                  disabled={!canEdit || !policy.enabled}
+                  onChange={(e) =>
+                    setPolicy({
+                      ...policy,
+                      fieldAgentCommissionPercent: Number(e.target.value)
+                    })
+                  }
+                />
+              </label>
+            </div>
+          )}
+
           <div className="commissions-fields-grid">
-            <label className="field">
-              <span>Field agent commission (%)</span>
-              <input
-                type="number"
-                min={0}
-                max={100}
-                step={0.1}
-                value={policy.fieldAgentCommissionPercent}
-                disabled={!canEdit || !policy.enabled}
-                onChange={(e) =>
-                  setPolicy({
-                    ...policy,
-                    fieldAgentCommissionPercent: Number(e.target.value)
-                  })
-                }
-              />
-            </label>
             <label className="field">
               <span>Coordinator commission (%)</span>
               <input
@@ -412,7 +523,11 @@ export function CommissionPolicyCard({ role }: Props) {
             {policy.enabled && preview ? (
               <ul className="commissions-preview-lines">
                 <li>
-                  <span>Base ({policy.fieldAgentCommissionPercent}%)</span>
+                  <span>
+                    {policy.fieldAgentCommissionMethod === "cycle_share"
+                      ? `Base (${formatMoney(sampleCollections, policy.currency)} ÷ ${policy.fieldAgentCycleDays} × ${policy.fieldAgentCycleMultiplier})`
+                      : `Base (${policy.fieldAgentCommissionPercent}%)`}
+                  </span>
                   <strong>{formatMoney(preview.base, policy.currency)}</strong>
                 </li>
                 {preview.bonuses > 0 ? (

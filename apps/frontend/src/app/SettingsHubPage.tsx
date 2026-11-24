@@ -23,6 +23,11 @@ const SETTINGS_ENTRIES = [
   { to: "settings/approval-workflows", label: "Approval Workflows", description: "Choose who approves new accounts and withdrawals." },
   { to: "settings/notifications", label: "Notification Settings", description: "SMS and email preferences, and the customer message log." },
   {
+    to: "settings/announcements",
+    label: "Floating Announcements",
+    description: "Publish timed top-bar announcements for all staff and field agents in your company."
+  },
+  {
     to: "settings/loan-qualification",
     label: "Loan qualification",
     description: "Consistency period, Susu thresholds, passbook collateral %, and Susu disbursement."

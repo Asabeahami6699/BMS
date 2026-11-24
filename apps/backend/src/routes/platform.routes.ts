@@ -26,6 +26,11 @@ import {
   rejectSubscriptionPaymentClaim,
   updatePlatformBillingSettings
 } from "../services/subscriptionBillingService.js";
+import {
+  getCompanyProfile,
+  updateCompanyProfile
+} from "../services/tenantProfileService.js";
+import { listPlatformTenantHealth } from "../services/platformHealthService.js";
 import { requirePermission } from "../middleware/requirePermission.js";
 
 const subscriptionUpdateSchema = z.object({
@@ -54,6 +59,18 @@ platformRouter.get("/tenants", requirePermission("platform.tenants.read"), async
   }
 });
 
+platformRouter.get("/tenants/health", requirePermission("platform.tenants.read"), async (_req, res) => {
+  try {
+    const tenants = await listPlatformTenants();
+    const health = await listPlatformTenantHealth(tenants.map((t) => t.id));
+    res.json(health);
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "Failed to load tenant health"
+    });
+  }
+});
+
 platformRouter.post("/tenants", requirePermission("platform.tenants.create"), async (req, res) => {
   try {
     const parsed = createTenantSchema.safeParse(req.body);
@@ -67,6 +84,36 @@ platformRouter.post("/tenants", requirePermission("platform.tenants.create"), as
     res.status(400).json({ error: error instanceof Error ? error.message : "Failed to create tenant" });
   }
 });
+
+platformRouter.get(
+  "/tenants/:tenantId/profile",
+  requirePermission("platform.tenants.read"),
+  async (req, res) => {
+    try {
+      const profile = await getCompanyProfile(String(req.params.tenantId));
+      res.json(profile);
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Failed to load company profile"
+      });
+    }
+  }
+);
+
+platformRouter.put(
+  "/tenants/:tenantId/profile",
+  requirePermission("platform.tenants.update"),
+  async (req, res) => {
+    try {
+      const profile = await updateCompanyProfile(String(req.params.tenantId), req.body);
+      res.json(profile);
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Failed to update company profile"
+      });
+    }
+  }
+);
 
 platformRouter.patch(
   "/tenants/:tenantId/modules",

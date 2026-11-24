@@ -11,7 +11,7 @@ export async function applySavingsInitialDepositOnApproval(
   customer: Customer,
   recordedByUserId: string
 ): Promise<void> {
-  if (customer.accountType !== "savings") {
+  if (customer.accountType !== "savings" || !customer.savingsOpeningFeeCollected) {
     return;
   }
 

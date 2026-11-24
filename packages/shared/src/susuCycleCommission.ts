@@ -52,6 +52,7 @@ export const susuCommissionPolicySchema = z.object({
   rolloverTreatment: susuCommissionRolloverTreatmentSchema,
   partialAllocation: susuCommissionPartialAllocationSchema,
   earlyWithdrawalPolicy: susuCommissionEarlyWithdrawalSchema,
+  notifyCustomerOnCommission: z.boolean().optional().default(true),
   effectiveFrom: z.string().min(1),
   createdByUserId: z.string().nullable().optional(),
   createdAt: z.string().optional()
@@ -71,10 +72,11 @@ export const updateSusuCommissionPolicySchema = z.object({
   rolloverTreatment: susuCommissionRolloverTreatmentSchema,
   partialAllocation: susuCommissionPartialAllocationSchema,
   earlyWithdrawalPolicy: susuCommissionEarlyWithdrawalSchema,
+  notifyCustomerOnCommission: z.boolean().optional().default(true),
   effectiveFrom: z.string().min(1).optional()
 });
 
-export type UpdateSusuCommissionPolicyInput = z.infer<typeof updateSusuCommissionPolicySchema>;
+export type UpdateSusuCommissionPolicyInput = z.input<typeof updateSusuCommissionPolicySchema>;
 
 export const susuCustomerCycleSchema = z.object({
   id: z.string().uuid(),
@@ -251,6 +253,7 @@ export function defaultSusuCommissionPolicy(tenantId: string): SusuCommissionPol
     rolloverTreatment: "defer",
     partialAllocation: "commission_first",
     earlyWithdrawalPolicy: "deduct_full",
+    notifyCustomerOnCommission: true,
     effectiveFrom: new Date().toISOString().slice(0, 10)
   };
 }

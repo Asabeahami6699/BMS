@@ -656,6 +656,13 @@ export const SUSU_NAV_VISIBILITY: SusuNavVisibilityRow[] = [
     roles: ["admin", "field_agent", "coordinator"]
   },
   {
+    navPath: "susu/account-statements",
+    label: "Account statements",
+    description: "Search customers to view account ledger, Susu passbook, print statement, or export CSV.",
+    anyPermissions: ["customers.read", "transactions.read"],
+    roles: ["admin", "coordinator", "teller", "accountant", "auditor", "customer_service"]
+  },
+  {
     navPath: "susu/pending-approvals",
     label: "Pending Approvals",
     description: "Registrations, balance, and withdrawal queues.",
@@ -984,6 +991,12 @@ export const SETTINGS_ROUTE_VISIBILITY: SettingsRouteVisibilityRow[] = [
     routePath: "settings/notifications",
     label: "Notifications",
     anyPermissions: ["workspace.notifications"],
+    roles: ["admin"]
+  },
+  {
+    routePath: "settings/announcements",
+    label: "Announcements",
+    anyPermissions: ["workspace.notifications", "users.read"],
     roles: ["admin"]
   },
   {

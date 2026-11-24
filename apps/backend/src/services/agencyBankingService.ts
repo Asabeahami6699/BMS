@@ -21,6 +21,7 @@ import { assertBranchAccess } from "../middleware/branchScope.js";
 import { applyTransactionToFloat, adjustDepositAmountOnFloat, reverseTransactionFromFloat } from "./branchFloatService.js";
 import { getCustomerById, getCustomerWithdrawableBalance, listCustomers } from "./customerService.js";
 import { addLedgerEntry, hasLedgerDebitForTransaction } from "./ledgerService.js";
+import { getMemoryBalanceDisclosureRow } from "./balanceDisclosureService.js";
 import { createAgentNotification, notifyTenantStaff } from "./notificationService.js";
 import type { TransactionRequestContext } from "./transactionService.js";
 import {
@@ -1152,7 +1153,7 @@ export async function tellerPayWithdrawal(
         .eq("tenant_id", context.tenantId)
         .eq("id", disclosureId)
         .maybeSingle()
-    : { data: null };
+    : { data: getMemoryBalanceDisclosureRow(context.tenantId, disclosureId) };
 
   if (!row || row.request_type !== "withdrawal") {
     throw new Error("Withdrawal request not found");
@@ -1282,6 +1283,20 @@ export async function tellerPayWithdrawal(
           : {})
       })
       .eq("id", disclosureId);
+  } else {
+    Object.assign(row, {
+      status: "completed",
+      teller_paid_by: context.userId,
+      teller_paid_at: now,
+      paid_at: now,
+      linked_transaction_id: transactionId,
+      ...(isMomo
+        ? {
+            agent_delivered_by: context.userId,
+            agent_delivered_at: now
+          }
+        : {})
+    });
   }
 
   try {

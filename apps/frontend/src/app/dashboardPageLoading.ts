@@ -9,6 +9,7 @@ import { useBankProductsStore } from "./stores/bankProductsStore";
 import { useBranchCounterStore } from "./stores/branchCounterStore";
 import { useCommissionStore } from "./stores/commissionStore";
 import { useSusuCycleCommissionStore } from "./stores/susuCycleCommissionStore";
+import { useSusuRiskAlertsStore } from "./stores/susuRiskAlertsStore";
 import { useCoordinatorStore } from "./stores/coordinatorStore";
 import { useCoordinatorsStore } from "./stores/coordinatorsStore";
 import { useCustomersStore } from "./stores/customersStore";
@@ -41,6 +42,7 @@ import { useTellerTillDaybookStore } from "./stores/tellerTillDaybookStore";
 import { useWithdrawalsStore } from "./stores/withdrawalsStore";
 import { useUsersStore } from "./stores/usersStore";
 import { useSubscriptionBillingStore } from "./stores/subscriptionBillingStore";
+import { useSiteAnnouncementsStore } from "./stores/siteAnnouncementsStore";
 
 function appPath(pathname: string): string {
   if (pathname.startsWith("/platform")) {
@@ -180,6 +182,10 @@ function settingsWorkspaceLoading(path: string): boolean {
   if (path === "settings/subscription") {
     return useSubscriptionBillingStore.getState().loading || useSubscriptionBillingStore.getState().submitting;
   }
+  if (path === "settings/announcements") {
+    const ann = useSiteAnnouncementsStore.getState();
+    return ann.managedLoading || ann.saving || ann.busyId !== null;
+  }
   return any(
     s.section.approvalWorkflow.loading,
     s.section.companyProfile.loading,
@@ -209,7 +215,7 @@ export function computeDashboardPageLoading(pathname: string): boolean {
     return useCoordinatorStore.getState().loading;
   }
 
-  if (path === "susu/customers" || path === "susu/onboarding") {
+  if (path === "susu/customers" || path === "susu/onboarding" || path === "susu/account-statements") {
     return useCustomersStore.getState().loading;
   }
 
@@ -419,6 +425,11 @@ export function computeDashboardPageLoading(pathname: string): boolean {
     return useInstitutionalIncomeStore.getState().loading;
   }
 
+  if (path === "announcements") {
+    const ann = useSiteAnnouncementsStore.getState();
+    return ann.managedLoading || ann.saving || ann.busyId !== null;
+  }
+
   return false;
 }
 
@@ -438,6 +449,7 @@ const WATCHED_STORES: StoreLike[] = [
   useCustomersStore,
   useCommissionStore,
   useSusuCycleCommissionStore,
+  useSusuRiskAlertsStore,
   usePayrollStore,
   useBranchCounterStore,
   useAgencyStore,
@@ -469,6 +481,7 @@ const WATCHED_STORES: StoreLike[] = [
   usePlatformAdminStore,
   useSettingsWorkspaceStore,
   useSubscriptionBillingStore,
+  useSiteAnnouncementsStore,
   useUsersStore
 ];
 

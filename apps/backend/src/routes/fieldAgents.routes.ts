@@ -18,6 +18,8 @@ import {
   submitCollectionBatchForApproval
 } from "../services/collectionBatchService.js";
 import { listMyCashVariances } from "../services/cashVarianceService.js";
+import { resolveRequestBranchFilter } from "../middleware/branchScope.js";
+import { listZeroCollectionFieldAgentsToday } from "../services/susuRiskAlertsService.js";
 import {
   getFieldAgentDashboard,
   getFieldAgentTodayCollections
@@ -347,6 +349,38 @@ fieldAgentsRouter.post("/me/callover/report", requirePermission("transactions.re
     });
   }
 });
+
+fieldAgentsRouter.get(
+  "/zero-collection-today",
+  requirePermission("customers.read"),
+  async (req, res) => {
+    const context = req.userContext;
+    if (!context) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    if (context.role === "field_agent") {
+      res.status(403).json({ error: "Office access only" });
+      return;
+    }
+    const branchId = resolveRequestBranchFilter(req);
+    const businessDate =
+      typeof req.query.businessDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(req.query.businessDate)
+        ? req.query.businessDate
+        : undefined;
+    try {
+      const rows = await listZeroCollectionFieldAgentsToday(context.tenantId, {
+        branchId,
+        businessDate
+      });
+      res.json(rows);
+    } catch (error) {
+      res.status(500).json({
+        error: error instanceof Error ? error.message : "Failed to load zero-collection agent alerts"
+      });
+    }
+  }
+);
 
 fieldAgentsRouter.get(
   "/momo/resolve",

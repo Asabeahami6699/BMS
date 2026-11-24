@@ -48,6 +48,95 @@ export const CUSTOMER_LIFECYCLE_WARN_MONTHS_BEFORE = 1;
 
 export const accountTypeSchema = z.enum(["susu", "savings", "group", "meba_daakye"]);
 
+export const customerIdCardTypeSchema = z.enum([
+  "ghana_card",
+  "non_citizen_ghana_card",
+  "ecowas_id",
+  "voters_id",
+  "nhis",
+  "drivers_licence",
+  "passport",
+  "no_id_simplified_kyc"
+]);
+
+export type CustomerIdCardType = z.infer<typeof customerIdCardTypeSchema>;
+
+export const customerKycTierSchema = z.enum(["full", "simplified"]);
+export type CustomerKycTier = z.infer<typeof customerKycTierSchema>;
+
+export const kycIntroducerSchema = z.object({
+  fullName: z.string().trim().min(1, "Introducer full name is required"),
+  phone: z.string().trim().min(1, "Introducer phone is required"),
+  relationship: z.string().trim().min(1, "Introducer relationship is required"),
+  ghanaCardNumber: z.string().trim().min(4, "Introducer Ghana Card number is required")
+});
+
+export type KycIntroducerDetails = z.infer<typeof kycIntroducerSchema>;
+
+export const upgradeCustomerKycSchema = z.object({
+  idCardType: z.enum([
+    "ghana_card",
+    "non_citizen_ghana_card",
+    "ecowas_id",
+    "voters_id",
+    "nhis",
+    "drivers_licence",
+    "passport"
+  ]),
+  idCardNumber: z.string().trim().min(3, "Enter a valid ID number"),
+  idCardPhotoUrl: z.string().max(4_500_000, "ID card photo is too large").optional()
+});
+
+export type UpgradeCustomerKycInput = z.infer<typeof upgradeCustomerKycSchema>;
+
+export const CUSTOMER_ID_CARD_TYPE_OPTIONS: ReadonlyArray<{
+  value: CustomerIdCardType;
+  label: string;
+  placeholder: string;
+  isSimplifiedKyc?: boolean;
+}> = [
+  { value: "ghana_card", label: "Ghana Card", placeholder: "e.g. GHA-123456789-0" },
+  {
+    value: "non_citizen_ghana_card",
+    label: "Non-Citizen Ghana Card",
+    placeholder: "e.g. GHA-NC-123456789-0"
+  },
+  { value: "ecowas_id", label: "ECOWAS National ID", placeholder: "e.g. ECOWAS ID number" },
+  { value: "voters_id", label: "Voter's ID", placeholder: "e.g. 1234567890" },
+  { value: "nhis", label: "Health Insurance (NHIS)", placeholder: "e.g. 12345678" },
+  { value: "drivers_licence", label: "Driver's Licence", placeholder: "e.g. DL-1234567" },
+  { value: "passport", label: "Passport", placeholder: "e.g. G1234567" },
+  {
+    value: "no_id_simplified_kyc",
+    label: "No National ID (Simplified KYC + Local Introducer)",
+    placeholder: "",
+    isSimplifiedKyc: true
+  }
+];
+
+export function formatIdCardTypeLabel(type?: string | null): string {
+  switch (type) {
+    case "ghana_card":
+      return "Ghana Card";
+    case "non_citizen_ghana_card":
+      return "Non-Citizen Ghana Card";
+    case "ecowas_id":
+      return "ECOWAS National ID";
+    case "voters_id":
+      return "Voter's ID";
+    case "nhis":
+      return "Health Insurance (NHIS)";
+    case "drivers_licence":
+      return "Driver's Licence";
+    case "passport":
+      return "Passport";
+    case "no_id_simplified_kyc":
+      return "Simplified KYC (No National ID)";
+    default:
+      return "Ghana Card / ID";
+  }
+}
+
 export { SAVINGS_INITIAL_DEPOSIT_GHS } from "./savings.js";
 
 
@@ -86,7 +175,12 @@ export const customerSchema = z.object({
   dateOfBirth: z.string().optional(),
   occupation: z.string().optional(),
   accountType: accountTypeSchema.optional(),
+  idCardType: customerIdCardTypeSchema.optional(),
   idCardNumber: z.string().optional(),
+  kycTier: customerKycTierSchema.optional(),
+  nationality: z.string().optional(),
+  kycIntroducer: kycIntroducerSchema.optional(),
+  kycUpgradedAt: z.string().optional(),
   photoUrl: z.string().optional(),
   idCardPhotoUrl: z.string().optional(),
   savingsOpeningFeeCollected: z.boolean().optional(),
@@ -176,7 +270,13 @@ export const customerRegistrationInputSchema = z.object({
 
   accountType: accountTypeSchema,
 
+  idCardType: customerIdCardTypeSchema.optional(),
+
   idCardNumber: z.string().optional(),
+
+  nationality: z.string().optional(),
+
+  kycIntroducer: kycIntroducerSchema.optional(),
 
   photoUrl: z
     .string()

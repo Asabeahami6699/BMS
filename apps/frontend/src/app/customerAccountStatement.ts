@@ -7,7 +7,7 @@ import {
 } from "@bms/shared";
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
-import { getCompanyProfile, type Customer, type LedgerEntry } from "./api";
+import { getCompanyProfile, getCustomer, type Customer, type LedgerEntry } from "./api";
 
 const DOCUMENT_STYLES = `
   * { box-sizing: border-box; }
@@ -91,11 +91,40 @@ const DOCUMENT_STYLES = `
     border-bottom: 2px solid #000;
     padding-bottom: 6px;
   }
+  .stmt__meta-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    margin-bottom: 12px;
+  }
+  .stmt__customer-photo {
+    width: 80px;
+    height: 80px;
+    border-radius: 9px;
+    object-fit: cover;
+    border: 1.5px solid #1e293b;
+    flex-shrink: 0;
+    background: #f1f5f9;
+  }
+  .stmt__customer-initials {
+    width: 80px;
+    height: 80px;
+    border-radius: 9px;
+    border: 1.5px solid #1e293b;
+    flex-shrink: 0;
+    background: #f1f5f9;
+    color: #0f172a;
+    font-size: 1.35rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
   .stmt__meta {
+    flex: 1 1 auto;
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 6px 16px;
-    margin-bottom: 12px;
   }
   .stmt__label {
     font-size: 0.7rem;
@@ -255,11 +284,32 @@ async function resolveCompanyLogoUrl(explicit?: string): Promise<string | undefi
   }
 }
 
+async function resolveCustomerPhotoUrl(customer: Customer): Promise<string | undefined> {
+  if (isUsableLogoUrl(customer.photoUrl)) {
+    return customer.photoUrl.trim();
+  }
+  try {
+    const detail = await getCustomer(customer.id);
+    return isUsableLogoUrl(detail.photoUrl) ? detail.photoUrl.trim() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function statementInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return `${parts[0]![0]}${parts[1]![0]}`.toUpperCase();
+  }
+  return (parts[0]?.slice(0, 2) ?? "CU").toUpperCase();
+}
+
 export function buildCustomerAccountStatementHtml(options: {
   customer: Customer;
   ledger: LedgerEntry[];
   companyName?: string;
   logoUrl?: string;
+  customerPhotoUrl?: string;
   openingBalance?: number;
   closingBalance?: number;
   fromDate?: string;
@@ -268,6 +318,9 @@ export function buildCustomerAccountStatementHtml(options: {
   const company = options.companyName?.trim() || APP_BRAND_NAME;
   const customer = options.customer;
   const logoUrl = isUsableLogoUrl(options.logoUrl) ? options.logoUrl.trim() : undefined;
+  const customerPhotoUrl = isUsableLogoUrl(options.customerPhotoUrl ?? customer.photoUrl)
+    ? (options.customerPhotoUrl ?? customer.photoUrl)!.trim()
+    : undefined;
   const ledgerOldestFirst = [...options.ledger].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   const closing =
     options.closingBalance ??
@@ -323,7 +376,13 @@ export function buildCustomerAccountStatementHtml(options: {
         <h1 class="stmt__company">${escapeHtml(company)}</h1>
       </header>
       <p class="stmt__title">Account statement</p>
-      <div class="stmt__meta">
+      <div class="stmt__meta-row">
+        ${
+          customerPhotoUrl
+            ? `<img class="stmt__customer-photo" src="${customerPhotoUrl}" alt="${escapeHtml(customer.fullName)}" />`
+            : `<div class="stmt__customer-initials" aria-hidden="true">${escapeHtml(statementInitials(customer.fullName))}</div>`
+        }
+        <div class="stmt__meta">
         <div>
           <div class="stmt__label">Customer</div>
           <div class="stmt__value">${escapeHtml(customer.fullName)}</div>
@@ -355,6 +414,7 @@ export function buildCustomerAccountStatementHtml(options: {
         <div>
           <div class="stmt__label">Closing balance</div>
           <div class="stmt__value">GHS ${formatAccountAmount(closing)}</div>
+        </div>
         </div>
       </div>
       <table>
@@ -493,12 +553,16 @@ async function buildStatementPdfBlob(
   if (filtered.length === 0) {
     throw new Error("No account history entries in the selected date range.");
   }
-  const logoUrl = await resolveCompanyLogoUrl(options.logoUrl);
+  const [logoUrl, customerPhotoUrl] = await Promise.all([
+    resolveCompanyLogoUrl(options.logoUrl),
+    resolveCustomerPhotoUrl(options.customer)
+  ]);
   return htmlToPdfBlob(
     buildCustomerAccountStatementHtml({
       ...options,
       ledger: filtered,
-      logoUrl
+      logoUrl,
+      customerPhotoUrl
     })
   );
 }

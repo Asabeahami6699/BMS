@@ -5,7 +5,7 @@ import type {
   RequestCustomerApprovalInput,
   WithdrawalFulfillmentMode
 } from "../../app/api";
-import { resolveMomoAccountName } from "../../app/api";
+import { getRegistrationFormSetup, resolveMomoAccountName } from "../../app/api";
 import { Modal } from "../../components/Modal";
 
 const FULFILLMENT_OPTIONS: {
@@ -77,6 +77,7 @@ type LookupState =
 type Props = {
   open: boolean;
   customerName?: string;
+  kycTier?: "full" | "simplified";
   priorDeclineReason?: string;
   submitting: boolean;
   onClose: () => void;
@@ -86,12 +87,14 @@ type Props = {
 export function CustomerRequestModal({
   open,
   customerName,
+  kycTier,
   priorDeclineReason,
   submitting,
   onClose,
   onSubmit
 }: Props) {
   const [requestType, setRequestType] = useState<CustomerRequestType>("balance");
+  const [allowSimplifiedWithdrawal, setAllowSimplifiedWithdrawal] = useState<boolean>(true);
   const [reason, setReason] = useState("");
   const [amount, setAmount] = useState("");
   const [fulfillmentMode, setFulfillmentMode] = useState<WithdrawalFulfillmentMode>("next_day_cash");
@@ -114,8 +117,25 @@ export function CustomerRequestModal({
       setMomoAccountName("");
       setLookupState({ status: "idle" });
       lookupSeqRef.current += 1;
+      if (kycTier === "simplified") {
+        setAllowSimplifiedWithdrawal(false);
+        void getRegistrationFormSetup()
+          .then((setup) => {
+            setAllowSimplifiedWithdrawal(
+              Boolean(setup.simplifiedKyc?.allowFieldAgentWithdrawalRequest)
+            );
+          })
+          .catch(() => {
+            setAllowSimplifiedWithdrawal(false);
+          });
+      } else {
+        setAllowSimplifiedWithdrawal(true);
+      }
     }
-  }, [open]);
+  }, [open, kycTier]);
+
+  const withdrawalBlockedForSimplified =
+    kycTier === "simplified" && !allowSimplifiedWithdrawal;
 
   const runMomoLookup = useCallback(async (rawPhone: string, network: MomoNetworkCode) => {
     const normalized = normalizeGhanaPhone(rawPhone);
@@ -280,15 +300,28 @@ export function CustomerRequestModal({
               value="withdrawal"
               checked={requestType === "withdrawal"}
               onChange={() => setRequestType("withdrawal")}
-              disabled={submitting}
+              disabled={submitting || withdrawalBlockedForSimplified}
             />
             <span>
               <strong>Request withdrawal</strong>
-              <span className="muted">
-                {" "}
-                — opening savings deposit cannot be withdrawn
-              </span>
-              <small className="muted">Customer wants money from their account</small>
+              {withdrawalBlockedForSimplified ? (
+                <small className="muted" style={{ display: "block", color: "var(--warning)" }}>
+                  Disabled for Simplified KYC (Tier 1) accounts — direct customer to the branch for
+                  face-verified withdrawal.
+                </small>
+              ) : (
+                <>
+                  <span className="muted">
+                    {" "}
+                    — opening savings deposit cannot be withdrawn
+                  </span>
+                  <small className="muted">
+                    {kycTier === "simplified"
+                      ? "Simplified KYC account — agent withdrawal requests enabled by admin"
+                      : "Customer wants money from their account"}
+                  </small>
+                </>
+              )}
             </span>
           </label>
         </fieldset>

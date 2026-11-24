@@ -28,6 +28,7 @@ import {
 import { randomUUID } from "node:crypto";
 import { getSupabaseAdminClient } from "../config/supabaseClient.js";
 import { isMissingSupabaseResource } from "../lib/supabaseSchema.js";
+import { getCustomerById } from "./customerService.js";
 import { listBranches } from "./branchService.js";
 import { fetchUserNameMap } from "./userNameResolver.js";
 
@@ -629,6 +630,14 @@ export async function createInvestmentApplication(
   const parsed = createInvestmentApplicationSchema.safeParse(raw);
   if (!parsed.success) {
     throw new Error("Invalid investment application");
+  }
+  if (parsed.data.customerId) {
+    const linkedCustomer = await getCustomerById(actor.tenantId, parsed.data.customerId);
+    if (linkedCustomer?.kycTier === "simplified") {
+      throw new Error(
+        "Investments require Full KYC. This customer is on Tier 1 Simplified KYC — please upgrade their account with a valid national or foreign ID first."
+      );
+    }
   }
   const figures = computeInvestmentFigures({
     principalAmount: parsed.data.principalAmount,

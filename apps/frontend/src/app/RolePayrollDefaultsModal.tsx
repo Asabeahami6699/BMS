@@ -1,4 +1,8 @@
-import { computeStaffPayrollPreview, formatAccountAmount, type TenantPayrollRole } from "@bms/shared";
+import {
+  computeStaffPayrollPreview,
+  formatAccountAmount,
+  type TenantPayrollRole
+} from "@bms/shared";
 import { useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { Modal } from "../components/Modal";
@@ -10,6 +14,17 @@ type Props = {
   open: boolean;
   onClose: () => void;
 };
+
+const COMMISSION_ELIGIBLE_ROLES = new Set<string>(["field_agent", "coordinator"]);
+
+function roleBadgeInitials(role: string): string {
+  const label = formatRoleLabel(role);
+  const parts = label.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return `${parts[0]![0]}${parts[1]![0]}`.toUpperCase();
+  }
+  return label.slice(0, 2).toUpperCase();
+}
 
 export function RolePayrollDefaultsModal({ open, onClose }: Props) {
   const { showToast } = useToast();
@@ -34,11 +49,26 @@ export function RolePayrollDefaultsModal({ open, onClose }: Props) {
   );
 
   const staffCountByRole = useMemo(() => selectStaffCountByRole(staffRows), [staffRows]);
-  const exampleCoordinator = roleDrafts.find((d) => d.role === "coordinator");
+
+  const summary = useMemo(() => {
+    let totalStaff = 0;
+    let totalBase = 0;
+    let configuredRoles = 0;
+    for (const d of roleDrafts) {
+      const count = staffCountByRole[d.role] ?? 0;
+      const base = parseMoney(d.draftBaseSalary);
+      totalStaff += count;
+      totalBase += base * count;
+      if (base > 0) configuredRoles += 1;
+    }
+    return { totalStaff, totalBase, configuredRoles };
+  }, [roleDrafts, staffCountByRole]);
 
   if (!policy) {
     return null;
   }
+
+  const currency = policy.currency || "GHS";
 
   async function saveOne(draft: RoleDraft) {
     try {
@@ -63,44 +93,67 @@ export function RolePayrollDefaultsModal({ open, onClose }: Props) {
   }
 
   const footer = (
-    <>
-      <button type="button" className="secondary" onClick={onClose}>
-        Close
-      </button>
-      <button
-        type="button"
-        className="primary"
-        disabled={savingAll || roleDrafts.some((d) => d.saving)}
-        onClick={() => void saveAll()}
-      >
-        {savingAll ? "Saving all…" : "Save all roles & apply"}
-      </button>
-    </>
+    <div className="role-pay-footer">
+      <span className="muted role-pay-footer__hint">
+        Changes apply immediately to all {summary.totalStaff} staff member
+        {summary.totalStaff === 1 ? "" : "s"} in the live payroll sheet.
+      </span>
+      <div className="role-pay-footer__actions">
+        <button type="button" className="button secondary" onClick={onClose}>
+          Close
+        </button>
+        <button
+          type="button"
+          className="button"
+          disabled={savingAll || roleDrafts.some((d) => d.saving)}
+          onClick={() => void saveAll()}
+        >
+          {savingAll ? "Saving all…" : "Save all roles & apply"}
+        </button>
+      </div>
+    </div>
   );
 
   return (
     <Modal
       open={open}
       title="Pay by role"
-      subtitle="Set basic salary, SSNIT, and welfare once per role. Every user with that role receives these amounts automatically."
+      subtitle="Configure standard basic salary, monthly bonus, SSNIT, welfare, and default loan deductions per staff role."
       onClose={onClose}
       footer={footer}
-      panelClassName="modal-panel--70 role-payroll-modal"
+      panelClassName="modal-panel--70 role-pay-modal"
     >
-      <div className="role-payroll-modal__notice">
-        <p>
-          <strong>Example:</strong> set Coordinator basic salary to{" "}
-          <strong>{exampleCoordinator ? parseMoneyDisplay(exampleCoordinator.draftBaseSalary) : "5,000"}</strong>{" "}
-          — every coordinator on the platform uses that basic pay (plus commission from collections if
-          applicable).
-        </p>
+      {/* Top executive KPI strip */}
+      <div className="role-pay-summary">
+        <div className="role-pay-summary__stat">
+          <span className="role-pay-summary__label">Roles configured</span>
+          <strong>
+            {summary.configuredRoles} / {roleDrafts.length}
+          </strong>
+        </div>
+        <div className="role-pay-summary__stat">
+          <span className="role-pay-summary__label">Staff covered</span>
+          <strong>{summary.totalStaff}</strong>
+        </div>
+        <div className="role-pay-summary__stat">
+          <span className="role-pay-summary__label">Monthly base payroll</span>
+          <strong>
+            {currency} {formatAccountAmount(summary.totalBase)}
+          </strong>
+        </div>
+        <div className="role-pay-summary__tip">
+          Updating any role automatically recalculates gross, deductions, and take-home pay for
+          every staff member holding that role (plus collection commissions where eligible).
+        </div>
       </div>
 
-      <div className="role-payroll-grid">
+      {/* Role cards grid */}
+      <div className="role-pay-grid">
         {roleDrafts.map((draft) => (
           <RolePayrollCard
             key={draft.role}
             draft={draft}
+            currency={currency}
             policy={policy}
             staffCount={staffCountByRole[draft.role] ?? 0}
             onChange={(patch) => patchRoleDraft(draft.role as TenantPayrollRole, patch)}
@@ -112,21 +165,18 @@ export function RolePayrollDefaultsModal({ open, onClose }: Props) {
   );
 }
 
-function parseMoneyDisplay(raw: string): string {
-  const n = Number(raw);
-  if (Number.isNaN(n)) return raw || "0";
-  return n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
-}
-
 type CardProps = {
   draft: RoleDraft;
+  currency: string;
   policy: NonNullable<ReturnType<typeof usePayrollStore.getState>["policy"]>;
   staffCount: number;
   onChange: (patch: Partial<RoleDraft>) => void;
   onSave: () => void;
 };
 
-function RolePayrollCard({ draft, policy, staffCount, onChange, onSave }: CardProps) {
+function RolePayrollCard({ draft, currency, policy, staffCount, onChange, onSave }: CardProps) {
+  const commissionEligible = COMMISSION_ELIGIBLE_ROLES.has(draft.role);
+
   const preview = useMemo(
     () =>
       computeStaffPayrollPreview({
@@ -149,35 +199,59 @@ function RolePayrollCard({ draft, policy, staffCount, onChange, onSave }: CardPr
   );
 
   return (
-    <article className="role-payroll-card">
-      <header className="role-payroll-card__head">
-        <div>
-          <h3>{formatRoleLabel(draft.role)}</h3>
-          <p className="muted">
-            {staffCount > 0
-              ? `Applies to ${staffCount} staff`
-              : "No active staff with this role yet"}
-          </p>
+    <article className="role-pay-card">
+      <header className="role-pay-card__head">
+        <div className="role-pay-card__identity">
+          <span className="role-pay-card__avatar" aria-hidden>
+            {roleBadgeInitials(draft.role)}
+          </span>
+          <div className="role-pay-card__title-wrap">
+            <h3 className="role-pay-card__title">{formatRoleLabel(draft.role)}</h3>
+            <div className="role-pay-card__badges">
+              <span
+                className={`role-pay-card__pill${staffCount > 0 ? " role-pay-card__pill--active" : ""}`}
+              >
+                {staffCount > 0 ? `${staffCount} staff` : "No active staff"}
+              </span>
+              {commissionEligible ? (
+                <span className="role-pay-card__pill role-pay-card__pill--comm">
+                  + Commission
+                </span>
+              ) : null}
+            </div>
+          </div>
         </div>
-        <div className="role-payroll-card__basic-preview">
-          <span className="muted">Basic</span>
-          <strong>{parseMoneyDisplay(draft.draftBaseSalary)}</strong>
+        <div className="role-pay-card__net-badge">
+          <span className="role-pay-card__net-label">Est. base net</span>
+          <strong className="role-pay-card__net-value">
+            {currency} {formatAccountAmount(preview.projectedNet)}
+          </strong>
         </div>
       </header>
 
-      <div className="role-payroll-card__fields">
-        <label className="role-payroll-field">
-          <span>Basic salary</span>
+      <div className="role-pay-card__fields">
+        <label className="role-pay-field">
+          <span>Basic salary ({currency})</span>
           <input
             className="input-no-spin"
             inputMode="decimal"
-            placeholder="e.g. 5000"
+            placeholder="0.00"
             value={draft.draftBaseSalary}
             onChange={(e) => onChange({ draftBaseSalary: e.target.value })}
           />
         </label>
-        <label className="role-payroll-field">
-          <span>SSNIT % (of basic)</span>
+        <label className="role-pay-field">
+          <span>Monthly bonus ({currency})</span>
+          <input
+            className="input-no-spin"
+            inputMode="decimal"
+            placeholder="0.00"
+            value={draft.draftMonthlyBonus}
+            onChange={(e) => onChange({ draftMonthlyBonus: e.target.value })}
+          />
+        </label>
+        <label className="role-pay-field">
+          <span>SSNIT rate (%)</span>
           <input
             className="input-no-spin"
             inputMode="decimal"
@@ -186,47 +260,56 @@ function RolePayrollCard({ draft, policy, staffCount, onChange, onSave }: CardPr
             onChange={(e) => onChange({ draftSsnitRate: e.target.value })}
           />
         </label>
-        <label className="role-payroll-field">
-          <span>SSNIT fixed (if no %)</span>
+        <label className="role-pay-field">
+          <span>SSNIT fixed ({currency}, if no %)</span>
           <input
             className="input-no-spin"
             inputMode="decimal"
+            placeholder="0.00"
             value={draft.draftSsnitFixed}
             onChange={(e) => onChange({ draftSsnitFixed: e.target.value })}
           />
         </label>
-        <label className="role-payroll-field">
-          <span>Welfare</span>
+        <label className="role-pay-field">
+          <span>Welfare deduction ({currency})</span>
           <input
             className="input-no-spin"
             inputMode="decimal"
+            placeholder="0.00"
             value={draft.draftWelfare}
             onChange={(e) => onChange({ draftWelfare: e.target.value })}
           />
         </label>
-        <label className="role-payroll-field">
-          <span>Monthly bonus</span>
+        <label className="role-pay-field">
+          <span>Default loan ded. ({currency})</span>
           <input
             className="input-no-spin"
             inputMode="decimal"
-            value={draft.draftMonthlyBonus}
-            onChange={(e) => onChange({ draftMonthlyBonus: e.target.value })}
-          />
-        </label>
-        <label className="role-payroll-field">
-          <span>Default loan deduction</span>
-          <input
-            className="input-no-spin"
-            inputMode="decimal"
+            placeholder="0.00"
             value={draft.draftLoan}
             onChange={(e) => onChange({ draftLoan: e.target.value })}
           />
         </label>
       </div>
 
-      <footer className="role-payroll-card__foot">
-        <span className="muted">Est. deductions −{formatAccountAmount(preview.projectedDeductions)}</span>
-        <button type="button" className="secondary small" disabled={draft.saving} onClick={onSave}>
+      <footer className="role-pay-card__foot">
+        <div className="role-pay-card__breakdown">
+          <span>
+            Gross <strong>{formatAccountAmount(preview.projectedGross)}</strong>
+          </span>
+          <span className="role-pay-card__sep" aria-hidden>
+            ·
+          </span>
+          <span className="role-pay-card__ded">
+            Ded. <strong>−{formatAccountAmount(preview.projectedDeductions)}</strong>
+          </span>
+        </div>
+        <button
+          type="button"
+          className="button secondary payroll-modern-btn-sm"
+          disabled={draft.saving}
+          onClick={onSave}
+        >
           {draft.saving ? "Saving…" : "Save & apply"}
         </button>
       </footer>

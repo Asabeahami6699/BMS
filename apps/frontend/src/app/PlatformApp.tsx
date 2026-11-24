@@ -7,6 +7,7 @@ import { CompaniesPage } from "./platform/CompaniesPage";
 import { PlatformAddonPage } from "./platform/PlatformAddonPage";
 import { PlatformProductPage } from "./platform/PlatformProductPage";
 import { SubscriptionManagementPage } from "./platform/SubscriptionManagementPage";
+import { SiteAnnouncementsManagerPage } from "./SiteAnnouncementsManagerPage";
 
 function ProductRoute() {
   const { slug } = useParams();
@@ -52,6 +53,7 @@ export function PlatformApp() {
         <Route path="/subscriptions" element={<SubscriptionManagementPage />} />
         <Route path="/products/:slug" element={<ProductRoute />} />
         <Route path="/addons/:slug" element={<AddonRoute />} />
+        <Route path="/announcements" element={<SiteAnnouncementsManagerPage scope="platform" />} />
         <Route path="/live-chat" element={<PlatformLiveChatPage />} />
         <Route path="*" element={<Navigate to="companies" replace />} />
       </Routes>

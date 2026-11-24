@@ -5,6 +5,7 @@ import { submitCollectionBatchForApproval } from "../../app/api";
 import { useToast } from "../../components/Toast";
 import { toUserFacingError } from "../../lib/networkError";
 import { AgentCashVariancePanel } from "../components/AgentCashVariancePanel";
+import { OfflineSyncInspector } from "../components/OfflineSyncInspector";
 import { useAgentCollectionStore } from "../stores/agentCollectionStore";
 import { useAgentCustomerStore, selectCustomerStats } from "../stores/agentCustomerStore";
 
@@ -37,6 +38,7 @@ export function AgentHomePage() {
 
   return (
     <div className="agent-page">
+      <OfflineSyncInspector />
       {priorUnsubmittedBatches.length > 0 ? (
         <article className="card agent-card eod-guard-banner" role="alert">
           <div className="eod-guard-banner__body">

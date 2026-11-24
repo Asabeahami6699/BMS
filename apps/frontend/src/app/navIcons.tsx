@@ -29,7 +29,9 @@ const iconByLabel: Record<string, string> = {
   Products: "📦",
   "Add-ons": "➕",
   "Live chat": "💬",
-  "Company chats": "💬"
+  "Company chats": "💬",
+  Announcements: "📢",
+  "Floating Announcements": "📢"
 };
 
 const iconByPath: Record<string, string> = {
@@ -58,6 +60,7 @@ const iconByPath: Record<string, string> = {
   reports: "▤",
   profile: "👤",
   "susu/customers": "◎",
+  "susu/account-statements": "▤",
   "susu/pending-approvals": "◷",
   "susu/callover-batches": "✓",
   "susu/overages-shortages": "⚖",
@@ -96,6 +99,8 @@ const iconByPath: Record<string, string> = {
   "settings/roles": "⚙",
   "settings/approval-workflows": "✓",
   "settings/notifications": "🔔",
+  "settings/announcements": "📢",
+  announcements: "📢",
   "settings/audit-logs": "📋"
 };
 

@@ -40,11 +40,22 @@ type Ctx = {
 
 const memoryPolicies = new Map<string, SusuCommissionPolicy[]>();
 const memoryCycles = new Map<string, SusuCustomerCycle[]>();
+/** In-memory fallback for notify_customer_on_commission if migration 103 is not yet applied. */
+const notifyCommissionFallback = new Map<string, boolean>();
+
+function isMissingNotifyCommissionColumn(message: string): boolean {
+  return /notify_customer_on_commission/i.test(message);
+}
 
 function mapPolicy(row: Record<string, unknown>): SusuCommissionPolicy {
+  const tenantId = String(row.tenant_id);
+  const notifyFlag =
+    typeof row.notify_customer_on_commission === "boolean"
+      ? row.notify_customer_on_commission
+      : (notifyCommissionFallback.get(tenantId) ?? true);
   return susuCommissionPolicySchema.parse({
     id: row.id,
-    tenantId: row.tenant_id,
+    tenantId,
     version: Number(row.version),
     enabled: row.enabled !== false,
     currency: row.currency ?? "GHS",
@@ -58,6 +69,7 @@ function mapPolicy(row: Record<string, unknown>): SusuCommissionPolicy {
     rolloverTreatment: row.rollover_treatment,
     partialAllocation: row.partial_allocation,
     earlyWithdrawalPolicy: row.early_withdrawal_policy,
+    notifyCustomerOnCommission: notifyFlag,
     effectiveFrom: row.effective_from,
     createdByUserId: row.created_by_user_id ?? null,
     createdAt: row.created_at
@@ -213,15 +225,27 @@ export async function publishSusuCommissionPolicy(
     rollover_treatment: parsed.rolloverTreatment,
     partial_allocation: parsed.partialAllocation,
     early_withdrawal_policy: parsed.earlyWithdrawalPolicy,
+    notify_customer_on_commission: parsed.notifyCustomerOnCommission,
     effective_from: effectiveFrom,
     created_by_user_id: context.userId,
     created_at: new Date().toISOString()
   };
 
-  const { data, error } = await supabase.from("susu_commission_policies").insert(row).select("*").single();
+  let { data, error } = await supabase.from("susu_commission_policies").insert(row).select("*").single();
+  if (error && isMissingNotifyCommissionColumn(error.message)) {
+    const { notify_customer_on_commission: _omit, ...withoutNotify } = row;
+    const retry = await supabase
+      .from("susu_commission_policies")
+      .insert(withoutNotify)
+      .select("*")
+      .single();
+    data = retry.data;
+    error = retry.error;
+  }
   if (error) {
     throw new Error(`Failed to save Susu commission policy: ${error.message}`);
   }
+  notifyCommissionFallback.set(context.tenantId, parsed.notifyCustomerOnCommission);
   return mapPolicy(data as Record<string, unknown>);
 }
 

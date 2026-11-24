@@ -39,11 +39,33 @@ export const registrationFormFieldsSchema = z.object({
 
 export type RegistrationFormFields = z.infer<typeof registrationFormFieldsSchema>;
 
+export const simplifiedKycPolicySchema = z.object({
+  /** Allow registering foreigners / customers with no national ID via Tier 1 Simplified KYC + Local Introducer. */
+  enabled: z.boolean().default(true),
+  /** Maximum cumulative balance (GHS) allowed on a Simplified KYC account (0 = no cap). */
+  maxBalanceGhs: money.default(5000),
+  /** Allow field agents to submit withdrawal requests for Simplified KYC accounts (admin toggle). */
+  allowFieldAgentWithdrawalRequest: z.boolean().default(false)
+});
+
+export type SimplifiedKycPolicy = z.infer<typeof simplifiedKycPolicySchema>;
+
+export const DEFAULT_SIMPLIFIED_KYC_POLICY: SimplifiedKycPolicy = {
+  enabled: true,
+  maxBalanceGhs: 5000,
+  allowFieldAgentWithdrawalRequest: false
+};
+
+export const savingsOpeningFeeHandlingSchema = z.enum(["both", "cash_now", "deduct_later"]);
+export type SavingsOpeningFeeHandling = z.infer<typeof savingsOpeningFeeHandlingSchema>;
+
 export const registrationFormSetupSchema = z
   .object({
     savingsOpeningFeeGhs: money,
+    savingsOpeningFeeHandling: savingsOpeningFeeHandlingSchema.optional().default("both"),
     forms: z.array(registrationAccountFormSchema).length(4),
-    fields: registrationFormFieldsSchema
+    fields: registrationFormFieldsSchema,
+    simplifiedKyc: simplifiedKycPolicySchema.optional().default(DEFAULT_SIMPLIFIED_KYC_POLICY)
   })
   .superRefine((data, ctx) => {
     const ids = data.forms.map((form) => form.id);
@@ -62,10 +84,12 @@ export const registrationFormSetupSchema = z
   })
   .transform((data) => ({
     savingsOpeningFeeGhs: data.savingsOpeningFeeGhs,
+    savingsOpeningFeeHandling: data.savingsOpeningFeeHandling ?? "both",
     forms: REGISTRATION_ACCOUNT_TYPES.map(
       (id) => data.forms.find((form) => form.id === id) as RegistrationAccountForm
     ),
-    fields: data.fields
+    fields: data.fields,
+    simplifiedKyc: data.simplifiedKyc ?? DEFAULT_SIMPLIFIED_KYC_POLICY
   }));
 
 export type RegistrationFormSetup = z.infer<typeof registrationFormSetupSchema>;
@@ -113,12 +137,14 @@ export function defaultRegistrationFormSetup(
 ): RegistrationFormSetup {
   return registrationFormSetupSchema.parse({
     savingsOpeningFeeGhs: openingFeeGhs,
+    savingsOpeningFeeHandling: "both",
     forms: REGISTRATION_ACCOUNT_TYPES.map((id) => ({
       id,
       enabled: true,
       ...DEFAULT_FORM_COPY[id]
     })),
-    fields: DEFAULT_FIELDS
+    fields: DEFAULT_FIELDS,
+    simplifiedKyc: DEFAULT_SIMPLIFIED_KYC_POLICY
   });
 }
 
@@ -148,8 +174,10 @@ export function readRegistrationFormSetup(value: unknown): RegistrationFormSetup
 export function registrationFormsUseDefaults(setup: RegistrationFormSetup): boolean {
   const defaults = defaultRegistrationFormSetup();
   return (
+    setup.savingsOpeningFeeHandling === defaults.savingsOpeningFeeHandling &&
     JSON.stringify(setup.forms) === JSON.stringify(defaults.forms) &&
-    JSON.stringify(setup.fields) === JSON.stringify(defaults.fields)
+    JSON.stringify(setup.fields) === JSON.stringify(defaults.fields) &&
+    JSON.stringify(setup.simplifiedKyc) === JSON.stringify(defaults.simplifiedKyc)
   );
 }
 
@@ -159,7 +187,15 @@ export type RegistrationDraft = {
   houseNumber?: string;
   dateOfBirth?: string;
   occupation?: string;
+  idCardType?: string;
   idCardNumber?: string;
+  nationality?: string;
+  kycIntroducer?: {
+    fullName?: string;
+    phone?: string;
+    relationship?: string;
+    ghanaCardNumber?: string;
+  };
   idCardPhotoUrl?: string;
   photoUrl?: string;
   nextOfKin?: {
@@ -183,6 +219,10 @@ export function registrationFormIssue(draft: RegistrationDraft, setup: Registrat
     return "That account form is turned off. Choose another account type.";
   }
   const fields = setup.fields;
+  const isSimplifiedKyc = draft.idCardType === "no_id_simplified_kyc";
+  if (isSimplifiedKyc && !setup.simplifiedKyc.enabled) {
+    return "Simplified KYC (No National ID) registration is turned off by your company admin.";
+  }
   if (fields.email === "required" && !filled(draft.email)) {
     return "Enter an email address.";
   }
@@ -198,14 +238,32 @@ export function registrationFormIssue(draft: RegistrationDraft, setup: Registrat
   if (fields.occupation === "required" && !filled(draft.occupation)) {
     return "Enter the occupation.";
   }
-  if (fields.idCardNumber === "required" && !filled(draft.idCardNumber)) {
-    return "Enter the ID card number.";
-  }
-  if (fields.idCardPhoto === "required" && !draft.idCardPhotoUrl?.trim()) {
-    return "Take a photo of the customer's ID card.";
-  }
-  if (fields.customerPhoto === "required" && !draft.photoUrl?.trim()) {
-    return "Take a photo of the customer.";
+  if (isSimplifiedKyc) {
+    if (!filled(draft.nationality)) {
+      return "Enter the customer's nationality / country of origin for Simplified KYC.";
+    }
+    const intro = draft.kycIntroducer;
+    if (
+      !filled(intro?.fullName) ||
+      !filled(intro?.phone) ||
+      !filled(intro?.relationship) ||
+      !filled(intro?.ghanaCardNumber)
+    ) {
+      return "Complete all local introducer details (name, phone, relationship, and Ghana Card number) for Simplified KYC.";
+    }
+    if (!draft.photoUrl?.trim()) {
+      return "Customer face photo is required for Simplified KYC accounts.";
+    }
+  } else {
+    if (fields.idCardNumber === "required" && !filled(draft.idCardNumber)) {
+      return "Enter the ID card number.";
+    }
+    if (fields.idCardPhoto === "required" && !draft.idCardPhotoUrl?.trim()) {
+      return "Take a photo of the customer's ID card.";
+    }
+    if (fields.customerPhoto === "required" && !draft.photoUrl?.trim()) {
+      return "Take a photo of the customer.";
+    }
   }
   const kin = draft.nextOfKin;
   const kinStarted = Boolean(
@@ -229,6 +287,7 @@ export function registrationFormIssue(draft: RegistrationDraft, setup: Registrat
 export function registrationPayloadForSetup<T extends RegistrationDraft>(draft: T, setup: RegistrationFormSetup): T {
   const fields = setup.fields;
   const next: T = { ...draft };
+  const isSimplifiedKyc = draft.idCardType === "no_id_simplified_kyc";
   if (fields.email === "hidden") {
     next.email = undefined;
   } else {
@@ -237,12 +296,35 @@ export function registrationPayloadForSetup<T extends RegistrationDraft>(draft: 
   next.houseNumber = fields.houseNumber === "hidden" ? undefined : filled(draft.houseNumber);
   next.dateOfBirth = fields.dateOfBirth === "hidden" ? undefined : filled(draft.dateOfBirth);
   next.occupation = fields.occupation === "hidden" ? undefined : filled(draft.occupation);
-  next.idCardNumber = fields.idCardNumber === "hidden" ? undefined : filled(draft.idCardNumber);
-  if (fields.idCardPhoto === "hidden") {
+  next.idCardType = fields.idCardNumber === "hidden" ? undefined : filled(draft.idCardType);
+  if (isSimplifiedKyc) {
+    next.idCardNumber = undefined;
     next.idCardPhotoUrl = undefined;
-  }
-  if (fields.customerPhoto === "hidden") {
-    next.photoUrl = undefined;
+    next.nationality = filled(draft.nationality);
+    const intro = draft.kycIntroducer;
+    const iName = filled(intro?.fullName);
+    const iPhone = filled(intro?.phone);
+    const iRel = filled(intro?.relationship);
+    const iCard = filled(intro?.ghanaCardNumber);
+    next.kycIntroducer =
+      iName && iPhone && iRel && iCard
+        ? {
+            fullName: iName,
+            phone: iPhone,
+            relationship: iRel,
+            ghanaCardNumber: iCard
+          }
+        : undefined;
+  } else {
+    next.idCardNumber = fields.idCardNumber === "hidden" ? undefined : filled(draft.idCardNumber);
+    next.nationality = filled(draft.nationality);
+    next.kycIntroducer = undefined;
+    if (fields.idCardPhoto === "hidden") {
+      next.idCardPhotoUrl = undefined;
+    }
+    if (fields.customerPhoto === "hidden") {
+      next.photoUrl = undefined;
+    }
   }
   if (fields.nextOfKin === "hidden") {
     next.nextOfKin = undefined;

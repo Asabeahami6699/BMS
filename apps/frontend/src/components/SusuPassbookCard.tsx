@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import type { SusuPassbookBox, SusuPassbookCard as SusuPassbookCardModel } from "@bms/shared";
+import { printSusuPassbookCard } from "../app/susuPassbookDocument";
 import { useSusuCycleCommissionStore } from "../app/stores/susuCycleCommissionStore";
+import { useToast } from "./Toast";
 
 type Props = {
   customerId: string;
   customerName?: string;
+  accountNumber?: string;
   compact?: boolean;
 };
 
@@ -58,7 +61,8 @@ function boxTooltip(box: SusuPassbookBox, card: SusuPassbookCardModel): string {
   return parts.join(" • ");
 }
 
-export function SusuPassbookCard({ customerId, customerName, compact = false }: Props) {
+export function SusuPassbookCard({ customerId, customerName, accountNumber, compact = false }: Props) {
+  const { showToast } = useToast();
   const summary = useSusuCycleCommissionStore((s) => s.summaryByCustomer[customerId] ?? null);
   const loading = useSusuCycleCommissionStore((s) => Boolean(s.summaryLoadingByCustomer[customerId]));
   const error = useSusuCycleCommissionStore((s) => s.summaryErrorByCustomer[customerId] ?? null);
@@ -233,6 +237,23 @@ export function SusuPassbookCard({ customerId, customerName, compact = false }: 
           ) : (
             <span className="susu-passbook-card-pill">Page #{activeCard.cycleNumber}</span>
           )}
+
+          <button
+            type="button"
+            className="button secondary susu-passbook-refresh"
+            onClick={() => {
+              void printSusuPassbookCard({
+                card: activeCard,
+                customerName: customerName || "Customer",
+                accountNumber
+              }).catch((err) =>
+                showToast(err instanceof Error ? err.message : "Could not print passbook", "error")
+              );
+            }}
+            title="Print this Susu passbook card"
+          >
+            Print card
+          </button>
 
           <button
             type="button"

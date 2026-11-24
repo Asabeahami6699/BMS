@@ -8,6 +8,8 @@ import {
 } from "../components/AccountingAmountInput";
 import { Modal } from "../components/Modal";
 import { useToast } from "../components/Toast";
+import { useAuth } from "../auth/AuthContext";
+import { printBranchEodSummary } from "./branchEodReportDocument";
 import { usePageLoading } from "./hooks/usePageLoading";
 import { formatBranchLabel } from "./branchDisplay";
 import { useSusuClosingBalancesStore } from "./stores/susuClosingBalancesStore";
@@ -34,6 +36,7 @@ const SAVE_CLOSING_TOOLTIP =
 
 export function SusuClosingBalancesPage({ role }: Props) {
   const { showToast } = useToast();
+  const { user } = useAuth();
   const canEdit = role === "admin" || role === "coordinator" || role === "accountant";
   const canManageCapital = role === "admin" || role === "accountant";
 
@@ -265,14 +268,37 @@ export function SusuClosingBalancesPage({ role }: Props) {
             <Link to="/app/susu/overages-shortages#os-branch-till">Overages/Shortages</Link>.
           </p>
         </div>
-        <button
-          type="button"
-          className="button secondary"
-          disabled={loading || !branchId}
-          onClick={() => void refresh()}
-        >
-          {loading ? "Loading…" : "Refresh"}
-        </button>
+        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className="button secondary"
+            disabled={!snapshot || loading}
+            onClick={() => {
+              if (!snapshot) return;
+              void printBranchEodSummary({
+                snapshot,
+                branchLabel,
+                companyName: user?.tenantName,
+                preparedBy: user?.fullName || user?.email
+              }).catch((err) =>
+                showToast(
+                  err instanceof Error ? err.message : "Could not print EOD summary",
+                  "error"
+                )
+              );
+            }}
+          >
+            Print Daily EOD Summary
+          </button>
+          <button
+            type="button"
+            className="button secondary"
+            disabled={loading || !branchId}
+            onClick={() => void refresh()}
+          >
+            {loading ? "Loading…" : "Refresh"}
+          </button>
+        </div>
       </header>
 
       <div className="agents-page__filters">

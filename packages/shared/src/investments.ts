@@ -368,9 +368,10 @@ export function buildDefaultInvestmentFormConfig(tenantId: string): InvestmentFo
     field("address", "gpsAddress", "GPS Address", "text", 4),
     field("identification", "idType", "ID Type", "dropdown", 0, "required", [
       "Ghana Card",
-      "Passport",
-      "Voter ID",
-      "Driver License"
+      "Voter's ID",
+      "Health Insurance (NHIS)",
+      "Driver's Licence",
+      "Passport"
     ]),
     field("identification", "idNumber", "ID Number", "text", 1, "required"),
     field("identification", "idIssueDate", "Issue Date", "date", 2),

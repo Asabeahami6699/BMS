@@ -67,6 +67,23 @@ function canAccessTellerCalloverFallback(
   return hasAnyPermission(permissions, ["transactions.read"]);
 }
 
+function canAccessAccountStatementsFallback(
+  role: Role | undefined,
+  permissions: Permission[] | undefined
+): boolean {
+  if (
+    role !== "admin" &&
+    role !== "coordinator" &&
+    role !== "teller" &&
+    role !== "accountant" &&
+    role !== "auditor" &&
+    role !== "customer_service"
+  ) {
+    return false;
+  }
+  return hasAnyPermission(permissions, ["customers.read", "transactions.read"]);
+}
+
 export function SusuPermissionGate({
   role,
   permissions,
@@ -81,7 +98,8 @@ export function SusuPermissionGate({
     (path === "susu/overages-shortages" && canAccessOsFallback(role, permissions)) ||
     (path === "susu/cycle-commission" && canAccessCycleFeesFallback(role, permissions)) ||
     (path === "susu/income" && canAccessSusuIncomeFallback(role, permissions)) ||
-    (path === "susu/teller-callover" && canAccessTellerCalloverFallback(role, permissions));
+    (path === "susu/teller-callover" && canAccessTellerCalloverFallback(role, permissions)) ||
+    (path === "susu/account-statements" && canAccessAccountStatementsFallback(role, permissions));
   if (!allowed) {
     return <>{denied}</>;
   }

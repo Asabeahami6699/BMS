@@ -20,6 +20,7 @@ import {
   recordOpeningFeeRecovery
 } from "./savingsOpeningFeeService.js";
 import { getSavingsOpeningFeeGhs } from "./tenantProfileService.js";
+import { getRegistrationFormSetup } from "./registrationFormService.js";
 import {
   applyTransactionToFloat,
   assertFloatCapacityForTransaction
@@ -312,6 +313,19 @@ export async function postWithdrawalForApprovedDisclosure(params: {
       );
     });
 
+    if (commission > 0) {
+      const { getActiveSusuCommissionPolicy } = await import("./susuCycleCommissionService.js");
+      const commPolicy = await getActiveSusuCommissionPolicy(params.tenantId).catch(() => null);
+      if (commPolicy?.notifyCustomerOnCommission !== false) {
+        scheduleCustomerSusuCommissionNotification({
+          tenantId: params.tenantId,
+          customerId: params.customerId,
+          transactionId,
+          amount: commission
+        });
+      }
+    }
+
     return transactionId;
   }
 
@@ -358,6 +372,19 @@ export async function postWithdrawalForApprovedDisclosure(params: {
       error instanceof Error ? error.message : error
     );
   });
+
+  if (commission > 0) {
+    const { getActiveSusuCommissionPolicy } = await import("./susuCycleCommissionService.js");
+    const commPolicy = await getActiveSusuCommissionPolicy(params.tenantId).catch(() => null);
+    if (commPolicy?.notifyCustomerOnCommission !== false) {
+      scheduleCustomerSusuCommissionNotification({
+        tenantId: params.tenantId,
+        customerId: params.customerId,
+        transactionId,
+        amount: commission
+      });
+    }
+  }
 
   return transactionId;
 }
@@ -487,6 +514,23 @@ export async function createTransaction(
 
   if (!canRecordAtBranch(context, payload.transactionBranchId, customer.homeBranchId)) {
     throw new Error("User cannot post transactions outside assigned branch");
+  }
+
+  // BoG Tier 1 Simplified KYC balance cap guard on incoming deposits
+  if (
+    customer.kycTier === "simplified" &&
+    (payload.type === "daily_susu" || payload.type === "deposit")
+  ) {
+    const formSetup = await getRegistrationFormSetup(context.tenantId);
+    const cap = formSetup.simplifiedKyc.maxBalanceGhs;
+    if (cap > 0) {
+      const currentBalance = await computeCustomerBalance(context.tenantId, payload.customerId);
+      if (currentBalance + payload.amount > cap) {
+        throw new Error(
+          `Simplified KYC (Tier 1) balance cap of GHS ${formatAccountAmount(cap)} exceeded (current balance: GHS ${formatAccountAmount(currentBalance)}). Upgrade this customer to Full KYC with a valid ID document to remove the cap.`
+        );
+      }
+    }
   }
 
   // Validate till float / physical cash BEFORE mutating Susu cycles, institutional income,
@@ -924,16 +968,36 @@ export async function createTransaction(
     });
   }
 
-  // Send follow-up commission debit alert ~1 minute after the full deposit credit alert.
+  // Send follow-up commission debit alert ~1 minute after the full deposit credit alert
+  // only when the tenant enabled customer notifications for deducted commission.
   if (commissionDebitTxId && susuAllocation && susuAllocation.commissionCollectNow > 0) {
-    scheduleCustomerSusuCommissionNotification({
-      tenantId: context.tenantId,
-      customerId: transaction.customerId,
-      transactionId: commissionDebitTxId,
-      amount: susuAllocation.commissionCollectNow,
-      cycleNumber: susuAllocation.cycle?.cycleNumber,
-      subscribedAddons: context.subscribedAddons
-    });
+    const { getActiveSusuCommissionPolicy } = await import("./susuCycleCommissionService.js");
+    const commPolicy = await getActiveSusuCommissionPolicy(context.tenantId).catch(() => null);
+    if (commPolicy?.notifyCustomerOnCommission !== false) {
+      scheduleCustomerSusuCommissionNotification({
+        tenantId: context.tenantId,
+        customerId: transaction.customerId,
+        transactionId: commissionDebitTxId,
+        amount: susuAllocation.commissionCollectNow,
+        cycleNumber: susuAllocation.cycle?.cycleNumber,
+        subscribedAddons: context.subscribedAddons
+      });
+    }
+  }
+
+  // Also send commission alert on withdrawal when deferred commission was deducted and toggle is ON.
+  if (payload.type === "withdrawal" && withdrawalCommission > 0) {
+    const { getActiveSusuCommissionPolicy } = await import("./susuCycleCommissionService.js");
+    const commPolicy = await getActiveSusuCommissionPolicy(context.tenantId).catch(() => null);
+    if (commPolicy?.notifyCustomerOnCommission !== false) {
+      scheduleCustomerSusuCommissionNotification({
+        tenantId: context.tenantId,
+        customerId: transaction.customerId,
+        transactionId: transaction.id,
+        amount: withdrawalCommission,
+        subscribedAddons: context.subscribedAddons
+      });
+    }
   }
 
   return enrichTransactionProduct(context.tenantId, transaction);

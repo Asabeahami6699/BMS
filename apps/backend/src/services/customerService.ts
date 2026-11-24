@@ -11,9 +11,11 @@ import {
   rejectCustomerSchema,
   scheduleNextCardDailySusuSchema,
   updateCustomerStatusSchema,
+  upgradeCustomerKycSchema,
   type AdminManagedCustomerStatus,
   type Customer,
   type CustomerRegistrationInput,
+  type KycIntroducerDetails,
   type NextOfKinDetails
 } from "@bms/shared";
 import { listTenantFieldAgents } from "./authService.js";
@@ -90,6 +92,58 @@ function isMissingPendingDailyColumn(message: string): boolean {
   return /pending_daily_contribution/i.test(message);
 }
 
+function isMissingIdCardTypeColumn(message: string): boolean {
+  return /id_card_type|kyc_tier|nationality|kyc_introducer_|kyc_upgraded_at/i.test(message);
+}
+
+/** In-memory fallback for customer ID card type & Simplified KYC fields if migration 102 is not yet applied. */
+const kycMetadataFallback = new Map<
+  string,
+  {
+    idCardType?: Customer["idCardType"];
+    kycTier?: Customer["kycTier"];
+    nationality?: string;
+    kycIntroducer?: KycIntroducerDetails;
+    kycUpgradedAt?: string;
+  }
+>();
+
+function mapKycIntroducerFromRow(row: Record<string, unknown>): KycIntroducerDetails | undefined {
+  if (
+    row.kyc_introducer_name &&
+    row.kyc_introducer_phone &&
+    row.kyc_introducer_relationship &&
+    row.kyc_introducer_ghana_card
+  ) {
+    return {
+      fullName: String(row.kyc_introducer_name),
+      phone: String(row.kyc_introducer_phone),
+      relationship: String(row.kyc_introducer_relationship),
+      ghanaCardNumber: String(row.kyc_introducer_ghana_card)
+    };
+  }
+  return undefined;
+}
+
+const SIMPLIFIED_KYC_COLUMNS = [
+  "id_card_type",
+  "kyc_tier",
+  "nationality",
+  "kyc_introducer_name",
+  "kyc_introducer_phone",
+  "kyc_introducer_relationship",
+  "kyc_introducer_ghana_card",
+  "kyc_upgraded_at"
+] as const;
+
+function stripKycColumns(row: Record<string, unknown>): Record<string, unknown> {
+  const copy = { ...row };
+  for (const col of SIMPLIFIED_KYC_COLUMNS) {
+    delete copy[col];
+  }
+  return copy;
+}
+
 
 
 function getTenantCustomers(tenantId: string): Customer[] {
@@ -155,6 +209,14 @@ async function enrichCustomerWithAgentNames(tenantId: string, customer: Customer
 }
 
 function mapCustomerRow(row: Record<string, unknown>): Customer {
+  const fb = kycMetadataFallback.get(pendingDailyKey(String(row.tenant_id), String(row.id)));
+  const resolvedIdCardType =
+    row.id_card_type != null ? String(row.id_card_type) : fb?.idCardType;
+  const resolvedKycTier =
+    row.kyc_tier != null
+      ? String(row.kyc_tier)
+      : (fb?.kycTier ?? (resolvedIdCardType === "no_id_simplified_kyc" ? "simplified" : "full"));
+
   return customerSchema.parse({
     id: String(row.id),
     tenantId: String(row.tenant_id),
@@ -166,7 +228,12 @@ function mapCustomerRow(row: Record<string, unknown>): Customer {
     dateOfBirth: row.date_of_birth ? String(row.date_of_birth).slice(0, 10) : undefined,
     occupation: row.occupation ? String(row.occupation) : undefined,
     accountType: row.account_type ?? undefined,
+    idCardType: resolvedIdCardType,
     idCardNumber: row.id_card_number ? String(row.id_card_number) : undefined,
+    kycTier: resolvedKycTier,
+    nationality: row.nationality != null ? String(row.nationality) : fb?.nationality,
+    kycIntroducer: mapKycIntroducerFromRow(row) ?? fb?.kycIntroducer,
+    kycUpgradedAt: row.kyc_upgraded_at != null ? String(row.kyc_upgraded_at) : fb?.kycUpgradedAt,
     photoUrl: row.photo_url ? String(row.photo_url) : undefined,
     idCardPhotoUrl: row.id_card_photo_url ? String(row.id_card_photo_url) : undefined,
     ...(row.savings_opening_fee_collected != null
@@ -238,7 +305,15 @@ function insertRowFromCustomer(
     date_of_birth: customer.dateOfBirth ?? null,
     occupation: customer.occupation ?? null,
     account_type: customer.accountType ?? null,
+    id_card_type: customer.idCardType ?? null,
     id_card_number: customer.idCardNumber ?? null,
+    kyc_tier: customer.kycTier ?? "full",
+    nationality: customer.nationality ?? null,
+    kyc_introducer_name: customer.kycIntroducer?.fullName ?? null,
+    kyc_introducer_phone: customer.kycIntroducer?.phone ?? null,
+    kyc_introducer_relationship: customer.kycIntroducer?.relationship ?? null,
+    kyc_introducer_ghana_card: customer.kycIntroducer?.ghanaCardNumber ?? null,
+    kyc_upgraded_at: customer.kycUpgradedAt ?? null,
     photo_url: customer.photoUrl ?? null,
     id_card_photo_url: customer.idCardPhotoUrl ?? null,
     savings_opening_fee_collected: customer.savingsOpeningFeeCollected ?? false,
@@ -328,8 +403,12 @@ export async function createCustomer(
   const supabase = getSupabaseAdminClient();
 
   if (supabase) {
-
-    const { error } = await supabase.from("customers").insert(insertRowFromCustomer(nextCustomer));
+    const insertPayload = insertRowFromCustomer(nextCustomer);
+    let { error } = await supabase.from("customers").insert(insertPayload);
+    if (error && isMissingIdCardTypeColumn(error.message)) {
+      const retry = await supabase.from("customers").insert(stripKycColumns(insertPayload));
+      error = retry.error;
+    }
 
     if (error) {
 
@@ -388,7 +467,12 @@ export async function registerLoanBorrower(
   if (supabase) {
     const accountNumber = await generateCustomerAccountNumber(tenantId);
     nextCustomer.accountNumber = accountNumber;
-    const { error } = await supabase.from("customers").insert(insertRowFromCustomer(nextCustomer));
+    const insertPayload = insertRowFromCustomer(nextCustomer);
+    let { error } = await supabase.from("customers").insert(insertPayload);
+    if (error && isMissingIdCardTypeColumn(error.message)) {
+      const retry = await supabase.from("customers").insert(stripKycColumns(insertPayload));
+      error = retry.error;
+    }
     if (error) {
       throw new Error(`Failed to register borrower: ${error.message}`);
     }
@@ -420,6 +504,24 @@ export async function submitCustomerRegistration(
   const formIssue = registrationFormIssue(payload, formSetup);
   if (formIssue) {
     throw new Error(formIssue);
+  }
+  if (payload.accountType === "savings" && formSetup.savingsOpeningFeeGhs > 0) {
+    if (
+      formSetup.savingsOpeningFeeHandling === "cash_now" &&
+      payload.savingsOpeningFeeCollected !== true
+    ) {
+      throw new Error(
+        `This company requires the GHS ${formSetup.savingsOpeningFeeGhs.toFixed(2)} savings opening fee to be collected in cash at registration.`
+      );
+    }
+    if (
+      formSetup.savingsOpeningFeeHandling === "deduct_later" &&
+      payload.savingsOpeningFeeCollected !== false
+    ) {
+      throw new Error(
+        `This company is configured to defer the GHS ${formSetup.savingsOpeningFeeGhs.toFixed(2)} savings opening fee to first deposit(s).`
+      );
+    }
   }
   const normalized = registrationPayloadForSetup(payload, formSetup);
   const homeBranchId = await resolveHomeBranchId(
@@ -469,7 +571,18 @@ export async function submitCustomerRegistration(
     dateOfBirth: normalized.dateOfBirth,
     occupation: normalized.occupation,
     accountType: payload.accountType,
+    idCardType: (normalized.idCardType as Customer["idCardType"]) ?? undefined,
     idCardNumber: normalized.idCardNumber,
+    kycTier: normalized.idCardType === "no_id_simplified_kyc" ? "simplified" : "full",
+    nationality: normalized.nationality,
+    kycIntroducer: normalized.kycIntroducer
+      ? {
+          fullName: normalized.kycIntroducer.fullName,
+          phone: normalized.kycIntroducer.phone,
+          relationship: normalized.kycIntroducer.relationship,
+          ghanaCardNumber: normalized.kycIntroducer.ghanaCardNumber
+        }
+      : undefined,
     photoUrl: normalized.photoUrl,
     idCardPhotoUrl: normalized.idCardPhotoUrl,
     savingsOpeningFeeCollected:
@@ -497,10 +610,22 @@ export async function submitCustomerRegistration(
   });
 
   if (supabase) {
+    const insertPayload = insertRowFromCustomer(nextCustomer, { offlineClientId });
+    let { error } = await supabase.from("customers").insert(insertPayload);
 
-    const { error } = await supabase
-      .from("customers")
-      .insert(insertRowFromCustomer(nextCustomer, { offlineClientId }));
+    if (error && isMissingIdCardTypeColumn(error.message)) {
+      const retry = await supabase.from("customers").insert(stripKycColumns(insertPayload));
+      error = retry.error;
+      if (!error) {
+        kycMetadataFallback.set(pendingDailyKey(tenantId, nextCustomer.id), {
+          idCardType: nextCustomer.idCardType,
+          kycTier: nextCustomer.kycTier,
+          nationality: nextCustomer.nationality,
+          kycIntroducer: nextCustomer.kycIntroducer,
+          kycUpgradedAt: nextCustomer.kycUpgradedAt
+        });
+      }
+    }
 
     if (error) {
       if (offlineClientId && /offline_client_id|duplicate|unique/i.test(error.message)) {
@@ -884,7 +1009,15 @@ const LIGHT_CUSTOMER_COLUMNS = [
   "date_of_birth",
   "occupation",
   "account_type",
+  "id_card_type",
   "id_card_number",
+  "kyc_tier",
+  "nationality",
+  "kyc_introducer_name",
+  "kyc_introducer_phone",
+  "kyc_introducer_relationship",
+  "kyc_introducer_ghana_card",
+  "kyc_upgraded_at",
   "savings_opening_fee_collected",
   "savings_opening_fee_recovered",
   "next_of_kin_name",
@@ -972,9 +1105,14 @@ export async function listCustomers(
 
   let { data, error } = await runCustomerListQuery(options?.light ? LIGHT_CUSTOMER_COLUMNS : "*");
 
-  if (error && options?.light && isMissingPendingDailyColumn(error.message)) {
+  if (
+    error &&
+    options?.light &&
+    (isMissingPendingDailyColumn(error.message) || isMissingIdCardTypeColumn(error.message))
+  ) {
+    const kycCols = new Set<string>(SIMPLIFIED_KYC_COLUMNS);
     const fallbackCols = LIGHT_CUSTOMER_COLUMNS.split(",")
-      .filter((col) => !col.startsWith("pending_daily_contribution_"))
+      .filter((col) => !col.startsWith("pending_daily_contribution_") && !kycCols.has(col))
       .join(",");
     const retry = await runCustomerListQuery(fallbackCols);
     data = retry.data;
@@ -1838,6 +1976,85 @@ export async function scheduleNextCardDailySusu(
     cancelled: false,
     effectiveCardNumber: nextCardNumber
   };
+}
+
+/** Upgrade a Tier 1 Simplified KYC customer to Full KYC once they provide a valid national/foreign ID. */
+export async function upgradeCustomerToFullKyc(
+  tenantId: string,
+  customerId: string,
+  input: unknown
+): Promise<Customer> {
+  const payload = upgradeCustomerKycSchema.parse(input);
+  const existing = await getCustomerById(tenantId, customerId);
+  if (!existing) {
+    throw new Error("Customer not found");
+  }
+
+  const now = new Date().toISOString();
+  const supabase = getSupabaseAdminClient();
+  if (supabase) {
+    const updatePatch: Record<string, unknown> = {
+      id_card_type: payload.idCardType,
+      id_card_number: payload.idCardNumber.trim(),
+      kyc_tier: "full",
+      kyc_upgraded_at: now,
+      ...(payload.idCardPhotoUrl ? { id_card_photo_url: payload.idCardPhotoUrl } : {})
+    };
+    let { error } = await supabase
+      .from("customers")
+      .update(updatePatch)
+      .eq("tenant_id", tenantId)
+      .eq("id", customerId);
+
+    if (error && isMissingIdCardTypeColumn(error.message)) {
+      const minimalPatch: Record<string, unknown> = {
+        id_card_number: payload.idCardNumber.trim(),
+        ...(payload.idCardPhotoUrl ? { id_card_photo_url: payload.idCardPhotoUrl } : {})
+      };
+      const retry = await supabase
+        .from("customers")
+        .update(minimalPatch)
+        .eq("tenant_id", tenantId)
+        .eq("id", customerId);
+      error = retry.error;
+      if (!error) {
+        kycMetadataFallback.set(pendingDailyKey(tenantId, customerId), {
+          idCardType: payload.idCardType,
+          kycTier: "full",
+          nationality: existing.nationality,
+          kycIntroducer: existing.kycIntroducer,
+          kycUpgradedAt: now
+        });
+      }
+    }
+    if (error) {
+      throw new Error(`Failed to upgrade customer KYC: ${error.message}`);
+    }
+  } else {
+    const customers = getTenantCustomers(tenantId);
+    const idx = customers.findIndex((c) => c.id === customerId);
+    if (idx >= 0) {
+      customers[idx] = {
+        ...customers[idx]!,
+        idCardType: payload.idCardType,
+        idCardNumber: payload.idCardNumber.trim(),
+        kycTier: "full",
+        kycUpgradedAt: now,
+        ...(payload.idCardPhotoUrl ? { idCardPhotoUrl: payload.idCardPhotoUrl } : {})
+      };
+      setTenantCustomers(tenantId, customers);
+    }
+  }
+
+  const updated = (await getCustomerById(tenantId, customerId)) ?? {
+    ...existing,
+    idCardType: payload.idCardType,
+    idCardNumber: payload.idCardNumber.trim(),
+    kycTier: "full" as const,
+    kycUpgradedAt: now,
+    ...(payload.idCardPhotoUrl ? { idCardPhotoUrl: payload.idCardPhotoUrl } : {})
+  };
+  return updated;
 }
 
 export { QUALIFYING_TX_TYPES };

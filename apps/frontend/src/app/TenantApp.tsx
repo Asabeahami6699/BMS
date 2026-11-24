@@ -10,6 +10,7 @@ import { API_BASE_URL, getCompanyProfile, type AppRole, type AuthMe, type Compan
 import { applyDocumentBranding, resetDocumentBranding } from "../lib/documentBranding";
 import { BranchManagementCard } from "./BranchManagementCard";
 import { AccountNumberPolicyCard } from "./AccountNumberPolicyCard";
+import { AccountStatementsPage } from "./AccountStatementsPage";
 import { CommissionPolicyCard } from "./CommissionPolicyCard";
 import { SusuCycleCommissionPage } from "./SusuCycleCommissionPage";
 import { CustomerOpsCard } from "./CustomerOpsCard";
@@ -25,6 +26,7 @@ import { SettingsCompanyProfilePage, COMPANY_PROFILE_UPDATED_EVENT } from "./set
 import { SettingsFormSetupPage } from "./settings/SettingsFormSetupPage";
 import { applyTenantFontStep } from "./fontSize";
 import { SettingsNotificationsPage } from "./settings/SettingsNotificationsPage";
+import { SiteAnnouncementsManagerPage } from "./SiteAnnouncementsManagerPage";
 import { SettingsLoanQualificationPage } from "./settings/SettingsLoanQualificationPage";
 import { SettingsSubscriptionPage } from "./settings/SettingsSubscriptionPage";
 import { SettingsHubPage } from "./SettingsHubPage";
@@ -369,6 +371,20 @@ export function TenantApp() {
           }
         />
         <Route path="/susu/customers" element={<TenantSusuRoute route="susu/customers" modules={modules} role={role} permissions={permissions} susuNavVisibility={user?.susuNavVisibility}><CustomerOpsCard role={role} /></TenantSusuRoute>} />
+        <Route
+          path="/susu/account-statements"
+          element={
+            <TenantSusuRoute
+              route="susu/account-statements"
+              modules={modules}
+              role={role}
+              permissions={permissions}
+              susuNavVisibility={user?.susuNavVisibility}
+            >
+              <AccountStatementsPage role={role} />
+            </TenantSusuRoute>
+          }
+        />
         <Route
           path="/susu/pending-approvals"
           element={
@@ -940,6 +956,14 @@ export function TenantApp() {
           element={
             <TenantSettingsRoute route="settings/notifications" role={role} permissions={permissions}>
               <SettingsNotificationsPage subscribedAddons={addons} />
+            </TenantSettingsRoute>
+          }
+        />
+        <Route
+          path="/settings/announcements"
+          element={
+            <TenantSettingsRoute route="settings/announcements" role={role} permissions={permissions}>
+              <SiteAnnouncementsManagerPage scope="tenant" />
             </TenantSettingsRoute>
           }
         />

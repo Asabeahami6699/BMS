@@ -483,4 +483,75 @@ describe("Susu FIFO withdrawal commission, red-line cancellation, and BBF", () =
     expect(passbook.cards[1]!.balanceBroughtForward).toBe(15);
     expect(passbook.cards[1]!.bbfRemaining).toBe(15);
   });
+
+  it("never double-deducts commission when switching from first_collection to withdrawal, and persists notifyCustomerOnCommission", async () => {
+    const tenantId = `tenant-switch-${Date.now()}`;
+    const ctx = { userId: "admin-1", tenantId, role: "admin", branchId: "br-1" };
+
+    // 1. Start with First collection(s) timing
+    await publishSusuCommissionPolicy(ctx, {
+      enabled: true,
+      dailyContributionMode: "flexible",
+      defaultDailyContributionGhs: 10,
+      cycleDays: 31,
+      commissionBasis: "first_day",
+      commissionFixedAmount: 10,
+      commissionPercent: 0,
+      deductionTiming: "first_collection",
+      rolloverTreatment: "defer",
+      partialAllocation: "commission_first",
+      earlyWithdrawalPolicy: "deduct_full",
+      notifyCustomerOnCommission: true
+    });
+
+    // Customer deposits GHS 100 (fee GHS 10 deducted immediately -> GHS 90 credited to savings)
+    const col1 = await applySusuCollectionToCycle(ctx, {
+      customerId: "cust-switch-1",
+      branchId: "br-1",
+      dailyContributionAmount: 10,
+      paymentAmount: 100,
+      transactionId: "tx-switch-1"
+    });
+    expect(col1.commissionCollectNow).toBe(10);
+    expect(col1.savingsCredit).toBe(90);
+
+    // 2. Admin switches policy to Customer withdrawal & turns OFF customer commission SMS
+    const switched = await publishSusuCommissionPolicy(ctx, {
+      enabled: true,
+      dailyContributionMode: "flexible",
+      defaultDailyContributionGhs: 10,
+      cycleDays: 31,
+      commissionBasis: "first_day",
+      commissionFixedAmount: 10,
+      commissionPercent: 0,
+      deductionTiming: "withdrawal",
+      rolloverTreatment: "defer",
+      partialAllocation: "commission_first",
+      earlyWithdrawalPolicy: "deduct_full",
+      notifyCustomerOnCommission: false
+    });
+    expect(switched.deductionTiming).toBe("withdrawal");
+    expect(switched.notifyCustomerOnCommission).toBe(false);
+
+    // 3. Customer withdraws from the already-charged card -> ZERO double-deduction!
+    const wd = await resolveSusuWithdrawalCommission(ctx, {
+      customerId: "cust-switch-1",
+      branchId: "br-1",
+      requestedWithdrawalAmount: 50,
+      transactionId: "tx-switch-wd-1"
+    });
+    expect(wd.blocked).toBe(false);
+    expect(wd.commissionToCollect).toBe(0);
+
+    // 4. New customer starting AFTER the switch gets deferred fee (0 taken on deposit)
+    const colNew = await applySusuCollectionToCycle(ctx, {
+      customerId: "cust-switch-2",
+      branchId: "br-1",
+      dailyContributionAmount: 10,
+      paymentAmount: 100,
+      transactionId: "tx-switch-2"
+    });
+    expect(colNew.commissionCollectNow).toBe(0);
+    expect(colNew.savingsCredit).toBe(100);
+  });
 });

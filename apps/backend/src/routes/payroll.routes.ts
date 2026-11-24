@@ -5,6 +5,7 @@ import { getCommissionPolicy } from "../services/commissionPolicyService.js";
 import {
   getMyPayslips,
   getPayslipById,
+  getStaffCommissionStatement,
   listTenantPayslips,
   runPayroll,
   runPayrollForTenant
@@ -30,7 +31,7 @@ payrollRouter.get("/bootstrap", requirePermission("payroll.read"), async (req, r
       return;
     }
     const period = currentPayrollPeriod();
-    const policy = getCommissionPolicy(context.tenantId);
+    const policy = await getCommissionPolicy(context.tenantId);
     const canManage = context.role === "admin" || context.role === "accountant";
 
     const [myPayslips, published, rows, roleDefaults] = await Promise.all([
@@ -45,7 +46,10 @@ payrollRouter.get("/bootstrap", requirePermission("payroll.read"), async (req, r
       policy: {
         enabled: policy.enabled,
         currency: policy.currency,
-        bonusRules: policy.bonusRules
+        bonusRules: policy.bonusRules,
+        fieldAgentCommissionMethod: policy.fieldAgentCommissionMethod,
+        fieldAgentCycleDays: policy.fieldAgentCycleDays,
+        fieldAgentCycleMultiplier: policy.fieldAgentCycleMultiplier
       },
       rows,
       roleDefaults,
@@ -65,7 +69,7 @@ payrollRouter.get("/staff-setup", requirePermission("payroll.run"), async (req, 
       return;
     }
     const period = currentPayrollPeriod();
-    const policy = getCommissionPolicy(context.tenantId);
+    const policy = await getCommissionPolicy(context.tenantId);
     const [rows, roleDefaults] = await Promise.all([
       listStaffPayrollSetup(context.tenantId, period),
       listRolePayrollDefaults(context.tenantId)
@@ -77,7 +81,10 @@ payrollRouter.get("/staff-setup", requirePermission("payroll.run"), async (req, 
       policy: {
         enabled: policy.enabled,
         currency: policy.currency,
-        bonusRules: policy.bonusRules
+        bonusRules: policy.bonusRules,
+        fieldAgentCommissionMethod: policy.fieldAgentCommissionMethod,
+        fieldAgentCycleDays: policy.fieldAgentCycleDays,
+        fieldAgentCycleMultiplier: policy.fieldAgentCycleMultiplier
       }
     });
   } catch (error) {
@@ -208,6 +215,31 @@ payrollRouter.get("/payslips/:id", requirePermission("payroll.read"), async (req
     }
 
     res.json(payslip);
+  } catch (error) {
+    next(error);
+  }
+});
+
+payrollRouter.get("/commission-statement/:userId", requirePermission("payroll.read"), async (req, res, next) => {
+  try {
+    const context = req.userContext;
+    if (!context) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    const targetUserId = String(req.params.userId);
+    const isSelf = targetUserId === context.userId;
+    const canViewAll =
+      context.role === "admin" ||
+      context.role === "accountant" ||
+      context.role === "coordinator" ||
+      context.role === "auditor";
+    if (!isSelf && !canViewAll) {
+      res.status(403).json({ error: PERMISSION_DENIED_MESSAGE });
+      return;
+    }
+    const statement = await getStaffCommissionStatement(context.tenantId, targetUserId);
+    res.json(statement);
   } catch (error) {
     next(error);
   }

@@ -20,6 +20,7 @@ import {
 import { computeCustomerBalance } from "./ledgerService.js";
 import { findUserById } from "./authStore.js";
 import { createAgentNotification, notifyTenantStaff } from "./notificationService.js";
+import { getRegistrationFormSetup } from "./registrationFormService.js";
 import { loadTenantModules } from "./tenantModuleService.js";
 import {
   postWithdrawalForApprovedDisclosure,
@@ -177,6 +178,14 @@ function getMemoryList(tenantId: string): DisclosureRow[] {
 
 function setMemoryList(tenantId: string, rows: DisclosureRow[]): void {
   memoryDisclosures.set(tenantKey(tenantId), rows);
+}
+
+/** Shared in-memory lookup for local/test mode (when Supabase is not configured). */
+export function getMemoryBalanceDisclosureRow(
+  tenantId: string,
+  disclosureId: string
+): DisclosureRow | null {
+  return getMemoryList(tenantId).find((r) => r.id === disclosureId) ?? null;
 }
 
 function mapRow(
@@ -487,6 +496,14 @@ export async function requestCustomerApproval(
       throw new Error("Balance is already visible. Wait until the coordinator's visibility window ends.");
     }
   } else {
+    if (customer.kycTier === "simplified") {
+      const formSetup = await getRegistrationFormSetup(tenantId);
+      if (!formSetup.simplifiedKyc.allowFieldAgentWithdrawalRequest) {
+        throw new Error(
+          "This customer is on Simplified KYC (Tier 1). Field agent withdrawal requests are turned off for Simplified KYC accounts — please direct the customer to the branch for face-verified withdrawal, or ask an admin to enable it in Settings → Form setup."
+        );
+      }
+    }
     const activeWithdrawal = forCustomer.find((r) => isActiveWithdrawalApproval(r));
     if (activeWithdrawal) {
       throw new Error(

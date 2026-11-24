@@ -293,6 +293,12 @@ export type StaffPayrollPreviewInput = {
   monthlyBonus: number;
   collections: number;
   commissionPercent: number;
+  /** Optional exact cycle-share formula: (collections / cycleDays) * multiplier. Used when no per-user % override is set. */
+  commissionFormula?: {
+    method: "cycle_share" | "percentage";
+    cycleDays: number;
+    multiplier: number;
+  };
   commissionsApply: boolean;
   policyEnabled: boolean;
   bonusRules: Array<{ threshold: number; amount: number }>;
@@ -307,10 +313,18 @@ export function computeStaffPayrollPreview(input: StaffPayrollPreviewInput): {
   projectedDeductions: number;
   projectedNet: number;
 } {
-  const projectedCommission =
-    input.policyEnabled && input.commissionsApply
-      ? (input.collections * input.commissionPercent) / 100
-      : 0;
+  let projectedCommission = 0;
+  if (input.policyEnabled && input.commissionsApply && input.collections > 0) {
+    if (input.commissionFormula?.method === "cycle_share") {
+      const days = input.commissionFormula.cycleDays > 0 ? input.commissionFormula.cycleDays : 31;
+      const mult =
+        input.commissionFormula.multiplier >= 0 ? input.commissionFormula.multiplier : 0.5;
+      projectedCommission = Math.round(((input.collections / days) * mult) * 100) / 100;
+    } else {
+      projectedCommission =
+        Math.round(((input.collections * input.commissionPercent) / 100) * 100) / 100;
+    }
+  }
   const projectedTierBonus =
     input.policyEnabled && input.commissionsApply
       ? calculateTierBonus(input.collections, input.bonusRules)

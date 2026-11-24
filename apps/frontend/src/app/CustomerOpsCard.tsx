@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useShallow } from "zustand/react/shallow";
 import { formatAccountAmount } from "@bms/shared";
 import type { AppRole, Branch, Customer } from "./api";
@@ -22,6 +22,7 @@ import { CustomerDetailModal } from "./CustomerDetailModal";
 import { useCustomersLiveSync } from "./hooks/useCustomersLiveSync";
 import { useAgentsStore } from "./stores/agentsStore";
 import { useCustomersStore } from "./stores/customersStore";
+import { useSusuRiskAlertsStore } from "./stores/susuRiskAlertsStore";
 import { formatBranchLabel } from "./branchDisplay";
 
 type Props = { role: AppRole };
@@ -72,6 +73,27 @@ export function CustomerOpsCard({ role }: Props) {
   const [createOpen, setCreateOpen] = useState(false);
   const [detailCustomerId, setDetailCustomerId] = useState<string | null>(null);
   const [statementCustomerId, setStatementCustomerId] = useState<string | null>(null);
+  const [dormantExpanded, setDormantExpanded] = useState(false);
+
+  const {
+    dormantDays,
+    dormantCustomers,
+    loading: dormantLoading,
+    setDormantDays,
+    hydrate: hydrateRiskAlerts
+  } = useSusuRiskAlertsStore(
+    useShallow((s) => ({
+      dormantDays: s.dormantDays,
+      dormantCustomers: s.dormantCustomers,
+      loading: s.loading,
+      setDormantDays: s.setDormantDays,
+      hydrate: s.hydrate
+    }))
+  );
+
+  useEffect(() => {
+    hydrateRiskAlerts();
+  }, [hydrateRiskAlerts]);
 
   const {
     customers,
@@ -290,6 +312,78 @@ export function CustomerOpsCard({ role }: Props) {
 
   return (
     <>
+      {dormantCustomers.length > 0 ? (
+        <section className="overview-panel eod-guard-panel" style={{ marginBottom: "1rem" }}>
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "0.75rem"
+            }}
+          >
+            <div>
+              <h3 className="overview-panel__title">
+                Dormant Susu customers ({dormantCustomers.length})
+              </h3>
+              <p className="muted" style={{ margin: "0.2rem 0 0", fontSize: "0.84rem" }}>
+                Active Susu accounts with no posted contribution in the last {dormantDays}+ days —
+                verify with the customer to prevent unrecorded collections.
+              </p>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", flexWrap: "wrap" }}>
+              {[7, 14, 30].map((d) => (
+                <button
+                  key={d}
+                  type="button"
+                  className={`statements-filter-pill${
+                    dormantDays === d ? " statements-filter-pill--active" : ""
+                  }`}
+                  disabled={dormantLoading}
+                  onClick={() => setDormantDays(d)}
+                >
+                  {d}d+
+                </button>
+              ))}
+              <button
+                type="button"
+                className="button secondary"
+                onClick={() => setDormantExpanded((open) => !open)}
+              >
+                {dormantExpanded ? "Hide list" : "Review accounts"}
+              </button>
+            </div>
+          </div>
+
+          {dormantExpanded ? (
+            <div className="eod-guard-list" style={{ marginTop: "0.75rem" }}>
+              {dormantCustomers.slice(0, 25).map((item) => (
+                <div key={item.customerId} className="eod-guard-list__row">
+                  <div>
+                    <strong>{item.fullName}</strong>
+                    <span className="muted">
+                      {" "}
+                      · {item.accountNumber || "No acct"} · {item.phone} ·{" "}
+                      <span className="eod-guard-date">{item.daysInactive} days inactive</span>
+                      {item.lastContributionAt
+                        ? ` (last ${new Date(item.lastContributionAt).toLocaleDateString()})`
+                        : " (no contribution yet)"}
+                    </span>
+                  </div>
+                  <Link
+                    to={`/app/susu/account-statements?customerId=${encodeURIComponent(item.customerId)}`}
+                    className="button secondary"
+                  >
+                    View statement
+                  </Link>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
       <section className="card customers-card">
         <div className="customers-card-head">
           <div>

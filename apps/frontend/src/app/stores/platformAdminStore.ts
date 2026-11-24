@@ -1,6 +1,6 @@
 import { create } from "zustand";
-import type { TenantRecord } from "../api";
-import { listPlatformTenants } from "../api";
+import type { PlatformTenantHealth, TenantRecord } from "../api";
+import { getPlatformTenantHealth, listPlatformTenants } from "../api";
 import { toUserFacingError } from "../../lib/networkError";
 import {
   createSilentRefreshScheduler,
@@ -10,6 +10,7 @@ import {
 
 type PlatformAdminState = {
   tenants: TenantRecord[];
+  healthByTenant: Record<string, PlatformTenantHealth>;
   loading: boolean;
   error: string | null;
   statusMessage: string;
@@ -37,6 +38,7 @@ function tenantsSnapshotKey(tenants: TenantRecord[]): string {
 
 export const usePlatformAdminStore = create<PlatformAdminState>((set, get) => ({
   tenants: [],
+  healthByTenant: {},
   loading: false,
   error: null,
   statusMessage: "",
@@ -79,18 +81,23 @@ export const usePlatformAdminStore = create<PlatformAdminState>((set, get) => ({
     set({ loading: true, error: null, statusMessage: "Loading companies..." });
     fetchInFlight = (async () => {
       try {
-        const tenants = await listPlatformTenants();
+        const [tenants, healthByTenant] = await Promise.all([
+          listPlatformTenants(),
+          getPlatformTenantHealth().catch(() => ({} as Record<string, PlatformTenantHealth>))
+        ]);
         const key = tenantsSnapshotKey(tenants);
         if (key !== lastSnapshotKey) {
           lastSnapshotKey = key;
           set({
             tenants,
+            healthByTenant,
             statusMessage: tenants.length === 0 ? "No companies registered yet." : "",
             lastFetchedAt: Date.now(),
             error: null
           });
         } else {
           set({
+            healthByTenant,
             lastFetchedAt: Date.now(),
             error: null,
             statusMessage: tenants.length === 0 ? "No companies registered yet." : ""
@@ -120,18 +127,22 @@ export const usePlatformAdminStore = create<PlatformAdminState>((set, get) => ({
     }
     fetchInFlight = (async () => {
       try {
-        const tenants = await listPlatformTenants();
+        const [tenants, healthByTenant] = await Promise.all([
+          listPlatformTenants(),
+          getPlatformTenantHealth().catch(() => ({} as Record<string, PlatformTenantHealth>))
+        ]);
         const key = tenantsSnapshotKey(tenants);
         if (key !== lastSnapshotKey) {
           lastSnapshotKey = key;
           set({
             tenants,
+            healthByTenant,
             statusMessage: tenants.length === 0 ? "No companies registered yet." : "",
             lastFetchedAt: Date.now(),
             error: null
           });
         } else {
-          set({ lastFetchedAt: Date.now() });
+          set({ healthByTenant, lastFetchedAt: Date.now() });
         }
       } catch {
         /* keep cache */

@@ -41,3 +41,4 @@ export * from "./approvalWorkflow.js";
 export * from "./registrationForm.js";
 export * from "./tenantHost.js";
 export * from "./branchCapital.js";
+export * from "./announcements.js";

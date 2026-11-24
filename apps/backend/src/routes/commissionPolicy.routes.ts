@@ -5,17 +5,21 @@ import { getCommissionPolicy, upsertCommissionPolicy } from "../services/commiss
 
 export const commissionPolicyRouter = Router();
 
-commissionPolicyRouter.get("/", requirePermission("commission_policy.read"), (req, res) => {
+commissionPolicyRouter.get("/", requirePermission("commission_policy.read"), async (req, res) => {
   const tenantId = req.userContext?.tenantId;
   if (!tenantId) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
 
-  res.json(getCommissionPolicy(tenantId));
+  try {
+    res.json(await getCommissionPolicy(tenantId));
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : "Failed to load policy" });
+  }
 });
 
-commissionPolicyRouter.put("/", requirePermission("commission_policy.update"), (req, res) => {
+commissionPolicyRouter.put("/", requirePermission("commission_policy.update"), async (req, res) => {
   const tenantId = req.userContext?.tenantId;
   if (!tenantId) {
     res.status(401).json({ error: "Unauthorized" });
@@ -32,6 +36,10 @@ commissionPolicyRouter.put("/", requirePermission("commission_policy.update"), (
     return;
   }
 
-  const updated = upsertCommissionPolicy(parsed.data);
-  res.json(updated);
+  try {
+    const updated = await upsertCommissionPolicy(parsed.data);
+    res.json(updated);
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : "Failed to save policy" });
+  }
 });

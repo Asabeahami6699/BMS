@@ -33,6 +33,9 @@ const liveSync = createLiveSyncManager();
 function policySnapshotKey(policy: CommissionPolicy): string {
   return JSON.stringify({
     enabled: policy.enabled,
+    fieldAgentCommissionMethod: policy.fieldAgentCommissionMethod,
+    fieldAgentCycleDays: policy.fieldAgentCycleDays,
+    fieldAgentCycleMultiplier: policy.fieldAgentCycleMultiplier,
     fieldAgentCommissionPercent: policy.fieldAgentCommissionPercent,
     coordinatorCommissionPercent: policy.coordinatorCommissionPercent,
     basis: policy.basis,
@@ -41,7 +44,13 @@ function policySnapshotKey(policy: CommissionPolicy): string {
 }
 
 function normalizePolicy(data: CommissionPolicy): CommissionPolicy {
-  return { ...data, bonusRules: data.bonusRules ?? [] };
+  return {
+    ...data,
+    fieldAgentCommissionMethod: data.fieldAgentCommissionMethod ?? "cycle_share",
+    fieldAgentCycleDays: data.fieldAgentCycleDays ?? 31,
+    fieldAgentCycleMultiplier: data.fieldAgentCycleMultiplier ?? 0.5,
+    bonusRules: data.bonusRules ?? []
+  };
 }
 
 export const useCommissionStore = create<CommissionState>((set, get) => ({

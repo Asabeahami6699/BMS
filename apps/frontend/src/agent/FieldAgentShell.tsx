@@ -6,6 +6,7 @@ import {
 } from "../app/stores/notificationsStore";
 import { AgentNetworkStatusBar } from "./components/AgentNetworkStatusBar";
 import { AgentProfileDrawer } from "./AgentProfileDrawer";
+import { FloatingAnnouncementBar } from "../components/FloatingAnnouncementBar";
 
 type Props = {
   onLogout: () => void;
@@ -102,6 +103,7 @@ export function FieldAgentShell({
       </header>
 
       <AgentNetworkStatusBar />
+      <FloatingAnnouncementBar variant="agent" />
       <main className="agent-main">{children}</main>
 
       <nav className="agent-bottom-nav" aria-label="Field agent navigation">

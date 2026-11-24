@@ -7,6 +7,7 @@ import { AiHelpPanel } from "../components/AiHelpPanel";
 import { GlobalSearch } from "./components/GlobalSearch";
 import { DashboardNotifications } from "./components/DashboardNotifications";
 import { DashboardLoadingBar } from "./components/DashboardLoadingBar";
+import { FloatingAnnouncementBar } from "../components/FloatingAnnouncementBar";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { InstallAppButton } from "../pwa/InstallAppButton";
 import { useDashboardPageLoading } from "./hooks/useDashboardPageLoading";
@@ -94,6 +95,14 @@ export function DashboardShell({
   const [profileOpen, setProfileOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
+  const sidebarRef = useRef<HTMLElement>(null);
+
+  function handleSidebarMouseLeave() {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && sidebarRef.current?.contains(active)) {
+      active.blur();
+    }
+  }
 
   useEffect(() => {
     setMobileNavOpen(false);
@@ -223,8 +232,10 @@ export function DashboardShell({
       ) : null}
 
       <aside
+        ref={sidebarRef}
         className={`dash-sidebar${mobileNavOpen ? " is-mobile-open" : ""}`}
         aria-label="Main navigation"
+        onMouseLeave={handleSidebarMouseLeave}
       >
         <div className="dash-brand">
           {(() => {
@@ -391,6 +402,7 @@ export function DashboardShell({
 
       <div className="dash-main">
         <div className="dash-header-shell">
+          <FloatingAnnouncementBar variant="desktop" />
           <header className="dash-header">
             <div className="dash-header-start">
               <button

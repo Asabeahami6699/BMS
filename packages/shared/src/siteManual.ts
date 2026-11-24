@@ -91,8 +91,8 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
   {
     id: "susu-onboarding-accounts",
     department: "susu",
-    title: "Customer onboarding, account types, and pending approvals",
-    howTo: "How to register and approve Susu customers",
+    title: "Customer onboarding, ID card types, Simplified KYC & Savings opening fee",
+    howTo: "How to register customers (including foreigners without national ID) and approve accounts",
     keywords: [
       "susu",
       "onboarding",
@@ -101,17 +101,34 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
       "pending approvals",
       "account type",
       "savings",
+      "opening fee",
       "daily contribution",
       "meba daakye",
-      "activation"
+      "activation",
+      "id card",
+      "ghana card",
+      "voters id",
+      "nhis",
+      "health insurance",
+      "drivers licence",
+      "passport",
+      "non-citizen",
+      "ecowas",
+      "foreigner",
+      "simplified kyc",
+      "tier 1",
+      "introducer",
+      "upgrade kyc"
     ],
     modules: ["susu_management"],
     body: [
       "New customers can be registered in the office under Susu → Customer Onboarding or in the field via the Field agent mobile app.",
-      "Supported account types include Susu, Savings (which can carry an opening fee and minimum locked balance), Group, and Meba Daakye.",
-      "Set the customer’s agreed daily contribution amount during onboarding (for example GHS 20/day). The Susu passbook and first-day Susu cycle fee both use this registered daily plan.",
-      "Every new registration lands in Susu → Pending Approvals. Admin or coordinator verifies the customer details, confirms the registration phone number, and approves or rejects the account.",
-      "Once approved, the account becomes Active, receives an account number, and appears in Susu → Customers for deposits, collections, statements, and passbook tracking."
+      "Supported account types include Susu, Savings (with an admin-configured fixed/locked opening amount and preferred collection handling: Cash collected now only, Not collected — deduct later only, or Show both), Group, and Meba Daakye.",
+      "Supported ID card types under Identity & KYC: Ghana Card, Non-Citizen Ghana Card, ECOWAS National ID, Voter's ID, Health Insurance (NHIS), Driver's Licence, Passport, and No National ID (Tier 1 · Simplified KYC + Local Introducer).",
+      "Tier 1 · Simplified KYC (BoG-aligned onboarding for foreign residents or applicants without a national ID): selecting No National ID requires the customer’s Nationality (grouped West Africa / global dropdown), a mandatory live Customer Face Photo, and a verified Local Introducer (full name, phone, relationship, and valid Ghana Card number).",
+      "Tier 1 · Simplified KYC guardrails: accounts are tagged Simplified KYC, capped at the tenant’s configured maximum balance (default GHS 5,000, configurable in Settings → Form setup), and locked from Loans and Investments until upgraded. By default, Simplified KYC customers withdraw in person at the branch with face verification, or the admin can toggle Allow field agent withdrawal requests in Settings → Form setup.",
+      "Upgrade to Full KYC: once a Simplified KYC customer obtains a Non-Citizen Ghana Card, ECOWAS ID, Passport, or other approved ID, an admin, branch manager, or coordinator opens the customer’s profile and clicks Upgrade to Full KYC to lift Tier 1 limits (logged in Audit logs).",
+      "Every new registration lands in Susu → Pending Approvals. Admin or coordinator verifies the customer details, photo, and ID/introducer information, then approves or rejects the account so it becomes Active with an account number."
     ]
   },
   {
@@ -143,14 +160,14 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
     modules: ["susu_management"],
     body: [
       "Every Susu account includes a virtual Susu passbook showing its contribution boxes (dynamic to your company’s cycle length, e.g. 31 boxes per page).",
-      "Where to find it: open any Susu customer’s Account statement (Susu → Customers → Actions → Account statement), open Customer Details, or tap Susu passbook on an active Susu customer card in the Field agent app.",
+      "Where to find it: open Susu → Account statements from the sidebar (available to all authorised roles), open any Susu customer’s Account statement from Susu → Customers, open Customer Details, or tap Susu passbook on an active Susu customer card in the Field agent app.",
       "Automatic box counting (1 real ledger transaction): both Field agent Daily Susu collections (posted via Callover) and walk-in Branch counter deposits on Susu accounts convert into checked boxes using gross contribution ÷ daily contribution plan. Example: on a GHS 20/day plan, a GHS 100 payment records 1 transaction and auto-checks 5 boxes (Box 1 = institution Fee, Boxes 2–5 = customer savings). Loan disbursements and non-contribution adjustments are excluded so passbook boxes always stay ledger-accurate.",
       "Partial boxes (non-multiples): if a customer pays GHS 30 on a GHS 20 plan, 1 full box checks off and the next box shows a progress fill of 10 / 20 (partial) until the remaining GHS 10 is paid.",
       "Overflow into the next page: if a customer is at Box 29 (28 boxes filled) and pays GHS 100 (5 boxes), Boxes 29, 30, and 31 complete Page #1 (marked Completed) and the remaining GHS 40 automatically opens Page #2 and checks Boxes 1 and 2 (collecting Page #2’s Box 1 fee if first-collection timing is enabled).",
       "Cancelled pages & Balance Brought Forward (BBF): when a customer withdraws from a completed page (e.g. withdrawing GHS 200 from a GHS 600 completed Page #1), Page #1 is immediately marked Cancelled with a red strike-through line (matching real-world Susu book practice) and the leftover GHS 400 rolls forward as Balance Brought Forward (BBF) at the top of Page #2. BBF never auto-checks contribution boxes — Page #2 still starts at 0/31 boxes — and BBF is always spent first on future withdrawals with GHS 0 additional fee.",
       "Scheduled daily contribution changes (Susu only): admins can update a Susu customer’s daily rate from Customer Details. The new rate is scheduled automatically for the next card so the current active page finishes cleanly at its original rate.",
       "Visual cues & page switcher: Box 1 is badged Fee under first-collection timing (or the final box, e.g. Box 31, under cycle-maturity timing). Use Page #1, Page #2, etc. at the top of the passbook to inspect active, completed, and red-line cancelled pages.",
-      "Account statements also let staff filter by date range, print a PDF statement, or download the full ledger as CSV."
+      "Account statements & passbook workspace (Susu → Account statements): authorised staff can search any customer by name, account number, phone, branch, or account type; view live KPIs (current balance, period credits/debits); switch between Passbook & Ledger, Account ledger, and Susu passbook; filter by 7D/30D/90D/All time or custom dates; print an official PDF statement; print a visual 31-box Passbook Card; share a formatted account summary via WhatsApp/clipboard; or export CSV."
     ]
   },
   {
@@ -231,6 +248,8 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
       "Go to Susu → Susu cycle fees to configure how your institution earns Susu commission on customer cycles. Click How deductions work at the top of that page anytime for a worked staff reference.",
       "Cycle length & basis: choose the contribution boxes per page (standard Susu is 31 days) and commission basis (Customer’s registered daily amount, Fixed amount, Percentage, or No commission).",
       "Deduction timing: choose First collection(s) (deducted upfront on Box 1), Cycle maturity (deducted when the page completes at Box 31), or Customer withdrawal (deducted when the customer withdraws).",
+      "Safe timing switches (zero double-deduction): policies are versioned and snapshotted when each card opens. Switching from First collection(s) to Customer withdrawal applies immediately to new/next cards while never double-charging any existing card whose fee was already collected (withdrawals strictly check remaining unpaid commissionOutstanding).",
+      "Customer commission notification toggle: under When to deduct, toggle Send message to customer when commission is deducted ON (default) to send an SMS/email alert whenever Susu commission is deducted, or turn it OFF to deduct silently without sending a separate commission message.",
       "Strict FIFO withdrawal settlement: every Susu withdrawal settles in strict oldest-first order — (1) Balance Brought Forward (BBF) first at GHS 0 fee, (2) Completed pages oldest-first (any touched completed page is cancelled with a red line, its remaining fee if any is collected, and any leftover rolls forward as BBF onto the next page), and (3) Active incomplete page last only if the withdrawal overflows past BBF and all completed pages.",
       "Commission charged on top: when a withdrawal triggers a Susu fee, the fee is charged on top of the customer’s requested amount so the customer receives their full requested payout (unless total available balance cannot cover both, in which case remaining balance is settled cleanly).",
       "Early withdrawal policy (when touching an incomplete page): choose Deduct full fee, Deduct pro-rata (by boxes completed), Waive the fee, or Block early withdrawal.",
@@ -417,6 +436,7 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
       "Field deposits increase the vault; field withdrawals decrease it. Walk-in activity stays inside till cash.",
       "Enter cash to bank (Susu worksheet only — Banking Treasury post comes later), optional vault count, and save.",
       "Expected closing vault = opening − issued to tills + field deposits − field withdrawals + returned closed tills − cash to bank − extra branch expenses.",
+      "Print Daily EOD Summary: click Print Daily EOD Summary at the top of Susu → Closing balances to generate a signed 1-page branch vault sheet with Coordinator, Branch Manager, and Internal Audit sign-off lines.",
       "Teller drawer OS remains on Overages/Shortages → Branch till."
     ]
   },
@@ -462,8 +482,10 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
     ],
     modules: ["susu_management"],
     body: [
-      "Susu → Agent commissions configures payroll commission rates paid to field agents and coordinators based on collections (separate from company revenue in Susu → Susu cycle fees and Susu → Susu income).",
-      "Susu → Payroll lets admins and accountants prepare and review staff payroll runs incorporating earned commissions.",
+      "Susu → Agent commissions configures payroll commission rules paid to field agents and coordinators based on collections (separate from company revenue in Susu → Susu cycle fees and Susu → Susu income).",
+      "Admins can choose between the Cycle share formula — (Total Collected ÷ Cycle Days) × Multiplier (default: Total ÷ 31 × 0.5, fully editable by the admin) — or a Flat percentage rate, plus tiered performance bonuses.",
+      "Commission breakdown statement: on Susu → Payroll (click Breakdown on any staff row) or Susu → Agents → Details → Commission breakdown, review the exact day-by-day posted collection totals, formula calculation, tier bonus, open field-agent cash shortages, and net reference amount before running payroll.",
+      "Modernized Susu → Payroll workspace: view executive KPIs (Projected gross, Projected net pay, Total deductions, Published payslips), switch cleanly between Live staff payroll, Published payslips (with modal payslip preview), and My payslip, search/filter by staff name or role, adjust loan deductions or commission % inline, export the payroll schedule to CSV, and click Pay by role to configure standard base salary, bonus, SSNIT, welfare, and default loan deductions per role.",
       "Susu → Performance provides read-only KPIs and leaderboards showing branch and agent collection volume, active savers, and growth."
     ]
   },
@@ -598,7 +620,7 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
     body: [
       "Open the Field agent app → Collect.",
       "Select the customer, enter the daily Susu amount (single day, multi-day, or partial payment), and save. (Branch counter does not post Daily Susu.)",
-      "Offline collections queue on the device and sync automatically when the phone is back online.",
+      "Offline collections queue on the device and sync automatically when the phone is back online. Whenever items are queued offline, an Offline sync queue inspector card appears on the Home screen showing every pending collection/registration with a manual Retry sync now button.",
       "Use Call over to submit the day's batch for coordinator approval and posting. If a previous day’s draft batch was never submitted, an amber reminder card appears at the top of the Home screen with a 1-tap Submit button.",
       "Tap Susu passbook on any active Susu customer card under Customers to show the customer their checked boxes, partial progress, Balance Brought Forward (BBF), Fee box, and past completed or red-line cancelled pages."
     ]
@@ -644,6 +666,76 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
   },
 
   {
+    id: "susu-risk-alerts",
+    department: "susu",
+    title: "Cash control & fraud alerts (dormant customers & zero-collection agents)",
+    howTo: "How to monitor dormant accounts and zero-collection agents",
+    keywords: [
+      "dormant",
+      "inactive",
+      "fraud",
+      "risk",
+      "zero collection",
+      "uncollected",
+      "alert",
+      "monitoring"
+    ],
+    modules: ["susu_management"],
+    body: [
+      "Dormant Susu customer alerts (Susu → Customers): active Susu accounts with no posted contribution for 7+, 14+, or 30+ days are flagged automatically at the top of the Customers page. Switch thresholds (7d+ / 14d+ / 30d+) and click View statement on any flagged customer to verify whether collections were missed or unrecorded.",
+      "Zero-collection agent alerts (Susu → Agents): active field agents who have assigned Susu customers yet have GHS 0 recorded today are highlighted at the top of the Agents page so coordinators can follow up on route activity or pending offline syncs before end of day."
+    ]
+  },
+  {
+    id: "settings-audit-export",
+    department: "settings",
+    title: "Audit logs, quick category filters, and CSV export",
+    howTo: "How to filter and export audit logs",
+    keywords: [
+      "audit",
+      "audit logs",
+      "csv",
+      "export",
+      "compliance",
+      "withdrawals",
+      "reversals",
+      "super admin",
+      "edit profile",
+      "tenant health"
+    ],
+    body: [
+      "Go to Settings → Audit logs to review a full timestamped trail of staff actions across your workspace.",
+      "Use the quick filter chips (All events, Withdrawals, Reversals, Till & Cash, Profiles & Roles, Approvals) combined with text search to isolate specific events in seconds.",
+      "Click Export CSV to download the currently filtered audit rows for external or internal audit review.",
+      "Platform Super Admins can also update any company’s profile, logo, brand color, and contact details via Companies → Edit profile, and monitor live per-company health badges (active staff, active customers, prior open tills, SMS status, and last activity) directly on the Companies screen."
+    ]
+  },
+  {
+    id: "settings-form-setup",
+    department: "settings",
+    title: "Registration form setup, Savings opening fee options, Simplified KYC & printable paper forms",
+    howTo: "How to configure registration forms, Simplified KYC rules, and print blank forms",
+    keywords: [
+      "form setup",
+      "paper form",
+      "print form",
+      "savings opening fee",
+      "cash collected now",
+      "deduct later",
+      "simplified kyc",
+      "balance cap",
+      "withdrawal request toggle",
+      "tally sheet",
+      "walk-in deposit slip"
+    ],
+    body: [
+      "Go to Settings → Form setup to customize registration account types, required/optional/hidden fields, and downloadable paper sheets.",
+      "Savings opening fee controls: set your company’s Fixed / locked initial opening amount (GHS) and choose Opening fee options shown to field agents (Show both, Cash collected now only, or Not collected — deduct later only). Field agents only see the option(s) you allow, and the server enforces your preference on submission.",
+      "Tier 1 · Simplified KYC settings: toggle Allow Simplified KYC registration ON/OFF, set the Maximum account balance cap (GHS, default 5,000; 0 for no cap), and toggle Allow field agent withdrawal requests for Simplified KYC accounts (off by default for branch face-verified withdrawals; turn on to let field agents request withdrawals for coordinator approval).",
+      "Printable single-page A4 paper forms: print or download your company’s Standard Registration Form, the dedicated single-page A4 Simplified KYC (Tier 1) Registration & Local Introducer Attestation Form, the Daily Tally Sheet (40 rows), and 6-per-sheet Walk-in Deposit Slips."
+    ]
+  },
+  {
     id: "settings-sms",
     department: "settings",
     title: "Turn on customer SMS alerts",
@@ -654,6 +746,19 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
       "Enable SMS and choose deposit, withdrawal, and daily Susu events.",
       "Sender ID must be Arkesel-approved before messages deliver.",
       "Loan qualification and lifecycle warnings also use this channel when enabled."
+    ]
+  },
+  {
+    id: "settings-announcements",
+    department: "settings",
+    title: "Publish timed floating top-bar announcements",
+    howTo: "How to broadcast announcements with a timer",
+    keywords: ["announcement", "banner", "floating bar", "timer", "maintenance", "broadcast", "super admin"],
+    body: [
+      "Company admins can open Settings → Announcements to publish a company-wide message displayed in the single floating bar at the top of both the back-office dashboard and the field agent app.",
+      "Platform Super Admins can open Platform → Announcements to broadcast a site-wide maintenance or update notice across every company on the platform.",
+      "Set a countdown timer using quick presets (15 min to 24 hrs), custom minutes, a specific end date & time, or run until manually stopped. Once the timer reaches zero, the floating bar hides automatically.",
+      "Use +15m / +1h to extend a live timer, Stop now to take down an announcement immediately, or uncheck Allow users to dismiss for critical pinned notices."
     ]
   },
   {

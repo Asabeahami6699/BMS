@@ -49,6 +49,7 @@ import { siteManualRouter } from "./routes/siteManual.routes.js";
 import { emailSettingsRouter } from "./routes/emailSettings.routes.js";
 import { notificationPlatformRouter } from "./routes/notificationPlatform.routes.js";
 import { subscriptionRouter } from "./routes/subscription.routes.js";
+import { announcementsRouter } from "./routes/announcements.routes.js";
 
 function isAllowedCorsOrigin(origin: string | undefined): boolean {
   // Non-browser clients (health checks, mobile WebViews, server-to-server) have no Origin header.
@@ -177,6 +178,7 @@ export function createApp() {
   app.use("/api/v1/tenant/loan-qualification", adminMutationRateLimit, loanQualificationRouter);
   app.use("/api/v1/tenant/site-manual", siteManualRouter);
   app.use("/api/v1/tenant/subscription", adminMutationRateLimit, subscriptionRouter);
+  app.use("/api/v1/announcements", announcementsRouter);
 
   return app;
 }

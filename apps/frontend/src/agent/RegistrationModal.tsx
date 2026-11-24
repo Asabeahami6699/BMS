@@ -1,8 +1,15 @@
-import type { AccountType, CustomerRegistrationInput, RegistrationFormSetup } from "@bms/shared";
+import type {
+  AccountType,
+  CustomerIdCardType,
+  CustomerRegistrationInput,
+  RegistrationFormSetup
+} from "@bms/shared";
 import {
+  CUSTOMER_ID_CARD_TYPE_OPTIONS,
   defaultRegistrationFormSetup,
   formatAccountAmount,
   formatGhs,
+  formatIdCardTypeLabel,
   registrationFormIssue,
   registrationPayloadForSetup
 } from "@bms/shared";
@@ -20,6 +27,48 @@ function money(amount: number): string {
   return formatGhs(amount);
 }
 
+const NATIONALITY_OPTIONS = [
+  "Nigerian",
+  "Togolese",
+  "Burkinabe",
+  "Ivorian",
+  "Beninese",
+  "Nigerien",
+  "Malian",
+  "Liberian",
+  "Sierra Leonean",
+  "Guinean",
+  "Senegalese",
+  "Gambian",
+  "Cameroonian",
+  "Chadian",
+  "Cape Verdean",
+  "Guinea-Bissauan",
+  "Ghanaian",
+  "Kenyan",
+  "South African",
+  "Ethiopian",
+  "Egyptian",
+  "Moroccan",
+  "Lebanese",
+  "Indian",
+  "Chinese",
+  "Pakistani",
+  "Syrian",
+  "Turkish",
+  "British",
+  "American",
+  "Canadian",
+  "French",
+  "German",
+  "Dutch",
+  "Italian",
+  "Filipino",
+  "Brazilian"
+] as const;
+
+const NATIONALITY_OPTION_SET = new Set<string>(NATIONALITY_OPTIONS);
+
 const EMPTY_FORM = {
   fullName: "",
   email: "",
@@ -29,7 +78,13 @@ const EMPTY_FORM = {
   dateOfBirth: "",
   occupation: "",
   accountType: "susu" as AccountType,
+  idCardType: "ghana_card" as CustomerIdCardType,
   idCardNumber: "",
+  nationality: "",
+  introducerName: "",
+  introducerPhone: "",
+  introducerRelationship: "",
+  introducerGhanaCard: "",
   kinName: "",
   kinPhone: "",
   kinUseCustomerAddress: true,
@@ -116,8 +171,9 @@ function RegistrationPreview({
       ? [form.location, form.houseNumber].filter(Boolean).join(", ")
       : [form.kinLocation, form.kinHouseNumber].filter(Boolean).join(", ")) || "—";
   const dailyContribution = parseDailyContribution(form.dailyContributionAmount);
-  const showIdPhoto = fields.idCardPhoto !== "hidden" && Boolean(idCardPhotoUrl);
-  const showCustomerPhoto = fields.customerPhoto !== "hidden" && Boolean(photoUrl);
+  const isSimplifiedKyc = form.idCardType === "no_id_simplified_kyc";
+  const showIdPhoto = !isSimplifiedKyc && fields.idCardPhoto !== "hidden" && Boolean(idCardPhotoUrl);
+  const showCustomerPhoto = (isSimplifiedKyc || fields.customerPhoto !== "hidden") && Boolean(photoUrl);
   const showPhotosSection = showIdPhoto || showCustomerPhoto;
 
   return (
@@ -231,10 +287,45 @@ function RegistrationPreview({
               </div>
             ) : null}
             {fields.idCardNumber !== "hidden" ? (
-              <div>
-                <dt>ID card number</dt>
-                <dd className="agent-reg-preview__mono">{form.idCardNumber || "—"}</dd>
-              </div>
+              isSimplifiedKyc ? (
+                <>
+                  <div>
+                    <dt>KYC tier</dt>
+                    <dd>
+                      <span className="kyc-tier-badge kyc-tier-badge--simplified">
+                        Tier 1 · Simplified KYC
+                      </span>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Nationality</dt>
+                    <dd>{form.nationality || "—"}</dd>
+                  </div>
+                  <div>
+                    <dt>Local introducer</dt>
+                    <dd>
+                      {form.introducerName || "—"} ({form.introducerRelationship || "—"})
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Introducer Ghana Card &amp; phone</dt>
+                    <dd className="agent-reg-preview__mono">
+                      {form.introducerGhanaCard || "—"} · {form.introducerPhone || "—"}
+                    </dd>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <dt>ID card type</dt>
+                    <dd>{formatIdCardTypeLabel(form.idCardType)}</dd>
+                  </div>
+                  <div>
+                    <dt>ID card number</dt>
+                    <dd className="agent-reg-preview__mono">{form.idCardNumber || "—"}</dd>
+                  </div>
+                </>
+              )
             ) : null}
             {isSavings && openingFee > 0 ? (
               <div className="agent-reg-preview__span-2">
@@ -318,6 +409,7 @@ export function RegistrationModal({
   const [submitting, setSubmitting] = useState(false);
   const [step, setStep] = useState<"form" | "preview">("form");
   const [form, setForm] = useState(EMPTY_FORM);
+  const [customNationalityMode, setCustomNationalityMode] = useState(false);
   const [photoUrl, setPhotoUrl] = useState<string | undefined>();
   const [photoName, setPhotoName] = useState<string | undefined>();
   const [idCardPhotoUrl, setIdCardPhotoUrl] = useState<string | undefined>();
@@ -346,6 +438,21 @@ export function RegistrationModal({
 
   const isSavings = form.accountType === "savings";
   const openingFee = formSetup.savingsOpeningFeeGhs;
+  const openingFeeHandling = formSetup.savingsOpeningFeeHandling ?? "both";
+  const showCashNowOption = openingFeeHandling === "both" || openingFeeHandling === "cash_now";
+  const showDeductLaterOption =
+    openingFeeHandling === "both" || openingFeeHandling === "deduct_later";
+
+  useEffect(() => {
+    if (!isSavings || openingFee <= 0) {
+      return;
+    }
+    if (openingFeeHandling === "cash_now" && savingsOpeningFeeCollected !== true) {
+      setSavingsOpeningFeeCollected(true);
+    } else if (openingFeeHandling === "deduct_later" && savingsOpeningFeeCollected !== false) {
+      setSavingsOpeningFeeCollected(false);
+    }
+  }, [isSavings, openingFee, openingFeeHandling, savingsOpeningFeeCollected]);
   const activeForm = formSetup.forms.find((item) => item.id === form.accountType);
   const offeredForms = formSetup.forms.filter((item) => item.enabled);
   const accountHint = isSavings
@@ -387,6 +494,7 @@ export function RegistrationModal({
     if (!open) {
       setStep("form");
       setForm(EMPTY_FORM);
+      setCustomNationalityMode(false);
       setPhotoUrl(undefined);
       setPhotoName(undefined);
       setIdCardPhotoUrl(undefined);
@@ -402,6 +510,19 @@ export function RegistrationModal({
       setSavingsOpeningFeeCollected(null);
     }
   }, [form.accountType]);
+
+  useEffect(() => {
+    if (!formSetup.simplifiedKyc.enabled && form.idCardType === "no_id_simplified_kyc") {
+      setForm((prev) => ({
+        ...prev,
+        idCardType: "ghana_card",
+        introducerName: "",
+        introducerPhone: "",
+        introducerRelationship: "",
+        introducerGhanaCard: ""
+      }));
+    }
+  }, [formSetup.simplifiedKyc.enabled, form.idCardType]);
 
   useEffect(() => {
     if (!open) {
@@ -463,7 +584,18 @@ export function RegistrationModal({
       houseNumber: form.houseNumber,
       dateOfBirth: form.dateOfBirth,
       occupation: form.occupation,
+      idCardType: form.idCardType,
       idCardNumber: form.idCardNumber,
+      nationality: form.nationality,
+      kycIntroducer:
+        form.idCardType === "no_id_simplified_kyc"
+          ? {
+              fullName: form.introducerName,
+              phone: form.introducerPhone,
+              relationship: form.introducerRelationship,
+              ghanaCardNumber: form.introducerGhanaCard
+            }
+          : undefined,
       idCardPhotoUrl,
       photoUrl,
       nextOfKin: includeKin
@@ -552,7 +684,21 @@ export function RegistrationModal({
         dateOfBirth: cleaned.dateOfBirth,
         occupation: cleaned.occupation,
         accountType: form.accountType,
+        idCardType: cleaned.idCardType as CustomerIdCardType | undefined,
         idCardNumber: cleaned.idCardNumber,
+        nationality: cleaned.nationality,
+        kycIntroducer:
+          cleaned.kycIntroducer?.fullName &&
+          cleaned.kycIntroducer.phone &&
+          cleaned.kycIntroducer.relationship &&
+          cleaned.kycIntroducer.ghanaCardNumber
+            ? {
+                fullName: cleaned.kycIntroducer.fullName,
+                phone: cleaned.kycIntroducer.phone,
+                relationship: cleaned.kycIntroducer.relationship,
+                ghanaCardNumber: cleaned.kycIntroducer.ghanaCardNumber
+              }
+            : undefined,
         photoUrl: cleaned.photoUrl,
         idCardPhotoUrl: cleaned.idCardPhotoUrl,
         savingsOpeningFeeCollected: isSavings ? openingFee <= 0 || savingsOpeningFeeCollected === true : undefined,
@@ -813,40 +959,44 @@ export function RegistrationModal({
             </p>
 
             <div className="agent-fee-choices" role="radiogroup" aria-label="Opening fee collection">
-              <label
-                className={`agent-fee-choice${savingsOpeningFeeCollected === true ? " agent-fee-choice--selected" : ""}`}
-              >
-                <input
-                  type="radio"
-                  name="savings-opening-fee"
-                  checked={savingsOpeningFeeCollected === true}
-                  onChange={() => setSavingsOpeningFeeCollected(true)}
-                />
-                <span className="agent-fee-choice__body">
-                  <span className="agent-fee-choice__title">Cash collected now</span>
-                  <span className="agent-fee-choice__detail muted">
-                    {money(openingFee)} collected from the customer in cash.
+              {showCashNowOption ? (
+                <label
+                  className={`agent-fee-choice${savingsOpeningFeeCollected === true ? " agent-fee-choice--selected" : ""}`}
+                >
+                  <input
+                    type="radio"
+                    name="savings-opening-fee"
+                    checked={savingsOpeningFeeCollected === true}
+                    onChange={() => setSavingsOpeningFeeCollected(true)}
+                  />
+                  <span className="agent-fee-choice__body">
+                    <span className="agent-fee-choice__title">Cash collected now</span>
+                    <span className="agent-fee-choice__detail muted">
+                      {money(openingFee)} collected from the customer in cash.
+                    </span>
                   </span>
-                </span>
-              </label>
+                </label>
+              ) : null}
 
-              <label
-                className={`agent-fee-choice${savingsOpeningFeeCollected === false ? " agent-fee-choice--selected" : ""}`}
-              >
-                <input
-                  type="radio"
-                  name="savings-opening-fee"
-                  checked={savingsOpeningFeeCollected === false}
-                  onChange={() => setSavingsOpeningFeeCollected(false)}
-                />
-                <span className="agent-fee-choice__body">
-                  <span className="agent-fee-choice__title">Not collected — deduct later</span>
-                  <span className="agent-fee-choice__detail muted">
-                    Customer did not pay now. Up to {money(openingFee)} will be taken from their first
-                    deposit(s) after approval.
+              {showDeductLaterOption ? (
+                <label
+                  className={`agent-fee-choice${savingsOpeningFeeCollected === false ? " agent-fee-choice--selected" : ""}`}
+                >
+                  <input
+                    type="radio"
+                    name="savings-opening-fee"
+                    checked={savingsOpeningFeeCollected === false}
+                    onChange={() => setSavingsOpeningFeeCollected(false)}
+                  />
+                  <span className="agent-fee-choice__body">
+                    <span className="agent-fee-choice__title">Not collected — deduct later</span>
+                    <span className="agent-fee-choice__detail muted">
+                      Customer did not pay now. Up to {money(openingFee)} will be taken from their first
+                      deposit(s) after approval.
+                    </span>
                   </span>
-                </span>
-              </label>
+                </label>
+              ) : null}
             </div>
           </section>
         ) : null}
@@ -858,19 +1008,153 @@ export function RegistrationModal({
           <h3 className="agent-form__section-title">Identity &amp; KYC</h3>
           {formSetup.fields.idCardNumber !== "hidden" ? (
           <div className="agent-form__grid">
-            <label className="field agent-form__span-2">
-              <span>ID card number{formSetup.fields.idCardNumber === "optional" ? " (optional)" : ""}</span>
-              <input
-                value={form.idCardNumber}
-                onChange={(e) => updateField("idCardNumber", e.target.value)}
-                placeholder="e.g. GHA-123456789-0"
-                required={formSetup.fields.idCardNumber === "required"}
-              />
+            <label
+              className={`field${form.idCardType === "no_id_simplified_kyc" ? " agent-form__span-2" : ""}`}
+            >
+              <span>ID card type</span>
+              <select
+                value={form.idCardType}
+                onChange={(e) => updateField("idCardType", e.target.value as CustomerIdCardType)}
+              >
+                {CUSTOMER_ID_CARD_TYPE_OPTIONS.filter(
+                  (opt) => !opt.isSimplifiedKyc || formSetup.simplifiedKyc.enabled
+                ).map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
             </label>
+            {form.idCardType !== "no_id_simplified_kyc" ? (
+              <label className="field">
+                <span>
+                  {formatIdCardTypeLabel(form.idCardType)} number
+                  {formSetup.fields.idCardNumber === "optional" ? " (optional)" : ""}
+                </span>
+                <input
+                  value={form.idCardNumber}
+                  onChange={(e) => updateField("idCardNumber", e.target.value)}
+                  placeholder={
+                    CUSTOMER_ID_CARD_TYPE_OPTIONS.find((o) => o.value === form.idCardType)
+                      ?.placeholder ?? "Enter ID number"
+                  }
+                  required={formSetup.fields.idCardNumber === "required"}
+                />
+              </label>
+            ) : null}
           </div>
           ) : null}
+
+          {form.idCardType === "no_id_simplified_kyc" ? (
+            <div className="kyc-simplified-banner">
+              <div className="kyc-simplified-banner__head">
+                <strong>Tier 1 · Simplified KYC (BoG Susu compliance)</strong>
+                <span className="kyc-tier-badge kyc-tier-badge--simplified">Simplified KYC</span>
+              </div>
+              <p className="muted">
+                For foreign residents or customers without a national ID. Capture a clear customer
+                face photo and a verified local introducer holding a valid Ghana Card.
+                {formSetup.simplifiedKyc.maxBalanceGhs > 0
+                  ? ` Maximum balance cap: GHS ${formatAccountAmount(formSetup.simplifiedKyc.maxBalanceGhs)}.`
+                  : ""}{" "}
+                Loans and investments stay locked until upgraded to Full KYC.
+              </p>
+              <div className="agent-form__grid">
+                <label className="field">
+                  <span>Nationality / country of origin</span>
+                  <select
+                    value={
+                      customNationalityMode
+                        ? "__other__"
+                        : NATIONALITY_OPTION_SET.has(form.nationality)
+                          ? form.nationality
+                          : ""
+                    }
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === "__other__") {
+                        setCustomNationalityMode(true);
+                        updateField("nationality", "");
+                      } else {
+                        setCustomNationalityMode(false);
+                        updateField("nationality", val);
+                      }
+                    }}
+                    required={!customNationalityMode}
+                  >
+                    <option value="">Select nationality…</option>
+                    <optgroup label="West Africa (ECOWAS & neighbours)">
+                      {NATIONALITY_OPTIONS.slice(0, 17).map((nat) => (
+                        <option key={nat} value={nat}>
+                          {nat}
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Other countries">
+                      {NATIONALITY_OPTIONS.slice(17).map((nat) => (
+                        <option key={nat} value={nat}>
+                          {nat}
+                        </option>
+                      ))}
+                    </optgroup>
+                    <option value="__other__">Other (specify)…</option>
+                  </select>
+                </label>
+                {customNationalityMode ? (
+                  <label className="field">
+                    <span>Specify nationality</span>
+                    <input
+                      value={form.nationality}
+                      onChange={(e) => updateField("nationality", e.target.value)}
+                      placeholder="Enter nationality"
+                      required
+                    />
+                  </label>
+                ) : null}
+                <label className="field">
+                  <span>Local introducer full name</span>
+                  <input
+                    value={form.introducerName}
+                    onChange={(e) => updateField("introducerName", e.target.value)}
+                    placeholder="e.g. Kwame Boateng"
+                    required
+                  />
+                </label>
+                <label className="field">
+                  <span>Introducer phone number</span>
+                  <input
+                    type="tel"
+                    inputMode="tel"
+                    value={form.introducerPhone}
+                    onChange={(e) => updateField("introducerPhone", e.target.value)}
+                    placeholder="e.g. 0241234567"
+                    required
+                  />
+                </label>
+                <label className="field">
+                  <span>Relationship to customer</span>
+                  <input
+                    value={form.introducerRelationship}
+                    onChange={(e) => updateField("introducerRelationship", e.target.value)}
+                    placeholder="e.g. Landlord, Employer, Market Leader"
+                    required
+                  />
+                </label>
+                <label className="field agent-form__span-2">
+                  <span>Introducer Ghana Card number</span>
+                  <input
+                    value={form.introducerGhanaCard}
+                    onChange={(e) => updateField("introducerGhanaCard", e.target.value)}
+                    placeholder="e.g. GHA-123456789-0"
+                    required
+                  />
+                </label>
+              </div>
+            </div>
+          ) : null}
+
           <div className="agent-form__photos">
-            {formSetup.fields.idCardPhoto !== "hidden" ? (
+            {form.idCardType !== "no_id_simplified_kyc" && formSetup.fields.idCardPhoto !== "hidden" ? (
             <AgentPhotoField
               label="ID card photo"
               hint="Capture the front of the Ghana Card or other ID — must be readable."
@@ -886,10 +1170,18 @@ export function RegistrationModal({
             />
             ) : null}
 
-            {formSetup.fields.customerPhoto !== "hidden" ? (
+            {form.idCardType === "no_id_simplified_kyc" || formSetup.fields.customerPhoto !== "hidden" ? (
             <AgentPhotoField
-              label="Customer photo"
-              hint="Face photo of the customer for the account file."
+              label={
+                form.idCardType === "no_id_simplified_kyc"
+                  ? "Customer face photo (required for Simplified KYC)"
+                  : "Customer photo"
+              }
+              hint={
+                form.idCardType === "no_id_simplified_kyc"
+                  ? "Required for face verification on withdrawals."
+                  : "Face photo of the customer for the account file."
+              }
               captureGuide="Center the customer's face in the frame"
               facingMode="user"
               photoUrl={photoUrl}
@@ -898,7 +1190,10 @@ export function RegistrationModal({
                 setPhotoUrl(url);
                 setPhotoName(name);
               }}
-              required={formSetup.fields.customerPhoto === "required"}
+              required={
+                form.idCardType === "no_id_simplified_kyc" ||
+                formSetup.fields.customerPhoto === "required"
+              }
             />
             ) : null}
           </div>

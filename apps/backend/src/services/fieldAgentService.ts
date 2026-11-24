@@ -6,6 +6,7 @@ import { getMyPayslips } from "./payrollService.js";
 import { resolveEffectivePayroll } from "@bms/shared";
 import { getRolePayrollDefault } from "./rolePayrollDefaultService.js";
 import {
+  effectiveCommissionFormula,
   effectiveCommissionPercent,
   getUserPayrollProfile,
   profileDeductions
@@ -214,12 +215,13 @@ async function resolveProfile(context: AgentContext): Promise<FieldAgentDashboar
 
 export async function getFieldAgentDashboard(context: AgentContext): Promise<FieldAgentDashboard> {
   const period = periodMeta();
-  const policy = getCommissionPolicy(context.tenantId);
+  const policy = await getCommissionPolicy(context.tenantId);
   const profile = await resolveProfile(context);
   const payrollProfile = await getUserPayrollProfile(context.tenantId, context.userId);
   const roleDefault = await getRolePayrollDefault(context.tenantId, context.role as Role);
   const effectiveComp = resolveEffectivePayroll(roleDefault, payrollProfile);
   const percent = effectiveCommissionPercent(context.role as Role, policy, payrollProfile);
+  const formula = effectiveCommissionFormula(context.role as Role, policy, payrollProfile);
 
   const customers = await listCustomers(context.tenantId, { agentId: context.userId });
   const activeCustomers = customers.filter((c) => c.status === "active");
@@ -257,6 +259,7 @@ export async function getFieldAgentDashboard(context: AgentContext): Promise<Fie
     monthlyBonus: effectiveComp.monthlyBonus,
     collections: totalCollectedThisMonth,
     commissionPercent: percent,
+    commissionFormula: formula,
     commissionsApply: true,
     policyEnabled: policy.enabled,
     bonusRules: policy.bonusRules,

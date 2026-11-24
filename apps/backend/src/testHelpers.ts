@@ -57,14 +57,33 @@ export async function fundCustomerViaCollection(
     });
   expect(submit.status).toBe(201);
 
-  const post = await request(app)
-    .post("/api/v1/collection-batches/post-all")
-    .set({
-      "x-user-id": "test-admin-ho",
-      "x-tenant-id": opts.coordinatorHeaders["x-tenant-id"] ?? "tenant-demo",
-      "x-role": "admin",
-      "x-scope-type": "head_office"
-    })
-    .send({});
+  const batchId = (submit.body?.batchId ?? submit.body?.id ?? submit.body?.batch?.id) as
+    | string
+    | undefined;
+  const batchTotal = Number(
+    line.body?.batch?.totalAmount ??
+      line.body?.totalAmount ??
+      submit.body?.totalAmount ??
+      opts.amount
+  );
+  const post = batchId
+    ? await request(app)
+        .post(`/api/v1/collection-batches/${batchId}/post`)
+        .set({
+          "x-user-id": "test-admin-ho",
+          "x-tenant-id": opts.coordinatorHeaders["x-tenant-id"] ?? "tenant-demo",
+          "x-role": "admin",
+          "x-scope-type": "head_office"
+        })
+        .send({ cashReceivedAmount: batchTotal })
+    : await request(app)
+        .post("/api/v1/collection-batches/post-all")
+        .set({
+          "x-user-id": "test-admin-ho",
+          "x-tenant-id": opts.coordinatorHeaders["x-tenant-id"] ?? "tenant-demo",
+          "x-role": "admin",
+          "x-scope-type": "head_office"
+        })
+        .send({});
   expect(post.status, JSON.stringify(post.body)).toBe(200);
 }

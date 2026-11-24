@@ -56,6 +56,9 @@ export function CustomerRequestsRow({ customerId, customerName, compact }: Props
   const withdrawal = useAgentBalanceStore(selectWithdrawalForCustomer(customerId));
   const submitRequest = useAgentBalanceStore((s) => s.submitRequest);
   const refreshCustomers = useAgentCustomerStore((s) => s.refreshSilent);
+  const customerKycTier = useAgentCustomerStore(
+    (s) => s.customers.find((c) => c.id === customerId)?.kycTier
+  );
   const [submitting, setSubmitting] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [updatesOpen, setUpdatesOpen] = useState(false);
@@ -158,6 +161,7 @@ export function CustomerRequestsRow({ customerId, customerName, compact }: Props
       <CustomerRequestModal
         open={modalOpen}
         customerName={customerName}
+        kycTier={customerKycTier}
         submitting={submitting}
         onClose={() => setModalOpen(false)}
         onSubmit={(payload) => void handleSubmit(payload)}

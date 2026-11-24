@@ -1,6 +1,9 @@
 import { defaultRegistrationFormSetup, type RegistrationFormSetup } from "@bms/shared";
 import { downloadHtmlDocument, printHtmlDocument } from "./printHtml";
-import { buildRegistrationFormDocumentHtml } from "./registrationFormDocument";
+import {
+  buildRegistrationFormDocumentHtml,
+  buildSimplifiedKycRegistrationFormDocumentHtml
+} from "./registrationFormDocument";
 
 export type RegistrationFormPrintContext = {
   companyName?: string;
@@ -42,5 +45,38 @@ export function downloadDefaultRegistrationForm(context: RegistrationFormPrintCo
   downloadHtmlDocument(
     documentHtml(defaultRegistrationFormSetup(), context, true),
     "customer-registration-form-default.html"
+  );
+}
+
+function simplifiedKycDocumentHtml(
+  setup: RegistrationFormSetup,
+  context: RegistrationFormPrintContext
+): string {
+  return buildSimplifiedKycRegistrationFormDocumentHtml({
+    setup,
+    companyName: context.companyName,
+    companyPhone: context.companyPhone,
+    companyAddress: context.companyAddress,
+    companyLogoUrl: context.companyLogoUrl
+  });
+}
+
+export function printSimplifiedKycRegistrationForm(
+  setup: RegistrationFormSetup,
+  context: RegistrationFormPrintContext = {}
+): void {
+  printHtmlDocument(
+    simplifiedKycDocumentHtml(setup, context),
+    "Pop-up blocked. Allow pop-ups to print the Simplified KYC registration form."
+  );
+}
+
+export function downloadSimplifiedKycRegistrationForm(
+  setup: RegistrationFormSetup,
+  context: RegistrationFormPrintContext = {}
+): void {
+  downloadHtmlDocument(
+    simplifiedKycDocumentHtml(setup, context),
+    "simplified-kyc-registration-form.html"
   );
 }

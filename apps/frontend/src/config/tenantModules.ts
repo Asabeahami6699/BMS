@@ -133,6 +133,17 @@ function buildSusuChildren(susuNav?: SusuNavVisibilityRow[]): NavChildDef[] {
       anyPermissions: ["income.read", "income.read.daily"]
     });
   }
+  const ACCOUNT_STATEMENTS_PATH = "susu/account-statements";
+  if (!byPath.has(ACCOUNT_STATEMENTS_PATH)) {
+    byPath.set(ACCOUNT_STATEMENTS_PATH, {
+      navPath: ACCOUNT_STATEMENTS_PATH,
+      label: "Account statements",
+      description:
+        "Search customers to view account ledger, Susu passbook, print statement, or export CSV.",
+      roles: ["admin", "coordinator", "teller", "accountant", "auditor", "customer_service"],
+      anyPermissions: ["customers.read", "transactions.read"]
+    });
+  }
   const TELLER_CALLOVER_PATH = "susu/teller-callover";
   if (!byPath.has(TELLER_CALLOVER_PATH)) {
     byPath.set(TELLER_CALLOVER_PATH, {
@@ -146,6 +157,10 @@ function buildSusuChildren(susuNav?: SusuNavVisibilityRow[]): NavChildDef[] {
   }
   const order = [
     ...SUSU_NAV_VISIBILITY.map((r) => r.navPath),
+    ...(byPath.has(ACCOUNT_STATEMENTS_PATH) &&
+    !SUSU_NAV_VISIBILITY.some((r) => r.navPath === ACCOUNT_STATEMENTS_PATH)
+      ? [ACCOUNT_STATEMENTS_PATH]
+      : []),
     ...(byPath.has(OVERAGES_SHORTAGES_NAV_CHILD.to) &&
     !SUSU_NAV_VISIBILITY.some((r) => r.navPath === OVERAGES_SHORTAGES_NAV_CHILD.to)
       ? [OVERAGES_SHORTAGES_NAV_CHILD.to]
@@ -243,6 +258,7 @@ const SETTINGS_CHILDREN: NavChildDef[] = [
   },
   { to: "settings/approval-workflows", label: "Approval Workflows", roleCheck: (r) => r === "admin" },
   { to: "settings/notifications", label: "Notification Settings", roleCheck: (r) => r === "admin" },
+  { to: "settings/announcements", label: "Announcements", roleCheck: (r) => r === "admin" },
   {
     to: "settings/loan-qualification",
     label: "Loan qualification",

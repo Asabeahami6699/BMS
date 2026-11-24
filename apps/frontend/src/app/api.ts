@@ -64,6 +64,9 @@ export type CommissionPolicy = {
   tenantId: string;
   currency: string;
   enabled: boolean;
+  fieldAgentCommissionMethod: "cycle_share" | "percentage";
+  fieldAgentCycleDays: number;
+  fieldAgentCycleMultiplier: number;
   fieldAgentCommissionPercent: number;
   coordinatorCommissionPercent: number;
   basis: "gross_collections" | "net_collections";
@@ -147,6 +150,9 @@ export type StaffPayrollSetupResponse = {
     enabled: boolean;
     currency: string;
     bonusRules: Array<{ threshold: number; amount: number }>;
+    fieldAgentCommissionMethod?: "percentage" | "cycle_share";
+    fieldAgentCycleDays?: number;
+    fieldAgentCycleMultiplier?: number;
   };
 };
 
@@ -212,7 +218,25 @@ export type Customer = {
   dateOfBirth?: string;
   occupation?: string;
   accountType?: AccountType;
+  idCardType?:
+    | "ghana_card"
+    | "non_citizen_ghana_card"
+    | "ecowas_id"
+    | "voters_id"
+    | "nhis"
+    | "drivers_licence"
+    | "passport"
+    | "no_id_simplified_kyc";
   idCardNumber?: string;
+  kycTier?: "full" | "simplified";
+  nationality?: string;
+  kycIntroducer?: {
+    fullName: string;
+    phone: string;
+    relationship: string;
+    ghanaCardNumber: string;
+  };
+  kycUpgradedAt?: string;
   photoUrl?: string;
   idCardPhotoUrl?: string;
   savingsOpeningFeeCollected?: boolean;
@@ -1278,6 +1302,142 @@ export async function updateCompanyProfile(body: {
     headers: authHeaders(),
     body: JSON.stringify(body)
   });
+}
+
+export async function getPlatformTenantProfile(tenantId: string): Promise<CompanyProfile> {
+  return fetchJson<CompanyProfile>(
+    `${API_BASE_URL}/api/v1/platform/tenants/${encodeURIComponent(tenantId)}/profile`,
+    { headers: authHeaders() }
+  );
+}
+
+export async function updatePlatformTenantProfile(
+  tenantId: string,
+  body: {
+    name: string;
+    phone?: string | null;
+    email?: string | null;
+    address?: string | null;
+    taxId?: string | null;
+    logoUrl?: string | null;
+    brandColor?: string | null;
+    fontSizeStep?: number;
+    savingsOpeningFeeGhs?: number;
+    susuLoanBridgeEnabled?: boolean;
+  }
+): Promise<CompanyProfile> {
+  return fetchJson<CompanyProfile>(
+    `${API_BASE_URL}/api/v1/platform/tenants/${encodeURIComponent(tenantId)}/profile`,
+    {
+      method: "PUT",
+      headers: authHeaders(),
+      body: JSON.stringify(body)
+    }
+  );
+}
+
+export type PlatformTenantHealth = {
+  tenantId: string;
+  activeUsers: number;
+  activeCustomers: number;
+  priorOpenTills: number;
+  smsEnabled: boolean;
+  smsSenderId?: string;
+  lastActivityAt: string | null;
+};
+
+export async function getPlatformTenantHealth(): Promise<Record<string, PlatformTenantHealth>> {
+  return fetchJson<Record<string, PlatformTenantHealth>>(
+    `${API_BASE_URL}/api/v1/platform/tenants/health`,
+    { headers: authHeaders() }
+  );
+}
+
+export type DormantSusuCustomerAlert = {
+  customerId: string;
+  fullName: string;
+  accountNumber?: string;
+  phone: string;
+  homeBranchId: string;
+  fieldAgentId?: string;
+  dailyContributionAmount: number;
+  lastContributionAt: string | null;
+  daysInactive: number;
+};
+
+export async function listDormantSusuCustomers(options?: {
+  days?: number;
+  branchId?: string;
+}): Promise<DormantSusuCustomerAlert[]> {
+  const qs = new URLSearchParams();
+  if (options?.days) qs.set("days", String(options.days));
+  if (options?.branchId) qs.set("branchId", options.branchId);
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return fetchJson<DormantSusuCustomerAlert[]>(
+    `${API_BASE_URL}/api/v1/customers/dormant${suffix}`,
+    { headers: authHeaders() }
+  );
+}
+
+export type ZeroCollectionAgentAlert = {
+  agentId: string;
+  fullName: string;
+  email: string;
+  branchId?: string;
+  activeCustomerCount: number;
+  expectedDailyTarget: number;
+};
+
+export async function listZeroCollectionFieldAgentsToday(options?: {
+  branchId?: string;
+  businessDate?: string;
+}): Promise<ZeroCollectionAgentAlert[]> {
+  const qs = new URLSearchParams();
+  if (options?.branchId) qs.set("branchId", options.branchId);
+  if (options?.businessDate) qs.set("businessDate", options.businessDate);
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return fetchJson<ZeroCollectionAgentAlert[]>(
+    `${API_BASE_URL}/api/v1/field-agents/zero-collection-today${suffix}`,
+    { headers: authHeaders() }
+  );
+}
+
+export type StaffCommissionDailyRow = {
+  date: string;
+  transactionCount: number;
+  totalAmount: number;
+};
+
+export type StaffCommissionStatement = {
+  period: { id: string; label: string; startDate: string; endDate: string };
+  currency: string;
+  userId: string;
+  fullName: string;
+  email: string;
+  role: string;
+  policyEnabled: boolean;
+  method: "cycle_share" | "percentage";
+  cycleDays: number;
+  multiplier: number;
+  effectivePercent: number;
+  isOverride: boolean;
+  totalCollected: number;
+  dailyBreakdown: StaffCommissionDailyRow[];
+  baseCommission: number;
+  tierBonus: number;
+  totalCommission: number;
+  openShortagesTotal: number;
+  openShortageCount: number;
+  netAfterShortages: number;
+};
+
+export async function getStaffCommissionStatement(
+  userId: string
+): Promise<StaffCommissionStatement> {
+  return fetchJson<StaffCommissionStatement>(
+    `${API_BASE_URL}/api/v1/payroll/commission-statement/${encodeURIComponent(userId)}`,
+    { headers: authHeaders() }
+  );
 }
 
 export async function getRegistrationFormSetup(): Promise<import("@bms/shared").RegistrationFormSetup> {
@@ -2404,6 +2564,31 @@ export async function scheduleCustomerNextCardDailySusu(
       method: "PATCH",
       headers: authHeaders(),
       body: JSON.stringify({ dailyContributionAmount })
+    }
+  );
+}
+
+export async function upgradeCustomerKyc(
+  customerId: string,
+  input: {
+    idCardType:
+      | "ghana_card"
+      | "non_citizen_ghana_card"
+      | "ecowas_id"
+      | "voters_id"
+      | "nhis"
+      | "drivers_licence"
+      | "passport";
+    idCardNumber: string;
+    idCardPhotoUrl?: string;
+  }
+): Promise<Customer> {
+  return fetchJson<Customer>(
+    `${API_BASE_URL}/api/v1/customers/${encodeURIComponent(customerId)}/upgrade-kyc`,
+    {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify(input)
     }
   );
 }
@@ -4911,5 +5096,60 @@ export async function resolveBankAccountName(
   return fetchJson<BankAccountLookupResult>(
     `${API_BASE_URL}/api/v1/account-lookup/bank?${params.toString()}`,
     { headers: authHeaders() }
+  );
+}
+
+/* ── Floating Site & Admin Announcements ──────────────────────────────────── */
+
+export async function listActiveSiteAnnouncements(): Promise<{
+  announcements: import("@bms/shared").SiteAnnouncement[];
+}> {
+  return fetchJson<{ announcements: import("@bms/shared").SiteAnnouncement[] }>(
+    `${API_BASE_URL}/api/v1/announcements/active`,
+    { headers: authHeaders() }
+  );
+}
+
+export async function listManagedSiteAnnouncements(): Promise<{
+  scope: import("@bms/shared").AnnouncementScope;
+  announcements: import("@bms/shared").SiteAnnouncement[];
+}> {
+  return fetchJson<{
+    scope: import("@bms/shared").AnnouncementScope;
+    announcements: import("@bms/shared").SiteAnnouncement[];
+  }>(`${API_BASE_URL}/api/v1/announcements/manage`, { headers: authHeaders() });
+}
+
+export async function createSiteAnnouncementApi(
+  input: import("@bms/shared").CreateSiteAnnouncementInput
+): Promise<import("@bms/shared").SiteAnnouncement> {
+  return fetchJson<import("@bms/shared").SiteAnnouncement>(`${API_BASE_URL}/api/v1/announcements`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(input)
+  });
+}
+
+export async function updateSiteAnnouncementApi(
+  id: string,
+  input: import("@bms/shared").UpdateSiteAnnouncementInput
+): Promise<import("@bms/shared").SiteAnnouncement> {
+  return fetchJson<import("@bms/shared").SiteAnnouncement>(
+    `${API_BASE_URL}/api/v1/announcements/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      headers: authHeaders(),
+      body: JSON.stringify(input)
+    }
+  );
+}
+
+export async function deleteSiteAnnouncementApi(id: string): Promise<{ ok: true }> {
+  return fetchJson<{ ok: true }>(
+    `${API_BASE_URL}/api/v1/announcements/${encodeURIComponent(id)}`,
+    {
+      method: "DELETE",
+      headers: authHeaders()
+    }
   );
 }

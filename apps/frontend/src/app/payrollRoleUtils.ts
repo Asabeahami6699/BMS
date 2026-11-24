@@ -31,6 +31,9 @@ export type PayrollPolicy = {
   enabled: boolean;
   currency: string;
   bonusRules: Array<{ threshold: number; amount: number }>;
+  fieldAgentCommissionMethod?: "percentage" | "cycle_share";
+  fieldAgentCycleDays?: number;
+  fieldAgentCycleMultiplier?: number;
 };
 
 export function formatRoleLabel(role: string): string {
@@ -93,16 +96,29 @@ export function recomputeStaffRowLive(
     return row;
   }
 
+  const commissionOverride = parseOptionalPercent(row.draftCommissionOverride);
   const commissionPercent = row.commissionsApply
-    ? (parseOptionalPercent(row.draftCommissionOverride) ?? row.defaultCommissionPercent)
+    ? (commissionOverride ?? row.defaultCommissionPercent)
     : 0;
   const loanDeduction = parseMoney(row.draftLoan) || parseMoney(roleDraft.draftLoan);
+  const commissionFormula =
+    row.commissionsApply &&
+    row.role === "field_agent" &&
+    commissionOverride == null &&
+    policy.fieldAgentCommissionMethod === "cycle_share"
+      ? {
+          method: "cycle_share" as const,
+          cycleDays: policy.fieldAgentCycleDays ?? 30,
+          multiplier: policy.fieldAgentCycleMultiplier ?? 1
+        }
+      : undefined;
 
   const preview = computeStaffPayrollPreview({
     baseSalary: parseMoney(roleDraft.draftBaseSalary),
     monthlyBonus: parseMoney(roleDraft.draftMonthlyBonus),
     collections: row.collectionsThisPeriod,
     commissionPercent,
+    commissionFormula,
     commissionsApply: row.commissionsApply,
     policyEnabled: policy.enabled,
     bonusRules: policy.bonusRules,

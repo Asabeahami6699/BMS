@@ -1,13 +1,15 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
+  CUSTOMER_ID_CARD_TYPE_OPTIONS,
   SAVINGS_INITIAL_DEPOSIT_GHS,
   SUSU_COMMISSION_DEBIT_TAG,
   SUSU_COMMISSION_REFUND_TAG,
   formatAccountAmount,
+  formatIdCardTypeLabel,
   ledgerDisplayReason
 } from "@bms/shared";
 import type { AccountType, Customer } from "../app/api";
-import { scheduleCustomerNextCardDailySusu } from "../app/api";
+import { scheduleCustomerNextCardDailySusu, upgradeCustomerKyc } from "../app/api";
 import { SusuReversalDialog } from "../app/SusuReversalDialog";
 import { printCustomerAccountStatement } from "../app/customerAccountStatement";
 import {
@@ -140,6 +142,18 @@ export function CustomerDetailsView({
   const [editingNextDaily, setEditingNextDaily] = useState(false);
   const [nextDailyInput, setNextDailyInput] = useState("");
   const [savingNextDaily, setSavingNextDaily] = useState(false);
+  const [upgradingKyc, setUpgradingKyc] = useState(false);
+  const [upgradeIdType, setUpgradeIdType] = useState<
+    | "ghana_card"
+    | "non_citizen_ghana_card"
+    | "ecowas_id"
+    | "voters_id"
+    | "nhis"
+    | "drivers_licence"
+    | "passport"
+  >("non_citizen_ghana_card");
+  const [upgradeIdNumber, setUpgradeIdNumber] = useState("");
+  const [savingKycUpgrade, setSavingKycUpgrade] = useState(false);
 
   const liveCustomer = useCustomersStore((s) =>
     s.customers.find((c) => c.id === customerProp.id)
@@ -189,7 +203,43 @@ export function CustomerDetailsView({
   const status = statusLabel ?? STATUS_LABELS[customer.status] ?? customer.status;
   const address = [customer.location, customer.houseNumber].filter(Boolean).join(", ") || "—";
   const isSavings = customer.accountType === "savings";
-  const hasKyc = Boolean(customer.photoUrl && customer.idCardPhotoUrl);
+  const isSimplifiedKyc = customer.kycTier === "simplified";
+  const hasKyc = isSimplifiedKyc
+    ? Boolean(customer.photoUrl && customer.kycIntroducer?.ghanaCardNumber)
+    : Boolean(customer.photoUrl && customer.idCardPhotoUrl);
+  const canUpgradeKyc =
+    isSimplifiedKyc &&
+    (user?.role === "admin" ||
+      user?.role === "super_admin" ||
+      user?.role === "coordinator" ||
+      user?.role === "branch_manager" ||
+      user?.role === "manager");
+
+  async function handleUpgradeKyc() {
+    const trimmed = upgradeIdNumber.trim();
+    if (trimmed.length < 3) {
+      showToast("Enter a valid ID number (at least 3 characters)", "error");
+      return;
+    }
+    setSavingKycUpgrade(true);
+    try {
+      await upgradeCustomerKyc(customer.id, {
+        idCardType: upgradeIdType,
+        idCardNumber: trimmed
+      });
+      await Promise.all([
+        useCustomersStore.getState().refreshSilent(),
+        useCustomerLedgerStore.getState().ensureDetail(customer.id, { force: true })
+      ]);
+      setUpgradingKyc(false);
+      setUpgradeIdNumber("");
+      showToast("Customer upgraded to Full KYC", "success");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Could not upgrade KYC", "error");
+    } finally {
+      setSavingKycUpgrade(false);
+    }
+  }
   const initials = customer.fullName
     .split(/\s+/)
     .slice(0, 2)
@@ -214,6 +264,9 @@ export function CustomerDetailsView({
     setLedgerVisibleCount(LEDGER_PAGE_SIZE);
     setEditingNextDaily(false);
     setNextDailyInput("");
+    setUpgradingKyc(false);
+    setUpgradeIdType("ghana_card");
+    setUpgradeIdNumber("");
   }, [customerProp.id]);
 
   const canScheduleDailySusu =
@@ -593,8 +646,16 @@ export function CustomerDetailsView({
             </div>
             <div className="cif-metric" role="listitem">
               <span className="cif-metric__label">KYC</span>
-              <strong className={`cif-metric__value${hasKyc ? " cif-metric__value--ok" : ""}`}>
-                {hasKyc ? "Complete" : "Incomplete"}
+              <strong
+                className={`cif-metric__value${
+                  isSimplifiedKyc
+                    ? " cif-metric__value--warn"
+                    : hasKyc
+                      ? " cif-metric__value--ok"
+                      : ""
+                }`}
+              >
+                {isSimplifiedKyc ? "Tier 1 · Simplified" : hasKyc ? "Full KYC" : "Incomplete"}
               </strong>
             </div>
             <div className="cif-metric" role="listitem">
@@ -614,6 +675,81 @@ export function CustomerDetailsView({
           {customer.rejectionReason ? (
             <div className="cif-alert cif-alert--danger" role="status">
               <strong>Rejected</strong> — {customer.rejectionReason}
+            </div>
+          ) : null}
+
+          {isSimplifiedKyc ? (
+            <div className="cif-kyc-upgrade-box" role="status">
+              <div className="cif-kyc-upgrade-box__head">
+                <div>
+                  <span className="kyc-tier-badge kyc-tier-badge--simplified">
+                    Tier 1 · Simplified KYC
+                  </span>
+                  <p className="muted" style={{ margin: "0.35rem 0 0" }}>
+                    BoG low-value Susu account backed by a verified Ghana Card local introducer.
+                    Loans and investments remain locked until upgraded with a valid national or
+                    foreign ID.
+                  </p>
+                </div>
+                {canUpgradeKyc && !upgradingKyc ? (
+                  <button
+                    type="button"
+                    className="button secondary"
+                    onClick={() => setUpgradingKyc(true)}
+                  >
+                    Upgrade to Full KYC
+                  </button>
+                ) : null}
+              </div>
+
+              {upgradingKyc ? (
+                <div className="cif-kyc-upgrade-box__form">
+                  <label className="field">
+                    <span>ID card type</span>
+                    <select
+                      value={upgradeIdType}
+                      onChange={(e) =>
+                        setUpgradeIdType(e.target.value as typeof upgradeIdType)
+                      }
+                    >
+                      {CUSTOMER_ID_CARD_TYPE_OPTIONS.filter((o) => !o.isSimplifiedKyc).map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>ID number</span>
+                    <input
+                      value={upgradeIdNumber}
+                      onChange={(e) => setUpgradeIdNumber(e.target.value)}
+                      placeholder={
+                        CUSTOMER_ID_CARD_TYPE_OPTIONS.find((o) => o.value === upgradeIdType)
+                          ?.placeholder ?? "Enter ID number"
+                      }
+                    />
+                  </label>
+                  <div className="cif-kyc-upgrade-box__actions">
+                    <button
+                      type="button"
+                      className="button"
+                      disabled={savingKycUpgrade}
+                      onClick={() => void handleUpgradeKyc()}
+                    >
+                      {savingKycUpgrade ? "Upgrading…" : "Confirm Full KYC upgrade"}
+                    </button>
+                    <button
+                      type="button"
+                      className="button secondary"
+                      disabled={savingKycUpgrade}
+                      onClick={() => setUpgradingKyc(false)}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </div>
           ) : null}
 
@@ -647,7 +783,24 @@ export function CustomerDetailsView({
                   label="Occupation"
                   value={customer.occupation?.trim() ? customer.occupation : "Not provided"}
                 />
-                <InfoRow label="Ghana Card / ID" value={customer.idCardNumber} />
+                <InfoRow
+                  label={formatIdCardTypeLabel(customer.idCardType)}
+                  value={
+                    isSimplifiedKyc
+                      ? "No national ID (Tier 1 · Simplified KYC)"
+                      : customer.idCardNumber
+                  }
+                />
+                {customer.nationality ? (
+                  <InfoRow label="Nationality" value={customer.nationality} />
+                ) : null}
+                {customer.kycIntroducer ? (
+                  <InfoRow
+                    label="Local introducer (Ghana Card)"
+                    value={`${customer.kycIntroducer.fullName} (${customer.kycIntroducer.relationship}) · ${customer.kycIntroducer.phone} · ${customer.kycIntroducer.ghanaCardNumber}`}
+                    fullWidth
+                  />
+                ) : null}
                 <InfoRow label="Address" value={address} fullWidth />
               </div>
             </Section>

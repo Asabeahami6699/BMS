@@ -52,9 +52,76 @@ function statusClass(code: number): string {
   return "status-pill status-pill--active";
 }
 
+type AuditCategory =
+  | "all"
+  | "withdrawals"
+  | "reversals"
+  | "till"
+  | "profiles_roles"
+  | "approvals";
+
+const AUDIT_CATEGORY_CHIPS: Array<{ id: AuditCategory; label: string }> = [
+  { id: "all", label: "All events" },
+  { id: "withdrawals", label: "Withdrawals" },
+  { id: "reversals", label: "Reversals" },
+  { id: "till", label: "Till & Cash" },
+  { id: "profiles_roles", label: "Profiles & Roles" },
+  { id: "approvals", label: "Approvals" }
+];
+
+function matchesAuditCategory(row: AuditRow, cat: AuditCategory): boolean {
+  if (cat === "all") return true;
+  const hay = `${row.action} ${row.path}`.toLowerCase();
+  if (cat === "withdrawals") return /withdraw|payout|momo/.test(hay);
+  if (cat === "reversals") return /revers/.test(hay);
+  if (cat === "till") return /float|till|closing|variance|overage|shortage|capital/.test(hay);
+  if (cat === "profiles_roles") return /profile|role|permission|user|password|commission/.test(hay);
+  if (cat === "approvals") return /approv|reject|callover|batch|registration/.test(hay);
+  return true;
+}
+
+function escapeCsvCell(value: unknown): string {
+  const s = value == null ? "" : String(value);
+  if (/[",\n\r]/.test(s)) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+}
+
+function downloadAuditLogsCsv(rows: AuditRow[]): void {
+  const header = ["Timestamp", "Action", "Method", "Path", "Status", "Actor Role", "Actor ID", "Branch"];
+  const lines = [
+    header.join(","),
+    ...rows.map((r) =>
+      [
+        r.createdAt,
+        r.action,
+        r.method,
+        r.path,
+        formatStatus(r.statusCode),
+        r.actorRole,
+        r.actorUserId,
+        r.branchLabel
+      ]
+        .map(escapeCsvCell)
+        .join(",")
+    )
+  ];
+  const blob = new Blob([lines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `audit-logs-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 export function AuditLogsPage() {
   const { showToast } = useToast();
   const [search, setSearch] = useState("");
+  const [category, setCategory] = useState<AuditCategory>("all");
   const [selected, setSelected] = useState<AuditRow | null>(null);
   useBranchesLiveSync();
   const branches = useBranchesStore((s) => s.branches);
@@ -92,7 +159,12 @@ export function AuditLogsPage() {
     [rows, branches]
   );
 
-  const filtered = filterRowsBySearch(labeled, search, [
+  const categoryFiltered = useMemo(
+    () => labeled.filter((row) => matchesAuditCategory(row, category)),
+    [labeled, category]
+  );
+
+  const filtered = filterRowsBySearch(categoryFiltered, search, [
     "action",
     "actorRole",
     "actorUserId",
@@ -113,15 +185,43 @@ export function AuditLogsPage() {
             notifications read are not logged. Click a row for full details.
           </p>
         </div>
-        <button
-          type="button"
-          className="button secondary"
-          disabled={loading}
-          onClick={() => useAuditLogsStore.getState().hydrate({ force: true })}
-        >
-          {loading ? "Refreshing…" : "Refresh"}
-        </button>
+        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className="button secondary"
+            disabled={filtered.length === 0}
+            onClick={() => {
+              downloadAuditLogsCsv(filtered);
+              showToast(`Exported ${filtered.length} audit log row(s) to CSV`, "success");
+            }}
+          >
+            Export CSV
+          </button>
+          <button
+            type="button"
+            className="button secondary"
+            disabled={loading}
+            onClick={() => useAuditLogsStore.getState().hydrate({ force: true })}
+          >
+            {loading ? "Refreshing…" : "Refresh"}
+          </button>
+        </div>
       </header>
+
+      <div className="audit-filter-chips" role="group" aria-label="Quick audit category filters">
+        {AUDIT_CATEGORY_CHIPS.map((chip) => (
+          <button
+            key={chip.id}
+            type="button"
+            className={`statements-filter-pill${
+              category === chip.id ? " statements-filter-pill--active" : ""
+            }`}
+            onClick={() => setCategory(chip.id)}
+          >
+            {chip.label}
+          </button>
+        ))}
+      </div>
 
       <section className="card agents-page__table-card">
         <AdminDataTable

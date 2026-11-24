@@ -55,7 +55,12 @@ export async function updateRegistrationFormSetup(
     savings_opening_fee_ghs: next.savingsOpeningFeeGhs,
     registration_form_config: registrationFormsUseDefaults(next)
       ? null
-      : { forms: next.forms, fields: next.fields }
+      : {
+          savingsOpeningFeeHandling: next.savingsOpeningFeeHandling,
+          forms: next.forms,
+          fields: next.fields,
+          simplifiedKyc: next.simplifiedKyc
+        }
   };
   let { error } = await supabase.from("tenants").update(payload).eq("id", tenantId);
   if (error && /savings_opening_fee_ghs/i.test(error.message)) {

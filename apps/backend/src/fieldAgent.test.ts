@@ -55,6 +55,8 @@ describe("field agent flows", () => {
         phone: "0244111222",
         location: "Kumasi",
         houseNumber: "12",
+        dateOfBirth: "1992-05-14",
+        occupation: "Trader",
         accountType: "susu",
         idCardNumber: "GHA-FA-001",
         idCardPhotoUrl: FAKE_ID_CARD_PHOTO,
@@ -94,6 +96,8 @@ describe("field agent flows", () => {
         phone: "0244999888",
         location: "Accra",
         houseNumber: "9",
+        dateOfBirth: "1990-03-10",
+        occupation: "Seamstress",
         accountType: "susu",
         idCardNumber: "GHA-FA-002",
         idCardPhotoUrl: FAKE_ID_CARD_PHOTO,
@@ -141,6 +145,8 @@ describe("field agent flows", () => {
         phone: "0244888777",
         location: "Tema",
         houseNumber: "1",
+        dateOfBirth: "1995-07-21",
+        occupation: "Artisan",
         accountType: "susu",
         idCardNumber: "GHA-FA-003",
         idCardPhotoUrl: FAKE_ID_CARD_PHOTO,
@@ -170,6 +176,8 @@ describe("field agent flows", () => {
         phone: "0244555666",
         location: "Accra",
         houseNumber: "3",
+        dateOfBirth: "1989-11-02",
+        occupation: "Shopkeeper",
         accountType: "susu",
         idCardNumber: "GHA-FA-BAL",
         idCardPhotoUrl: FAKE_ID_CARD_PHOTO,
@@ -227,6 +235,8 @@ describe("field agent flows", () => {
         phone: "0244333222",
         location: "Tema",
         houseNumber: "2",
+        dateOfBirth: "1991-01-19",
+        occupation: "Driver",
         accountType: "susu",
         idCardNumber: "GHA-FA-BAL2",
         idCardPhotoUrl: FAKE_ID_CARD_PHOTO,
@@ -276,6 +286,8 @@ describe("field agent flows", () => {
         phone: "0244111333",
         location: "Accra",
         houseNumber: "5",
+        dateOfBirth: "1988-08-08",
+        occupation: "Merchant",
         accountType: "susu",
         idCardNumber: "GHA-FA-WD",
         idCardPhotoUrl: FAKE_ID_CARD_PHOTO,
@@ -321,8 +333,16 @@ describe("field agent flows", () => {
       .patch(`/api/v1/customers/balance-disclosures/${row!.id}/approve`)
       .set(coordinatorHeaders());
     expect(approved.status).toBe(200);
-    expect(approved.body.status).toBe("approved");
-    expect(approved.body.balanceAmount).toBe(60);
+    expect(approved.body.status).toBe("cs_approved");
+    // GHS 100 deposit minus GHS 25 first-collection Susu cycle commission = GHS 75
+    const preWithdrawalBalance = Number(approved.body.balanceAmount);
+    expect(preWithdrawalBalance).toBeGreaterThanOrEqual(40);
+    expect(preWithdrawalBalance).toBe(75);
+
+    const paid = await request(app)
+      .post(`/api/v1/transactions/field-withdrawals/${row!.id}/pay-cash`)
+      .set(adminBranchHeaders());
+    expect(paid.status, JSON.stringify(paid.body)).toBe(200);
 
     const ledger = await request(app)
       .get(`/api/v1/ledger/customers/${customerId}`)
@@ -332,7 +352,7 @@ describe("field agent flows", () => {
     const last = entries[entries.length - 1];
     expect(last.entryType).toBe("debit");
     expect(last.amount).toBe(40);
-    expect(last.balanceAfter).toBe(60);
+    expect(last.balanceAfter).toBe(preWithdrawalBalance - 40);
   });
 
   it("rejects direct deposit by field agent", async () => {
@@ -344,6 +364,8 @@ describe("field agent flows", () => {
         phone: "0244999000",
         location: "Accra",
         houseNumber: "7",
+        dateOfBirth: "1993-04-12",
+        occupation: "Vendor",
         accountType: "susu",
         idCardNumber: "GHA-FA-NODEP",
         idCardPhotoUrl: FAKE_ID_CARD_PHOTO,
@@ -379,10 +401,12 @@ describe("field agent flows", () => {
         phone: "0244222555",
         location: "Tamale",
         houseNumber: "3",
+        dateOfBirth: "1994-09-30",
+        occupation: "Farmer",
         accountType: "savings",
         idCardNumber: "GHA-FA-SAV",
         idCardPhotoUrl: FAKE_ID_CARD_PHOTO,
-        savingsOpeningFeeCollected: false,
+        savingsOpeningFeeCollected: true,
         nextOfKin: { fullName: "Kin Sav", phone: "0244333666", location: "Tamale" },
         dailyContributionAmount: 0
       });
@@ -439,6 +463,8 @@ describe("field agent flows", () => {
         phone: "0244222666",
         location: "Tamale",
         houseNumber: "8",
+        dateOfBirth: "1994-09-30",
+        occupation: "Farmer",
         accountType: "savings",
         idCardNumber: "GHA-FA-SAV2",
         idCardPhotoUrl: FAKE_ID_CARD_PHOTO,

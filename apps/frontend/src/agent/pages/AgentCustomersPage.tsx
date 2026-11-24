@@ -193,6 +193,11 @@ export function AgentCustomersPage({
               <div className="agent-customer-card-head">
                 <strong className="agent-customer-card-name">{customer.fullName}</strong>
                 <div className="agent-customer-card-head-end">
+                  {customer.kycTier === "simplified" ? (
+                    <span className="kyc-tier-badge kyc-tier-badge--simplified">
+                      Simplified KYC
+                    </span>
+                  ) : null}
                   {customer.accountNumber ? (
                     <span className="agent-customer-account">{customer.accountNumber}</span>
                   ) : null}

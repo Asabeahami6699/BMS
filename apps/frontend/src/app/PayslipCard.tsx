@@ -45,37 +45,33 @@ export function PayslipCard({ role }: Props) {
 
   if (canManagePayroll) {
     return (
-      <div className="agents-page payroll-page">
+      <div className="payroll-page">
         <StaffPayrollSection />
-        <section className="payroll-panel payroll-panel--compact">
-          <h3>Your payslip preview</h3>
-          {latest ? (
-            <PayslipViewer payslip={latest} subtitle="Your account after the last payroll run" />
-          ) : (
-            <p className="muted">{status}</p>
-          )}
-        </section>
       </div>
     );
   }
 
   return (
-    <div className="agents-page payroll-page">
-      <section className="payroll-panel">
-        <header className="agents-page__header payroll-workspace__header">
-          <div>
-            <h2>My payslip</h2>
-            <p className="muted">
-              {hasCommission
-                ? "Earnings, commissions, and deductions from your role template and collections."
-                : "Take-home pay after role-based deductions."}
-            </p>
-          </div>
-        </header>
+    <div className="payroll-modern-page">
+      <header className="overview-hero payroll-modern-hero">
+        <div>
+          <p className="overview-hero__eyebrow">Compensation</p>
+          <h1 className="overview-hero__title">My payslip</h1>
+          <p className="overview-hero__sub muted">
+            {hasCommission
+              ? "Earnings, collection commissions, and deductions from your role template."
+              : "Take-home pay after role-based deductions."}
+          </p>
+        </div>
+      </header>
+
+      <section className="overview-panel statements-section">
         {latest ? (
           <PayslipViewer payslip={latest} subtitle="Published payslip" />
         ) : (
-          <p className="muted">{status}</p>
+          <div className="statements-ledger-empty">
+            <p className="muted">{status}</p>
+          </div>
         )}
       </section>
     </div>

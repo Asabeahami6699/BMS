@@ -551,6 +551,11 @@ export async function createLoanApplication(
     if (!customer || customer.status !== "active") {
       throw new Error("Customer not found or not active");
     }
+    if (customer.kycTier === "simplified") {
+      throw new Error(
+        "Loans require Full KYC. This customer is on Tier 1 Simplified KYC — please upgrade their account with a valid national or foreign ID first."
+      );
+    }
     customerName = customer.fullName;
     if (payload.photoUrl || payload.idCardPhotoUrl) {
       await patchCustomerKycPhotos(context.tenantId, customerId, {

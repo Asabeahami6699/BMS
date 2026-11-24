@@ -84,6 +84,7 @@ export function SusuCycleCommissionPage({ role }: Props) {
       rolloverTreatment: policy.rolloverTreatment,
       partialAllocation: policy.partialAllocation,
       earlyWithdrawalPolicy: policy.earlyWithdrawalPolicy,
+      notifyCustomerOnCommission: policy.notifyCustomerOnCommission !== false,
       effectiveFrom: policy.effectiveFrom
     });
   }, [policy]);
@@ -94,7 +95,14 @@ export function SusuCycleCommissionPage({ role }: Props) {
     }
     // Preview only — live cycles use each customer’s registered daily amount.
     const daily = draft.defaultDailyContributionGhs;
-    const agreed = computeAgreedCommissionAmount(draft, daily);
+    const agreed = computeAgreedCommissionAmount(
+      {
+        ...draft,
+        commissionFixedAmount: draft.commissionFixedAmount ?? 0,
+        commissionPercent: draft.commissionPercent ?? 0
+      },
+      daily
+    );
     const expectedGross = daily * draft.cycleDays;
     return {
       daily,
@@ -325,6 +333,22 @@ export function SusuCycleCommissionPage({ role }: Props) {
                 )
               )}
             </div>
+
+            <label className="cycle-fees-toggle" style={{ marginTop: "0.85rem" }}>
+              <span>
+                <strong>Send message to customer when commission is deducted</strong>
+                <small className="muted">
+                  When on, customers receive an SMS/email alert for deducted Susu commission. Turn
+                  off to deduct quietly without a separate commission message.
+                </small>
+              </span>
+              <input
+                type="checkbox"
+                checked={draft.notifyCustomerOnCommission !== false}
+                disabled={!canEdit}
+                onChange={(e) => patch("notifyCustomerOnCommission", e.target.checked)}
+              />
+            </label>
           </div>
 
           {preview ? (

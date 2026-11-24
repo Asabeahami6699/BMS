@@ -4,7 +4,8 @@ import {
   customerRegistrationInputSchema,
   rejectCustomerSchema,
   roleMayApprove,
-  scheduleNextCardDailySusuSchema
+  scheduleNextCardDailySusuSchema,
+  upgradeCustomerKycSchema
 } from "@bms/shared";
 
 import { Router } from "express";
@@ -38,10 +39,13 @@ import {
 
   submitCustomerRegistration,
 
-  updateCustomerStatus
+  updateCustomerStatus,
+
+  upgradeCustomerToFullKyc
 
 } from "../services/customerService.js";
 import { getCustomerBootstrap } from "../services/customerBootstrapService.js";
+import { listDormantSusuCustomers } from "../services/susuRiskAlertsService.js";
 import { getApprovalWorkflow } from "../services/approvalWorkflowService.js";
 
 import {
@@ -101,8 +105,30 @@ customersRouter.post(
 
 
 
-customersRouter.post(
+customersRouter.get("/dormant", requirePermission("customers.read"), async (req, res) => {
+  const context = req.userContext;
+  if (!context) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const branchId = resolveRequestBranchFilter(req);
+  const rawDays = Number(req.query.days ?? 7);
+  const days = Number.isFinite(rawDays) && rawDays >= 1 ? Math.floor(rawDays) : 7;
+  try {
+    const rows = await listDormantSusuCustomers(context.tenantId, {
+      days,
+      branchId,
+      agentId: context.role === "field_agent" ? context.userId : undefined
+    });
+    res.json(rows);
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "Failed to load dormant customer alerts"
+    });
+  }
+});
 
+customersRouter.post(
   "/registrations",
 
   requirePermission("customers.create"),
@@ -626,6 +652,42 @@ customersRouter.patch(
     } catch (error) {
       res.status(400).json({
         error: error instanceof Error ? error.message : "Failed to update daily Susu amount"
+      });
+    }
+  }
+);
+
+const KYC_UPGRADE_ROLES = new Set([
+  "admin",
+  "super_admin",
+  "coordinator",
+  "branch_manager",
+  "manager"
+]);
+
+customersRouter.post(
+  "/:customerId/upgrade-kyc",
+  requireAnyPermission("customers.create", "customers.read"),
+  validateBody(upgradeCustomerKycSchema),
+  async (req, res) => {
+    const context = req.userContext;
+    if (!context) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    if (!KYC_UPGRADE_ROLES.has(context.role)) {
+      res.status(403).json({ error: "Only admins, managers, or coordinators can upgrade customer KYC" });
+      return;
+    }
+    const customerId = Array.isArray(req.params.customerId)
+      ? req.params.customerId[0]
+      : req.params.customerId;
+    try {
+      const updated = await upgradeCustomerToFullKyc(context.tenantId, customerId, req.body);
+      res.json(updated);
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Failed to upgrade customer KYC"
       });
     }
   }

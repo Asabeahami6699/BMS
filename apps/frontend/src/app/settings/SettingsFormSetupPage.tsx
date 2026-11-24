@@ -5,15 +5,18 @@ import {
   type RegistrationAccountForm,
   type RegistrationFieldRequirement,
   type RegistrationFormFields,
-  type RegistrationFormSetup
+  type RegistrationFormSetup,
+  type SavingsOpeningFeeHandling
 } from "@bms/shared";
 import { useToast } from "../../components/Toast";
 import { useSettingsWorkspaceStore } from "../stores/settingsWorkspaceStore";
 import {
   downloadDefaultRegistrationForm,
   downloadRegistrationForm,
+  downloadSimplifiedKycRegistrationForm,
   printDefaultRegistrationForm,
   printRegistrationForm,
+  printSimplifiedKycRegistrationForm,
   type RegistrationFormPrintContext
 } from "../registrationFormPrint";
 import { downloadDailyTallySheet, printDailyTallySheet } from "../dailyTallySheetPrint";
@@ -151,6 +154,23 @@ export function SettingsFormSetupPage() {
     }
   }
 
+  function handlePrintSimplifiedKycForm() {
+    try {
+      printSimplifiedKycRegistrationForm(setup, printContext);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Could not open the print dialog", "error");
+    }
+  }
+
+  function handleDownloadSimplifiedKycForm() {
+    try {
+      downloadSimplifiedKycRegistrationForm(setup, printContext);
+      showToast("Simplified KYC registration form downloaded", "success");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Could not download the Simplified KYC form", "error");
+    }
+  }
+
   function handlePrintTallySheet() {
     try {
       printDailyTallySheet({
@@ -213,19 +233,35 @@ export function SettingsFormSetupPage() {
     });
   }
 
+  function patchSimplifiedKyc(patch: Partial<RegistrationFormSetup["simplifiedKyc"]>) {
+    setFormSetup({
+      ...setup,
+      simplifiedKyc: {
+        ...setup.simplifiedKyc,
+        ...patch
+      }
+    });
+  }
+
   function restoreForm(id: RegistrationAccountForm["id"]) {
     const baseline = defaultRegistrationFormSetup().forms.find((form) => form.id === id);
     if (!baseline) {
       return;
     }
-    patchForm(id, baseline);
+    if (id === "savings") {
+      setOpeningFee("20.00");
+      setFormSetup({
+        ...setup,
+        savingsOpeningFeeHandling: "both",
+        forms: setup.forms.map((form) => (form.id === id ? { ...form, ...baseline } : form))
+      });
+    } else {
+      patchForm(id, baseline);
+    }
     setDailyAmounts({
       ...dailyAmounts,
       [id]: baseline.defaultDailyContributionGhs.toFixed(2)
     });
-    if (id === "savings") {
-      setOpeningFee("20.00");
-    }
   }
 
   function restoreAll() {
@@ -312,6 +348,35 @@ export function SettingsFormSetupPage() {
           </button>
           <button type="button" className="button secondary" onClick={handleDownloadDefaultForm}>
             Download default form
+          </button>
+        </div>
+      </section>
+
+      <section className="form-setup-print" aria-label="Simplified KYC paper registration form">
+        <div>
+          <h3>Simplified KYC (Tier 1) paper form — No National ID</h3>
+          <p className="muted">
+            Dedicated single-page A4 form for foreign residents or customers without a national ID. Includes
+            nationality, customer declaration, and the mandatory Ghana Card local introducer attestation &amp;
+            signature block.
+          </p>
+        </div>
+        <div className="form-setup-print__actions">
+          <button
+            type="button"
+            className="button"
+            disabled={!setup.simplifiedKyc.enabled}
+            onClick={handlePrintSimplifiedKycForm}
+          >
+            Print Simplified KYC form
+          </button>
+          <button
+            type="button"
+            className="button secondary"
+            disabled={!setup.simplifiedKyc.enabled}
+            onClick={handleDownloadSimplifiedKycForm}
+          >
+            Download Simplified KYC form
           </button>
         </div>
       </section>
@@ -406,22 +471,46 @@ export function SettingsFormSetupPage() {
               />
             </label>
             {form.id === "savings" ? (
-              <label className="field">
-                <span>Savings opening amount (GHS)</span>
-                <input
-                  inputMode="decimal"
-                  value={openingFee}
-                  disabled={!form.enabled}
-                  onChange={(event) => {
-                    if (moneyInput(event.target.value)) {
-                      setOpeningFee(event.target.value);
+              <>
+                <label className="field">
+                  <span>Fixed / locked initial opening amount (GHS)</span>
+                  <input
+                    inputMode="decimal"
+                    value={openingFee}
+                    disabled={!form.enabled}
+                    onChange={(event) => {
+                      if (moneyInput(event.target.value)) {
+                        setOpeningFee(event.target.value);
+                      }
+                    }}
+                  />
+                  <p className="muted">
+                    Admin-configured fixed amount credited on approval and kept locked (non-withdrawable).
+                  </p>
+                </label>
+                <label className="field">
+                  <span>Opening fee options shown to field agents</span>
+                  <select
+                    disabled={!form.enabled}
+                    value={setup.savingsOpeningFeeHandling ?? "both"}
+                    onChange={(event) =>
+                      setFormSetup({
+                        ...setup,
+                        savingsOpeningFeeHandling: event.target.value as SavingsOpeningFeeHandling
+                      })
                     }
-                  }}
-                />
-                <p className="muted">
-                  Cash taken when a savings account is opened. It is credited on approval and stays locked.
-                </p>
-              </label>
+                  >
+                    <option value="both">
+                      Show both (Cash collected now &amp; Deduct later)
+                    </option>
+                    <option value="cash_now">Cash collected now only</option>
+                    <option value="deduct_later">Not collected — deduct later only</option>
+                  </select>
+                  <p className="muted">
+                    Controls whether field agents choose between both options or only see your preferred handling method.
+                  </p>
+                </label>
+              </>
             ) : null}
             <button type="button" className="button secondary" onClick={() => restoreForm(form.id)}>
               Use default
@@ -460,6 +549,78 @@ export function SettingsFormSetupPage() {
       >
         Use default fields
       </button>
+
+      <section className="form-setup-kyc-card" aria-label="Simplified KYC policy">
+        <div className="form-setup-kyc-card__head">
+          <div>
+            <h3>Tier 1 · Simplified KYC (Foreigner / No-ID Susu accounts)</h3>
+            <p className="muted">
+              BoG risk-based onboarding for customers without a national ID. Requires a live customer face photo,
+              nationality, and a local introducer with a valid Ghana Card. Loans and investments remain locked until
+              upgraded to Full KYC.
+            </p>
+          </div>
+          <span className="status-pill status-pill--pending">BoG Tier 1</span>
+        </div>
+
+        <div className="form-setup-kyc-card__controls">
+          <label className="checkbox-row">
+            <input
+              type="checkbox"
+              checked={setup.simplifiedKyc.enabled}
+              onChange={(event) => patchSimplifiedKyc({ enabled: event.target.checked })}
+            />
+            <span>
+              <strong>Allow Simplified KYC registration (No National ID + Local Introducer)</strong>
+            </span>
+          </label>
+
+          <label className="checkbox-row">
+            <input
+              type="checkbox"
+              checked={setup.simplifiedKyc.allowFieldAgentWithdrawalRequest}
+              disabled={!setup.simplifiedKyc.enabled}
+              onChange={(event) =>
+                patchSimplifiedKyc({ allowFieldAgentWithdrawalRequest: event.target.checked })
+              }
+            />
+            <span>
+              <strong>Allow field agent withdrawal requests for Simplified KYC accounts</strong>
+              <small className="muted" style={{ display: "block" }}>
+                When off (default), Simplified KYC customers must withdraw in person at the branch with face
+                verification. Turn on to let field agents submit withdrawal requests for coordinator approval.
+              </small>
+            </span>
+          </label>
+
+          <label className="field" style={{ maxWidth: "280px" }}>
+            <span>Maximum account balance cap (GHS)</span>
+            <input
+              type="number"
+              min="0"
+              step="100"
+              inputMode="decimal"
+              disabled={!setup.simplifiedKyc.enabled}
+              value={String(setup.simplifiedKyc.maxBalanceGhs ?? 5000)}
+              onChange={(event) => {
+                const raw = event.target.value;
+                if (raw === "") {
+                  patchSimplifiedKyc({ maxBalanceGhs: 0 });
+                  return;
+                }
+                const num = Number(raw);
+                if (Number.isFinite(num) && num >= 0) {
+                  patchSimplifiedKyc({ maxBalanceGhs: Math.round(num * 100) / 100 });
+                }
+              }}
+            />
+            <p className="muted">
+              Default is GHS 5,000. Set to 0 for no balance cap. Deposits above this cap are blocked until upgraded
+              to Full KYC.
+            </p>
+          </label>
+        </div>
+      </section>
 
       <div className="form-actions">
         <button type="button" className="button" disabled={saving} onClick={() => void handleSave()}>

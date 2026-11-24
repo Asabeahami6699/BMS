@@ -1,6 +1,7 @@
 import {
   computeStaffPayrollPreview,
   currentPayrollPeriod,
+  effectiveFieldAgentPercentFromPolicy,
   resolveEffectivePayroll,
   roleReceivesCommission,
   isBuiltinRole,
@@ -54,7 +55,7 @@ function tenantProfiles(tenantId: string): Map<string, ProfileRow> {
 
 function defaultCommissionPercent(role: Role, policy: CommissionPolicy): number {
   if (role === "field_agent") {
-    return policy.fieldAgentCommissionPercent;
+    return effectiveFieldAgentPercentFromPolicy(policy);
   }
   if (role === "coordinator") {
     return policy.coordinatorCommissionPercent;
@@ -71,6 +72,21 @@ export function effectiveCommissionPercent(
     return profile.commissionPercentOverride;
   }
   return defaultCommissionPercent(role, policy);
+}
+
+export function effectiveCommissionFormula(
+  role: Role,
+  policy: CommissionPolicy,
+  profile: UserPayrollProfile | undefined
+): { method: "cycle_share" | "percentage"; cycleDays: number; multiplier: number } | undefined {
+  if (role !== "field_agent" || profile?.commissionPercentOverride != null) {
+    return undefined;
+  }
+  return {
+    method: policy.fieldAgentCommissionMethod,
+    cycleDays: policy.fieldAgentCycleDays,
+    multiplier: policy.fieldAgentCycleMultiplier
+  };
 }
 
 export function profileDeductions(
@@ -297,7 +313,7 @@ export async function listStaffPayrollSetup(
   tenantId: string,
   period = currentPayrollPeriod()
 ): Promise<StaffPayrollSetupRow[]> {
-  const policy = getCommissionPolicy(tenantId);
+  const policy = await getCommissionPolicy(tenantId);
   const users = await listTenantUsers(tenantId);
   const profiles = await loadProfileRows(tenantId);
   const roleDefaults = await loadRolePayrollDefaults(tenantId);
@@ -331,6 +347,7 @@ export async function listStaffPayrollSetup(
       monthlyBonus: effective.monthlyBonus,
       collections,
       commissionPercent: effectivePercent,
+      commissionFormula: effectiveCommissionFormula(role, policy, profile),
       commissionsApply,
       policyEnabled: policy.enabled,
       bonusRules: policy.bonusRules,
