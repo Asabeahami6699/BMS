@@ -189,6 +189,7 @@ export async function notifyCustomerSusuCommissionEmail(input: {
   transactionId: string;
   amount: number;
   cycleNumber?: number;
+  balanceOverride?: number;
   subscribedAddons?: TenantAddon[];
 }): Promise<void> {
   const addons = input.subscribedAddons ?? (await loadTenantAddons(input.tenantId)) ?? [];
@@ -214,7 +215,9 @@ export async function notifyCustomerSusuCommissionEmail(input: {
 
   const [brand, balance] = await Promise.all([
     resolveTenantName(input.tenantId),
-    computeCustomerBalance(input.tenantId, input.customerId)
+    input.balanceOverride !== undefined
+      ? Promise.resolve(input.balanceOverride)
+      : computeCustomerBalance(input.tenantId, input.customerId)
   ]);
 
   const displayName = settings.fromName?.trim() || brand;

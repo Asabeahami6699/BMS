@@ -42,6 +42,7 @@ export function scheduleCustomerSusuCommissionNotification(input: {
   transactionId: string;
   amount: number;
   cycleNumber?: number;
+  balanceOverride?: number;
   subscribedAddons?: TenantAddon[];
   delayMs?: number;
 }): void {

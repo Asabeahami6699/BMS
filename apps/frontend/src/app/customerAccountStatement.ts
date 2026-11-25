@@ -188,7 +188,7 @@ function typeLabel(entry: LedgerEntry): string {
     return "Reversal";
   }
   if (entry.notes?.toLowerCase().includes(SUSU_COMMISSION_DEBIT_TAG)) {
-    return "Susu commission";
+    return "Debit (commission)";
   }
   if (entry.notes?.toLowerCase().includes(SUSU_COMMISSION_REFUND_TAG)) {
     return "Commission refund";

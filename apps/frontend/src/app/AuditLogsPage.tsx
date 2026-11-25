@@ -201,7 +201,12 @@ export function AuditLogsPage() {
             type="button"
             className="button secondary"
             disabled={loading}
-            onClick={() => useAuditLogsStore.getState().hydrate({ force: true })}
+            onClick={() => {
+              void Promise.allSettled([
+                useAuditLogsStore.getState().refresh(),
+                useBranchesStore.getState().refreshSilent()
+              ]);
+            }}
           >
             {loading ? "Refreshing…" : "Refresh"}
           </button>

@@ -350,7 +350,17 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
           set({ selectedCustomerId: "" });
         }
         if (selectedCustomerId) {
-          await get().loadLedger(selectedCustomerId, { silent: true });
+          await get().loadLedger(selectedCustomerId, { silent: true, force: true });
+          void import("./customerLedgerStore").then(({ useCustomerLedgerStore }) => {
+            const ledgerStore = useCustomerLedgerStore.getState();
+            void ledgerStore.ensureLedger(selectedCustomerId, { force: true });
+            void ledgerStore.ensureDetail(selectedCustomerId, { force: true });
+          });
+          void import("./susuCycleCommissionStore").then(({ useSusuCycleCommissionStore }) => {
+            void useSusuCycleCommissionStore
+              .getState()
+              .ensureCustomerPassbook(selectedCustomerId, { force: true });
+          });
         }
       } catch (error) {
         if (isUnauthorized(error)) {
@@ -571,6 +581,9 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
         postRetry = null;
         const customerId = payload.customerId;
         await get().loadLedger(customerId, { silent: true, force: true });
+        void import("./customerLedgerStore").then(({ useCustomerLedgerStore }) => {
+          useCustomerLedgerStore.getState().invalidate(customerId);
+        });
         void import("./susuCycleCommissionStore").then(({ useSusuCycleCommissionStore }) => {
           const passbookStore = useSusuCycleCommissionStore.getState();
           passbookStore.invalidateCustomerPassbook(customerId);
@@ -616,6 +629,14 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
       await get().refreshSilent();
       if (customerId) {
         await get().loadLedger(customerId, { silent: true, force: true });
+        void import("./customerLedgerStore").then(({ useCustomerLedgerStore }) => {
+          useCustomerLedgerStore.getState().invalidate(customerId);
+        });
+        void import("./susuCycleCommissionStore").then(({ useSusuCycleCommissionStore }) => {
+          const passbookStore = useSusuCycleCommissionStore.getState();
+          passbookStore.invalidateCustomerPassbook(customerId);
+          void passbookStore.refreshCustomerPassbookSilent(customerId);
+        });
       }
     } catch (error) {
       set({ error: toUserFacingError(error, "Pay now failed") });

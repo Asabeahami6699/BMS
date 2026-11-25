@@ -111,6 +111,14 @@ export function PendingApprovalsPage() {
           `Approved for Pay now — ${approved.customerName ?? "Customer"}: ${approved.withdrawalAmount != null ? formatGhs(approved.withdrawalAmount) : "—"}`,
           "success"
         );
+        if (row.customerId) {
+          void import("./stores/customerLedgerStore").then(({ useCustomerLedgerStore }) => {
+            useCustomerLedgerStore.getState().invalidate(row.customerId);
+          });
+          void import("./stores/susuCycleCommissionStore").then(({ useSusuCycleCommissionStore }) => {
+            useSusuCycleCommissionStore.getState().invalidateCustomerPassbook(row.customerId);
+          });
+        }
       } else {
         showToast(
           `Balance visible — ${approved.customerName ?? "Customer"}: ${approved.balanceAmount != null ? formatGhs(approved.balanceAmount) : "—"}`,

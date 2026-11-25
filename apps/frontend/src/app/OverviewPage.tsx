@@ -241,10 +241,20 @@ export function OverviewPage({
           className="button secondary"
           disabled={coordLoading || perfLoading}
           onClick={() => {
-            void coordRefresh().then(() => showToast("Overview refreshed", "success"));
+            const tasks: Promise<unknown>[] = [coordRefresh()];
+            if (loadPerformance) {
+              tasks.push(usePerformanceStore.getState().refresh());
+            }
+            if (loadWithdrawals) {
+              tasks.push(useWithdrawalsStore.getState().refresh());
+            }
+            if (loadGroupSavings) {
+              tasks.push(useGroupSavingsStore.getState().refresh());
+            }
+            void Promise.allSettled(tasks).then(() => showToast("Overview refreshed", "success"));
           }}
         >
-          {coordLoading ? "Refreshing…" : "Refresh"}
+          {coordLoading || perfLoading ? "Refreshing…" : "Refresh"}
         </button>
       </header>
 

@@ -1,3 +1,4 @@
+import { SUSU_COMMISSION_DEBIT_TAG, SUSU_COMMISSION_REFUND_TAG } from "@bms/shared";
 import type { Customer, LedgerEntry } from "../app/api";
 
 function escapeCsvCell(value: string | number): string {
@@ -33,9 +34,17 @@ function formatIsoForCsv(iso: string): string {
 }
 
 function entryToCsvRow(entry: LedgerEntry): string {
+  const lowerNotes = (entry.notes ?? "").toLowerCase();
+  const typeLabel = lowerNotes.includes(SUSU_COMMISSION_DEBIT_TAG)
+    ? "Debit (commission)"
+    : lowerNotes.includes(SUSU_COMMISSION_REFUND_TAG)
+      ? "Commission refund"
+      : entry.entryType === "credit"
+        ? "Credit"
+        : "Debit";
   return csvRow([
     formatIsoForCsv(entry.createdAt),
-    entry.entryType === "credit" ? "Credit" : "Debit",
+    typeLabel,
     entry.amount.toFixed(2),
     entry.balanceAfter.toFixed(2),
     entry.performedByName ?? entry.recordedByName ?? "",

@@ -37,7 +37,7 @@ export function buildTransactionAlertMessage(input: {
 export const SUSU_COMMISSION_DEBIT_TAG = "susu_comm_tx:";
 export const SUSU_COMMISSION_REFUND_TAG = "susu_comm_refund:";
 
-/** SMS when Susu cycle commission (service charge) is debited after a deposit/collection. */
+/** SMS when Susu cycle commission (service charge) is debited after a deposit/collection or withdrawal. */
 export function buildSusuCommissionDebitMessage(input: {
   brand: string;
   amount: number;
@@ -49,10 +49,9 @@ export function buildSusuCommissionDebitMessage(input: {
   const bal = formatSmsAmount(input.balance);
   const accountMask = maskAccountNumber(input.accountNumber);
   const brand = input.brand.slice(0, 40);
-  const cardLabel = input.cycleNumber ? `Susu card #${input.cycleNumber}` : "Susu card";
   return {
-    subject: `${brand} — ${cardLabel} service charge`,
-    text: `${brand}: GHS ${amt} has been debited from your Account # ${accountMask} as ${cardLabel} service charge (commission). Current balance is: GHS ${bal}`
+    subject: `${brand} — Susu service charge`,
+    text: `${brand}: GHS ${amt} has been debited from your Account # ${accountMask} as Susu service charge. Current balance is: GHS ${bal}`
   };
 }
 

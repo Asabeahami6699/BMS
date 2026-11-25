@@ -184,7 +184,7 @@ export function CustomerDetailsView({
   }, [customerProp.routeId, liveCustomer?.routeId]);
 
   useEffect(() => {
-    void useCustomerLedgerStore.getState().ensureDetail(customerProp.id);
+    void useCustomerLedgerStore.getState().ensureDetail(customerProp.id, { force: true });
   }, [customerProp.id]);
 
   useEffect(() => {
@@ -192,10 +192,15 @@ export function CustomerDetailsView({
       return;
     }
     const store = useCustomerLedgerStore.getState();
-    void store.ensureLedger(customerProp.id);
+    void store.ensureLedger(customerProp.id, { force: true });
+    if ((customerProp.accountType ?? "susu") === "susu") {
+      void useSusuCycleCommissionStore
+        .getState()
+        .ensureCustomerPassbook(customerProp.id, { force: true });
+    }
     store.startLiveSync();
     return () => useCustomerLedgerStore.getState().stopLiveSync();
-  }, [customerProp.id, showFinancials]);
+  }, [customerProp.id, customerProp.accountType, showFinancials]);
 
   const accountLabel = customer.accountType
     ? (ACCOUNT_TYPE_LABELS[customer.accountType] ?? customer.accountType)
@@ -563,7 +568,7 @@ export function CustomerDetailsView({
                           entry.transactionType === "susu_reversal"
                             ? "Reversal"
                             : isSusuCommissionDebit
-                              ? "Susu commission"
+                              ? "Debit (commission)"
                               : isSusuCommissionRefund
                                 ? "Commission refund"
                                 : settledShortage

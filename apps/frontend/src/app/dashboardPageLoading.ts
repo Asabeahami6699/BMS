@@ -12,6 +12,7 @@ import { useSusuCycleCommissionStore } from "./stores/susuCycleCommissionStore";
 import { useSusuRiskAlertsStore } from "./stores/susuRiskAlertsStore";
 import { useCoordinatorStore } from "./stores/coordinatorStore";
 import { useCoordinatorsStore } from "./stores/coordinatorsStore";
+import { useCustomerLedgerStore } from "./stores/customerLedgerStore";
 import { useCustomersStore } from "./stores/customersStore";
 import { useGroupSavingsStore } from "./stores/groupSavingsStore";
 import { useHrDeskStore } from "./stores/hrDeskStore";
@@ -215,7 +216,15 @@ export function computeDashboardPageLoading(pathname: string): boolean {
     return useCoordinatorStore.getState().loading;
   }
 
-  if (path === "susu/customers" || path === "susu/onboarding" || path === "susu/account-statements") {
+  if (path === "susu/account-statements") {
+    const ledgerState = useCustomerLedgerStore.getState();
+    const passbookState = useSusuCycleCommissionStore.getState();
+    const anyLedgerLoading = Object.values(ledgerState.loadingByCustomer).some(Boolean);
+    const anyPassbookLoading = Object.values(passbookState.summaryLoadingByCustomer).some(Boolean);
+    return any(useCustomersStore.getState().loading, anyLedgerLoading, anyPassbookLoading);
+  }
+
+  if (path === "susu/customers" || path === "susu/onboarding") {
     return useCustomersStore.getState().loading;
   }
 
@@ -447,6 +456,7 @@ const WATCHED_STORES: StoreLike[] = [
   useCoordinatorsStore,
   useRoutesStore,
   useCustomersStore,
+  useCustomerLedgerStore,
   useCommissionStore,
   useSusuCycleCommissionStore,
   useSusuRiskAlertsStore,

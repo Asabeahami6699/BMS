@@ -403,7 +403,28 @@ export function CustomerOpsCard({ role }: Props) {
               type="button"
               className="button secondary"
               disabled={loading}
-              onClick={() => void refresh()}
+              onClick={() => {
+                const tasks: Promise<unknown>[] = [
+                  refresh(),
+                  useAgentsStore.getState().refreshSilent()
+                ];
+                const openId = detailCustomerId ?? statementCustomerId;
+                if (openId) {
+                  void import("./stores/customerLedgerStore").then(({ useCustomerLedgerStore }) => {
+                    const ledgerStore = useCustomerLedgerStore.getState();
+                    void ledgerStore.ensureDetail(openId, { force: true });
+                    void ledgerStore.ensureLedger(openId, { force: true });
+                  });
+                  void import("./stores/susuCycleCommissionStore").then(
+                    ({ useSusuCycleCommissionStore }) => {
+                      void useSusuCycleCommissionStore
+                        .getState()
+                        .ensureCustomerPassbook(openId, { force: true });
+                    }
+                  );
+                }
+                void Promise.allSettled(tasks);
+              }}
             >
               {loading ? "Refreshing…" : "Refresh"}
             </button>

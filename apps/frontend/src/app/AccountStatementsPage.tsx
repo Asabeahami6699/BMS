@@ -1,4 +1,9 @@
-import { formatAccountAmount } from "@bms/shared";
+import {
+  SUSU_COMMISSION_DEBIT_TAG,
+  SUSU_COMMISSION_REFUND_TAG,
+  formatAccountAmount,
+  ledgerDisplayReason
+} from "@bms/shared";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useShallow } from "zustand/react/shallow";
@@ -10,6 +15,7 @@ import {
   useCustomerLedgerStore
 } from "./stores/customerLedgerStore";
 import { useCustomersStore } from "./stores/customersStore";
+import { useSusuCycleCommissionStore } from "./stores/susuCycleCommissionStore";
 import { useAuth } from "../auth/AuthContext";
 import { SusuPassbookCard } from "../components/SusuPassbookCard";
 import { useToast } from "../components/Toast";
@@ -70,6 +76,12 @@ function entryTypeLabel(entry: LedgerEntry): string {
     return "Reversal";
   }
   const reasonOrNotes = `${entry.reason ?? ""} ${entry.notes ?? ""}`.toLowerCase();
+  if (reasonOrNotes.includes(SUSU_COMMISSION_DEBIT_TAG)) {
+    return "Debit (commission)";
+  }
+  if (reasonOrNotes.includes(SUSU_COMMISSION_REFUND_TAG)) {
+    return "Commission refund";
+  }
   if (reasonOrNotes.includes("loan repayment")) {
     return "Loan repayment";
   }
@@ -90,13 +102,10 @@ function entryTypeLabel(entry: LedgerEntry): string {
 
 function entryReason(entry: LedgerEntry): string {
   if (entry.reason?.trim()) {
-    return entry.reason.trim();
-  }
-  if (entry.notes?.toLowerCase().includes("loan repayment")) {
-    return entry.notes.replace(/\s*·\s*loan_repay:[0-9a-f-]+/gi, "").trim();
+    return ledgerDisplayReason(entry.reason) ?? entry.reason.trim();
   }
   if (entry.notes?.trim()) {
-    return entry.notes.trim();
+    return ledgerDisplayReason(entry.notes) ?? "—";
   }
   return "—";
 }
@@ -216,6 +225,9 @@ export function AccountStatementsPage({ role }: Props) {
   const ledgerError = useCustomerLedgerStore((s) =>
     activeCustomerId ? (s.errorByCustomer[activeCustomerId] ?? null) : null
   );
+  const passbookLoading = useSusuCycleCommissionStore((s) =>
+    activeCustomerId ? Boolean(s.summaryLoadingByCustomer[activeCustomerId]) : false
+  );
 
   useEffect(() => {
     if (!activeCustomerId) {
@@ -224,10 +236,15 @@ export function AccountStatementsPage({ role }: Props) {
     setLedgerVisibleCount(LEDGER_PAGE_SIZE);
     const store = useCustomerLedgerStore.getState();
     void store.ensureLedger(activeCustomerId, { force: true });
-    void store.ensureDetail(activeCustomerId);
+    void store.ensureDetail(activeCustomerId, { force: true });
+    if (isSusuAccount) {
+      void useSusuCycleCommissionStore
+        .getState()
+        .ensureCustomerPassbook(activeCustomerId, { force: true });
+    }
     store.startLiveSync();
     return () => useCustomerLedgerStore.getState().stopLiveSync();
-  }, [activeCustomerId]);
+  }, [activeCustomerId, isSusuAccount]);
 
   function selectCustomer(customer: Customer) {
     setSelectedId(customer.id);
@@ -399,17 +416,28 @@ export function AccountStatementsPage({ role }: Props) {
           <button
             type="button"
             className="button secondary"
-            disabled={customersLoading || ledgerLoading}
+            disabled={customersLoading || ledgerLoading || passbookLoading}
             onClick={() => {
-              void refreshCustomers();
+              const tasks: Promise<unknown>[] = [
+                refreshCustomers(),
+                useBranchesStore.getState().refreshSilent()
+              ];
               if (activeCustomerId) {
-                void useCustomerLedgerStore
-                  .getState()
-                  .ensureLedger(activeCustomerId, { force: true });
+                const ledgerStore = useCustomerLedgerStore.getState();
+                tasks.push(ledgerStore.ensureLedger(activeCustomerId, { force: true }));
+                tasks.push(ledgerStore.ensureDetail(activeCustomerId, { force: true }));
+                if (isSusuAccount) {
+                  tasks.push(
+                    useSusuCycleCommissionStore
+                      .getState()
+                      .ensureCustomerPassbook(activeCustomerId, { force: true })
+                  );
+                }
               }
+              void Promise.allSettled(tasks);
             }}
           >
-            {customersLoading || ledgerLoading ? "Refreshing…" : "Refresh"}
+            {customersLoading || ledgerLoading || passbookLoading ? "Refreshing…" : "Refresh"}
           </button>
         </div>
       </header>

@@ -177,7 +177,7 @@ export const useSusuCycleCommissionStore = create<State>((set, get) => ({
     if (existing) {
       return existing;
     }
-    if (!cached) {
+    if (!cached || force) {
       set((state) => ({
         summaryLoadingByCustomer: { ...state.summaryLoadingByCustomer, [customerId]: true },
         summaryErrorByCustomer: { ...state.summaryErrorByCustomer, [customerId]: null }

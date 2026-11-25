@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useShallow } from "zustand/react/shallow";
-import { SAVINGS_INITIAL_DEPOSIT_GHS, bankProductDisplayLabel, bankProductsForSubscription, type Permission, type TenantProductModule, formatAccountAmount } from "@bms/shared";
+import { SAVINGS_INITIAL_DEPOSIT_GHS, SUSU_COMMISSION_DEBIT_TAG, SUSU_COMMISSION_REFUND_TAG, bankProductDisplayLabel, bankProductsForSubscription, type Permission, type TenantProductModule, formatAccountAmount } from "@bms/shared";
 import type { AppRole } from "./api";
 import { BranchCounterFloatPanel } from "./BranchCounterFloatPanel";
 import { BranchCounterPayoutQueue } from "./BranchCounterPayoutQueue";
@@ -897,12 +897,17 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
             {recentLedger.map((entry) => {
               const susuDetail =
                 entry.transactionType === "daily_susu" || entry.transactionType === "susu_reversal";
+              const lowerNotes = (entry.notes ?? "").toLowerCase();
               const typeLabel =
                 entry.transactionType === "susu_reversal"
                   ? "Reversal"
-                  : entry.entryType === "credit"
-                    ? "Credit"
-                    : "Debit";
+                  : lowerNotes.includes(SUSU_COMMISSION_DEBIT_TAG)
+                    ? "Debit (commission)"
+                    : lowerNotes.includes(SUSU_COMMISSION_REFUND_TAG)
+                      ? "Commission refund"
+                      : entry.entryType === "credit"
+                        ? "Credit"
+                        : "Debit";
               const cells = (
                 <>
                   <span>{formatLedgerDate(entry.createdAt)}</span>

@@ -1,11 +1,18 @@
-import { formatAccountAmount } from "@bms/shared";
+import {
+  SUSU_COMMISSION_DEBIT_TAG,
+  SUSU_COMMISSION_REFUND_TAG,
+  formatAccountAmount,
+  ledgerDisplayReason
+} from "@bms/shared";
 import { useEffect, useState } from "react";
 import type { Customer, LedgerEntry } from "./api";
 import { printCustomerAccountStatement } from "./customerAccountStatement";
 import {
+  selectCustomerDetail,
   selectLedgerForCustomer,
   useCustomerLedgerStore
 } from "./stores/customerLedgerStore";
+import { useSusuCycleCommissionStore } from "./stores/susuCycleCommissionStore";
 import { downloadCustomerLedgerCsv } from "../lib/customerLedgerCsv";
 import { useAuth } from "../auth/AuthContext";
 import { Modal } from "../components/Modal";
@@ -55,6 +62,12 @@ function entryTypeLabel(entry: LedgerEntry): string {
     return "Reversal";
   }
   const reasonOrNotes = `${entry.reason ?? ""} ${entry.notes ?? ""}`.toLowerCase();
+  if (reasonOrNotes.includes(SUSU_COMMISSION_DEBIT_TAG)) {
+    return "Debit (commission)";
+  }
+  if (reasonOrNotes.includes(SUSU_COMMISSION_REFUND_TAG)) {
+    return "Commission refund";
+  }
   if (reasonOrNotes.includes("loan repayment")) {
     return "Loan repayment";
   }
@@ -66,10 +79,10 @@ function entryTypeLabel(entry: LedgerEntry): string {
 
 function entryReason(entry: LedgerEntry): string {
   if (entry.reason?.trim()) {
-    return entry.reason.trim();
+    return ledgerDisplayReason(entry.reason) ?? entry.reason.trim();
   }
-  if (entry.notes?.toLowerCase().includes("loan repayment")) {
-    return entry.notes.replace(/\s*·\s*loan_repay:[0-9a-f-]+/gi, "").trim();
+  if (entry.notes?.trim()) {
+    return ledgerDisplayReason(entry.notes) ?? "—";
   }
   return "—";
 }
@@ -83,13 +96,35 @@ export function CustomerAccountStatementModal({ open, customer, onClose }: Props
   const [printBusy, setPrintBusy] = useState(false);
 
   const customerId = customer?.id ?? "";
+  const detail = useCustomerLedgerStore((s) =>
+    customerId ? selectCustomerDetail(s, customerId) : undefined
+  );
   const ledger = useCustomerLedgerStore((s) => selectLedgerForCustomer(s, customerId));
   const ledgerLoading = useCustomerLedgerStore((s) =>
     customerId ? Boolean(s.loadingByCustomer[customerId]) : false
   );
+  const passbookLoading = useSusuCycleCommissionStore((s) =>
+    customerId ? Boolean(s.summaryLoadingByCustomer[customerId]) : false
+  );
   const ledgerError = useCustomerLedgerStore((s) =>
     customerId ? (s.errorByCustomer[customerId] ?? null) : null
   );
+
+  const isSusuAccount = (customer?.accountType ?? "susu") === "susu";
+
+  function refreshAll() {
+    if (!customerId) {
+      return;
+    }
+    const store = useCustomerLedgerStore.getState();
+    void store.ensureLedger(customerId, { force: true });
+    void store.ensureDetail(customerId, { force: true });
+    if (isSusuAccount) {
+      void useSusuCycleCommissionStore
+        .getState()
+        .ensureCustomerPassbook(customerId, { force: true });
+    }
+  }
 
   useEffect(() => {
     if (!open || !customerId) {
@@ -100,15 +135,21 @@ export function CustomerAccountStatementModal({ open, customer, onClose }: Props
     setLedgerVisibleCount(LEDGER_PAGE_SIZE);
     const store = useCustomerLedgerStore.getState();
     void store.ensureLedger(customerId, { force: true });
+    void store.ensureDetail(customerId, { force: true });
+    if (isSusuAccount) {
+      void useSusuCycleCommissionStore
+        .getState()
+        .ensureCustomerPassbook(customerId, { force: true });
+    }
     store.startLiveSync();
     return () => useCustomerLedgerStore.getState().stopLiveSync();
-  }, [open, customerId]);
+  }, [open, customerId, isSusuAccount]);
 
   if (!customer) {
     return null;
   }
 
-  const activeCustomer = customer;
+  const activeCustomer = detail ? { ...customer, ...detail } : customer;
   const accountBalance = ledger.length > 0 ? ledger[ledger.length - 1]!.balanceAfter : 0;
   const ledgerNewestFirst = [...ledger].reverse();
   const displayedLedger = ledgerNewestFirst.slice(0, ledgerVisibleCount);
@@ -163,9 +204,19 @@ export function CustomerAccountStatementModal({ open, customer, onClose }: Props
       onClose={onClose}
       panelClassName="modal-panel--70 modal-panel--customer modal-panel--statement"
       footer={
-        <button type="button" className="button secondary" onClick={onClose}>
-          Close
-        </button>
+        <>
+          <button
+            type="button"
+            className="button secondary"
+            disabled={ledgerLoading || passbookLoading}
+            onClick={refreshAll}
+          >
+            {ledgerLoading || passbookLoading ? "Refreshing…" : "Refresh"}
+          </button>
+          <button type="button" className="button secondary" onClick={onClose}>
+            Close
+          </button>
+        </>
       }
     >
       <div className="cif account-statement-modal">

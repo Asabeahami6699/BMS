@@ -259,10 +259,10 @@ export function SusuPassbookCard({ customerId, customerName, accountNumber, comp
             type="button"
             className="button secondary susu-passbook-refresh"
             onClick={() => void handleRefresh()}
-            disabled={refreshing}
+            disabled={refreshing || loading}
             title="Refresh Susu passbook"
           >
-            {refreshing ? "..." : "Refresh"}
+            {refreshing || loading ? "..." : "Refresh"}
           </button>
         </div>
       </div>

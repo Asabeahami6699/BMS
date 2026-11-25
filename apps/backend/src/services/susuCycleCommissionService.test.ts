@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  buildSusuCommissionDebitMessage,
   buildSusuCustomerPassbook,
+  buildTransactionAlertMessage,
   defaultSusuCommissionPolicy,
   type SusuCustomerCycle
 } from "@bms/shared";
@@ -49,6 +51,7 @@ import {
   publishSusuCommissionPolicy,
   resolveSusuWithdrawalCommission
 } from "./susuCycleCommissionService.js";
+import { computeWithdrawalNotificationPlan } from "./transactionService.js";
 
 const ctx = {
   userId: "user-1",
@@ -553,5 +556,69 @@ describe("Susu FIFO withdrawal commission, red-line cancellation, and BBF", () =
     });
     expect(colNew.commissionCollectNow).toBe(0);
     expect(colNew.savingsCredit).toBe(100);
+  });
+
+  it("sends exact withdrawn amount + pre-commission balance in SMS #1 and commission + remaining balance in SMS #2", () => {
+    // Customer had GHS 800, withdrew GHS 195, GHS 10 deferred commission -> ledger debited 205 -> final balance 595.
+    const plan = computeWithdrawalNotificationPlan({
+      withdrawnAmount: 195,
+      commission: 10,
+      finalBalanceAfterLedgerDebit: 595,
+      notifyCustomerOnCommission: true
+    });
+
+    expect(plan.primaryAmount).toBe(195);
+    expect(plan.primaryBalance).toBe(605);
+    expect(plan.sendCommissionAlert).toBe(true);
+    expect(plan.commissionAmount).toBe(10);
+    expect(plan.commissionRemainingBalance).toBe(595);
+
+    const sms1 = buildTransactionAlertMessage({
+      brand: "Opioko Susu",
+      type: "withdrawal",
+      amount: plan.primaryAmount,
+      balance: plan.primaryBalance,
+      accountNumber: "155100037226",
+      customerName: "Opioko Ba"
+    });
+    expect(sms1.text).toContain("GHS 195.00");
+    expect(sms1.text).not.toContain("205.00");
+    expect(sms1.text).toContain("Ghs 605.00");
+
+    const sms2 = buildSusuCommissionDebitMessage({
+      brand: "Opioko Susu",
+      amount: plan.commissionAmount,
+      balance: plan.commissionRemainingBalance,
+      accountNumber: "155100037226",
+      cycleNumber: 2
+    });
+    expect(sms2.subject).toBe("Opioko Susu — Susu service charge");
+    expect(sms2.text).toContain("GHS 10.00");
+    expect(sms2.text).toContain("as Susu service charge.");
+    expect(sms2.text.toLowerCase()).not.toContain("card");
+    expect(sms2.text).toContain("GHS 595.00");
+
+    // When commission alerts are turned OFF, SMS #1 still shows exact withdrawn amount (195)
+    // and the true remaining balance (595) since no follow-up message is sent.
+    const offPlan = computeWithdrawalNotificationPlan({
+      withdrawnAmount: 195,
+      commission: 10,
+      finalBalanceAfterLedgerDebit: 595,
+      notifyCustomerOnCommission: false
+    });
+    expect(offPlan.primaryAmount).toBe(195);
+    expect(offPlan.primaryBalance).toBe(595);
+    expect(offPlan.sendCommissionAlert).toBe(false);
+
+    // When there is no commission, single alert shows withdrawn amount + final balance.
+    const noFeePlan = computeWithdrawalNotificationPlan({
+      withdrawnAmount: 35,
+      commission: 0,
+      finalBalanceAfterLedgerDebit: 490,
+      notifyCustomerOnCommission: true
+    });
+    expect(noFeePlan.primaryAmount).toBe(35);
+    expect(noFeePlan.primaryBalance).toBe(490);
+    expect(noFeePlan.sendCommissionAlert).toBe(false);
   });
 });
