@@ -1,5 +1,9 @@
 import { create } from "zustand";
-import type { TenantBankProduct } from "@bms/shared";
+import {
+  DEFAULT_APPROVAL_WORKFLOW,
+  type TenantBankProduct,
+  type WithdrawalVerificationMode
+} from "@bms/shared";
 import type {
   BalanceDisclosure,
   Branch,
@@ -44,6 +48,7 @@ type PostPayload = {
   transactionBranchId: string;
   notes?: string;
   bankProductId?: string;
+  customerIdentityVerified?: boolean;
 };
 
 const TELLER_CALLOVER_STORAGE_PREFIX = "bms:teller-callover:";
@@ -134,6 +139,9 @@ type BranchCounterState = {
   floatSummary: BranchFloatSummary;
   pendingFloatRequests: BranchFloatSession[];
   pendingFieldPayouts: BalanceDisclosure[];
+  allowCrossBranchWithdrawals: boolean;
+  withdrawalVerificationMode: WithdrawalVerificationMode;
+  branchLocked: boolean;
   statementBranchId: string;
   statementDate: string;
   transactionBranchId: string;
@@ -244,6 +252,9 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
   floatSummary: null,
   pendingFloatRequests: [],
   pendingFieldPayouts: [],
+  allowCrossBranchWithdrawals: true,
+  withdrawalVerificationMode: DEFAULT_APPROVAL_WORKFLOW.withdrawalVerificationMode,
+  branchLocked: false,
   statementBranchId: getRuntimeBranchId(),
   statementDate: todayIso(),
   transactionBranchId: getRuntimeBranchId(),
@@ -265,9 +276,12 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
     if (!isHeadOfficeRole) {
       const branch = getRuntimeBranchId();
       set({
+        branchLocked: true,
         statementBranchId: branch,
         transactionBranchId: branch
       });
+    } else {
+      set({ branchLocked: false });
     }
   },
 
@@ -332,6 +346,10 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
           floatSummary: data.floatSummary,
           pendingFloatRequests: data.pendingFloatRequests,
           pendingFieldPayouts: data.pendingFieldPayouts ?? [],
+          allowCrossBranchWithdrawals: data.allowCrossBranchWithdrawals !== false,
+          withdrawalVerificationMode:
+            data.withdrawalVerificationMode ??
+            DEFAULT_APPROVAL_WORKFLOW.withdrawalVerificationMode,
           ...branchPatch,
           lastFetchedAt: now,
           sessionExpired: false,
@@ -419,6 +437,10 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
             floatSummary: data.floatSummary,
             pendingFloatRequests: data.pendingFloatRequests,
             pendingFieldPayouts: data.pendingFieldPayouts ?? [],
+            allowCrossBranchWithdrawals: data.allowCrossBranchWithdrawals !== false,
+            withdrawalVerificationMode:
+              data.withdrawalVerificationMode ??
+              DEFAULT_APPROVAL_WORKFLOW.withdrawalVerificationMode,
             ...branchPatch,
             lastFetchedAt: now,
             sessionExpired: false,
@@ -447,6 +469,12 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
             floatSummary: data.floatSummary,
             pendingFloatRequests: data.pendingFloatRequests,
             pendingFieldPayouts: data.pendingFieldPayouts ?? [],
+            allowCrossBranchWithdrawals:
+              data.allowCrossBranchWithdrawals !== undefined
+                ? data.allowCrossBranchWithdrawals
+                : get().allowCrossBranchWithdrawals,
+            withdrawalVerificationMode:
+              data.withdrawalVerificationMode ?? get().withdrawalVerificationMode,
             lastFetchedAt: Date.now(),
             sessionExpired: false,
             error: null
@@ -495,6 +523,12 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
   },
 
   setStatementBranchId: (branchId) => {
+    if (get().branchLocked) {
+      const assigned = getRuntimeBranchId();
+      if (assigned && branchId !== assigned) {
+        return;
+      }
+    }
     set({ statementBranchId: branchId, transactionBranchId: branchId, statementLoading: true });
     void get().refreshSilent().finally(() => set({ statementLoading: false }));
   },
@@ -505,6 +539,12 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
   },
 
   setTransactionBranchId: (branchId) => {
+    if (get().branchLocked) {
+      const assigned = getRuntimeBranchId();
+      if (assigned && branchId !== assigned) {
+        return;
+      }
+    }
     set({ transactionBranchId: branchId, statementBranchId: branchId });
   },
 

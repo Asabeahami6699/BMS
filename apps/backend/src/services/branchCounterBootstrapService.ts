@@ -1,4 +1,10 @@
-import type { BalanceDisclosure, Customer, TenantBankProduct } from "@bms/shared";
+import {
+  DEFAULT_APPROVAL_WORKFLOW,
+  type BalanceDisclosure,
+  type Customer,
+  type TenantBankProduct,
+  type WithdrawalVerificationMode
+} from "@bms/shared";
 import { isMissingSupabaseResource } from "../lib/supabaseSchema.js";
 import { listBranches, resolveBranchId } from "./branchService.js";
 import { listBankProducts } from "./bankProductService.js";
@@ -16,6 +22,7 @@ import {
   type BranchFloatSession
 } from "./branchFloatService.js";
 import { loadWithdrawalsPendingTellerPay } from "./agencyBankingService.js";
+import { getApprovalWorkflow } from "./approvalWorkflowService.js";
 
 type BranchRow = Awaited<ReturnType<typeof listBranches>>[number];
 
@@ -34,6 +41,10 @@ export type BranchCounterBootstrap = {
   pendingFloatRequests: BranchFloatSession[];
   /** Coordinator/CS-approved field cash withdrawals awaiting teller Pay now. */
   pendingFieldPayouts: BalanceDisclosure[];
+  /** Company policy: whether walk-in withdrawals are permitted at branches other than customer's home branch. */
+  allowCrossBranchWithdrawals: boolean;
+  /** Company policy: whether walk-in withdrawals require customer identity verification (Simplified KYC is always required). */
+  withdrawalVerificationMode: WithdrawalVerificationMode;
 };
 
 export async function getBranchCounterBootstrap(
@@ -108,6 +119,8 @@ export async function getBranchCounterBootstrap(
         )
       : [];
 
+    const workflow = await getApprovalWorkflow(tenantId).catch(() => null);
+
     return {
       customers: [],
       branches: [],
@@ -117,11 +130,15 @@ export async function getBranchCounterBootstrap(
       priorOpenFloatSession,
       floatSummary: floatSessionSummary(floatSession),
       pendingFloatRequests,
-      pendingFieldPayouts
+      pendingFieldPayouts,
+      allowCrossBranchWithdrawals: workflow?.allowCrossBranchWithdrawals !== false,
+      withdrawalVerificationMode:
+        workflow?.withdrawalVerificationMode ??
+        DEFAULT_APPROVAL_WORKFLOW.withdrawalVerificationMode
     };
   }
 
-  const [customers, branchRows, bankProducts] = await Promise.all([
+  const [customers, branchRows, bankProducts, workflow] = await Promise.all([
     listCustomers(tenantId, { light: true }),
     listBranches(tenantId).catch(() => [] as BranchRow[]),
     (async () => {
@@ -132,7 +149,8 @@ export async function getBranchCounterBootstrap(
         activeOnly: true,
         branchId: branchKey ?? undefined
       }).catch(() => [] as TenantBankProduct[]);
-    })()
+    })(),
+    getApprovalWorkflow(tenantId).catch(() => null)
   ]);
 
   const branches = branchRows.filter((b) => b.status !== "inactive");
@@ -205,6 +223,10 @@ export async function getBranchCounterBootstrap(
     priorOpenFloatSession,
     floatSummary: floatSessionSummary(floatSession),
     pendingFloatRequests,
-    pendingFieldPayouts
+    pendingFieldPayouts,
+    allowCrossBranchWithdrawals: workflow?.allowCrossBranchWithdrawals !== false,
+    withdrawalVerificationMode:
+      workflow?.withdrawalVerificationMode ??
+      DEFAULT_APPROVAL_WORKFLOW.withdrawalVerificationMode
   };
 }

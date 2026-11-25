@@ -1,4 +1,4 @@
-import { formatAccountAmount } from "@bms/shared";
+import { formatAccountAmount, ledgerDisplayReason } from "@bms/shared";
 import { useMemo } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useToast } from "../components/Toast";
@@ -85,7 +85,7 @@ export function BranchCounterStatementPanel() {
 
   return (
     <section className="card branch-counter__statement">
-      <div className="branch-counter__section-head branch-counter__statement-head">
+      <div className="branch-counter__section-head branch-counter__statement-topbar">
         <span className="branch-counter__step">4</span>
         <h3>Daily transaction statement</h3>
         <span className="muted branch-counter__ledger-meta">
@@ -198,7 +198,7 @@ export function BranchCounterStatementPanel() {
               role="table"
               aria-label="Branch counter daily statement"
             >
-              <div className="cif-ledger__head branch-counter__statement-head" role="row">
+              <div className="cif-ledger__head branch-counter__statement-table-head" role="row">
                 <span role="columnheader">Time</span>
                 <span role="columnheader">Customer</span>
                 <span role="columnheader">Type</span>
@@ -206,31 +206,37 @@ export function BranchCounterStatementPanel() {
                 <span role="columnheader">Posted by</span>
                 <span role="columnheader">Notes</span>
               </div>
-              {lines.map((line) => (
-                <div className="cif-ledger__row branch-counter__statement-row" role="row" key={line.id}>
-                  <span>{formatTime(line.createdAt)}</span>
-                  <span className="branch-counter__statement-customer">
-                    <strong>{line.customerName}</strong>
-                    {line.customerAccountNumber ? (
-                      <small className="muted">{line.customerAccountNumber}</small>
-                    ) : null}
-                  </span>
-                  <span className={`branch-counter__tx--${line.type}`}>
-                    {TX_LABELS[line.type] ?? line.type}
-                    {line.reversedAt ? " · Reversed" : ""}
-                  </span>
-                  <span className="branch-counter__ledger-amt">{formatMoney(line.amount)}</span>
-                  <span className="cif-ledger__by" title={line.recordedByRole}>
-                    {line.recordedByName}
-                    <small className="muted">
-                      {ROLE_LABELS[line.recordedByRole] ?? line.recordedByRole}
-                    </small>
-                  </span>
-                  <span className="branch-counter__statement-notes muted">
-                    {line.notes ?? "—"}
-                  </span>
-                </div>
-              ))}
+              {lines.map((line) => {
+                const displayNotes = ledgerDisplayReason(line.notes) || "—";
+                return (
+                  <div className="cif-ledger__row branch-counter__statement-row" role="row" key={line.id}>
+                    <span>{formatTime(line.createdAt)}</span>
+                    <span className="branch-counter__statement-customer">
+                      <strong>{line.customerName}</strong>
+                      {line.customerAccountNumber ? (
+                        <small className="muted">{line.customerAccountNumber}</small>
+                      ) : null}
+                    </span>
+                    <span className={`branch-counter__tx--${line.type}`}>
+                      {TX_LABELS[line.type] ?? line.type}
+                      {line.reversedAt ? " · Reversed" : ""}
+                    </span>
+                    <span className="branch-counter__ledger-amt">{formatMoney(line.amount)}</span>
+                    <span className="cif-ledger__by" title={line.recordedByRole}>
+                      {line.recordedByName}
+                      <small className="muted">
+                        {ROLE_LABELS[line.recordedByRole] ?? line.recordedByRole}
+                      </small>
+                    </span>
+                    <span
+                      className="branch-counter__statement-notes muted"
+                      title={displayNotes !== "—" ? displayNotes : undefined}
+                    >
+                      {displayNotes}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           )}
         </>

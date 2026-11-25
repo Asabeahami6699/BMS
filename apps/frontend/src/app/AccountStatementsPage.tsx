@@ -5,7 +5,7 @@ import {
   ledgerDisplayReason
 } from "@bms/shared";
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useShallow } from "zustand/react/shallow";
 import type { AppRole, Customer, LedgerEntry } from "./api";
 import { printCustomerAccountStatement } from "./customerAccountStatement";
@@ -400,6 +400,10 @@ export function AccountStatementsPage({ role }: Props) {
 
   const showPassbook = isSusuAccount && (activeTab === "overview" || activeTab === "passbook");
   const showLedger = activeTab === "overview" || activeTab === "ledger";
+  const fromBranchCounter = searchParams.get("from") === "counter";
+  const backToCounterUrl = activeCustomerId
+    ? `/app/susu/collections?customerId=${encodeURIComponent(activeCustomerId)}`
+    : "/app/susu/collections";
 
   return (
     <div className="statements-page">
@@ -413,6 +417,11 @@ export function AccountStatementsPage({ role }: Props) {
           </p>
         </div>
         <div className="statements-hero__actions">
+          {fromBranchCounter ? (
+            <Link to={backToCounterUrl} className="button">
+              ← Back to branch counter
+            </Link>
+          ) : null}
           <button
             type="button"
             className="button secondary"

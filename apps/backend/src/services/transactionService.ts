@@ -1,9 +1,11 @@
 import {
   createTransactionInputSchema,
+  evaluateWalkInWithdrawalVerification,
   SUSU_COMMISSION_DEBIT_TAG,
   transactionSchema,
   type Transaction,
-  formatAccountAmount
+  formatAccountAmount,
+  withdrawalVerificationRequirementMessage
 } from "@bms/shared";
 import { randomUUID } from "node:crypto";
 import { getSupabaseAdminClient } from "../config/supabaseClient.js";
@@ -711,6 +713,36 @@ export async function createTransaction(
     throw new Error("User cannot post transactions outside assigned branch");
   }
 
+  // Enforce company branch counter rules on walk-in withdrawals only (deposits never require verification).
+  if (payload.type === "withdrawal") {
+    const { getApprovalWorkflow } = await import("./approvalWorkflowService.js");
+    const workflow = await getApprovalWorkflow(context.tenantId);
+    const isCrossBranch = Boolean(
+      customer.homeBranchId &&
+        payload.transactionBranchId &&
+        payload.transactionBranchId !== customer.homeBranchId
+    );
+    if (isCrossBranch && !workflow.allowCrossBranchWithdrawals) {
+      const { listBranches } = await import("./branchService.js");
+      const branches = await listBranches(context.tenantId).catch(() => []);
+      const home = branches.find((b) => String(b.id) === String(customer.homeBranchId));
+      const homeLabel = home ? `${home.name} (${home.code})` : "their registered home branch";
+      throw new Error(
+        `Cross-branch withdrawals are disabled for this company. This customer belongs to ${homeLabel} and must withdraw there.`
+      );
+    }
+
+    const verification = evaluateWalkInWithdrawalVerification({
+      type: payload.type,
+      mode: workflow.withdrawalVerificationMode,
+      isCrossBranch,
+      kycTier: customer.kycTier
+    });
+    if (verification.required && !payload.customerIdentityVerified) {
+      throw new Error(withdrawalVerificationRequirementMessage(verification.reason));
+    }
+  }
+
   // BoG Tier 1 Simplified KYC balance cap guard on incoming deposits
   if (
     customer.kycTier === "simplified" &&
@@ -823,8 +855,10 @@ export async function createTransaction(
   let withdrawalCommission = 0;
   if (payload.type === "withdrawal" && customer.accountType === "susu") {
     const { resolveSusuWithdrawalCommission } = await import("./susuCycleCommissionService.js");
-    const branchId =
-      payload.transactionBranchId ?? customer.homeBranchId ?? context.branchId ?? "";
+    // Credit Susu cycle commission institutional income to the customer's home branch
+    // (where the Susu collections were earned), while physical cash payout stays on transactionBranchId.
+    const commissionBranchId =
+      customer.homeBranchId || payload.transactionBranchId || context.branchId || "";
     const resolved = await resolveSusuWithdrawalCommission(
       {
         userId: context.userId,
@@ -835,7 +869,7 @@ export async function createTransaction(
       },
       {
         customerId: payload.customerId,
-        branchId,
+        branchId: commissionBranchId,
         requestedWithdrawalAmount: payload.amount,
         transactionId: transactionIdEarly
       }
@@ -888,6 +922,14 @@ export async function createTransaction(
   );
 
   let workflowData: Record<string, unknown> | undefined = payload.workflowData;
+  if (payload.type === "withdrawal" && payload.customerIdentityVerified) {
+    workflowData = {
+      ...(workflowData ?? {}),
+      customerIdentityVerified: true,
+      customerIdentityVerifiedBy: context.userId,
+      customerIdentityVerifiedAt: new Date().toISOString()
+    };
+  }
   if (bankProductId && payload.type === "deposit" && usesAgencyDepositFlow(context)) {
     const { getBankProductById } = await import("./bankProductService.js");
     const { validateDepositCaptureWorkflow } = await import("@bms/shared");

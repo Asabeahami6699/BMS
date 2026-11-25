@@ -2899,6 +2899,8 @@ export type BranchCounterBootstrapResponse = {
   floatSummary: BranchFloatSummary;
   pendingFloatRequests: BranchFloatSession[];
   pendingFieldPayouts?: BalanceDisclosure[];
+  allowCrossBranchWithdrawals?: boolean;
+  withdrawalVerificationMode?: import("@bms/shared").WithdrawalVerificationMode;
 };
 
 export async function requestBranchFloat(payload: {
@@ -3117,6 +3119,7 @@ export async function createTransaction(
     bankProductId?: string;
     workflowData?: Record<string, unknown>;
     manualPartnerAccount?: boolean;
+    customerIdentityVerified?: boolean;
   },
   idempotencyKey: string = crypto.randomUUID()
 ): Promise<Transaction> {

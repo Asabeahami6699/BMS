@@ -351,7 +351,10 @@ export const createTransactionInputSchema = z.object({
   workflowData: z.record(z.string(), z.unknown()).optional(),
 
   /** Non-aabanker partner deposit — queues for back-office bank execution. aabanker Susu/Savings credit immediately. */
-  manualPartnerAccount: z.boolean().optional()
+  manualPartnerAccount: z.boolean().optional(),
+
+  /** True when the teller verified customer photo/ID/details on the branch counter before a walk-in withdrawal. */
+  customerIdentityVerified: z.boolean().optional()
 
 });
 

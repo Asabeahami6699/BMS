@@ -1,12 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useShallow } from "zustand/react/shallow";
-import { SAVINGS_INITIAL_DEPOSIT_GHS, SUSU_COMMISSION_DEBIT_TAG, SUSU_COMMISSION_REFUND_TAG, bankProductDisplayLabel, bankProductsForSubscription, type Permission, type TenantProductModule, formatAccountAmount } from "@bms/shared";
+import {
+  SAVINGS_INITIAL_DEPOSIT_GHS,
+  SUSU_COMMISSION_DEBIT_TAG,
+  SUSU_COMMISSION_REFUND_TAG,
+  bankProductDisplayLabel,
+  bankProductsForSubscription,
+  evaluateWalkInWithdrawalVerification,
+  withdrawalVerificationRequirementMessage,
+  type Permission,
+  type TenantProductModule,
+  formatAccountAmount
+} from "@bms/shared";
 import type { AppRole } from "./api";
 import { BranchCounterFloatPanel } from "./BranchCounterFloatPanel";
 import { BranchCounterPayoutQueue } from "./BranchCounterPayoutQueue";
 import { BranchCounterCashCalculator } from "./BranchCounterCashCalculator";
 import { BranchCounterStatementPanel } from "./BranchCounterStatement";
+import { CustomerVerifyModal } from "./CustomerVerifyModal";
 import { SusuReversalDialog } from "./SusuReversalDialog";
 import { filterRowsBySearch } from "../components/AdminDataTable";
 import { useToast } from "../components/Toast";
@@ -113,6 +125,9 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
   const [bankProductId, setBankProductId] = useState("");
   const [confirmWithdraw, setConfirmWithdraw] = useState(false);
   const [calculatorOpen, setCalculatorOpen] = useState(false);
+  const [verifyOpen, setVerifyOpen] = useState(false);
+  const [verifiedCustomerId, setVerifiedCustomerId] = useState<string | null>(null);
+  const [heroPhotoFailed, setHeroPhotoFailed] = useState(false);
   const [susuTransactionId, setSusuTransactionId] = useState<string | null>(null);
 
   const {
@@ -144,6 +159,8 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
     floatSession,
     floatSummary,
     pendingFloatRequests,
+    allowCrossBranchWithdrawals,
+    withdrawalVerificationMode,
     bankProducts,
     refresh
   } = useBranchCounterStore(
@@ -176,6 +193,8 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
       floatSession: s.floatSession,
       floatSummary: s.floatSummary,
       pendingFloatRequests: s.pendingFloatRequests,
+      allowCrossBranchWithdrawals: s.allowCrossBranchWithdrawals,
+      withdrawalVerificationMode: s.withdrawalVerificationMode,
       bankProducts: s.bankProducts,
       refresh: s.refresh
     }))
@@ -279,12 +298,21 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
     }
     return {
       ...fromList,
+      ...customerDetail,
       loanReserveAmount: customerDetail.loanReserveAmount ?? fromList.loanReserveAmount,
       lockedBalance: customerDetail.lockedBalance ?? fromList.lockedBalance,
       withdrawableBalance: customerDetail.withdrawableBalance ?? fromList.withdrawableBalance,
       accountBalance: customerDetail.accountBalance ?? fromList.accountBalance
     };
   }, [activeCustomers, selectedCustomerId, customerDetail]);
+
+  const isSelectedCustomerVerified = Boolean(
+    selectedCustomer && verifiedCustomerId === selectedCustomer.id
+  );
+
+  useEffect(() => {
+    setHeroPhotoFailed(false);
+  }, [selectedCustomerId]);
 
   const balances = useMemo(
     () =>
@@ -304,6 +332,9 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
   function handleSelectCustomer(id: string) {
     selectCustomer(id);
     setConfirmWithdraw(false);
+    if (id !== verifiedCustomerId) {
+      setVerifiedCustomerId(null);
+    }
     setSearchParams(id ? { customerId: id } : {}, { replace: true });
   }
 
@@ -342,6 +373,13 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
       showToast("Select the branch where this transaction is handled", "error");
       return;
     }
+    if (crossBranchWithdrawalBlocked) {
+      showToast(
+        `Cross-branch withdrawals are disabled. This customer belongs to ${homeBranchLabel} and must withdraw there.`,
+        "error"
+      );
+      return;
+    }
     const floatGate = checkTillFloatForTransaction({
       role,
       type,
@@ -356,6 +394,14 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
       showToast(
         `Insufficient withdrawable balance (GHS ${formatAccountAmount(balances.withdrawableBalance)} available)`,
         "error"
+      );
+      return;
+    }
+    if (type === "withdrawal" && withdrawalVerification.required && !isSelectedCustomerVerified) {
+      setVerifyOpen(true);
+      showToast(
+        withdrawalVerificationRequirementMessage(withdrawalVerification.reason),
+        "info"
       );
       return;
     }
@@ -376,7 +422,9 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
         amount: parsedAmount,
         transactionBranchId,
         notes: notes.trim() || undefined,
-        bankProductId: bankProductId || undefined
+        bankProductId: bankProductId || undefined,
+        customerIdentityVerified:
+          type === "withdrawal" && isSelectedCustomerVerified ? true : undefined
       });
       showToast(
         `${TX_LABELS[type]} of GHS ${formatAccountAmount(parsedAmount)} posted for ${selectedCustomer.fullName}`,
@@ -385,6 +433,9 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
       setAmount("");
       setNotes("");
       setConfirmWithdraw(false);
+      if (type === "withdrawal") {
+        setVerifiedCustomerId(null);
+      }
     } catch (err) {
       showToast(toUserFacingError(err, "Failed to post transaction"), "error");
     }
@@ -392,6 +443,52 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
       postLock.current = false;
     }
   }
+
+  const customerHomeBranch = useMemo(
+    () =>
+      selectedCustomer?.homeBranchId
+        ? (branches.find((b) => b.id === selectedCustomer.homeBranchId) ?? null)
+        : null,
+    [branches, selectedCustomer?.homeBranchId]
+  );
+
+  const counterBranch = useMemo(
+    () =>
+      transactionBranchId
+        ? (branches.find((b) => b.id === transactionBranchId) ?? null)
+        : null,
+    [branches, transactionBranchId]
+  );
+
+  const isCrossBranchCustomer = Boolean(
+    selectedCustomer?.homeBranchId &&
+      transactionBranchId &&
+      selectedCustomer.homeBranchId !== transactionBranchId
+  );
+
+  const crossBranchWithdrawalBlocked =
+    isCrossBranchCustomer && type === "withdrawal" && !allowCrossBranchWithdrawals;
+
+  const withdrawalVerification = useMemo(
+    () =>
+      evaluateWalkInWithdrawalVerification({
+        type,
+        mode: withdrawalVerificationMode,
+        isCrossBranch: isCrossBranchCustomer,
+        kycTier: selectedCustomer?.kycTier
+      }),
+    [type, withdrawalVerificationMode, isCrossBranchCustomer, selectedCustomer?.kycTier]
+  );
+
+  const verificationMissing =
+    withdrawalVerification.required && !isSelectedCustomerVerified;
+
+  const homeBranchLabel = customerHomeBranch
+    ? `${customerHomeBranch.name} (${customerHomeBranch.code})`
+    : "their registered home branch";
+  const counterBranchLabel = counterBranch
+    ? `${counterBranch.name} (${counterBranch.code})`
+    : "this branch";
 
   const recentLedger = [...ledger].reverse().slice(0, 15);
   const canDownloadLedger = Boolean(selectedCustomer && ledger.length > 0);
@@ -573,21 +670,72 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
           {selectedCustomer ? (
             <div className="branch-counter__hero card">
               <div className="branch-counter__hero-top">
-                <div>
-                  <p className="branch-counter__hero-eyebrow">Selected account</p>
-                  <h3 className="branch-counter__hero-name">{selectedCustomer.fullName}</h3>
-                  <p className="muted">
-                    {selectedCustomer.accountNumber ?? "—"} ·{" "}
-                    {selectedCustomer.accountType?.replace(/_/g, " ") ?? "Account"}
-                  </p>
+                <div className="branch-counter__hero-identity">
+                  <button
+                    type="button"
+                    className="branch-counter__hero-avatar"
+                    onClick={() => setVerifyOpen(true)}
+                    title="Click to verify customer photo, ID & account details"
+                    aria-label={`Verify ${selectedCustomer.fullName}`}
+                  >
+                    {selectedCustomer.photoUrl && !heroPhotoFailed ? (
+                      <img
+                        src={selectedCustomer.photoUrl}
+                        alt={selectedCustomer.fullName}
+                        onError={() => setHeroPhotoFailed(true)}
+                      />
+                    ) : (
+                      <span>
+                        {selectedCustomer.fullName
+                          .trim()
+                          .split(/\s+/)
+                          .filter(Boolean)
+                          .slice(0, 2)
+                          .map((p) => p[0]?.toUpperCase() ?? "")
+                          .join("") || "?"}
+                      </span>
+                    )}
+                  </button>
+                  <div>
+                    <p className="branch-counter__hero-eyebrow">
+                      Selected account
+                      {type === "withdrawal" && isSelectedCustomerVerified ? (
+                        <span className="branch-counter__verified-pill">Verified ✓</span>
+                      ) : null}
+                      {type === "withdrawal" && verificationMissing ? (
+                        <span className="branch-counter__verify-req-pill">
+                          {selectedCustomer.kycTier === "simplified"
+                            ? "Simplified KYC · Verify required"
+                            : "Verify required"}
+                        </span>
+                      ) : null}
+                    </p>
+                    <h3 className="branch-counter__hero-name">{selectedCustomer.fullName}</h3>
+                    <p className="muted">
+                      {selectedCustomer.accountNumber ?? "—"} ·{" "}
+                      {selectedCustomer.accountType?.replace(/_/g, " ") ?? "Account"}
+                      {selectedCustomer.phone ? ` · ${selectedCustomer.phone}` : ""}
+                    </p>
+                  </div>
                 </div>
-                <button
-                  type="button"
-                  className="button secondary branch-counter__clear"
-                  onClick={() => handleSelectCustomer("")}
-                >
-                  Clear
-                </button>
+                <div className="branch-counter__hero-actions">
+                  {type === "withdrawal" ? (
+                    <button
+                      type="button"
+                      className={`button ${!isSelectedCustomerVerified ? "" : "secondary"} branch-counter__verify`}
+                      onClick={() => setVerifyOpen(true)}
+                    >
+                      {isSelectedCustomerVerified ? "Verified ✓" : "Verify"}
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="button secondary branch-counter__clear"
+                    onClick={() => handleSelectCustomer("")}
+                  >
+                    Clear
+                  </button>
+                </div>
               </div>
               <div className="branch-counter__hero-balances">
                 <div className="branch-counter__hero-balance branch-counter__hero-balance--primary">
@@ -743,11 +891,18 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
                 </label>
               ) : null}
               <label className="field">
-                <span>Branch</span>
+                <span>
+                  Branch{!isHeadOfficeRole ? " (your counter)" : ""}
+                </span>
                 <select
                   value={transactionBranchId}
                   disabled={
-                    sessionExpired || (!isHeadOfficeRole && branches.length <= 1) || !selectedCustomer
+                    sessionExpired || !isHeadOfficeRole || branches.length <= 1 || !selectedCustomer
+                  }
+                  title={
+                    !isHeadOfficeRole
+                      ? "Locked to your assigned branch counter"
+                      : undefined
                   }
                   onChange={(e) => setTransactionBranchId(e.target.value)}
                 >
@@ -771,10 +926,64 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
               </label>
             </div>
 
-            {type === "withdrawal" && confirmWithdraw && selectedCustomer ? (
+            {isCrossBranchCustomer && selectedCustomer ? (
+              crossBranchWithdrawalBlocked ? (
+                <div className="branch-counter__alert" role="alert">
+                  <p>
+                    <strong>Cross-branch withdrawal disabled.</strong> {selectedCustomer.fullName}{" "}
+                    is registered at <strong>{homeBranchLabel}</strong>, while this counter is{" "}
+                    <strong>{counterBranchLabel}</strong>. Ask the customer to withdraw at{" "}
+                    <strong>{homeBranchLabel}</strong> (walk-in deposits are still allowed here).
+                  </p>
+                </div>
+              ) : (
+                <p className="branch-counter__confirm" role="status">
+                  <strong>Inter-branch customer:</strong> Home branch is{" "}
+                  <strong>{homeBranchLabel}</strong> · Counter till is{" "}
+                  <strong>{counterBranchLabel}</strong>.
+                  {type === "withdrawal"
+                    ? " Verify customer ID and photo before paying cash (Susu commission stays credited to home branch)."
+                    : " Deposit posts to this branch till and credits the customer's account."}
+                </p>
+              )
+            ) : null}
+
+            {type === "withdrawal" &&
+            selectedCustomer &&
+            !crossBranchWithdrawalBlocked &&
+            verificationMissing ? (
+              <p className="branch-counter__confirm" role="status">
+                <strong>Verification required:</strong>{" "}
+                {withdrawalVerificationRequirementMessage(withdrawalVerification.reason)}{" "}
+                <button
+                  type="button"
+                  className="branch-counter__inline-verify"
+                  onClick={() => setVerifyOpen(true)}
+                >
+                  Open Verify →
+                </button>
+              </p>
+            ) : null}
+
+            {type === "withdrawal" && confirmWithdraw && selectedCustomer && !crossBranchWithdrawalBlocked ? (
               <p className="branch-counter__confirm" role="status">
                 Confirm withdrawal of <strong>GHS {formatAccountAmount(Number(amount))}</strong> for{" "}
                 {selectedCustomer.fullName}? Available: GHS {formatAccountAmount(balances.withdrawableBalance)}.
+                {isCrossBranchCustomer
+                  ? ` (Inter-branch payout from ${counterBranchLabel} till · home branch ${homeBranchLabel})`
+                  : ""}
+                {!isSelectedCustomerVerified ? (
+                  <>
+                    {" "}
+                    <button
+                      type="button"
+                      className="branch-counter__inline-verify"
+                      onClick={() => setVerifyOpen(true)}
+                    >
+                      Verify photo &amp; ID first →
+                    </button>
+                  </>
+                ) : null}
               </p>
             ) : null}
 
@@ -798,7 +1007,8 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
                   sessionExpired ||
                   txTypes.length === 0 ||
                   tillBlocksPosting ||
-                  floatInsufficient
+                  floatInsufficient ||
+                  crossBranchWithdrawalBlocked
                 }
                 onClick={() => void handlePost()}
               >
@@ -943,6 +1153,24 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
       </section>
 
       <BranchCounterStatementPanel />
+      <CustomerVerifyModal
+        open={verifyOpen}
+        customer={selectedCustomer}
+        branches={branches}
+        counterBranchId={transactionBranchId}
+        accountBalance={balances.accountBalance}
+        withdrawableBalance={balances.withdrawableBalance}
+        loanReserveAmount={balances.loanReserveAmount}
+        lockedBalance={balances.isSavings ? (selectedCustomer?.lockedBalance ?? SAVINGS_INITIAL_DEPOSIT_GHS) : 0}
+        verified={isSelectedCustomerVerified}
+        requiredReason={withdrawalVerification.reason}
+        onMarkVerified={() => {
+          if (selectedCustomer) {
+            setVerifiedCustomerId(selectedCustomer.id);
+          }
+        }}
+        onClose={() => setVerifyOpen(false)}
+      />
       <SusuReversalDialog
         open={susuTransactionId != null}
         transactionId={susuTransactionId}

@@ -250,6 +250,7 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
       "Deduction timing: choose First collection(s) (deducted upfront on Box 1), Cycle maturity (deducted when the page completes at Box 31), or Customer withdrawal (deducted when the customer withdraws).",
       "Safe timing switches (zero double-deduction): policies are versioned and snapshotted when each card opens. Switching from First collection(s) to Customer withdrawal applies immediately to new/next cards while never double-charging any existing card whose fee was already collected (withdrawals strictly check remaining unpaid commissionOutstanding).",
       "Customer commission notification toggle: under When to deduct, toggle Send message to customer when commission is deducted ON (default) to send an SMS/email alert whenever Susu commission is deducted, or turn it OFF to deduct silently without sending a separate commission message.",
+      "Separate commission ledger & SMS sequence: both deposit and withdrawal Susu commissions post as their own system Debit (commission) row on customer statements and ledgers. When commission alerts are ON during a withdrawal, SMS #1 confirms the exact cash withdrawn and balance before fee, followed by SMS #2 confirming the Susu service charge and remaining balance.",
       "Strict FIFO withdrawal settlement: every Susu withdrawal settles in strict oldest-first order — (1) Balance Brought Forward (BBF) first at GHS 0 fee, (2) Completed pages oldest-first (any touched completed page is cancelled with a red line, its remaining fee if any is collected, and any leftover rolls forward as BBF onto the next page), and (3) Active incomplete page last only if the withdrawal overflows past BBF and all completed pages.",
       "Commission charged on top: when a withdrawal triggers a Susu fee, the fee is charged on top of the customer’s requested amount so the customer receives their full requested payout (unless total available balance cannot cover both, in which case remaining balance is settled cleanly).",
       "Early withdrawal policy (when touching an incomplete page): choose Deduct full fee, Deduct pro-rata (by boxes completed), Waive the fee, or Block early withdrawal.",
@@ -276,6 +277,7 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
     body: [
       "Go to Susu → Susu income to view institutional fee revenue earned by your company (strictly isolated to your tenant’s branches and never mixed with customer deposits).",
       "Two automatic income streams are tracked: Susu cycle fees (earned from customer Susu cycles) and Savings opening fees (recorded for the branch when new savings accounts activate).",
+      "Home-branch attribution on inter-branch payouts: if a customer registered at Branch A makes a walk-in withdrawal at Branch B, physical cash leaves Branch B’s till while any Susu withdrawal commission income is automatically credited to Branch A (the customer’s home branch).",
       "Filter by branch, date range, and income source to review daily or period totals, branch breakdowns, and any reversed fee entries.",
       "Note: Susu income tracks revenue earned by the institution from customer fees. Staff payroll commissions paid to field agents are managed separately under Susu → Agent commissions."
     ]
@@ -291,7 +293,8 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
       "Open your till first (float + initial cash). Without an open till you cannot post cash.",
       "Go to Susu → Branch counter.",
       "Search and select the customer account.",
-      "Choose Deposit only (Daily Susu is not posted on branch counter — use Field agent Collect and Callover).",
+      "Choose Deposit only (Daily Susu is not posted on branch counter — use Field agent Collect and Callover). Walk-in deposits never require customer identity verification and remain allowed at any branch.",
+      "Branch counter locking: tellers, coordinators, and customer service staff always post to their assigned branch counter (the Branch selector stays locked to their counter); Head Office roles (Admin, Accountant, Auditor) can choose any branch.",
       "Enter the amount and post. Deposits increase physical cash in till (by the full gross cash received, even if Susu Box 1 commission applies) and consume float capacity.",
       "For Susu accounts, walk-in counter deposits also check off boxes on the customer’s Susu passbook and apply your Susu cycle fee policy automatically so the passbook stays aligned with contributions.",
       "Withdrawable balance already excludes savings minimum and any loan reserves."
@@ -300,17 +303,31 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
   {
     id: "susu-withdraw",
     department: "susu",
-    title: "Pay a customer withdrawal",
-    howTo: "How to withdraw from Susu",
-    keywords: ["withdrawal", "withdraw", "susu", "branch counter", "cash"],
+    title: "Pay a walk-in customer withdrawal (Verify, inter-branch & Simplified KYC)",
+    howTo: "How to verify and withdraw at branch counter",
+    keywords: [
+      "withdrawal",
+      "withdraw",
+      "susu",
+      "branch counter",
+      "cash",
+      "verify",
+      "customer verification",
+      "cross-branch",
+      "inter-branch",
+      "simplified kyc",
+      "photo",
+      "id card",
+      "account statement"
+    ],
     modules: ["susu_management"],
     body: [
-      "Select the customer on Branch counter.",
-      "Check Withdrawable (not full account balance).",
+      "Select the customer on Branch counter and switch to Withdrawal. Check Withdrawable (not full account balance) — any savings opening minimum, loan reserve, or passbook lien is excluded automatically.",
+      "Verify customer identity on counter: click Verify (or the customer’s portrait avatar) to open the instant verification modal without losing your typed amount. Inspect the customer’s portrait photo and ID card photo side-by-side (click either image to enlarge), Tier 1 Simplified KYC introducer details, phone, address, next of kin, balances, and compact Susu passbook, then click Mark verified & continue. You can also click Open full statement → to inspect the complete statement and return with ← Back to branch counter.",
+      "When verification is mandatory: Tier 1 Simplified KYC accounts ALWAYS require verification on walk-in withdrawals regardless of company settings. Full KYC walk-in withdrawals follow your company’s rule in Settings → Approval Workflows (Optional, Cross-branch only, or Always mandatory). Deposits never require verification, and already-approved Pay now field withdrawals are exempt.",
+      "Cross-branch walk-in withdrawals: when a customer registered at another branch withdraws at your counter, an Inter-branch customer banner appears. Cash is paid from your counter till while any Susu withdrawal commission income credits the customer’s home branch. Admins can allow or disable cross-branch walk-in withdrawals in Settings → Approval Workflows.",
       "Withdrawals need physical cash in the till — float alone is not cash. If cash is short, use Till movement → Extra cash (needs approval).",
-      "Post a withdrawal only up to the withdrawable amount and available till cash.",
-      "If your Susu cycle fee timing is set to Withdrawal (or an early-withdrawal fee applies), the system evaluates the active Susu cycle automatically.",
-      "If a savings opening minimum, loan reserve, or passbook lien is active, that locked amount cannot be withdrawn."
+      "If your Susu cycle fee timing is set to Withdrawal (or an early-withdrawal fee applies), the system evaluates the active Susu cycle automatically and posts the fee as a separate Debit (commission) entry."
     ]
   },
   {
@@ -684,6 +701,31 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
     body: [
       "Dormant Susu customer alerts (Susu → Customers): active Susu accounts with no posted contribution for 7+, 14+, or 30+ days are flagged automatically at the top of the Customers page. Switch thresholds (7d+ / 14d+ / 30d+) and click View statement on any flagged customer to verify whether collections were missed or unrecorded.",
       "Zero-collection agent alerts (Susu → Agents): active field agents who have assigned Susu customers yet have GHS 0 recorded today are highlighted at the top of the Agents page so coordinators can follow up on route activity or pending offline syncs before end of day."
+    ]
+  },
+  {
+    id: "settings-approval-workflows",
+    department: "settings",
+    title: "Approval workflows, cross-branch withdrawals & counter verification rules",
+    howTo: "How to configure approval roles and branch counter rules",
+    keywords: [
+      "approval workflows",
+      "approver roles",
+      "new account approval",
+      "withdrawal approval",
+      "branch counter rules",
+      "cross-branch",
+      "inter-branch",
+      "customer verification",
+      "simplified kyc",
+      "pay now"
+    ],
+    body: [
+      "Go to Settings → Approval Workflows to configure who approves new accounts and withdrawal requests, and to set frontline branch counter rules.",
+      "New account approval & Withdrawal request approval: select which staff roles can approve or reject customer registrations and customer withdrawal requests. Company admin always stays enabled on both; field agents submit requests and are never approvers.",
+      "Cross-branch walk-in withdrawals toggle: turn ON (default) to let customers withdraw walk-in cash at any branch (cash leaves the paying branch’s till while Susu commission credits the customer’s home branch), or turn OFF to restrict walk-in withdrawals to each customer’s registered home branch. Walk-in deposits remain allowed at any branch.",
+      "Walk-in withdrawal customer verification mode: choose Optional for Full KYC (fastest), Cross-branch only (balanced — verifies inter-branch payouts), or Always mandatory (strictest — verifies every walk-in withdrawal).",
+      "Fixed compliance safeguards: Tier 1 Simplified KYC accounts always require photo & introducer verification on walk-in withdrawals regardless of the selected mode; Deposits and Daily Susu never require verification; already-approved Pay now field withdrawals are exempt."
     ]
   },
   {
