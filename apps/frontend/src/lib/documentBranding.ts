@@ -43,12 +43,52 @@ function setMetaContent(name: string, content: string): void {
   }
 }
 
-function setLinkHref(selector: string, href: string): void {
-  document.querySelectorAll<HTMLLinkElement>(selector).forEach((link) => {
-    if (link.getAttribute("href") !== href) {
-      link.setAttribute("href", href);
-    }
-  });
+/**
+ * Replaces favicon link elements with fresh `<link rel="icon">` / `<link rel="shortcut icon">`
+ * tags (without stale fixed `sizes="32x32"` attributes) so browsers immediately repaint the tab icon.
+ */
+function setBrandFavicon(href: string): void {
+  const existing = Array.from(
+    document.querySelectorAll<HTMLLinkElement>('link[rel="icon"], link[rel="shortcut icon"]')
+  );
+  if (
+    existing.length === 2 &&
+    existing[0]?.getAttribute("href") === href &&
+    !existing[0]?.hasAttribute("sizes") &&
+    existing[1]?.getAttribute("href") === href
+  ) {
+    return;
+  }
+  for (const el of existing) {
+    el.remove();
+  }
+  const icon = document.createElement("link");
+  icon.rel = "icon";
+  icon.type = "image/png";
+  icon.href = href;
+  const shortcut = document.createElement("link");
+  shortcut.rel = "shortcut icon";
+  shortcut.type = "image/png";
+  shortcut.href = href;
+  document.head.appendChild(icon);
+  document.head.appendChild(shortcut);
+}
+
+function setBrandAppleIcon(href: string): void {
+  const existing = Array.from(
+    document.querySelectorAll<HTMLLinkElement>('link[rel="apple-touch-icon"]')
+  );
+  if (existing.length === 1 && existing[0]?.getAttribute("href") === href) {
+    return;
+  }
+  for (const el of existing) {
+    el.remove();
+  }
+  const apple = document.createElement("link");
+  apple.rel = "apple-touch-icon";
+  apple.setAttribute("sizes", "180x180");
+  apple.href = href;
+  document.head.appendChild(apple);
 }
 
 function setManifestLink(href: string): void {
@@ -436,8 +476,8 @@ export function applyDocumentBranding(options: DocumentBrandingOptions): void {
       // Required for Chrome Desktop HTTPS address-bar Install icon AND Android WebAPK minting.
       const faviconUrl = `${apiBase}/api/v1/auth/company-icon?${idQuery}&size=64&purpose=any&v=${v}`;
       const appleIconUrl = `${apiBase}/api/v1/auth/company-icon?${idQuery}&size=180&purpose=apple&v=${v}`;
-      setLinkHref('link[rel="icon"], link[rel="shortcut icon"]', faviconUrl);
-      setLinkHref('link[rel="apple-touch-icon"]', appleIconUrl);
+      setBrandFavicon(faviconUrl);
+      setBrandAppleIcon(appleIconUrl);
 
       if (signature !== activeManifestSignature) {
         manifestBuildToken += 1;
@@ -453,8 +493,8 @@ export function applyDocumentBranding(options: DocumentBrandingOptions): void {
 
     // Fallback when API base URL or tenant identifier is unavailable
     if (logo) {
-      setLinkHref('link[rel="icon"], link[rel="shortcut icon"]', logo);
-      setLinkHref('link[rel="apple-touch-icon"]', logo);
+      setBrandFavicon(logo);
+      setBrandAppleIcon(logo);
     }
     if (signature !== activeManifestSignature) {
       void applyFallbackBlobManifest({ company, logo, brandColor, signature });
@@ -467,10 +507,8 @@ export function applyDocumentBranding(options: DocumentBrandingOptions): void {
   setMetaContent("application-name", DEFAULT_APP_NAME);
   setMetaContent("apple-mobile-web-app-title", DEFAULT_APP_NAME);
   setMetaContent("description", DEFAULT_DESCRIPTION);
-  setLinkHref('link[rel="icon"][sizes="32x32"]', "/favicon-32.png");
-  setLinkHref('link[rel="icon"][sizes="48x48"]', "/favicon-48.png");
-  setLinkHref('link[rel="icon"]:not([sizes]), link[rel="shortcut icon"]', DEFAULT_FAVICON);
-  setLinkHref('link[rel="apple-touch-icon"]', DEFAULT_APPLE_ICON);
+  setBrandFavicon(DEFAULT_FAVICON);
+  setBrandAppleIcon(DEFAULT_APPLE_ICON);
 
   writeActiveBrandCache(null);
 

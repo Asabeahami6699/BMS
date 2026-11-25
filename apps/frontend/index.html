@@ -95,6 +95,7 @@
             var appleIconUrl = apiBase + "/api/v1/auth/company-icon?" + idQuery + "&size=180&purpose=apple";
             var favIcons = document.querySelectorAll('link[rel="icon"], link[rel="shortcut icon"]');
             for (var j = 0; j < favIcons.length; j++) {
+              favIcons[j].removeAttribute("sizes");
               favIcons[j].setAttribute("href", faviconUrl);
             }
             var appleIcons = document.querySelectorAll('link[rel="apple-touch-icon"]');

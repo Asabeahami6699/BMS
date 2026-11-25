@@ -6,8 +6,14 @@ import { resolveUserContextFromHeaders } from "../services/userContextService.js
 
 const PUBLIC_PATHS = new Set(["/api/v1/auth/login", "/api/v1/auth/refresh"]);
 
-function isPublicCompanyHost(path: string, method: string): boolean {
-  return path === "/api/v1/auth/company-host" && method === "GET";
+const PUBLIC_GET_BRANDING_PATHS = new Set([
+  "/api/v1/auth/company-host",
+  "/api/v1/auth/company-icon",
+  "/api/v1/auth/manifest.webmanifest"
+]);
+
+function isPublicCompanyBranding(path: string, method: string): boolean {
+  return PUBLIC_GET_BRANDING_PATHS.has(path) && (method === "GET" || method === "HEAD");
 }
 
 function isPublicChatPath(path: string, method: string): boolean {
@@ -26,7 +32,7 @@ function isPublicAiPath(path: string, method: string): boolean {
 
 export async function authenticate(req: Request, res: Response, next: NextFunction): Promise<void> {
   const path = req.originalUrl.split("?")[0] ?? req.path;
-  if ((PUBLIC_PATHS.has(path) && req.method === "POST") || isPublicCompanyHost(path, req.method) || isPublicChatPath(path, req.method) || isPublicAiPath(path, req.method)) {
+  if ((PUBLIC_PATHS.has(path) && req.method === "POST") || isPublicCompanyBranding(path, req.method) || isPublicChatPath(path, req.method) || isPublicAiPath(path, req.method)) {
     next();
     return;
   }

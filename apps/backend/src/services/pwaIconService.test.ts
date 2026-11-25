@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import sharp from "sharp";
+import request from "supertest";
+import { createApp } from "../app.js";
+import { upsertTenantInStore } from "./authStore.js";
 import { renderTenantPwaPng } from "./pwaIconService.js";
 
 describe("renderTenantPwaPng", () => {
@@ -49,5 +52,44 @@ describe("renderTenantPwaPng", () => {
     expect(meta512.format).toBe("png");
     expect(meta512.width).toBe(512);
     expect(meta512.height).toBe(512);
+  });
+
+  it("serves /api/v1/auth/company-icon and /api/v1/auth/manifest.webmanifest publicly without auth (never 401)", async () => {
+    upsertTenantInStore({
+      id: "tenant-pwa-public",
+      name: "Opioko Susu",
+      subdomain: "opiokopwa",
+      subscriptionStatus: "active",
+      createdAt: new Date().toISOString()
+    });
+
+    const app = createApp();
+
+    const iconRes = await request(app)
+      .get("/api/v1/auth/company-icon?subdomain=opiokopwa&size=64&purpose=any")
+      .set("Origin", "https://opiokopwa.aabanker.com");
+
+    expect(iconRes.status).toBe(200);
+    expect(iconRes.headers["content-type"]).toMatch(/^image\/png/);
+    expect(iconRes.headers["access-control-allow-origin"]).toBe("*");
+    expect(iconRes.headers["access-control-allow-credentials"]).toBeUndefined();
+    expect(iconRes.headers["cross-origin-resource-policy"]).toBe("cross-origin");
+    const iconMeta = await sharp(iconRes.body as Buffer).metadata();
+    expect(iconMeta.format).toBe("png");
+    expect(iconMeta.width).toBe(64);
+    expect(iconMeta.height).toBe(64);
+
+    const manifestRes = await request(app)
+      .get("/api/v1/auth/manifest.webmanifest?subdomain=opiokopwa&origin=https%3A%2F%2Fopiokopwa.aabanker.com")
+      .set("Origin", "https://opiokopwa.aabanker.com");
+
+    expect(manifestRes.status).toBe(200);
+    expect(manifestRes.headers["content-type"]).toMatch(/application\/manifest\+json/);
+    expect(manifestRes.headers["access-control-allow-origin"]).toBe("*");
+    expect(manifestRes.headers["access-control-allow-credentials"]).toBeUndefined();
+    expect(manifestRes.body.name).toBe("Opioko Susu");
+    expect(manifestRes.body.short_name).toBe("Opioko Susu");
+    expect(manifestRes.body.icons).toHaveLength(3);
+    expect(manifestRes.body.icons.every((i: { src: string }) => i.src.includes("/api/v1/auth/company-icon"))).toBe(true);
   });
 });
