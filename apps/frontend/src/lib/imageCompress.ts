@@ -45,3 +45,53 @@ export async function compressImageDataUrl(dataUrl: string): Promise<string> {
 export function isDataUrlWithinLimit(dataUrl: string): boolean {
   return dataUrl.length <= Math.ceil(MAX_PHOTO_BYTES * 1.37);
 }
+
+/**
+ * Normalizes uploaded company logos into a clean square 512x512 PNG (preserving transparency)
+ * so PWA install manifests, home-screen icons, favicons, and printed PDFs stay sharp.
+ * Falls back to compressed JPEG only if the PNG exceeds the storage size cap.
+ */
+export async function compressCompanyLogoDataUrl(dataUrl: string): Promise<string> {
+  const img = await loadImage(dataUrl);
+  const size = 512;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    return compressImageDataUrl(dataUrl);
+  }
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.clearRect(0, 0, size, size);
+  const pad = Math.round(size * 0.04);
+  const box = size - pad * 2;
+  const scale = Math.min(box / Math.max(1, img.width), box / Math.max(1, img.height));
+  const w = Math.round(img.width * scale);
+  const h = Math.round(img.height * scale);
+  const x = Math.round((size - w) / 2);
+  const y = Math.round((size - h) / 2);
+  ctx.drawImage(img, x, y, w, h);
+
+  const png = canvas.toDataURL("image/png");
+  if (isDataUrlWithinLimit(png)) {
+    return png;
+  }
+
+  // Try 384x384 PNG before falling back to JPEG so transparency is kept whenever possible.
+  const smaller = document.createElement("canvas");
+  smaller.width = 384;
+  smaller.height = 384;
+  const sctx = smaller.getContext("2d");
+  if (sctx) {
+    sctx.imageSmoothingEnabled = true;
+    sctx.imageSmoothingQuality = "high";
+    sctx.drawImage(canvas, 0, 0, 384, 384);
+    const smallPng = smaller.toDataURL("image/png");
+    if (isDataUrlWithinLimit(smallPng)) {
+      return smallPng;
+    }
+  }
+
+  return compressImageDataUrl(dataUrl);
+}

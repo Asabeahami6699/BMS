@@ -4,7 +4,7 @@ import type { TenantRecord } from "../api";
 import { getPlatformTenantProfile, updatePlatformTenantProfile } from "../api";
 import { Modal } from "../../components/Modal";
 import { useToast } from "../../components/Toast";
-import { compressImageDataUrl, isDataUrlWithinLimit } from "../../lib/imageCompress";
+import { compressCompanyLogoDataUrl, isDataUrlWithinLimit } from "../../lib/imageCompress";
 
 type Props = {
   open: boolean;
@@ -94,7 +94,7 @@ export function EditTenantProfileModal({ open, tenant, onClose, onUpdated }: Pro
       void (async () => {
         if (typeof reader.result !== "string") return;
         try {
-          const compressed = await compressImageDataUrl(reader.result);
+          const compressed = await compressCompanyLogoDataUrl(reader.result);
           if (!isDataUrlWithinLimit(compressed)) {
             showToast("Could not compress the logo enough. Try a smaller image.", "error");
             return;

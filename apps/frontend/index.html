@@ -10,7 +10,6 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="aabanker" />
-    <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="48x48" href="/favicon-48.png" />
     <link rel="icon" type="image/png" href="/favicon.png" />
@@ -25,11 +24,65 @@
           if (theme !== "light" && theme !== "dark") theme = "dark";
           document.documentElement.dataset.theme = theme;
           document.documentElement.style.colorScheme = theme;
-          var meta = document.querySelector('meta[name="theme-color"]');
-          if (meta) meta.setAttribute("content", theme === "light" ? "#f4f6fa" : "#0b0e14");
+          var themeMeta = document.querySelector('meta[name="theme-color"]');
+          if (themeMeta) themeMeta.setAttribute("content", theme === "light" ? "#f4f6fa" : "#0b0e14");
+
+          // Detect company subdomain (e.g. opiokosusu.aabanker.com / opiokosusu.localhost)
+          var reserved = {
+            www: 1, api: 1, admin: 1, app: 1, mail: 1, platform: 1,
+            ns1: 1, ns2: 1, vercel: 1, ftp: 1, smtp: 1
+          };
+          var host = (window.location.hostname || "").toLowerCase().replace(/\.$/, "");
+          var sub = null;
+          var suffixes = [".aabanker.com", ".localhost"];
+          for (var i = 0; i < suffixes.length; i++) {
+            if (host.endsWith(suffixes[i])) {
+              var label = host.slice(0, -suffixes[i].length);
+              if (label && label.indexOf(".") === -1 && !reserved[label]) {
+                sub = label;
+              }
+              break;
+            }
+          }
+
+          var rawBrand = sub
+            ? localStorage.getItem("bms.hostBrand.v1." + sub)
+            : localStorage.getItem("bms.activeBrand.v1");
+          var cached = rawBrand ? JSON.parse(rawBrand) : null;
+
+          if (cached && cached.name) {
+            document.title = cached.name;
+            var appName = document.querySelector('meta[name="application-name"]');
+            if (appName) appName.setAttribute("content", cached.name);
+            var appleTitle = document.querySelector('meta[name="apple-mobile-web-app-title"]');
+            if (appleTitle) appleTitle.setAttribute("content", String(cached.name).slice(0, 15));
+            if (cached.brandColor && themeMeta) {
+              themeMeta.setAttribute("content", cached.brandColor);
+            }
+            if (cached.logoUrl) {
+              var icons = document.querySelectorAll('link[rel="icon"], link[rel="shortcut icon"], link[rel="apple-touch-icon"]');
+              for (var j = 0; j < icons.length; j++) {
+                icons[j].setAttribute("href", cached.logoUrl);
+              }
+            }
+          }
+
+          // Only attach the generic platform manifest on non-company hosts when no company brand
+          // is active. On company subdomains, documentBranding attaches the branded company
+          // manifest so Chrome/Android never capture `aabanker` before the company loads.
+          if (!sub && !(cached && cached.name)) {
+            var manifestLink = document.createElement("link");
+            manifestLink.rel = "manifest";
+            manifestLink.href = "/manifest.webmanifest";
+            document.head.appendChild(manifestLink);
+          }
         } catch (e) {
           document.documentElement.dataset.theme = "dark";
           document.documentElement.style.colorScheme = "dark";
+          var fallbackLink = document.createElement("link");
+          fallbackLink.rel = "manifest";
+          fallbackLink.href = "/manifest.webmanifest";
+          document.head.appendChild(fallbackLink);
         }
       })();
     </script>

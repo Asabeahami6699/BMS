@@ -22,14 +22,13 @@ export default defineConfig({
         "favicon-48.png",
         "icons/icon-180.png",
         "icons/icon-192.png",
-        "icons/icon-512.png",
-        "manifest.webmanifest"
+        "icons/icon-512.png"
       ],
       workbox: {
         navigateFallback: "/index.html",
         // App shell JS exceeds Workbox's default 2 MiB precache cap.
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
-        globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2,webmanifest}"],
+        globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
         // Bundled hashed copy is huge; public favicons are the install icon source.
         globIgnores: ["**/favIconBms-*.png"],
         runtimeCaching: [

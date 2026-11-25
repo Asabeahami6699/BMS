@@ -3,7 +3,7 @@ import { useShallow } from "zustand/react/shallow";
 import { tenantHasSusuAndLoans } from "@bms/shared";
 import { useAuth } from "../../auth/AuthContext";
 import { useToast } from "../../components/Toast";
-import { compressImageDataUrl, isDataUrlWithinLimit } from "../../lib/imageCompress";
+import { compressCompanyLogoDataUrl, isDataUrlWithinLimit } from "../../lib/imageCompress";
 import type { CompanyProfile } from "../api";
 import { applyTenantFontStep, clampFontSizeStep, FONT_SIZE_OPTIONS } from "../fontSize";
 import { useSettingsWorkspaceStore } from "../stores/settingsWorkspaceStore";
@@ -116,7 +116,7 @@ export function SettingsCompanyProfilePage() {
           return;
         }
         try {
-          const compressed = await compressImageDataUrl(reader.result);
+          const compressed = await compressCompanyLogoDataUrl(reader.result);
           if (!isDataUrlWithinLimit(compressed)) {
             showToast("Could not compress the logo enough. Try a smaller image.", "error");
             return;
