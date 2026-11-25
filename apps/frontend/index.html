@@ -19,6 +19,16 @@
     <title>aabanker — Banking Management System</title>
     <script>
       (function () {
+        function attachManifest(href) {
+          var link = document.querySelector('link[rel="manifest"]');
+          if (!link) {
+            link = document.createElement("link");
+            link.rel = "manifest";
+            document.head.appendChild(link);
+          }
+          link.setAttribute("href", href);
+        }
+
         try {
           var theme = localStorage.getItem("bms.theme");
           if (theme !== "light" && theme !== "dark") theme = "dark";
@@ -27,12 +37,17 @@
           var themeMeta = document.querySelector('meta[name="theme-color"]');
           if (themeMeta) themeMeta.setAttribute("content", theme === "light" ? "#f4f6fa" : "#0b0e14");
 
+          var rawApi = "%VITE_API_URL%";
+          var host = (window.location.hostname || "").toLowerCase().replace(/\.$/, "");
+          var apiBase = rawApi && rawApi.indexOf("%VITE_") === -1
+            ? rawApi.replace(/\/+$/, "").replace(/\/api$/, "")
+            : (host === "localhost" || host.endsWith(".localhost") ? "http://localhost:4000" : "");
+
           // Detect company subdomain (e.g. opiokosusu.aabanker.com / opiokosusu.localhost)
           var reserved = {
             www: 1, api: 1, admin: 1, app: 1, mail: 1, platform: 1,
             ns1: 1, ns2: 1, vercel: 1, ftp: 1, smtp: 1
           };
-          var host = (window.location.hostname || "").toLowerCase().replace(/\.$/, "");
           var sub = null;
           var suffixes = [".aabanker.com", ".localhost"];
           for (var i = 0; i < suffixes.length; i++) {
@@ -59,30 +74,40 @@
             if (cached.brandColor && themeMeta) {
               themeMeta.setAttribute("content", cached.brandColor);
             }
-            if (cached.logoUrl) {
-              var icons = document.querySelectorAll('link[rel="icon"], link[rel="shortcut icon"], link[rel="apple-touch-icon"]');
-              for (var j = 0; j < icons.length; j++) {
-                icons[j].setAttribute("href", cached.logoUrl);
-              }
-            }
           }
 
-          // Only attach the generic platform manifest on non-company hosts when no company brand
-          // is active. On company subdomains, documentBranding attaches the branded company
-          // manifest so Chrome/Android never capture `aabanker` before the company loads.
-          if (!sub && !(cached && cached.name)) {
-            var manifestLink = document.createElement("link");
-            manifestLink.rel = "manifest";
-            manifestLink.href = "/manifest.webmanifest";
-            document.head.appendChild(manifestLink);
+          var originParam = encodeURIComponent(window.location.origin);
+          var idQuery = sub
+            ? "subdomain=" + encodeURIComponent(sub)
+            : cached && cached.subdomain
+              ? "subdomain=" + encodeURIComponent(cached.subdomain)
+              : cached && cached.tenantId
+                ? "tenantId=" + encodeURIComponent(cached.tenantId)
+                : "";
+
+          if (idQuery && apiBase) {
+            // Attach real HTTPS company manifest immediately at 0ms so Chrome Desktop,
+            // Edge Desktop, and Android WebAPK always see a valid installable company PWA.
+            attachManifest(
+              apiBase + "/api/v1/auth/manifest.webmanifest?" + idQuery + "&origin=" + originParam
+            );
+            var faviconUrl = apiBase + "/api/v1/auth/company-icon?" + idQuery + "&size=64&purpose=any";
+            var appleIconUrl = apiBase + "/api/v1/auth/company-icon?" + idQuery + "&size=180&purpose=apple";
+            var favIcons = document.querySelectorAll('link[rel="icon"], link[rel="shortcut icon"]');
+            for (var j = 0; j < favIcons.length; j++) {
+              favIcons[j].setAttribute("href", faviconUrl);
+            }
+            var appleIcons = document.querySelectorAll('link[rel="apple-touch-icon"]');
+            for (var k = 0; k < appleIcons.length; k++) {
+              appleIcons[k].setAttribute("href", appleIconUrl);
+            }
+          } else {
+            attachManifest("/manifest.webmanifest");
           }
         } catch (e) {
           document.documentElement.dataset.theme = "dark";
           document.documentElement.style.colorScheme = "dark";
-          var fallbackLink = document.createElement("link");
-          fallbackLink.rel = "manifest";
-          fallbackLink.href = "/manifest.webmanifest";
-          document.head.appendChild(fallbackLink);
+          attachManifest("/manifest.webmanifest");
         }
       })();
     </script>

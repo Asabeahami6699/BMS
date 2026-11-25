@@ -15,12 +15,14 @@ export type DocumentBrandingOptions = {
   logoUrl?: string;
   brandColor?: string;
   subdomain?: string | null;
+  tenantId?: string | null;
   apiBaseUrl?: string;
 };
 
 type CachedActiveBrand = {
   name: string;
   subdomain?: string;
+  tenantId?: string;
   logoUrl?: string;
   brandColor?: string;
 };
@@ -49,23 +51,26 @@ function setLinkHref(selector: string, href: string): void {
   });
 }
 
-/**
- * Replaces the `<link rel="manifest">` node in `<head>` so Chromium reliably
- * re-parses updated company name & icon entries instead of sticking to an older manifest.
- */
 function setManifestLink(href: string): void {
-  const existing = document.querySelector<HTMLLinkElement>('link[rel="manifest"]');
-  if (existing && existing.getAttribute("href") === href) {
+  let link = document.querySelector<HTMLLinkElement>('link[rel="manifest"]');
+  if (link && link.getAttribute("href") === href) {
     return;
   }
-  const next = document.createElement("link");
-  next.rel = "manifest";
-  next.href = href;
-  if (existing) {
-    existing.replaceWith(next);
-  } else {
-    document.head.appendChild(next);
+  if (!link) {
+    link = document.createElement("link");
+    link.rel = "manifest";
+    document.head.appendChild(link);
   }
+  link.setAttribute("href", href);
+}
+
+function shortHash(input: string): string {
+  let h = 2166136261;
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(36);
 }
 
 function deriveShortName(company: string): string {
@@ -136,12 +141,33 @@ function readActiveBrandCache(): CachedActiveBrand | null {
     }
     return {
       name: parsed.name.trim(),
-      subdomain: typeof parsed.subdomain === "string" && parsed.subdomain.trim() ? parsed.subdomain.trim().toLowerCase() : undefined,
-      logoUrl: typeof parsed.logoUrl === "string" && parsed.logoUrl.trim() ? parsed.logoUrl.trim() : undefined,
-      brandColor: typeof parsed.brandColor === "string" && parsed.brandColor.trim() ? parsed.brandColor.trim() : undefined
+      subdomain:
+        typeof parsed.subdomain === "string" && parsed.subdomain.trim()
+          ? parsed.subdomain.trim().toLowerCase()
+          : undefined,
+      tenantId:
+        typeof parsed.tenantId === "string" && parsed.tenantId.trim()
+          ? parsed.tenantId.trim()
+          : undefined,
+      logoUrl:
+        typeof parsed.logoUrl === "string" && parsed.logoUrl.trim()
+          ? parsed.logoUrl.trim()
+          : undefined,
+      brandColor:
+        typeof parsed.brandColor === "string" && parsed.brandColor.trim()
+          ? parsed.brandColor.trim()
+          : undefined
     };
   } catch {
     return null;
+  }
+}
+
+function revokeBlobManifestSoon(): void {
+  if (activeBlobManifestUrl) {
+    const prev = activeBlobManifestUrl;
+    activeBlobManifestUrl = null;
+    window.setTimeout(() => URL.revokeObjectURL(prev), 5_000);
   }
 }
 
@@ -183,8 +209,6 @@ function drawLogoToSquarePng(
     ctx.imageSmoothingQuality = "high";
 
     if (variant === "maskable" || variant === "apple") {
-      // Solid light tile guarantees logos remain crisp & never clip inside Android adaptive
-      // circles or iOS rounded-square app icons.
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, size, size);
     } else {
@@ -209,10 +233,6 @@ function drawLogoToSquarePng(
   }
 }
 
-/**
- * Generates a crisp branded monogram PNG icon when a company has not uploaded a logo yet,
- * so installed PWAs never fall back to the platform `aabanker` icon.
- */
 function renderMonogramPng(
   company: string,
   brandColor: string | undefined,
@@ -259,61 +279,10 @@ function renderMonogramPng(
   }
 }
 
-async function resolveBrandIcons(options: {
+async function applyFallbackBlobManifest(options: {
   company: string;
   logo?: string;
   brandColor?: string;
-  subdomain?: string;
-  apiBaseUrl?: string;
-}): Promise<{
-  icon64: string | null;
-  icon180: string | null;
-  icon192: string | null;
-  icon512: string | null;
-  icon512Maskable: string | null;
-}> {
-  let loadedImg: HTMLImageElement | null = null;
-  if (options.logo) {
-    loadedImg = await loadImageElement(options.logo);
-    // If a cross-origin URL failed CORS canvas loading, retry via backend CORS-enabled proxy.
-    if (!loadedImg && options.subdomain && options.apiBaseUrl) {
-      const proxyUrl = `${options.apiBaseUrl.replace(/\/+$/, "")}/api/v1/auth/company-icon?subdomain=${encodeURIComponent(options.subdomain)}`;
-      loadedImg = await loadImageElement(proxyUrl);
-    }
-  }
-
-  if (loadedImg) {
-    const icon64 = drawLogoToSquarePng(loadedImg, 64, "any");
-    const icon180 = drawLogoToSquarePng(loadedImg, 180, "apple");
-    const icon192 = drawLogoToSquarePng(loadedImg, 192, "any");
-    const icon512 = drawLogoToSquarePng(loadedImg, 512, "any");
-    const icon512Maskable = drawLogoToSquarePng(loadedImg, 512, "maskable");
-    if (icon192 && icon512) {
-      return {
-        icon64,
-        icon180: icon180 ?? icon192,
-        icon192,
-        icon512,
-        icon512Maskable: icon512Maskable ?? icon512
-      };
-    }
-  }
-
-  // Fallback to company monogram (never platform `aabanker` icon)
-  const icon64 = renderMonogramPng(options.company, options.brandColor, 64, "any");
-  const icon180 = renderMonogramPng(options.company, options.brandColor, 180, "apple");
-  const icon192 = renderMonogramPng(options.company, options.brandColor, 192, "any");
-  const icon512 = renderMonogramPng(options.company, options.brandColor, 512, "any");
-  const icon512Maskable = renderMonogramPng(options.company, options.brandColor, 512, "maskable");
-  return { icon64, icon180, icon192, icon512, icon512Maskable };
-}
-
-async function applyCompanyManifestAndIcons(options: {
-  company: string;
-  logo?: string;
-  brandColor?: string;
-  subdomain?: string;
-  apiBaseUrl?: string;
   signature: string;
 }): Promise<void> {
   if (typeof window === "undefined" || typeof Blob === "undefined" || typeof URL === "undefined") {
@@ -322,62 +291,38 @@ async function applyCompanyManifestAndIcons(options: {
   const token = ++manifestBuildToken;
   const origin = window.location.origin;
 
-  const rendered = await resolveBrandIcons({
-    company: options.company,
-    logo: options.logo,
-    brandColor: options.brandColor,
-    subdomain: options.subdomain,
-    apiBaseUrl: options.apiBaseUrl
-  });
-
+  const loadedImg = options.logo ? await loadImageElement(options.logo) : null;
   if (token !== manifestBuildToken) {
     return;
   }
 
-  // Update browser tab favicon & iOS Home Screen icon to crisp square company PNGs.
-  if (rendered.icon64) {
-    setLinkHref('link[rel="icon"], link[rel="shortcut icon"]', rendered.icon64);
-  } else if (options.logo) {
-    setLinkHref('link[rel="icon"], link[rel="shortcut icon"]', options.logo);
-  }
-  if (rendered.icon180) {
-    setLinkHref('link[rel="apple-touch-icon"]', rendered.icon180);
-  } else if (options.logo) {
-    setLinkHref('link[rel="apple-touch-icon"]', options.logo);
-  }
+  const icon192 =
+    (loadedImg ? drawLogoToSquarePng(loadedImg, 192, "any") : null) ??
+    renderMonogramPng(options.company, options.brandColor, 192, "any");
+  const icon512 =
+    (loadedImg ? drawLogoToSquarePng(loadedImg, 512, "any") : null) ??
+    renderMonogramPng(options.company, options.brandColor, 512, "any");
+  const icon512Maskable =
+    (loadedImg ? drawLogoToSquarePng(loadedImg, 512, "maskable") : null) ??
+    renderMonogramPng(options.company, options.brandColor, 512, "maskable");
 
   const icons: Array<{ src: string; sizes: string; type: string; purpose?: string }> = [];
-  if (rendered.icon192) {
-    icons.push({ src: rendered.icon192, sizes: "192x192", type: "image/png", purpose: "any" });
+  if (icon192) icons.push({ src: icon192, sizes: "192x192", type: "image/png", purpose: "any" });
+  if (icon512) icons.push({ src: icon512, sizes: "512x512", type: "image/png", purpose: "any" });
+  if (icon512Maskable) {
+    icons.push({ src: icon512Maskable, sizes: "512x512", type: "image/png", purpose: "maskable" });
   }
-  if (rendered.icon512) {
-    icons.push({ src: rendered.icon512, sizes: "512x512", type: "image/png", purpose: "any" });
-  }
-  if (rendered.icon512Maskable) {
-    icons.push({
-      src: rendered.icon512Maskable,
-      sizes: "512x512",
-      type: "image/png",
-      purpose: "maskable"
-    });
-  }
-
-  // Only fall back to default platform icons if canvas rendering is completely unavailable.
   if (icons.length === 0) {
     icons.push(
       { src: `${origin}/icons/icon-192.png`, sizes: "192x192", type: "image/png", purpose: "any" },
-      { src: `${origin}/icons/icon-512.png`, sizes: "512x512", type: "image/png", purpose: "any" },
-      { src: `${origin}/icons/icon-512.png`, sizes: "512x512", type: "image/png", purpose: "maskable" }
+      { src: `${origin}/icons/icon-512.png`, sizes: "512x512", type: "image/png", purpose: "any" }
     );
   }
-
-  const shortcutIcon = rendered.icon192 ?? `${origin}/icons/icon-192.png`;
-  const shortName = deriveShortName(options.company);
 
   const manifest = {
     id: `${origin}/`,
     name: options.company,
-    short_name: shortName,
+    short_name: deriveShortName(options.company),
     description: `${options.company} — Staff & Operations Portal`,
     start_url: `${origin}/`,
     scope: `${origin}/`,
@@ -389,28 +334,8 @@ async function applyCompanyManifestAndIcons(options: {
     background_color: "#0b0e14",
     categories: ["finance", "business"],
     prefer_related_applications: false,
-    icons,
-    shortcuts: [
-      {
-        name: "Dashboard",
-        short_name: "Dashboard",
-        description: `Open ${options.company} dashboard`,
-        url: `${origin}/app/dashboard`,
-        icons: [{ src: shortcutIcon, sizes: "192x192", type: "image/png" }]
-      },
-      {
-        name: "Field agent",
-        short_name: "Agent",
-        description: `Open ${options.company} field agent workspace`,
-        url: `${origin}/app/agent/home`,
-        icons: [{ src: shortcutIcon, sizes: "192x192", type: "image/png" }]
-      }
-    ]
+    icons
   };
-
-  if (token !== manifestBuildToken) {
-    return;
-  }
 
   const nextBlobUrl = URL.createObjectURL(
     new Blob([JSON.stringify(manifest)], { type: "application/manifest+json" })
@@ -428,8 +353,7 @@ async function applyCompanyManifestAndIcons(options: {
 
 /**
  * Bootstraps company branding & PWA manifest immediately at app startup from cached
- * company host/workspace metadata so Chrome/Safari sees the company name and logo
- * immediately without flashing `aabanker`.
+ * company host/workspace metadata.
  */
 export function bootstrapDocumentBrandingFromCache(apiBaseUrl?: string): void {
   if (typeof window === "undefined") {
@@ -457,6 +381,7 @@ export function bootstrapDocumentBrandingFromCache(apiBaseUrl?: string): void {
       logoUrl: active.logoUrl,
       brandColor: active.brandColor,
       subdomain: active.subdomain,
+      tenantId: active.tenantId,
       apiBaseUrl
     });
   }
@@ -464,8 +389,8 @@ export function bootstrapDocumentBrandingFromCache(apiBaseUrl?: string): void {
 
 /**
  * Updates browser tab title, favicon, apple-touch-icon, app-name meta tags,
- * and dynamic PWA manifest so installing the app mimics the company's name & logo
- * on both tenant subdomains and signed-in root-domain company workspaces.
+ * and real HTTPS PWA manifest URL so Chrome Desktop, Edge Desktop, Android WebAPK,
+ * and iOS Safari all install the app with the company's exact name and square PNG logo.
  */
 export function applyDocumentBranding(options: DocumentBrandingOptions): void {
   if (typeof document === "undefined") {
@@ -475,6 +400,11 @@ export function applyDocumentBranding(options: DocumentBrandingOptions): void {
   const logo = options.logoUrl?.trim();
   const brandColor = options.brandColor?.trim();
   const sub = options.subdomain?.trim().toLowerCase() || undefined;
+  const tenantId =
+    options.tenantId?.trim() && options.tenantId.trim() !== "platform"
+      ? options.tenantId.trim()
+      : undefined;
+  const apiBase = options.apiBaseUrl?.trim().replace(/\/+$/, "").replace(/\/api$/, "") || undefined;
 
   if (company) {
     document.title = options.pagePrefix ? `${options.pagePrefix} · ${company}` : company;
@@ -488,25 +418,46 @@ export function applyDocumentBranding(options: DocumentBrandingOptions): void {
     writeActiveBrandCache({
       name: company,
       subdomain: sub,
+      tenantId,
       logoUrl: logo,
       brandColor
     });
 
+    const signature = `${sub ?? ""}|${tenantId ?? ""}|${company}|${brandColor ?? ""}|${logo ?? ""}`;
+    const v = shortHash(signature);
+    const idQuery = sub
+      ? `subdomain=${encodeURIComponent(sub)}`
+      : tenantId
+        ? `tenantId=${encodeURIComponent(tenantId)}`
+        : "";
+
+    if (apiBase && idQuery) {
+      // Real HTTP/HTTPS manifest & exact server-rendered square PNG icons (192x192, 512x512 any & maskable).
+      // Required for Chrome Desktop HTTPS address-bar Install icon AND Android WebAPK minting.
+      const faviconUrl = `${apiBase}/api/v1/auth/company-icon?${idQuery}&size=64&purpose=any&v=${v}`;
+      const appleIconUrl = `${apiBase}/api/v1/auth/company-icon?${idQuery}&size=180&purpose=apple&v=${v}`;
+      setLinkHref('link[rel="icon"], link[rel="shortcut icon"]', faviconUrl);
+      setLinkHref('link[rel="apple-touch-icon"]', appleIconUrl);
+
+      if (signature !== activeManifestSignature) {
+        manifestBuildToken += 1;
+        activeManifestSignature = signature;
+        revokeBlobManifestSoon();
+        const originParam = encodeURIComponent(window.location.origin);
+        setManifestLink(
+          `${apiBase}/api/v1/auth/manifest.webmanifest?${idQuery}&origin=${originParam}&v=${v}`
+        );
+      }
+      return;
+    }
+
+    // Fallback when API base URL or tenant identifier is unavailable
     if (logo) {
       setLinkHref('link[rel="icon"], link[rel="shortcut icon"]', logo);
       setLinkHref('link[rel="apple-touch-icon"]', logo);
     }
-
-    const signature = `${sub ?? "root"}|${company}|${brandColor ?? ""}|${logo ?? ""}`;
     if (signature !== activeManifestSignature) {
-      void applyCompanyManifestAndIcons({
-        company,
-        logo,
-        brandColor,
-        subdomain: sub,
-        apiBaseUrl: options.apiBaseUrl,
-        signature
-      });
+      void applyFallbackBlobManifest({ company, logo, brandColor, signature });
     }
     return;
   }
@@ -526,11 +477,7 @@ export function applyDocumentBranding(options: DocumentBrandingOptions): void {
   if (activeManifestSignature !== "default") {
     manifestBuildToken += 1;
     activeManifestSignature = "default";
-    if (activeBlobManifestUrl) {
-      const prev = activeBlobManifestUrl;
-      activeBlobManifestUrl = null;
-      window.setTimeout(() => URL.revokeObjectURL(prev), 5_000);
-    }
+    revokeBlobManifestSoon();
     setManifestLink(DEFAULT_MANIFEST);
   }
 }

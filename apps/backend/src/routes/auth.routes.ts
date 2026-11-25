@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Response } from "express";
 import { applyApprovalWorkflowToSusuNav, setTransactionPinSchema, verifyTransactionPinSchema, tenantSignInHost, type ApprovalWorkflow } from "@bms/shared";
 import { loginRateLimit } from "../middleware/rateLimit.js";
 import { validateBody } from "../middleware/validateBody.js";
@@ -8,7 +8,13 @@ import {
   logoutAccessToken,
   resolveUserFromAccessToken
 } from "../services/authService.js";
-import { findTenantBySubdomain } from "../services/tenantHostService.js";
+import { findTenantBySubdomain, findTenantForBranding } from "../services/tenantHostService.js";
+import {
+  computeTenantBrandVersion,
+  parsePwaIconPurpose,
+  parsePwaIconSize,
+  renderTenantPwaPng
+} from "../services/pwaIconService.js";
 import { extendSession } from "../services/authStore.js";
 import { getSupabaseAuthClient } from "../config/supabaseClient.js";
 import { getApprovalWorkflow } from "../services/approvalWorkflowService.js";
@@ -45,103 +51,6 @@ authRouter.get("/company-host", async (req, res) => {
   }
 });
 
-function parseBase64DataImage(dataUrl: string): { mime: string; buffer: Buffer } | null {
-  const match = /^data:(image\/(?:png|jpeg|jpg|webp|gif|svg\+xml));base64,([A-Za-z0-9+/=\s]+)$/i.exec(
-    dataUrl.trim()
-  );
-  if (!match) {
-    return null;
-  }
-  const mime = match[1]!.toLowerCase() === "image/jpg" ? "image/jpeg" : match[1]!.toLowerCase();
-  const buffer = Buffer.from(match[2]!.replace(/\s+/g, ""), "base64");
-  return buffer.length > 0 ? { mime, buffer } : null;
-}
-
-function detectImageDimensions(mime: string, buffer: Buffer): { width: number; height: number } | null {
-  try {
-    // PNG: 8-byte signature + 4-byte len + "IHDR" + 4-byte width + 4-byte height
-    if (mime === "image/png" && buffer.length >= 24 && buffer.toString("ascii", 12, 16) === "IHDR") {
-      return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
-    }
-    // JPEG: scan SOF0/SOF1/SOF2 markers
-    if (mime === "image/jpeg" && buffer.length >= 4 && buffer[0] === 0xff && buffer[1] === 0xd8) {
-      let offset = 2;
-      while (offset + 8 < buffer.length) {
-        if (buffer[offset] !== 0xff) {
-          offset += 1;
-          continue;
-        }
-        const marker = buffer[offset + 1]!;
-        if (marker === 0xc0 || marker === 0xc1 || marker === 0xc2) {
-          return {
-            height: buffer.readUInt16BE(offset + 5),
-            width: buffer.readUInt16BE(offset + 7)
-          };
-        }
-        const segmentLength = buffer.readUInt16BE(offset + 2);
-        if (segmentLength < 2) break;
-        offset += 2 + segmentLength;
-      }
-    }
-  } catch {
-    return null;
-  }
-  return null;
-}
-
-function companyInitials(name: string): string {
-  const parts = name
-    .trim()
-    .split(/\s+/)
-    .filter((p) => /[a-z0-9]/i.test(p));
-  if (parts.length === 0) return "CO";
-  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
-  return `${parts[0]![0] ?? ""}${parts[1]![0] ?? ""}`.toUpperCase();
-}
-
-function buildMonogramSvg(name: string, brandColor?: string): string {
-  const bg = brandColor && /^#[0-9a-f]{3,8}$/i.test(brandColor) ? brandColor : "#3d5afe";
-  const text = companyInitials(name).replace(/[<>&"']/g, "");
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512"><rect width="512" height="512" rx="96" fill="${bg}"/><text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle" fill="#ffffff" font-family="system-ui,-apple-system,Segoe UI,sans-serif" font-size="210" font-weight="700">${text}</text></svg>`;
-}
-
-async function resolveTenantIconAsset(tenant: {
-  name: string;
-  logoUrl?: string;
-  brandColor?: string;
-}): Promise<{ mime: string; buffer: Buffer }> {
-  const raw = tenant.logoUrl?.trim();
-  if (raw) {
-    const decoded = parseBase64DataImage(raw);
-    if (decoded) {
-      return decoded;
-    }
-    if (/^https?:\/\//i.test(raw)) {
-      try {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 5_000);
-        const upstream = await fetch(raw, { signal: controller.signal });
-        clearTimeout(timer);
-        if (upstream.ok) {
-          const contentType = upstream.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() ?? "";
-          if (contentType.startsWith("image/")) {
-            const arr = await upstream.arrayBuffer();
-            if (arr.byteLength > 0 && arr.byteLength <= 3 * 1024 * 1024) {
-              return { mime: contentType, buffer: Buffer.from(arr) };
-            }
-          }
-        }
-      } catch {
-        /* fall through to monogram SVG */
-      }
-    }
-  }
-  return {
-    mime: "image/svg+xml",
-    buffer: Buffer.from(buildMonogramSvg(tenant.name, tenant.brandColor), "utf-8")
-  };
-}
-
 function deriveManifestShortName(name: string): string {
   const clean = name.trim().replace(/\s+/g, " ");
   if (clean.length <= 15) return clean;
@@ -155,20 +64,34 @@ function deriveManifestShortName(name: string): string {
   return out || clean.slice(0, 15).trim();
 }
 
+function setPublicPwaCorsHeaders(res: Response): void {
+  // Public unauthenticated PWA assets must not pair Allow-Origin: * with Allow-Credentials: true.
+  res.removeHeader("Access-Control-Allow-Credentials");
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+}
+
 authRouter.get("/company-icon", async (req, res) => {
   const subdomain = typeof req.query.subdomain === "string" ? req.query.subdomain : "";
+  const tenantId = typeof req.query.tenantId === "string" ? req.query.tenantId : "";
+  const size = parsePwaIconSize(req.query.size);
+  const purpose = parsePwaIconPurpose(req.query.purpose);
   try {
-    const tenant = await findTenantBySubdomain(subdomain);
+    const tenant = await findTenantForBranding({ subdomain, tenantId });
     if (!tenant) {
       res.status(404).end();
       return;
     }
-    const asset = await resolveTenantIconAsset(tenant);
-    res.setHeader("Content-Type", asset.mime);
-    res.setHeader("Cache-Control", "public, max-age=3600");
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
-    res.send(asset.buffer);
+    const png = await renderTenantPwaPng(tenant, { size, purpose });
+    setPublicPwaCorsHeaders(res);
+    res.setHeader("Content-Type", "image/png");
+    res.setHeader(
+      "Cache-Control",
+      typeof req.query.v === "string" && req.query.v.trim()
+        ? "public, max-age=86400, immutable"
+        : "public, max-age=300"
+    );
+    res.send(png);
   } catch {
     res.status(404).end();
   }
@@ -176,12 +99,16 @@ authRouter.get("/company-icon", async (req, res) => {
 
 authRouter.get("/manifest.webmanifest", async (req, res) => {
   const subdomain = typeof req.query.subdomain === "string" ? req.query.subdomain : "";
+  const tenantId = typeof req.query.tenantId === "string" ? req.query.tenantId : "";
   const rawOrigin = typeof req.query.origin === "string" ? req.query.origin.trim() : "";
   const safeOrigin = /^https?:\/\/[a-z0-9.-]+(?::\d+)?$/i.test(rawOrigin)
     ? rawOrigin.replace(/\/+$/, "")
     : "";
   try {
-    const tenant = subdomain ? await findTenantBySubdomain(subdomain) : null;
+    const tenant =
+      subdomain || tenantId
+        ? await findTenantForBranding({ subdomain, tenantId })
+        : null;
     const appName = tenant?.name?.trim() || "aabanker — Banking Management System";
     const shortName = tenant?.name?.trim()
       ? deriveManifestShortName(tenant.name)
@@ -192,23 +119,27 @@ authRouter.get("/manifest.webmanifest", async (req, res) => {
 
     const icons: Array<{ src: string; sizes: string; type: string; purpose?: string }> = [];
     const iconBase = safeOrigin || "";
+    let shortcutIcon = `${iconBase}/icons/icon-192.png`;
+
     if (tenant) {
-      const asset = await resolveTenantIconAsset(tenant);
-      const proto = (req.headers["x-forwarded-proto"] as string)?.split(",")[0]?.trim() || req.protocol;
+      const proto =
+        (req.headers["x-forwarded-proto"] as string)?.split(",")[0]?.trim() || req.protocol;
       const host = req.get("host");
-      const iconUrl = host
-        ? `${proto}://${host}/api/v1/auth/company-icon?subdomain=${encodeURIComponent(tenant.subdomain)}`
-        : `/api/v1/auth/company-icon?subdomain=${encodeURIComponent(tenant.subdomain)}`;
-      const dims = detectImageDimensions(asset.mime, asset.buffer);
-      const sizeStr =
-        asset.mime === "image/svg+xml"
-          ? "any"
-          : dims
-            ? `${dims.width}x${dims.height}`
-            : "512x512";
+      const base = host
+        ? `${proto}://${host}/api/v1/auth/company-icon`
+        : "/api/v1/auth/company-icon";
+      const idQuery = tenant.subdomain
+        ? `subdomain=${encodeURIComponent(tenant.subdomain)}`
+        : `tenantId=${encodeURIComponent(tenant.id)}`;
+      const v = computeTenantBrandVersion(tenant);
+      const icon192 = `${base}?${idQuery}&size=192&purpose=any&v=${v}`;
+      const icon512 = `${base}?${idQuery}&size=512&purpose=any&v=${v}`;
+      const icon512Maskable = `${base}?${idQuery}&size=512&purpose=maskable&v=${v}`;
+      shortcutIcon = icon192;
       icons.push(
-        { src: iconUrl, sizes: sizeStr, type: asset.mime, purpose: "any" },
-        { src: iconUrl, sizes: sizeStr, type: asset.mime, purpose: "maskable" }
+        { src: icon192, sizes: "192x192", type: "image/png", purpose: "any" },
+        { src: icon512, sizes: "512x512", type: "image/png", purpose: "any" },
+        { src: icon512Maskable, sizes: "512x512", type: "image/png", purpose: "maskable" }
       );
     } else {
       icons.push(
@@ -218,10 +149,9 @@ authRouter.get("/manifest.webmanifest", async (req, res) => {
       );
     }
 
+    setPublicPwaCorsHeaders(res);
     res.setHeader("Content-Type", "application/manifest+json; charset=utf-8");
     res.setHeader("Cache-Control", "public, max-age=60");
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
     res.json({
       id: startUrl,
       name: appName,
@@ -237,7 +167,23 @@ authRouter.get("/manifest.webmanifest", async (req, res) => {
       background_color: "#0b0e14",
       categories: ["finance", "business"],
       prefer_related_applications: false,
-      icons
+      icons,
+      shortcuts: [
+        {
+          name: "Dashboard",
+          short_name: "Dashboard",
+          description: `Open ${appName} dashboard`,
+          url: `${iconBase}/app/dashboard`,
+          icons: [{ src: shortcutIcon, sizes: "192x192", type: "image/png" }]
+        },
+        {
+          name: "Field agent",
+          short_name: "Agent",
+          description: `Open ${appName} field agent workspace`,
+          url: `${iconBase}/app/agent/home`,
+          icons: [{ src: shortcutIcon, sizes: "192x192", type: "image/png" }]
+        }
+      ]
     });
   } catch {
     res.status(404).json({ error: "Manifest unavailable" });

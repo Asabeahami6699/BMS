@@ -264,6 +264,7 @@ export function TenantApp() {
       logoUrl: companyBrand?.logoUrl,
       brandColor: companyBrand?.brandColor,
       subdomain: activeSubdomain,
+      tenantId: user.tenantId,
       apiBaseUrl: API_BASE_URL
     });
   }, [user?.tenantId, activeSubdomain, companyName, companyBrand?.logoUrl, companyBrand?.brandColor]);

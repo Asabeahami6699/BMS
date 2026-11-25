@@ -170,6 +170,49 @@ export async function findTenantBySubdomain(raw: string): Promise<TenantHostMatc
   return match;
 }
 
+export async function findTenantForBranding(params: {
+  subdomain?: string;
+  tenantId?: string;
+}): Promise<TenantHostMatch | null> {
+  if (params.subdomain?.trim()) {
+    const bySub = await findTenantBySubdomain(params.subdomain);
+    if (bySub) {
+      return bySub;
+    }
+  }
+  const rawId = params.tenantId?.trim();
+  if (!rawId || rawId === "platform") {
+    return null;
+  }
+  const cacheKey = `id:${rawId.toLowerCase()}`;
+  const cached = hostCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value;
+  }
+  const local = listTenantsFromStore().find((tenant) => tenant.id === rawId);
+  const supabase = getSupabaseAdminClient();
+  if (!supabase) {
+    return local ? fromStored(local, local.subdomain ?? rawId.toLowerCase()) : null;
+  }
+  const row = await selectTenantHostRow(supabase, "id", rawId);
+  if (!row || row.id === "platform") {
+    return local ? fromStored(local, local.subdomain ?? rawId.toLowerCase()) : null;
+  }
+  const match = rememberSubdomain({
+    id: row.id,
+    name: row.name,
+    subdomain:
+      row.subdomain && isTenantSubdomain(row.subdomain)
+        ? row.subdomain.toLowerCase()
+        : rawId.toLowerCase(),
+    subscriptionStatus: row.subscription_status === "inactive" ? "inactive" : "active",
+    logoUrl: validLogoUrl(row.logo_url),
+    brandColor: validBrandColor(row.brand_color)
+  });
+  hostCache.set(cacheKey, { value: match, expiresAt: Date.now() + HOST_CACHE_TTL_MS });
+  return match;
+}
+
 export async function assertLoginMatchesHost(
   tenantId: string | null,
   rawSubdomain: string | undefined
