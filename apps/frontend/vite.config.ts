@@ -26,6 +26,7 @@ export default defineConfig({
       ],
       workbox: {
         navigateFallback: "/index.html",
+        navigateFallbackDenylist: [/^\/api\//, /^\/pwa\//],
         // App shell JS exceeds Workbox's default 2 MiB precache cap.
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
@@ -33,7 +34,8 @@ export default defineConfig({
         globIgnores: ["**/favIconBms-*.png"],
         runtimeCaching: [
           {
-            urlPattern: ({ url }) => url.pathname.startsWith("/api/"),
+            urlPattern: ({ url }) =>
+              url.pathname.startsWith("/api/") || url.pathname.startsWith("/pwa/"),
             handler: "NetworkOnly"
           }
         ]

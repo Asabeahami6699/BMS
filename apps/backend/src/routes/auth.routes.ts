@@ -113,33 +113,44 @@ authRouter.get("/manifest.webmanifest", async (req, res) => {
     const shortName = tenant?.name?.trim()
       ? deriveManifestShortName(tenant.name)
       : "aabanker";
-    const themeColor = tenant?.brandColor || "#0b0e14";
+    // Keep neutral dark title-bar color instead of painting the window top bar in the company brand color.
+    const themeColor = "#0b0e14";
     const startUrl = safeOrigin ? `${safeOrigin}/` : "/";
     const scope = safeOrigin ? `${safeOrigin}/` : "/";
+    const manifestId =
+      tenant && safeOrigin
+        ? `${safeOrigin}/?app=${encodeURIComponent(tenant.subdomain || tenant.id)}`
+        : startUrl;
 
     const icons: Array<{ src: string; sizes: string; type: string; purpose?: string }> = [];
     const iconBase = safeOrigin || "";
     let shortcutIcon = `${iconBase}/icons/icon-192.png`;
 
     if (tenant) {
+      const preferSameOrigin = req.query.sameOrigin === "1" && Boolean(safeOrigin);
       const proto =
         (req.headers["x-forwarded-proto"] as string)?.split(",")[0]?.trim() || req.protocol;
       const host = req.get("host");
-      const base = host
-        ? `${proto}://${host}/api/v1/auth/company-icon`
-        : "/api/v1/auth/company-icon";
+      const base = preferSameOrigin
+        ? `${safeOrigin}/pwa/company-icon`
+        : host
+          ? `${proto}://${host}/api/v1/auth/company-icon`
+          : "/api/v1/auth/company-icon";
       const idQuery = tenant.subdomain
         ? `subdomain=${encodeURIComponent(tenant.subdomain)}`
         : `tenantId=${encodeURIComponent(tenant.id)}`;
       const v = computeTenantBrandVersion(tenant);
-      const icon192 = `${base}?${idQuery}&size=192&purpose=any&v=${v}`;
-      const icon512 = `${base}?${idQuery}&size=512&purpose=any&v=${v}`;
-      const icon512Maskable = `${base}?${idQuery}&size=512&purpose=maskable&v=${v}`;
-      shortcutIcon = icon192;
+      const iconUrl = (size: number, purpose: "any" | "maskable" = "any") =>
+        `${base}?${idQuery}&size=${size}&purpose=${purpose}&v=${v}`;
+      shortcutIcon = iconUrl(192, "any");
       icons.push(
-        { src: icon192, sizes: "192x192", type: "image/png", purpose: "any" },
-        { src: icon512, sizes: "512x512", type: "image/png", purpose: "any" },
-        { src: icon512Maskable, sizes: "512x512", type: "image/png", purpose: "maskable" }
+        { src: iconUrl(48, "any"), sizes: "48x48", type: "image/png", purpose: "any" },
+        { src: iconUrl(96, "any"), sizes: "96x96", type: "image/png", purpose: "any" },
+        { src: iconUrl(144, "any"), sizes: "144x144", type: "image/png", purpose: "any" },
+        { src: iconUrl(192, "any"), sizes: "192x192", type: "image/png", purpose: "any" },
+        { src: iconUrl(256, "any"), sizes: "256x256", type: "image/png", purpose: "any" },
+        { src: iconUrl(512, "any"), sizes: "512x512", type: "image/png", purpose: "any" },
+        { src: iconUrl(512, "maskable"), sizes: "512x512", type: "image/png", purpose: "maskable" }
       );
     } else {
       icons.push(
@@ -153,7 +164,7 @@ authRouter.get("/manifest.webmanifest", async (req, res) => {
     res.setHeader("Content-Type", "application/manifest+json; charset=utf-8");
     res.setHeader("Cache-Control", "public, max-age=60");
     res.json({
-      id: startUrl,
+      id: manifestId,
       name: appName,
       short_name: shortName,
       description: `${appName} — Staff & Operations Portal`,

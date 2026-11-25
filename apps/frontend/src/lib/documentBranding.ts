@@ -370,7 +370,7 @@ async function applyFallbackBlobManifest(options: {
     orientation: "any",
     lang: "en",
     dir: "ltr",
-    theme_color: options.brandColor || "#0b0e14",
+    theme_color: "#0b0e14",
     background_color: "#0b0e14",
     categories: ["finance", "business"],
     prefer_related_applications: false,
@@ -451,9 +451,6 @@ export function applyDocumentBranding(options: DocumentBrandingOptions): void {
     setMetaContent("application-name", company);
     setMetaContent("apple-mobile-web-app-title", deriveShortName(company));
     setMetaContent("description", `${company} — Staff & Operations Portal`);
-    if (brandColor) {
-      setMetaContent("theme-color", brandColor);
-    }
 
     writeActiveBrandCache({
       name: company,
@@ -471,11 +468,22 @@ export function applyDocumentBranding(options: DocumentBrandingOptions): void {
         ? `tenantId=${encodeURIComponent(tenantId)}`
         : "";
 
-    if (apiBase && idQuery) {
-      // Real HTTP/HTTPS manifest & exact server-rendered square PNG icons (192x192, 512x512 any & maskable).
-      // Required for Chrome Desktop HTTPS address-bar Install icon AND Android WebAPK minting.
-      const faviconUrl = `${apiBase}/api/v1/auth/company-icon?${idQuery}&size=64&purpose=any&v=${v}`;
-      const appleIconUrl = `${apiBase}/api/v1/auth/company-icon?${idQuery}&size=180&purpose=apple&v=${v}`;
+    const host = window.location.hostname.toLowerCase().replace(/\.$/, "");
+    const useSameOriginProxy =
+      window.location.protocol === "https:" &&
+      (host === "aabanker.com" || host.endsWith(".aabanker.com") || host.endsWith(".vercel.app"));
+    const pwaBase = useSameOriginProxy
+      ? "/pwa"
+      : apiBase
+        ? `${apiBase}/api/v1/auth`
+        : "";
+
+    if (pwaBase && idQuery) {
+      // Same-origin proxied HTTPS manifest & exact server-rendered square PNG icons on production,
+      // and direct local backend URLs on localhost.
+      const sameOriginFlag = useSameOriginProxy ? "&sameOrigin=1" : "";
+      const faviconUrl = `${pwaBase}/company-icon?${idQuery}&size=64&purpose=any&v=${v}`;
+      const appleIconUrl = `${pwaBase}/company-icon?${idQuery}&size=180&purpose=apple&v=${v}`;
       setBrandFavicon(faviconUrl);
       setBrandAppleIcon(appleIconUrl);
 
@@ -485,7 +493,7 @@ export function applyDocumentBranding(options: DocumentBrandingOptions): void {
         revokeBlobManifestSoon();
         const originParam = encodeURIComponent(window.location.origin);
         setManifestLink(
-          `${apiBase}/api/v1/auth/manifest.webmanifest?${idQuery}&origin=${originParam}&v=${v}`
+          `${pwaBase}/manifest.webmanifest?${idQuery}&origin=${originParam}${sameOriginFlag}&v=${v}`
         );
       }
       return;

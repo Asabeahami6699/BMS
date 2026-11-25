@@ -80,7 +80,7 @@ describe("renderTenantPwaPng", () => {
     expect(iconMeta.height).toBe(64);
 
     const manifestRes = await request(app)
-      .get("/api/v1/auth/manifest.webmanifest?subdomain=opiokopwa&origin=https%3A%2F%2Fopiokopwa.aabanker.com")
+      .get("/api/v1/auth/manifest.webmanifest?subdomain=opiokopwa&origin=https%3A%2F%2Fopiokopwa.aabanker.com&sameOrigin=1")
       .set("Origin", "https://opiokopwa.aabanker.com");
 
     expect(manifestRes.status).toBe(200);
@@ -89,7 +89,13 @@ describe("renderTenantPwaPng", () => {
     expect(manifestRes.headers["access-control-allow-credentials"]).toBeUndefined();
     expect(manifestRes.body.name).toBe("Opioko Susu");
     expect(manifestRes.body.short_name).toBe("Opioko Susu");
-    expect(manifestRes.body.icons).toHaveLength(3);
-    expect(manifestRes.body.icons.every((i: { src: string }) => i.src.includes("/api/v1/auth/company-icon"))).toBe(true);
+    expect(manifestRes.body.theme_color).toBe("#0b0e14");
+    expect(manifestRes.body.id).toBe("https://opiokopwa.aabanker.com/?app=opiokopwa");
+    expect(manifestRes.body.icons).toHaveLength(7);
+    expect(
+      manifestRes.body.icons.every((i: { src: string }) =>
+        i.src.startsWith("https://opiokopwa.aabanker.com/pwa/company-icon?")
+      )
+    ).toBe(true);
   });
 });

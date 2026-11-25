@@ -10,23 +10,27 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="aabanker" />
-    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
-    <link rel="icon" type="image/png" sizes="48x48" href="/favicon-48.png" />
-    <link rel="icon" type="image/png" href="/favicon.png" />
-    <link rel="shortcut icon" type="image/png" href="/favicon.png" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-180.png" />
-    <link rel="apple-touch-icon" href="/icons/icon-180.png" />
     <title>aabanker — Banking Management System</title>
     <script>
       (function () {
-        function attachManifest(href) {
-          var link = document.querySelector('link[rel="manifest"]');
-          if (!link) {
-            link = document.createElement("link");
-            link.rel = "manifest";
-            document.head.appendChild(link);
+        function appendLink(rel, href, extra) {
+          var link = document.createElement("link");
+          link.rel = rel;
+          link.href = href;
+          if (extra) {
+            for (var k in extra) {
+              link.setAttribute(k, extra[k]);
+            }
           }
-          link.setAttribute("href", href);
+          document.head.appendChild(link);
+        }
+
+        function attachDefaultIcons() {
+          appendLink("icon", "/favicon-32.png", { type: "image/png", sizes: "32x32" });
+          appendLink("icon", "/favicon-48.png", { type: "image/png", sizes: "48x48" });
+          appendLink("icon", "/favicon.png", { type: "image/png" });
+          appendLink("shortcut icon", "/favicon.png", { type: "image/png" });
+          appendLink("apple-touch-icon", "/icons/icon-180.png", { sizes: "180x180" });
         }
 
         try {
@@ -39,11 +43,15 @@
 
           var rawApi = "%VITE_API_URL%";
           var host = (window.location.hostname || "").toLowerCase().replace(/\.$/, "");
+          var isLocal = host === "localhost" || host.endsWith(".localhost") || host === "127.0.0.1";
+          var useSameOriginProxy =
+            window.location.protocol === "https:" &&
+            (host === "aabanker.com" || host.endsWith(".aabanker.com") || host.endsWith(".vercel.app"));
           var apiBase = rawApi && rawApi.indexOf("%VITE_") === -1
             ? rawApi.replace(/\/+$/, "").replace(/\/api$/, "")
-            : (host === "localhost" || host.endsWith(".localhost") ? "http://localhost:4000" : "");
+            : (isLocal ? "http://localhost:4000" : "");
 
-          // Detect company subdomain (e.g. opiokosusu.aabanker.com / opiokosusu.localhost)
+          // Detect company subdomain (e.g. ese.aabanker.com / ese.localhost)
           var reserved = {
             www: 1, api: 1, admin: 1, app: 1, mail: 1, platform: 1,
             ns1: 1, ns2: 1, vercel: 1, ftp: 1, smtp: 1
@@ -71,9 +79,6 @@
             if (appName) appName.setAttribute("content", cached.name);
             var appleTitle = document.querySelector('meta[name="apple-mobile-web-app-title"]');
             if (appleTitle) appleTitle.setAttribute("content", String(cached.name).slice(0, 15));
-            if (cached.brandColor && themeMeta) {
-              themeMeta.setAttribute("content", cached.brandColor);
-            }
           }
 
           var originParam = encodeURIComponent(window.location.origin);
@@ -85,30 +90,27 @@
                 ? "tenantId=" + encodeURIComponent(cached.tenantId)
                 : "";
 
-          if (idQuery && apiBase) {
-            // Attach real HTTPS company manifest immediately at 0ms so Chrome Desktop,
-            // Edge Desktop, and Android WebAPK always see a valid installable company PWA.
-            attachManifest(
-              apiBase + "/api/v1/auth/manifest.webmanifest?" + idQuery + "&origin=" + originParam
+          if (idQuery && (useSameOriginProxy || apiBase)) {
+            var pwaBase = useSameOriginProxy ? "/pwa" : apiBase + "/api/v1/auth";
+            var sameOriginFlag = useSameOriginProxy ? "&sameOrigin=1" : "";
+            appendLink(
+              "manifest",
+              pwaBase + "/manifest.webmanifest?" + idQuery + "&origin=" + originParam + sameOriginFlag
             );
-            var faviconUrl = apiBase + "/api/v1/auth/company-icon?" + idQuery + "&size=64&purpose=any";
-            var appleIconUrl = apiBase + "/api/v1/auth/company-icon?" + idQuery + "&size=180&purpose=apple";
-            var favIcons = document.querySelectorAll('link[rel="icon"], link[rel="shortcut icon"]');
-            for (var j = 0; j < favIcons.length; j++) {
-              favIcons[j].removeAttribute("sizes");
-              favIcons[j].setAttribute("href", faviconUrl);
-            }
-            var appleIcons = document.querySelectorAll('link[rel="apple-touch-icon"]');
-            for (var k = 0; k < appleIcons.length; k++) {
-              appleIcons[k].setAttribute("href", appleIconUrl);
-            }
+            var faviconUrl = pwaBase + "/company-icon?" + idQuery + "&size=64&purpose=any";
+            var appleIconUrl = pwaBase + "/company-icon?" + idQuery + "&size=180&purpose=apple";
+            appendLink("icon", faviconUrl, { type: "image/png" });
+            appendLink("shortcut icon", faviconUrl, { type: "image/png" });
+            appendLink("apple-touch-icon", appleIconUrl, { sizes: "180x180" });
           } else {
-            attachManifest("/manifest.webmanifest");
+            attachDefaultIcons();
+            appendLink("manifest", "/manifest.webmanifest");
           }
         } catch (e) {
           document.documentElement.dataset.theme = "dark";
           document.documentElement.style.colorScheme = "dark";
-          attachManifest("/manifest.webmanifest");
+          attachDefaultIcons();
+          appendLink("manifest", "/manifest.webmanifest");
         }
       })();
     </script>

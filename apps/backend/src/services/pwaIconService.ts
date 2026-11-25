@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import sharp from "sharp";
 
 export type PwaIconPurpose = "any" | "maskable" | "apple";
-export type PwaIconSize = 64 | 180 | 192 | 512;
+export type PwaIconSize = 48 | 64 | 96 | 144 | 180 | 192 | 256 | 512;
 
 export type TenantIconSource = {
   id: string;
@@ -11,7 +11,7 @@ export type TenantIconSource = {
   brandColor?: string;
 };
 
-const ALLOWED_SIZES = new Set<number>([64, 180, 192, 512]);
+const ALLOWED_SIZES = new Set<number>([48, 64, 96, 144, 180, 192, 256, 512]);
 const MAX_CACHE_ENTRIES = 200;
 const renderedPngCache = new Map<string, Buffer>();
 

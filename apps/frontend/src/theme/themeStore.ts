@@ -27,6 +27,10 @@ function persistTheme(theme: ThemeMode): void {
 export function applyTheme(theme: ThemeMode): void {
   document.documentElement.dataset.theme = theme;
   document.documentElement.style.colorScheme = theme;
+  const themeMeta = document.querySelector('meta[name="theme-color"]');
+  if (themeMeta) {
+    themeMeta.setAttribute("content", theme === "light" ? "#f4f6fa" : "#0b0e14");
+  }
 }
 
 type ThemeState = {
