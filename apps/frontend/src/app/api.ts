@@ -899,6 +899,13 @@ export async function fetchJson<T>(url: string, init?: RequestInit, retried = fa
   });
 }
 
+export class CompanyHostNotFoundError extends Error {
+  constructor(message = "This company address is not set up yet.") {
+    super(message);
+    this.name = "CompanyHostNotFoundError";
+  }
+}
+
 export async function lookupCompanyHost(subdomain: string): Promise<{
   name: string;
   subdomain: string;
@@ -906,7 +913,23 @@ export async function lookupCompanyHost(subdomain: string): Promise<{
   logoUrl?: string;
   brandColor?: string;
 }> {
-  return fetchJson(`${API_BASE_URL}/api/v1/auth/company-host?subdomain=${encodeURIComponent(subdomain)}`);
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/auth/company-host?subdomain=${encodeURIComponent(subdomain)}`
+  );
+  if (response.status === 404) {
+    throw new CompanyHostNotFoundError();
+  }
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(body?.error ?? `Company lookup failed (${response.status})`);
+  }
+  return (await response.json()) as {
+    name: string;
+    subdomain: string;
+    signInHost: string;
+    logoUrl?: string;
+    brandColor?: string;
+  };
 }
 
 export async function login(email: string, password: string): Promise<AuthSession> {

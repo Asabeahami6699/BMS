@@ -8,6 +8,7 @@ import { useAuth } from "../auth/AuthContext";
 import { buildTenantNav } from "../config/tenantModules";
 import { API_BASE_URL, getCompanyProfile, type AppRole, type AuthMe, type CompanyProfile } from "./api";
 import { applyDocumentBranding, resetDocumentBranding } from "../lib/documentBranding";
+import { readCachedCompanyHost, writeCachedCompanyHost } from "../lib/tenantHostCache";
 import { BranchManagementCard } from "./BranchManagementCard";
 import { AccountNumberPolicyCard } from "./AccountNumberPolicyCard";
 import { AccountStatementsPage } from "./AccountStatementsPage";
@@ -197,7 +198,16 @@ export function TenantApp() {
     navigate("/login", { replace: true });
   }
 
-  const [companyBrand, setCompanyBrand] = useState<Pick<CompanyProfile, "logoUrl" | "brandColor"> | null>(null);
+  const activeSubdomain =
+    user?.tenantSubdomain ??
+    (typeof window !== "undefined" ? parseTenantSubdomain(window.location.hostname) : null);
+
+  const [companyBrand, setCompanyBrand] = useState<Pick<CompanyProfile, "logoUrl" | "brandColor"> | null>(
+    () => {
+      const cached = readCachedCompanyHost(activeSubdomain);
+      return cached ? { logoUrl: cached.logoUrl, brandColor: cached.brandColor } : null;
+    }
+  );
 
   useEffect(() => {
     if (!user?.tenantId || user.tenantId === "platform") {
@@ -205,12 +215,22 @@ export function TenantApp() {
       return;
     }
     let cancelled = false;
+    const syncBrand = (profile: CompanyProfile) => {
+      setCompanyBrand({ logoUrl: profile.logoUrl, brandColor: profile.brandColor });
+      applyTenantFontStep(profile.fontSizeStep);
+      if (activeSubdomain) {
+        writeCachedCompanyHost(activeSubdomain, {
+          name: profile.name || user.tenantName || activeSubdomain,
+          logoUrl: profile.logoUrl,
+          brandColor: profile.brandColor
+        });
+      }
+    };
     const load = () => {
       void getCompanyProfile()
         .then((profile) => {
           if (!cancelled) {
-            setCompanyBrand({ logoUrl: profile.logoUrl, brandColor: profile.brandColor });
-            applyTenantFontStep(profile.fontSizeStep);
+            syncBrand(profile);
           }
         })
         .catch(() => undefined);
@@ -219,8 +239,7 @@ export function TenantApp() {
     const onUpdated = (event: Event) => {
       const detail = (event as CustomEvent<CompanyProfile>).detail;
       if (detail) {
-        setCompanyBrand({ logoUrl: detail.logoUrl, brandColor: detail.brandColor });
-        applyTenantFontStep(detail.fontSizeStep);
+        syncBrand(detail);
       } else {
         load();
       }
@@ -231,7 +250,7 @@ export function TenantApp() {
       applyTenantFontStep(0);
       window.removeEventListener(COMPANY_PROFILE_UPDATED_EVENT, onUpdated);
     };
-  }, [user?.tenantId, role]);
+  }, [user?.tenantId, user?.tenantName, activeSubdomain, role]);
 
   const companyName = user?.tenantName ?? user?.tenantId ?? undefined;
 
@@ -240,16 +259,14 @@ export function TenantApp() {
       resetDocumentBranding();
       return;
     }
-    const subdomain =
-      user.tenantSubdomain ??
-      (typeof window !== "undefined" ? parseTenantSubdomain(window.location.hostname) : null);
     applyDocumentBranding({
       companyName,
       logoUrl: companyBrand?.logoUrl,
-      subdomain,
+      brandColor: companyBrand?.brandColor,
+      subdomain: activeSubdomain,
       apiBaseUrl: API_BASE_URL
     });
-  }, [user?.tenantId, user?.tenantSubdomain, companyName, companyBrand?.logoUrl]);
+  }, [user?.tenantId, activeSubdomain, companyName, companyBrand?.logoUrl, companyBrand?.brandColor]);
 
   if (role === "field_agent") {
     return (

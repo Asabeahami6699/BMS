@@ -1,6 +1,11 @@
-import { FormEvent, useEffect, useId, useState } from "react";
+import { FormEvent, useEffect, useId, useMemo, useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
-import { API_BASE_URL, getAuthSession, lookupCompanyHost } from "../app/api";
+import {
+  API_BASE_URL,
+  CompanyHostNotFoundError,
+  getAuthSession,
+  lookupCompanyHost
+} from "../app/api";
 import { brandColorStyle } from "../app/brandColor";
 import { useAuth } from "../auth/AuthContext";
 import { getHomePathForRole } from "../auth/roleRedirect";
@@ -8,6 +13,11 @@ import { parseTenantSubdomain } from "@bms/shared";
 import { BmsBrandIcon } from "../components/BmsBrandIcon";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { applyDocumentBranding, resetDocumentBranding } from "../lib/documentBranding";
+import {
+  clearCachedCompanyHost,
+  readCachedCompanyHost,
+  writeCachedCompanyHost
+} from "../lib/tenantHostCache";
 import { toUserFacingError } from "../lib/networkError";
 import { InstallAppButton } from "../pwa/InstallAppButton";
 
@@ -32,10 +42,14 @@ export function LoginPage() {
   const [status, setStatus] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const hostSubdomain = parseTenantSubdomain(window.location.hostname);
-  const [companyName, setCompanyName] = useState("");
-  const [companyLogoUrl, setCompanyLogoUrl] = useState<string | undefined>(undefined);
-  const [companyBrandColor, setCompanyBrandColor] = useState<string | undefined>(undefined);
-  const [loadingCompany, setLoadingCompany] = useState(Boolean(hostSubdomain));
+  const initialCached = useMemo(() => readCachedCompanyHost(hostSubdomain), [hostSubdomain]);
+  const [companyName, setCompanyName] = useState(() => initialCached?.name ?? "");
+  const [companyLogoUrl, setCompanyLogoUrl] = useState<string | undefined>(
+    () => initialCached?.logoUrl
+  );
+  const [companyBrandColor, setCompanyBrandColor] = useState<string | undefined>(
+    () => initialCached?.brandColor
+  );
   const [unknownHost, setUnknownHost] = useState(false);
 
   const session = getAuthSession();
@@ -43,6 +57,7 @@ export function LoginPage() {
     !hostSubdomain ||
     hostSubdomain === (user?.tenantSubdomain || "").toLowerCase() ||
     hostSubdomain === (user?.tenantId || "").toLowerCase();
+  const willRedirect = Boolean(!submitting && session?.accessToken && user && ownsHost);
 
   const isCompanyHost = Boolean(hostSubdomain && !unknownHost);
 
@@ -53,51 +68,67 @@ export function LoginPage() {
       : "Use the email and password provided by your administrator.";
 
   useEffect(() => {
+    if (willRedirect) {
+      return;
+    }
     if (!hostSubdomain) {
-      setLoadingCompany(false);
+      // Gently warm up the backend while the user types credentials on main domain login
+      void fetch(`${API_BASE_URL}/health`).catch(() => undefined);
       return;
     }
     let cancelled = false;
-    setLoadingCompany(true);
     void lookupCompanyHost(hostSubdomain)
       .then((company) => {
-        if (!cancelled) {
-          setCompanyName(company.name);
-          setCompanyLogoUrl(company.logoUrl);
-          setCompanyBrandColor(company.brandColor);
-          setUnknownHost(false);
-          setLoadingCompany(false);
-        }
+        if (cancelled) return;
+        writeCachedCompanyHost(hostSubdomain, {
+          name: company.name,
+          logoUrl: company.logoUrl,
+          brandColor: company.brandColor
+        });
+        setCompanyName((prev) => (prev === company.name ? prev : company.name));
+        setCompanyLogoUrl((prev) => (prev === company.logoUrl ? prev : company.logoUrl));
+        setCompanyBrandColor((prev) => (prev === company.brandColor ? prev : company.brandColor));
+        setUnknownHost(false);
       })
-      .catch(() => {
-        if (!cancelled) {
+      .catch((error) => {
+        if (cancelled) return;
+        if (error instanceof CompanyHostNotFoundError) {
+          clearCachedCompanyHost(hostSubdomain);
           setCompanyName("");
           setCompanyLogoUrl(undefined);
           setCompanyBrandColor(undefined);
           setUnknownHost(true);
-          setLoadingCompany(false);
         }
+        // On transient network/cold-start errors, keep any cached company branding intact.
       });
     return () => {
       cancelled = true;
     };
-  }, [hostSubdomain]);
+  }, [hostSubdomain, willRedirect]);
 
   useEffect(() => {
+    if (willRedirect) {
+      return;
+    }
     if (!isCompanyHost) {
       resetDocumentBranding();
       return;
     }
+    // Only update manifest & branding once we have the real company name (instant from cache on repeat visits).
+    if (!companyName) {
+      return;
+    }
     applyDocumentBranding({
-      companyName: companyName || hostSubdomain || undefined,
+      companyName,
       pagePrefix: "Sign in",
       logoUrl: companyLogoUrl,
+      brandColor: companyBrandColor,
       subdomain: hostSubdomain,
       apiBaseUrl: API_BASE_URL
     });
-  }, [isCompanyHost, companyName, companyLogoUrl, hostSubdomain]);
+  }, [willRedirect, isCompanyHost, companyName, companyLogoUrl, companyBrandColor, hostSubdomain]);
 
-  if (!submitting && session?.accessToken && user && ownsHost) {
+  if (willRedirect && user) {
     return <Navigate to={getHomePathForRole(user.role, user.subscribedModules)} replace />;
   }
 
@@ -143,31 +174,23 @@ export function LoginPage() {
       <section className="login-card">
         <div className="login-card__brand">
           {isCompanyHost ? (
-            loadingCompany ? (
-              <>
-                <div className="login-card__logo-skeleton" aria-hidden="true" />
-                <p className="dash-brand-name">{displayCompanyName}</p>
-                <p className="dash-brand-tag">Loading workspace…</p>
-              </>
-            ) : (
-              <>
-                {companyLogoUrl ? (
-                  <div className="login-card__logo">
-                    <img src={companyLogoUrl} alt={`${displayCompanyName} logo`} />
-                  </div>
-                ) : (
-                  <div
-                    className="login-card__monogram"
-                    aria-hidden="true"
-                    style={companyBrandColor ? { background: companyBrandColor } : undefined}
-                  >
-                    <span>{companyInitials(displayCompanyName)}</span>
-                  </div>
-                )}
-                <p className="dash-brand-name">{displayCompanyName}</p>
-                <p className="dash-brand-tag">Staff &amp; Operations Portal</p>
-              </>
-            )
+            <>
+              {companyLogoUrl ? (
+                <div className="login-card__logo">
+                  <img src={companyLogoUrl} alt={`${displayCompanyName} logo`} />
+                </div>
+              ) : (
+                <div
+                  className="login-card__monogram"
+                  aria-hidden="true"
+                  style={companyBrandColor ? { background: companyBrandColor } : undefined}
+                >
+                  <span>{companyInitials(displayCompanyName)}</span>
+                </div>
+              )}
+              <p className="dash-brand-name">{displayCompanyName}</p>
+              <p className="dash-brand-tag">Staff &amp; Operations Portal</p>
+            </>
           ) : (
             <>
               <BmsBrandIcon />

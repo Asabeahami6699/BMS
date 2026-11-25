@@ -7,6 +7,7 @@ import {
 } from "@bms/shared";
 import { getSupabaseAdminClient } from "../config/supabaseClient.js";
 import { getTenantFromStore, upsertTenantInStore } from "./authStore.js";
+import { invalidateTenantHostCache } from "./tenantHostService.js";
 
 const PROFILE_COLUMNS_BASE = "id, name, phone, email, address, tax_id, logo_url, brand_color";
 const PROFILE_COLUMNS = `${PROFILE_COLUMNS_BASE}, font_size_step`;
@@ -202,6 +203,7 @@ export async function updateCompanyProfile(
     }
   }
 
+  invalidateTenantHostCache(tenantId);
   return remember(next);
 }
 

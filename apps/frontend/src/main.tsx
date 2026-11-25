@@ -10,8 +10,10 @@ import { ToastProvider } from "./components/Toast";
 import { ThemeProvider } from "./theme/ThemeProvider";
 import "./styles.css";
 import { applyTheme, getStoredTheme } from "./theme/themeStore";
+import { initPwaInstallCapture } from "./pwa/usePwaInstall";
 
 applyTheme(getStoredTheme());
+initPwaInstallCapture();
 
 // Service worker (vite-plugin-pwa → /sw.js). Required for full Chrome installability
 // alongside public/manifest.webmanifest; also enables future push if wired later.

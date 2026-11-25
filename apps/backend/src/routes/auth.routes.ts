@@ -30,6 +30,7 @@ authRouter.get("/company-host", async (req, res) => {
       res.status(404).json({ error: "This company address is not set up yet." });
       return;
     }
+    res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
     res.json({
       name: tenant.name,
       subdomain: tenant.subdomain,
@@ -93,6 +94,7 @@ authRouter.get("/manifest.webmanifest", async (req, res) => {
     const scope = safeOrigin ? `${safeOrigin}/` : "/";
 
     const icons: Array<{ src: string; sizes: string; type: string; purpose?: string }> = [];
+    const iconBase = safeOrigin || "";
     if (tenant?.logoUrl && parseBase64DataImage(tenant.logoUrl)) {
       const parsed = parseBase64DataImage(tenant.logoUrl)!;
       const proto = (req.headers["x-forwarded-proto"] as string)?.split(",")[0]?.trim() || req.protocol;
@@ -100,20 +102,18 @@ authRouter.get("/manifest.webmanifest", async (req, res) => {
       const iconUrl = host
         ? `${proto}://${host}/api/v1/auth/company-icon?subdomain=${encodeURIComponent(tenant.subdomain)}`
         : `/api/v1/auth/company-icon?subdomain=${encodeURIComponent(tenant.subdomain)}`;
-      icons.push(
-        { src: iconUrl, sizes: "192x192", type: parsed.mime, purpose: "any" },
-        { src: iconUrl, sizes: "512x512", type: parsed.mime, purpose: "any" }
-      );
-    } else {
-      const iconBase = safeOrigin || "";
-      icons.push(
-        { src: `${iconBase}/icons/icon-192.png`, sizes: "192x192", type: "image/png", purpose: "any" },
-        { src: `${iconBase}/icons/icon-512.png`, sizes: "512x512", type: "image/png", purpose: "any" }
-      );
+      icons.push({ src: iconUrl, sizes: "any", type: parsed.mime, purpose: "any" });
     }
+    // Always keep guaranteed-valid square 192x192 & 512x512 PNG icons so Chrome PWA installability never drops.
+    icons.push(
+      { src: `${iconBase}/icons/icon-192.png`, sizes: "192x192", type: "image/png", purpose: "any" },
+      { src: `${iconBase}/icons/icon-512.png`, sizes: "512x512", type: "image/png", purpose: "any" },
+      { src: `${iconBase}/icons/icon-512.png`, sizes: "512x512", type: "image/png", purpose: "maskable" }
+    );
 
     res.setHeader("Content-Type", "application/manifest+json; charset=utf-8");
     res.setHeader("Cache-Control", "public, max-age=300");
+    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
     res.json({
       id: startUrl,
       name: appName,

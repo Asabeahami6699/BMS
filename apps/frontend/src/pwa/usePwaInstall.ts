@@ -10,7 +10,9 @@ function isStandaloneDisplay(): boolean {
     return false;
   }
   const mediaStandalone = window.matchMedia("(display-mode: standalone)").matches;
-  const iosStandalone = "standalone" in window.navigator && Boolean((window.navigator as Navigator & { standalone?: boolean }).standalone);
+  const iosStandalone =
+    "standalone" in window.navigator &&
+    Boolean((window.navigator as Navigator & { standalone?: boolean }).standalone);
   return mediaStandalone || iosStandalone;
 }
 
@@ -21,6 +23,52 @@ function isIosDevice(): boolean {
   return /iphone|ipad|ipod/i.test(window.navigator.userAgent);
 }
 
+/**
+ * Module-level singleton capture for `beforeinstallprompt` / `appinstalled`.
+ * Prevents losing the Chrome install prompt if it fires before `InstallAppButton`
+ * mounts, during company branding hydration, or across route transitions.
+ */
+let capturedPrompt: BeforeInstallPromptEvent | null = null;
+let capturedInstalled = isStandaloneDisplay();
+let captureInitialized = false;
+const listeners = new Set<() => void>();
+
+function notifyListeners(): void {
+  for (const listener of listeners) {
+    listener();
+  }
+}
+
+export function initPwaInstallCapture(): void {
+  if (captureInitialized || typeof window === "undefined") {
+    return;
+  }
+  captureInitialized = true;
+  capturedInstalled = isStandaloneDisplay();
+
+  window.addEventListener("beforeinstallprompt", (event: Event) => {
+    event.preventDefault();
+    capturedPrompt = event as BeforeInstallPromptEvent;
+    notifyListeners();
+  });
+
+  window.addEventListener("appinstalled", () => {
+    capturedPrompt = null;
+    capturedInstalled = true;
+    notifyListeners();
+  });
+
+  const media = window.matchMedia("(display-mode: standalone)");
+  const onMediaChange = (event: MediaQueryListEvent) => {
+    if (event.matches) {
+      capturedInstalled = true;
+      capturedPrompt = null;
+      notifyListeners();
+    }
+  };
+  media.addEventListener("change", onMediaChange);
+}
+
 export type PwaInstallState = {
   canInstall: boolean;
   installed: boolean;
@@ -29,55 +77,44 @@ export type PwaInstallState = {
 };
 
 export function usePwaInstall(): PwaInstallState {
-  const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(null);
-  const [installed, setInstalled] = useState(isStandaloneDisplay);
+  initPwaInstallCapture();
+
+  const [, setVersion] = useState(0);
   const [isIos] = useState(isIosDevice);
 
   useEffect(() => {
-    const onBeforeInstall = (event: Event) => {
-      event.preventDefault();
-      setDeferred(event as BeforeInstallPromptEvent);
-    };
-    const onInstalled = () => {
-      setDeferred(null);
-      setInstalled(true);
-    };
-    const onDisplayModeChange = (event: MediaQueryListEvent) => {
-      if (event.matches) {
-        setInstalled(true);
-      }
-    };
-
-    const media = window.matchMedia("(display-mode: standalone)");
-    setInstalled(isStandaloneDisplay());
-    media.addEventListener("change", onDisplayModeChange);
-    window.addEventListener("beforeinstallprompt", onBeforeInstall);
-    window.addEventListener("appinstalled", onInstalled);
-
+    const sync = () => setVersion((v) => v + 1);
+    listeners.add(sync);
+    // Sync immediately in case standalone status changed before mount
+    const nowStandalone = isStandaloneDisplay();
+    if (nowStandalone !== capturedInstalled) {
+      capturedInstalled = nowStandalone;
+      sync();
+    }
     return () => {
-      media.removeEventListener("change", onDisplayModeChange);
-      window.removeEventListener("beforeinstallprompt", onBeforeInstall);
-      window.removeEventListener("appinstalled", onInstalled);
+      listeners.delete(sync);
     };
   }, []);
 
   const promptInstall = useCallback(async () => {
-    if (!deferred) {
+    const promptEvent = capturedPrompt;
+    if (!promptEvent) {
       return "unavailable" as const;
     }
-    await deferred.prompt();
-    const { outcome } = await deferred.userChoice;
-    setDeferred(null);
+    await promptEvent.prompt();
+    const { outcome } = await promptEvent.userChoice;
+    capturedPrompt = null;
     if (outcome === "accepted") {
-      setInstalled(true);
+      capturedInstalled = true;
     }
+    notifyListeners();
     return outcome;
-  }, [deferred]);
+  }, []);
 
   return {
-    canInstall: Boolean(deferred) && !installed,
-    installed,
-    isIos: isIos && !installed,
+    canInstall: Boolean(capturedPrompt) && !capturedInstalled,
+    installed: capturedInstalled,
+    isIos: isIos && !capturedInstalled,
     promptInstall
   };
 }

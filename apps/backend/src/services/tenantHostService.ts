@@ -113,12 +113,36 @@ async function selectTenantHostRow(
   throw new Error(`Failed to look up company address: ${full.error.message}`);
 }
 
+const HOST_CACHE_TTL_MS = 60_000;
+const hostCache = new Map<string, { value: TenantHostMatch; expiresAt: number }>();
+
+export function invalidateTenantHostCache(tenantIdOrSubdomain?: string): void {
+  if (!tenantIdOrSubdomain) {
+    hostCache.clear();
+    return;
+  }
+  const needle = tenantIdOrSubdomain.trim().toLowerCase();
+  for (const [key, entry] of hostCache.entries()) {
+    if (
+      key === needle ||
+      entry.value.id.toLowerCase() === needle ||
+      entry.value.subdomain.toLowerCase() === needle
+    ) {
+      hostCache.delete(key);
+    }
+  }
+}
+
 export async function findTenantBySubdomain(raw: string): Promise<TenantHostMatch | null> {
   const parsed = tenantSubdomainSchema.safeParse(raw);
   if (!parsed.success) {
     return null;
   }
   const subdomain = parsed.data;
+  const cached = hostCache.get(subdomain);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value;
+  }
   const local = listTenantsFromStore().find(
     (tenant) => tenant.subdomain === subdomain || tenant.id.toLowerCase() === subdomain
   );
@@ -134,7 +158,7 @@ export async function findTenantBySubdomain(raw: string): Promise<TenantHostMatc
   if (!row || row.id === "platform") {
     return local ? fromStored(local, local.subdomain ?? subdomain) : null;
   }
-  return rememberSubdomain({
+  const match = rememberSubdomain({
     id: row.id,
     name: row.name,
     subdomain: row.subdomain && isTenantSubdomain(row.subdomain) ? row.subdomain.toLowerCase() : subdomain,
@@ -142,6 +166,8 @@ export async function findTenantBySubdomain(raw: string): Promise<TenantHostMatc
     logoUrl: validLogoUrl(row.logo_url),
     brandColor: validBrandColor(row.brand_color)
   });
+  hostCache.set(subdomain, { value: match, expiresAt: Date.now() + HOST_CACHE_TTL_MS });
+  return match;
 }
 
 export async function assertLoginMatchesHost(
