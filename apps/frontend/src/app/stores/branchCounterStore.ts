@@ -62,8 +62,10 @@ function readTellerCallover(sessionId: string): PersistedTellerCallover | null {
   if (typeof window === "undefined" || !sessionId) {
     return null;
   }
+  const key = `${TELLER_CALLOVER_STORAGE_PREFIX}${sessionId}`;
   try {
-    const raw = window.sessionStorage.getItem(`${TELLER_CALLOVER_STORAGE_PREFIX}${sessionId}`);
+    const raw =
+      window.localStorage.getItem(key) ?? window.sessionStorage.getItem(key);
     if (!raw) {
       return null;
     }
@@ -83,11 +85,14 @@ function writeTellerCallover(sessionId: string, value: PersistedTellerCallover):
   if (typeof window === "undefined" || !sessionId) {
     return;
   }
+  const key = `${TELLER_CALLOVER_STORAGE_PREFIX}${sessionId}`;
   try {
-    window.sessionStorage.setItem(
-      `${TELLER_CALLOVER_STORAGE_PREFIX}${sessionId}`,
-      JSON.stringify(value)
-    );
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    /* ignore quota errors */
+  }
+  try {
+    window.sessionStorage.setItem(key, JSON.stringify(value));
   } catch {
     /* ignore quota errors */
   }
@@ -97,8 +102,14 @@ function removeTellerCallover(sessionId: string): void {
   if (typeof window === "undefined" || !sessionId) {
     return;
   }
+  const key = `${TELLER_CALLOVER_STORAGE_PREFIX}${sessionId}`;
   try {
-    window.sessionStorage.removeItem(`${TELLER_CALLOVER_STORAGE_PREFIX}${sessionId}`);
+    window.localStorage.removeItem(key);
+  } catch {
+    /* ignore */
+  }
+  try {
+    window.sessionStorage.removeItem(key);
   } catch {
     /* ignore */
   }
@@ -106,21 +117,23 @@ function removeTellerCallover(sessionId: string): void {
 
 async function resolveTellerTodayStatement(
   floatSession: BranchFloatSession | null,
+  priorOpenFloatSession: BranchFloatSession | null,
   bootstrapStatement: BranchCounterStatement | null,
   fallbackCurrent: BranchCounterStatement | null
 ): Promise<BranchCounterStatement | null> {
-  if (!floatSession || floatSession.status !== "open") {
+  const targetSession = floatSession ?? priorOpenFloatSession;
+  if (!targetSession) {
     return bootstrapStatement;
   }
   if (
     bootstrapStatement &&
-    bootstrapStatement.summary.branchId === floatSession.branchId &&
-    bootstrapStatement.summary.date === floatSession.businessDate
+    bootstrapStatement.summary.branchId === targetSession.branchId &&
+    bootstrapStatement.summary.date === targetSession.businessDate
   ) {
     return bootstrapStatement;
   }
   try {
-    return await getBranchCounterStatement(floatSession.branchId, floatSession.businessDate);
+    return await getBranchCounterStatement(targetSession.branchId, targetSession.businessDate);
   } catch {
     return fallbackCurrent ?? bootstrapStatement;
   }
@@ -173,10 +186,11 @@ type BranchCounterState = {
   postTransaction: (payload: PostPayload) => Promise<Transaction>;
   payFieldPayout: (disclosureId: string) => Promise<void>;
   initBranchScope: (isHeadOfficeRole: boolean) => void;
-  hydrateTellerCallover: (sessionId: string) => void;
+  hydrateTellerCallover: (session: BranchFloatSession | string) => void;
   toggleTellerCalloverTx: (sessionId: string, txId: string) => void;
   setTellerCalloverMany: (sessionId: string, txIds: string[], checked: boolean) => void;
   setTellerCalloverConfirmed: (sessionId: string, confirmed: boolean) => void;
+  markTellerCalloverCompleted: (sessionId: string, checkedIds: string[]) => void;
   clearTellerCallover: (sessionId: string) => void;
 };
 
@@ -330,6 +344,7 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
         const branchPatch = reconcileBranchScope(scopedBranchId, data.branches);
         const tellerTodayStatement = await resolveTellerTodayStatement(
           data.floatSession,
+          data.priorOpenFloatSession ?? null,
           data.statement,
           get().tellerTodayStatement
         );
@@ -355,8 +370,11 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
           sessionExpired: false,
           error: null
         });
-        if (data.floatSession?.id) {
-          get().hydrateTellerCallover(data.floatSession.id);
+        if (data.floatSession) {
+          get().hydrateTellerCallover(data.floatSession);
+        }
+        if (data.priorOpenFloatSession) {
+          get().hydrateTellerCallover(data.priorOpenFloatSession);
         }
         if (branchPatch.statementBranchId) {
           setRuntimeBranchId(branchPatch.statementBranchId, { silent: true });
@@ -421,6 +439,7 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
           const branchPatch = reconcileBranchScope(scopedBranchId, data.branches);
           const tellerTodayStatement = await resolveTellerTodayStatement(
             data.floatSession,
+            data.priorOpenFloatSession ?? null,
             data.statement,
             get().tellerTodayStatement
           );
@@ -446,8 +465,11 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
             sessionExpired: false,
             error: null
           });
-          if (data.floatSession?.id) {
-            get().hydrateTellerCallover(data.floatSession.id);
+          if (data.floatSession) {
+            get().hydrateTellerCallover(data.floatSession);
+          }
+          if (data.priorOpenFloatSession) {
+            get().hydrateTellerCallover(data.priorOpenFloatSession);
           }
           if (branchPatch.statementBranchId) {
             setRuntimeBranchId(branchPatch.statementBranchId, { silent: true });
@@ -458,6 +480,7 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
           });
           const tellerTodayStatement = await resolveTellerTodayStatement(
             data.floatSession,
+            data.priorOpenFloatSession ?? null,
             data.statement,
             get().tellerTodayStatement
           );
@@ -479,8 +502,11 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
             sessionExpired: false,
             error: null
           });
-          if (data.floatSession?.id) {
-            get().hydrateTellerCallover(data.floatSession.id);
+          if (data.floatSession) {
+            get().hydrateTellerCallover(data.floatSession);
+          }
+          if (data.priorOpenFloatSession) {
+            get().hydrateTellerCallover(data.priorOpenFloatSession);
           }
         }
         if (selectedCustomerId) {
@@ -686,10 +712,39 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
     }
   },
 
-  hydrateTellerCallover: (sessionId) => {
+  hydrateTellerCallover: (sessionOrId) => {
+    const session = typeof sessionOrId === "string" ? null : sessionOrId;
+    const sessionId = typeof sessionOrId === "string" ? sessionOrId : sessionOrId?.id;
     if (!sessionId) {
       return;
     }
+
+    const serverChecked = Array.isArray(session?.calloverCheckedTxIds)
+      ? session.calloverCheckedTxIds
+      : null;
+    const serverConfirmed = Boolean(session?.calloverConfirmedAt);
+
+    if (serverChecked !== null || serverConfirmed) {
+      const local = readTellerCallover(sessionId);
+      const existing = get().tellerCalloverCheckedBySession[sessionId];
+      const mergedChecked = Array.from(
+        new Set([...(serverChecked ?? []), ...(existing ?? local?.checkedIds ?? [])])
+      );
+      const confirmed = serverConfirmed || Boolean(get().tellerCalloverConfirmedBySession[sessionId] ?? local?.confirmed);
+      writeTellerCallover(sessionId, { checkedIds: mergedChecked, confirmed });
+      set((state) => ({
+        tellerCalloverCheckedBySession: {
+          ...state.tellerCalloverCheckedBySession,
+          [sessionId]: mergedChecked
+        },
+        tellerCalloverConfirmedBySession: {
+          ...state.tellerCalloverConfirmedBySession,
+          [sessionId]: confirmed
+        }
+      }));
+      return;
+    }
+
     const existing = get().tellerCalloverCheckedBySession[sessionId];
     if (existing !== undefined) {
       return;
@@ -769,6 +824,24 @@ export const useBranchCounterStore = create<BranchCounterState>((set, get) => ({
       tellerCalloverConfirmedBySession: {
         ...state.tellerCalloverConfirmedBySession,
         [sessionId]: confirmed
+      }
+    }));
+  },
+
+  markTellerCalloverCompleted: (sessionId, checkedIds) => {
+    if (!sessionId) {
+      return;
+    }
+    const deduped = Array.from(new Set(checkedIds));
+    writeTellerCallover(sessionId, { checkedIds: deduped, confirmed: true });
+    set((state) => ({
+      tellerCalloverCheckedBySession: {
+        ...state.tellerCalloverCheckedBySession,
+        [sessionId]: deduped
+      },
+      tellerCalloverConfirmedBySession: {
+        ...state.tellerCalloverConfirmedBySession,
+        [sessionId]: true
       }
     }));
   },

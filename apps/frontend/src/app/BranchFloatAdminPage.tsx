@@ -8,7 +8,7 @@ import { usePageLoading } from "./hooks/usePageLoading";
 import { formatBranchLabel } from "./branchDisplay";
 import { useTillFloatAdminStore } from "./stores/tillFloatAdminStore";
 
-type Props = { role: AppRole };
+type Props = { role: AppRole; currentUserId?: string };
 
 function formatMoney(n: number): string {
   return `GHS ${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -23,7 +23,7 @@ const STATUS_LABEL: Record<BranchFloatSession["status"], string> = {
   rejected: "Rejected"
 };
 
-export function BranchFloatAdminPage({ role }: Props) {
+export function BranchFloatAdminPage({ role, currentUserId }: Props) {
   const { showToast } = useToast();
   const pending = useTillFloatAdminStore((s) => s.pending);
   const todaySessions = useTillFloatAdminStore((s) => s.todaySessions);
@@ -246,18 +246,24 @@ export function BranchFloatAdminPage({ role }: Props) {
                           cash {formatMoney(exp)}
                         </span>
                       </div>
-                      <button
-                        type="button"
-                        className="button secondary"
-                        disabled={busy}
-                        onClick={() => {
-                          setClosingTarget(session);
-                          setClosingCash(exp.toFixed(2));
-                          setClosingNote("");
-                        }}
-                      >
-                        Close {session.businessDate} till
-                      </button>
+                      {currentUserId && session.cashierUserId === currentUserId ? (
+                        <Link to="/app/susu/teller-callover" className="button secondary">
+                          Open Teller call-over to close
+                        </Link>
+                      ) : (
+                        <button
+                          type="button"
+                          className="button secondary"
+                          disabled={busy}
+                          onClick={() => {
+                            setClosingTarget(session);
+                            setClosingCash(exp.toFixed(2));
+                            setClosingNote("");
+                          }}
+                        >
+                          Close {session.businessDate} till
+                        </button>
+                      )}
                     </div>
                   );
                 })}

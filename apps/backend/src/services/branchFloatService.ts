@@ -56,6 +56,10 @@ export type BranchFloatSession = {
   /** Pending expense awaiting admin/coordinator approval. */
   expenseRequested?: number;
   expenseRequestNote?: string;
+  /** Transaction IDs ticked off during teller call-over before closing the till. */
+  calloverCheckedTxIds?: string[];
+  /** ISO timestamp when the cashier confirmed teller call-over before closing. */
+  calloverConfirmedAt?: string;
 };
 
 type ActorContext = {
@@ -142,7 +146,12 @@ function rowToSession(row: Record<string, unknown>): BranchFloatSession {
       row.extra_cash_request_note != null ? String(row.extra_cash_request_note) : undefined,
     expenseRequested: row.expense_requested != null ? Number(row.expense_requested) : undefined,
     expenseRequestNote:
-      row.expense_request_note != null ? String(row.expense_request_note) : undefined
+      row.expense_request_note != null ? String(row.expense_request_note) : undefined,
+    calloverCheckedTxIds: Array.isArray(row.callover_checked_tx_ids)
+      ? row.callover_checked_tx_ids.filter((id): id is string => typeof id === "string")
+      : undefined,
+    calloverConfirmedAt:
+      row.callover_confirmed_at != null ? String(row.callover_confirmed_at) : undefined
   };
 }
 
@@ -180,6 +189,8 @@ function sessionToRow(session: BranchFloatSession): Record<string, unknown> {
     extra_cash_request_note: session.extraCashRequestNote ?? null,
     expense_requested: session.expenseRequested ?? null,
     expense_request_note: session.expenseRequestNote ?? null,
+    callover_checked_tx_ids: session.calloverCheckedTxIds ?? null,
+    callover_confirmed_at: session.calloverConfirmedAt ?? null,
     updated_at: new Date().toISOString()
   };
 }
@@ -198,18 +209,31 @@ async function persistSession(session: BranchFloatSession): Promise<void> {
     return;
   }
 
-  const row = sessionToRow(session);
-  let { error } = await supabase.from("branch_float_sessions").upsert(row);
+  let payload: Record<string, unknown> = sessionToRow(session);
+  let { error } = await supabase.from("branch_float_sessions").upsert(payload);
+  if (error && /callover_checked_tx_ids|callover_confirmed_at/i.test(error.message)) {
+    const {
+      callover_checked_tx_ids: _checkedTxIds,
+      callover_confirmed_at: _confirmedAt,
+      ...withoutCallover
+    } = payload;
+    void _checkedTxIds;
+    void _confirmedAt;
+    payload = withoutCallover;
+    const retry = await supabase.from("branch_float_sessions").upsert(payload);
+    error = retry.error;
+  }
   if (error && /top_up_requested|top_up_note/i.test(error.message)) {
     if ((session.topUpRequested ?? 0) > 0 || session.topUpNote) {
       throw new Error(
         "Float top-up storage is not ready. Apply migration 070_branch_float_top_up.sql in Supabase, then try again."
       );
     }
-    const { top_up_requested: _topUpAmount, top_up_note: _topUpNote, ...withoutTopUp } = row;
+    const { top_up_requested: _topUpAmount, top_up_note: _topUpNote, ...withoutTopUp } = payload;
     void _topUpAmount;
     void _topUpNote;
-    const retry = await supabase.from("branch_float_sessions").upsert(withoutTopUp);
+    payload = withoutTopUp;
+    const retry = await supabase.from("branch_float_sessions").upsert(payload);
     error = retry.error;
   }
   if (
@@ -226,11 +250,12 @@ async function persistSession(session: BranchFloatSession): Promise<void> {
       extra_cash: _extraCash,
       total_expenses: _totalExpenses,
       ...withoutCashCapital
-    } = row;
+    } = payload;
     void _initialCash;
     void _extraCash;
     void _totalExpenses;
-    const retry = await supabase.from("branch_float_sessions").upsert(withoutCashCapital);
+    payload = withoutCashCapital;
+    const retry = await supabase.from("branch_float_sessions").upsert(payload);
     error = retry.error;
   }
   if (error && !isMissingSupabaseResource(error.message)) {
@@ -707,22 +732,33 @@ export async function listBranchFloatSessions(
 export async function closeBranchFloat(
   context: ActorContext,
   sessionId: string,
-  input: { actualClosing: number; varianceNote?: string }
+  input: {
+    actualClosing: number;
+    varianceNote?: string;
+    calloverCheckedTxIds?: string[];
+    calloverConfirmed?: boolean;
+  }
 ): Promise<BranchFloatSession> {
   const sessions = await listSessions(context.tenantId);
   const session = sessions.find((s) => s.id === sessionId);
   if (!session) {
     throw new Error("Float session not found");
   }
+  const isSelfClose = session.cashierUserId === context.userId;
   const canCloseOnBehalf =
     context.role === "admin" ||
     (context.role === "coordinator" &&
       (!context.branchId || context.branchId === session.branchId));
-  if (session.cashierUserId !== context.userId && !canCloseOnBehalf) {
+  if (!isSelfClose && !canCloseOnBehalf) {
     throw new Error("You can only close your own float session");
   }
   if (session.status !== "open") {
     throw new Error("Float session must be open before end-of-day close");
+  }
+  if (isSelfClose && input.calloverConfirmed !== true) {
+    throw new Error(
+      "Complete and confirm your Teller call-over on the Teller call-over page before closing your till"
+    );
   }
 
   const expected = expectedCash(session);
@@ -731,6 +767,21 @@ export async function closeBranchFloat(
   session.actualClosing = actual;
   session.variance = Math.round((actual - expected) * 100) / 100;
   session.varianceNote = input.varianceNote?.trim() || undefined;
+  if (Array.isArray(input.calloverCheckedTxIds)) {
+    session.calloverCheckedTxIds = Array.from(
+      new Set(
+        input.calloverCheckedTxIds
+          .filter((id): id is string => typeof id === "string" && id.trim().length > 0)
+          .map((id) => id.trim())
+      )
+    );
+  }
+  if (input.calloverConfirmed === true) {
+    session.calloverConfirmedAt = session.calloverConfirmedAt ?? new Date().toISOString();
+    if (!session.calloverCheckedTxIds) {
+      session.calloverCheckedTxIds = [];
+    }
+  }
   session.status = "closed";
   session.closedAt = new Date().toISOString();
 

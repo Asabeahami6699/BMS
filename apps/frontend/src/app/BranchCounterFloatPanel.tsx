@@ -18,7 +18,6 @@ import {
   allocateBranchFloat,
   approveBranchFloatExpense,
   approveBranchFloatExtraCash,
-  closeBranchFloat,
   collectBranchFloatExtraCash,
   recordBranchFloatExpense,
   requestBranchFloat,
@@ -100,24 +99,17 @@ export function BranchCounterFloatPanel({
     fallbackStatement,
     priorOpenFloatSession,
     tellerCalloverCheckedBySession,
-    tellerCalloverConfirmedBySession,
-    clearTellerCallover
+    tellerCalloverConfirmedBySession
   } = useBranchCounterStore(
     useShallow((s) => ({
       tellerTodayStatement: s.tellerTodayStatement,
       fallbackStatement: s.statement,
       priorOpenFloatSession: s.priorOpenFloatSession,
       tellerCalloverCheckedBySession: s.tellerCalloverCheckedBySession,
-      tellerCalloverConfirmedBySession: s.tellerCalloverConfirmedBySession,
-      clearTellerCallover: s.clearTellerCallover
+      tellerCalloverConfirmedBySession: s.tellerCalloverConfirmedBySession
     }))
   );
   const [expanded, setExpanded] = useState(false);
-  const [actualClosing, setActualClosing] = useState("");
-  const [varianceNote, setVarianceNote] = useState("");
-  const [priorCloseOpen, setPriorCloseOpen] = useState(false);
-  const [priorActualClosing, setPriorActualClosing] = useState("");
-  const [priorVarianceNote, setPriorVarianceNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [allocateAmount, setAllocateAmount] = useState<Record<string, string>>({});
   const [allocateInitialCash, setAllocateInitialCash] = useState<Record<string, string>>({});
@@ -141,6 +133,8 @@ export function BranchCounterFloatPanel({
       : 0);
 
   const tillOpen = floatSession?.status === "open";
+  const tillClosedOrSettled =
+    floatSession?.status === "closed" || floatSession?.status === "settled";
   const topUpWaiting = Boolean(tillOpen && isFloatTopUpRequest(floatSession!));
 
   const availableActions = useMemo((): TillAction[] => {
@@ -152,26 +146,6 @@ export function BranchCounterFloatPanel({
     }
     return ["extra_float", "extra_cash", "expense"];
   }, [tillOpen, topUpWaiting]);
-
-  const closeVariancePreview = useMemo(() => {
-    const raw = actualClosing.trim();
-    if (!raw) {
-      return null;
-    }
-    const actual = Number(raw);
-    if (!Number.isFinite(actual) || actual < 0) {
-      return null;
-    }
-    const expected = floatSummary?.expectedCash ?? 0;
-    const variance = Math.round((actual - expected) * 100) / 100;
-    if (Math.abs(variance) < 0.005) {
-      return { type: "balanced" as const, amount: 0 };
-    }
-    if (variance > 0) {
-      return { type: "overage" as const, amount: variance };
-    }
-    return { type: "shortage" as const, amount: Math.abs(variance) };
-  }, [actualClosing, floatSummary?.expectedCash]);
 
   const tellerCallover = useMemo(() => {
     const sessionId = floatSession?.id ?? "";
@@ -209,7 +183,10 @@ export function BranchCounterFloatPanel({
       }
     }
 
-    const checkedIds = new Set(sessionId ? (tellerCalloverCheckedBySession[sessionId] ?? []) : []);
+    const checkedIds = new Set<string>([
+      ...(floatSession?.calloverCheckedTxIds ?? []),
+      ...(sessionId ? (tellerCalloverCheckedBySession[sessionId] ?? []) : [])
+    ]);
     const depositIds = deposits.map((d) => d.id);
     const withdrawalIds = withdrawals.map((w) => w.id);
     const allIds = [...depositIds, ...withdrawalIds];
@@ -218,27 +195,19 @@ export function BranchCounterFloatPanel({
     const totalCount = allIds.length;
     const checkedCount = checkedDepositsCount + checkedWithdrawalsCount;
     const allItemsChecked = totalCount === 0 || checkedCount === totalCount;
-    const confirmed = Boolean(sessionId && tellerCalloverConfirmedBySession[sessionId]);
-    const depositTotal = Math.round(deposits.reduce((sum, l) => sum + l.amount, 0) * 100) / 100;
-    const withdrawalTotal =
-      Math.round(withdrawals.reduce((sum, l) => sum + l.amount, 0) * 100) / 100;
+    const confirmed = Boolean(
+      floatSession?.calloverConfirmedAt ||
+        (sessionId && tellerCalloverConfirmedBySession[sessionId])
+    );
 
     return {
-      sessionId,
       deposits,
       withdrawals,
-      depositIds,
-      withdrawalIds,
-      checkedIds,
-      checkedDepositsCount,
-      checkedWithdrawalsCount,
       totalCount,
       checkedCount,
       allItemsChecked,
       confirmed,
-      readyToClose: allItemsChecked && confirmed,
-      depositTotal,
-      withdrawalTotal
+      readyToClose: allItemsChecked && confirmed
     };
   }, [
     floatSession,
@@ -397,65 +366,6 @@ export function BranchCounterFloatPanel({
     }
   }
 
-  async function handleClose(e: FormEvent) {
-    e.preventDefault();
-    if (!floatSession) {
-      return;
-    }
-    if (!tellerCallover.allItemsChecked) {
-      showToast(
-        "Complete your teller call-over by checking all today's deposits and withdrawals first",
-        "error"
-      );
-      return;
-    }
-    if (!tellerCallover.confirmed) {
-      showToast("Tick the call-over confirmation box before closing your till", "error");
-      return;
-    }
-    const expected = floatSummary?.expectedCash ?? 0;
-    const actual = Number(actualClosing);
-    const variance = Math.round((actual - expected) * 100) / 100;
-    const absVariance = Math.abs(variance);
-    if (absVariance >= 0.005 && !varianceNote.trim()) {
-      showToast(
-        variance > 0
-          ? "Add a note explaining the overage before closing"
-          : "Add a note explaining the shortage before closing",
-        "error"
-      );
-      return;
-    }
-    setBusy(true);
-    try {
-      await closeBranchFloat(floatSession.id, {
-        actualClosing: actual,
-        varianceNote: varianceNote.trim() || undefined
-      });
-      if (absVariance < 0.005) {
-        showToast("Till closed — drawer balanced", "success");
-      } else if (variance > 0) {
-        showToast(
-          `Till closed — overage ${formatMoney(absVariance)} flagged on Overages/Shortages (Branch till)`,
-          "success"
-        );
-      } else {
-        showToast(
-          `Till closed — shortage ${formatMoney(absVariance)} flagged on Overages/Shortages (Branch till)`,
-          "success"
-        );
-      }
-      clearTellerCallover(floatSession.id);
-      setActualClosing("");
-      setVarianceNote("");
-      onUpdated();
-    } catch (error) {
-      showToast(toUserFacingError(error, "Close failed"), "error");
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function handleSettle(session: BranchFloatSession) {
     setBusy(true);
     try {
@@ -464,34 +374,6 @@ export function BranchCounterFloatPanel({
       onUpdated();
     } catch (error) {
       showToast(toUserFacingError(error, "Settle failed"), "error");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleClosePriorTill(event: FormEvent) {
-    event.preventDefault();
-    if (!priorOpenFloatSession) {
-      return;
-    }
-    const actual = Number(priorActualClosing);
-    if (!Number.isFinite(actual) || actual < 0) {
-      showToast("Enter the physical cash counted for the prior till", "error");
-      return;
-    }
-    setBusy(true);
-    try {
-      await closeBranchFloat(priorOpenFloatSession.id, {
-        actualClosing: actual,
-        varianceNote: priorVarianceNote.trim() || undefined
-      });
-      showToast(`Closed ${priorOpenFloatSession.businessDate} till — you can now open today's till`, "success");
-      setPriorCloseOpen(false);
-      setPriorActualClosing("");
-      setPriorVarianceNote("");
-      onUpdated();
-    } catch (error) {
-      showToast(toUserFacingError(error, "Could not close prior till"), "error");
     } finally {
       setBusy(false);
     }
@@ -508,7 +390,6 @@ export function BranchCounterFloatPanel({
           priorOpenFloatSession.totalDeposits +
           priorOpenFloatSession.totalDailySusu -
           priorOpenFloatSession.totalWithdrawals -
-          (priorOpenFloatSession.totalFieldWithdrawals ?? 0) -
           priorOpenFloatSession.totalExpenses) *
           100
       ) / 100
@@ -525,80 +406,18 @@ export function BranchCounterFloatPanel({
             <strong>Unclosed till from {priorOpenFloatSession.businessDate}</strong>
             <p className="muted">
               Your previous till is still open (expected cash{" "}
-              <strong>{formatMoney(priorExpectedCash)}</strong>). Close it before opening today&apos;s
-              till.
+              <strong>{formatMoney(priorExpectedCash)}</strong>). Complete your call-over and close
+              it on the Teller call-over page before opening today&apos;s till.
             </p>
           </div>
           <div className="eod-guard-banner__actions">
-            <button
-              type="button"
-              className="button"
-              disabled={busy}
-              onClick={() => {
-                setPriorActualClosing(priorExpectedCash.toFixed(2));
-                setPriorVarianceNote("");
-                setPriorCloseOpen(true);
-              }}
-            >
-              Close {priorOpenFloatSession.businessDate} till
-            </button>
+            <Link to="/app/susu/teller-callover" className="button">
+              Open Teller call-over &amp; close {priorOpenFloatSession.businessDate} till →
+            </Link>
           </div>
         </div>
       ) : null}
 
-      <Modal
-        open={priorCloseOpen && Boolean(priorOpenFloatSession)}
-        onClose={() => !busy && setPriorCloseOpen(false)}
-        title={`Close unclosed till (${priorOpenFloatSession?.businessDate ?? ""})`}
-        subtitle="Count and record the physical cash from this prior session so you can open today's till."
-        panelClassName="modal-panel--till-movement"
-        footer={
-          <>
-            <button
-              type="button"
-              className="button secondary"
-              disabled={busy}
-              onClick={() => setPriorCloseOpen(false)}
-            >
-              Cancel
-            </button>
-            <button type="submit" form="close-prior-till-form" className="button" disabled={busy}>
-              {busy ? "Closing…" : "Confirm & close till"}
-            </button>
-          </>
-        }
-      >
-        <form
-          id="close-prior-till-form"
-          className="till-movement-form"
-          onSubmit={(e) => void handleClosePriorTill(e)}
-        >
-          <p className="muted till-movement-form__hint">
-            Expected cash in drawer: <strong>{formatMoney(priorExpectedCash)}</strong>. Any
-            difference automatically opens a Branch Till overage/shortage case.
-          </p>
-          <label className="field">
-            <span>Physical cash counted (GHS)</span>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={priorActualClosing}
-              onChange={(e) => setPriorActualClosing(e.target.value)}
-              required
-            />
-          </label>
-          <label className="field">
-            <span>Note (optional)</span>
-            <input
-              type="text"
-              value={priorVarianceNote}
-              onChange={(e) => setPriorVarianceNote(e.target.value)}
-              placeholder="Reason for late close or variance"
-            />
-          </label>
-        </form>
-      </Modal>
       <div className="branch-float__top">
         <button
           type="button"
@@ -644,7 +463,7 @@ export function BranchCounterFloatPanel({
               className="button secondary branch-float__top-action"
               onClick={(e) => e.stopPropagation()}
             >
-              Teller call-over{" "}
+              Call-over &amp; close{" "}
               {tellerCallover.readyToClose
                 ? "✓"
                 : tellerCallover.totalCount > 0
@@ -669,7 +488,19 @@ export function BranchCounterFloatPanel({
           </div>
         ) : null}
 
-        {needsFloat && !floatSession ? (
+        {needsFloat && tillClosedOrSettled ? (
+          <div className="branch-float__top-actions">
+            <Link
+              to="/app/susu/teller-callover"
+              className="button secondary branch-float__top-action"
+              onClick={(e) => e.stopPropagation()}
+            >
+              View call-over ✓
+            </Link>
+          </div>
+        ) : null}
+
+        {needsFloat && !floatSession && !priorOpenFloatSession ? (
           <button
             type="button"
             className="button branch-float__top-action"
@@ -768,8 +599,20 @@ export function BranchCounterFloatPanel({
           {needsFloat && !floatSession ? (
             <div className="branch-float__alert">
               <p>
-                <strong>No till for today.</strong> Use <strong>Open till</strong> above to request
-                float and initial cash. Admin or coordinator must approve before the till opens.
+                {priorOpenFloatSession ? (
+                  <>
+                    <strong>Close your previous till first.</strong> Complete call-over and close
+                    your <strong>{priorOpenFloatSession.businessDate}</strong> till on{" "}
+                    <Link to="/app/susu/teller-callover">Teller call-over</Link> before opening
+                    today&apos;s till.
+                  </>
+                ) : (
+                  <>
+                    <strong>No till for today.</strong> Use <strong>Open till</strong> above to
+                    request float and initial cash. Admin or coordinator must approve before the
+                    till opens.
+                  </>
+                )}
               </p>
             </div>
           ) : null}
@@ -887,98 +730,19 @@ export function BranchCounterFloatPanel({
             <div className="branch-float__eod-wrap">
               <div className="teller-callover-banner">
                 <div>
-                  <h3>1. Teller call-over</h3>
+                  <h3>End-of-day call-over &amp; till closing</h3>
                   <p className="muted teller-callover__lead">
                     {tellerCallover.readyToClose
-                      ? `Call-over verified (${tellerCallover.deposits.length} deposit(s) · ${tellerCallover.withdrawals.length} withdrawal(s)). Ready to close your till.`
+                      ? `Call-over verified (${tellerCallover.deposits.length} deposit(s) · ${tellerCallover.withdrawals.length} withdrawal(s)). Close your till on the Teller call-over page.`
                       : tellerCallover.totalCount === 0
-                        ? "Confirm your daily call-over on the Teller call-over page before closing your till."
-                        : `${tellerCallover.checkedCount} of ${tellerCallover.totalCount} deposits & withdrawals checked. Complete verification on Teller call-over before closing.`}
+                        ? "All teller till closings are done on the Teller call-over page. Confirm your call-over there to close your till."
+                        : `${tellerCallover.checkedCount} of ${tellerCallover.totalCount} deposits & withdrawals checked. Complete your call-over and close your till on the Teller call-over page.`}
                   </p>
                 </div>
-                <Link to="/app/susu/teller-callover" className="button secondary">
-                  {tellerCallover.readyToClose ? "Review call-over" : "Open Teller call-over →"}
+                <Link to="/app/susu/teller-callover" className="button">
+                  Open Teller call-over to close till →
                 </Link>
               </div>
-
-              <form className="branch-float__close-form" onSubmit={(e) => void handleClose(e)}>
-                <h3>2. End of day balancing</h3>
-                <p className="muted">
-                  Count physical cash in your drawer. Expected after deposits, withdrawals and
-                  expenses: <strong>{formatMoney(floatSummary?.expectedCash ?? 0)}</strong>
-                </p>
-                <label className="field">
-                  <span>Actual cash counted (GHS)</span>
-                  <input
-                    type="number"
-                    className="input-no-spin"
-                    min={0}
-                    step="0.01"
-                    value={actualClosing}
-                    onChange={(e) => setActualClosing(e.target.value)}
-                    required
-                  />
-                </label>
-                {closeVariancePreview ? (
-                  <p
-                    className={`branch-float__eod-flag branch-float__eod-flag--${closeVariancePreview.type}`}
-                    role="status"
-                  >
-                    {closeVariancePreview.type === "balanced" ? (
-                      <>
-                        <strong>Balanced</strong> — drawer matches expected cash. No OS case will
-                        open.
-                      </>
-                    ) : closeVariancePreview.type === "overage" ? (
-                      <>
-                        <strong>Overage {formatMoney(closeVariancePreview.amount)}</strong> — will
-                        be flagged automatically on Overages/Shortages (Branch till) when you close.
-                      </>
-                    ) : (
-                      <>
-                        <strong>Shortage {formatMoney(closeVariancePreview.amount)}</strong> — will
-                        be flagged automatically on Overages/Shortages (Branch till) when you close.
-                      </>
-                    )}
-                  </p>
-                ) : null}
-                <label className="field">
-                  <span>
-                    {closeVariancePreview?.type === "overage"
-                      ? "Overage note (required)"
-                      : closeVariancePreview?.type === "shortage"
-                        ? "Shortage note (required)"
-                        : "Variance note (optional)"}
-                  </span>
-                  <input
-                    value={varianceNote}
-                    onChange={(e) => setVarianceNote(e.target.value)}
-                    placeholder={
-                      closeVariancePreview?.type === "overage"
-                        ? "Why is there extra cash?"
-                        : closeVariancePreview?.type === "shortage"
-                          ? "Why is cash short?"
-                          : "Optional"
-                    }
-                    required={
-                      closeVariancePreview?.type === "overage" ||
-                      closeVariancePreview?.type === "shortage"
-                    }
-                  />
-                </label>
-                <button
-                  type="submit"
-                  className="button secondary"
-                  disabled={busy || !tellerCallover.readyToClose}
-                  title={
-                    !tellerCallover.readyToClose
-                      ? "Complete and confirm Step 1 (Teller call-over) above before closing your till"
-                      : undefined
-                  }
-                >
-                  Close till for today
-                </button>
-              </form>
             </div>
           ) : null}
 

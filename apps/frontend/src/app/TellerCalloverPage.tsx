@@ -13,7 +13,7 @@ import {
 } from "../components/AccountingAmountInput";
 import { useToast } from "../components/Toast";
 import { toUserFacingError } from "../lib/networkError";
-import type { AppRole, BranchCounterStatementLine } from "./api";
+import type { AppRole, BranchCounterStatementLine, BranchFloatSession } from "./api";
 import { closeBranchFloat, settleBranchFloat } from "./api";
 import { formatBranchLabel } from "./branchDisplay";
 import { useBranchCounterStore } from "./stores/branchCounterStore";
@@ -40,6 +40,23 @@ function formatTime(iso: string): string {
   }
 }
 
+function computeSessionExpectedCash(session: BranchFloatSession): number {
+  if (session.expectedClosing != null) {
+    return session.expectedClosing;
+  }
+  return (
+    Math.round(
+      (session.initialCash +
+        session.extraCash +
+        session.totalDeposits +
+        session.totalDailySusu -
+        session.totalWithdrawals -
+        session.totalExpenses) *
+        100
+    ) / 100
+  );
+}
+
 function isFieldPayoutLine(line: BranchCounterStatementLine): boolean {
   const notes = (line.notes ?? "").toLowerCase();
   return (
@@ -62,6 +79,7 @@ export function TellerCalloverPage({ role }: Props) {
     statementBranchId,
     statementDate,
     floatSession,
+    priorOpenFloatSession,
     floatSummary,
     loading,
     refreshing,
@@ -79,7 +97,7 @@ export function TellerCalloverPage({ role }: Props) {
     toggleTellerCalloverTx,
     setTellerCalloverMany,
     setTellerCalloverConfirmed,
-    clearTellerCallover
+    markTellerCalloverCompleted
   } = useBranchCounterStore(
     useShallow((s) => ({
       branches: s.branches,
@@ -88,6 +106,7 @@ export function TellerCalloverPage({ role }: Props) {
       statementBranchId: s.statementBranchId,
       statementDate: s.statementDate,
       floatSession: s.floatSession,
+      priorOpenFloatSession: s.priorOpenFloatSession,
       floatSummary: s.floatSummary,
       loading: s.loading,
       refreshing: s.refreshing,
@@ -105,7 +124,7 @@ export function TellerCalloverPage({ role }: Props) {
       toggleTellerCalloverTx: s.toggleTellerCalloverTx,
       setTellerCalloverMany: s.setTellerCalloverMany,
       setTellerCalloverConfirmed: s.setTellerCalloverConfirmed,
-      clearTellerCallover: s.clearTellerCallover
+      markTellerCalloverCompleted: s.markTellerCalloverCompleted
     }))
   );
 
@@ -130,13 +149,19 @@ export function TellerCalloverPage({ role }: Props) {
     }
   }, [error, showToast]);
 
-  const tillOpen = floatSession?.status === "open";
-  const isPersonalTillMode = Boolean(needsFloat && floatSession);
+  const activePersonalSession = needsFloat ? (floatSession ?? priorOpenFloatSession) : null;
+  const isPriorUnclosedTill = Boolean(needsFloat && !floatSession && priorOpenFloatSession);
+  const tillOpen = activePersonalSession?.status === "open";
+  const isPersonalTillMode = Boolean(activePersonalSession);
+  const calloverLocked = Boolean(
+    isPersonalTillMode &&
+      (activePersonalSession?.status === "closed" || activePersonalSession?.status === "settled")
+  );
 
   const activeBranchId = isPersonalTillMode
-    ? floatSession!.branchId
+    ? activePersonalSession!.branchId
     : statementBranchId || branches[0]?.id || "";
-  const activeDate = isPersonalTillMode ? floatSession!.businessDate : statementDate;
+  const activeDate = isPersonalTillMode ? activePersonalSession!.businessDate : statementDate;
   const branchLabel = useMemo(
     () => formatBranchLabel(activeBranchId, branches),
     [activeBranchId, branches]
@@ -144,23 +169,27 @@ export function TellerCalloverPage({ role }: Props) {
 
   const activeStatement = useMemo(() => {
     if (isPersonalTillMode) {
-      if (tellerTodayStatement) {
+      if (
+        tellerTodayStatement &&
+        tellerTodayStatement.summary.branchId === activePersonalSession!.branchId &&
+        tellerTodayStatement.summary.date === activePersonalSession!.businessDate
+      ) {
         return tellerTodayStatement;
       }
       if (
         statement &&
-        statement.summary.branchId === floatSession!.branchId &&
-        statement.summary.date === floatSession!.businessDate
+        statement.summary.branchId === activePersonalSession!.branchId &&
+        statement.summary.date === activePersonalSession!.businessDate
       ) {
         return statement;
       }
-      return null;
+      return tellerTodayStatement;
     }
     return statement;
-  }, [isPersonalTillMode, tellerTodayStatement, statement, floatSession]);
+  }, [isPersonalTillMode, tellerTodayStatement, statement, activePersonalSession]);
 
   const sessionKey = isPersonalTillMode
-    ? floatSession!.id
+    ? activePersonalSession!.id
     : `review:${activeBranchId || "branch"}:${activeDate}:${staffFilter}`;
 
   const staffOptions = useMemo(() => {
@@ -170,7 +199,7 @@ export function TellerCalloverPage({ role }: Props) {
   const callover = useMemo(() => {
     const rawLines = activeStatement?.lines ?? [];
     const cashierFilter = isPersonalTillMode
-      ? floatSession!.cashierUserId
+      ? activePersonalSession!.cashierUserId
       : staffFilter !== "all"
         ? staffFilter
         : null;
@@ -214,15 +243,33 @@ export function TellerCalloverPage({ role }: Props) {
     const visibleDeposits = deposits.filter(matchesSearch);
     const visibleWithdrawals = withdrawals.filter(matchesSearch);
 
-    const checkedIds = new Set(tellerCalloverCheckedBySession[sessionKey] ?? []);
     const depositIds = deposits.map((d) => d.id);
     const withdrawalIds = withdrawals.map((w) => w.id);
+    const serverChecked = isPersonalTillMode
+      ? (activePersonalSession?.calloverCheckedTxIds ?? [])
+      : [];
+    const serverConfirmed = Boolean(
+      isPersonalTillMode && activePersonalSession?.calloverConfirmedAt
+    );
+
+    const checkedIds = new Set<string>([
+      ...serverChecked,
+      ...(tellerCalloverCheckedBySession[sessionKey] ?? [])
+    ]);
+    const confirmed = Boolean(tellerCalloverConfirmedBySession[sessionKey] || serverConfirmed);
+
+    // If a closed/settled session was confirmed (e.g. before DB checked-ID column existed
+    // or opened on another device), keep every item in that closed session visibly marked.
+    if (calloverLocked && confirmed && checkedIds.size === 0) {
+      for (const id of depositIds) checkedIds.add(id);
+      for (const id of withdrawalIds) checkedIds.add(id);
+    }
+
     const checkedDepositsCount = depositIds.filter((id) => checkedIds.has(id)).length;
     const checkedWithdrawalsCount = withdrawalIds.filter((id) => checkedIds.has(id)).length;
     const totalCount = depositIds.length + withdrawalIds.length;
     const checkedCount = checkedDepositsCount + checkedWithdrawalsCount;
     const allItemsChecked = totalCount === 0 || checkedCount === totalCount;
-    const confirmed = Boolean(tellerCalloverConfirmedBySession[sessionKey]);
 
     const depositTotal = Math.round(deposits.reduce((sum, l) => sum + l.amount, 0) * 100) / 100;
     const withdrawalTotal =
@@ -249,7 +296,8 @@ export function TellerCalloverPage({ role }: Props) {
   }, [
     activeStatement,
     isPersonalTillMode,
-    floatSession,
+    activePersonalSession,
+    calloverLocked,
     staffFilter,
     search,
     tellerCalloverCheckedBySession,
@@ -257,10 +305,17 @@ export function TellerCalloverPage({ role }: Props) {
     sessionKey
   ]);
 
-  const initialCash = floatSession?.initialCash ?? floatSummary?.initialCash ?? 0;
-  const extraCash = floatSession?.extraCash ?? floatSummary?.extraCash ?? 0;
-  const totalExpenses = floatSession?.totalExpenses ?? floatSummary?.totalExpenses ?? 0;
-  const expectedCash = floatSummary?.expectedCash ?? 0;
+  const initialCash =
+    activePersonalSession?.initialCash ?? (!isPriorUnclosedTill ? floatSummary?.initialCash ?? 0 : 0);
+  const extraCash =
+    activePersonalSession?.extraCash ?? (!isPriorUnclosedTill ? floatSummary?.extraCash ?? 0 : 0);
+  const totalExpenses =
+    activePersonalSession?.totalExpenses ??
+    (!isPriorUnclosedTill ? floatSummary?.totalExpenses ?? 0 : 0);
+  const expectedCash = isPriorUnclosedTill
+    ? computeSessionExpectedCash(activePersonalSession!)
+    : floatSummary?.expectedCash ??
+      (activePersonalSession ? computeSessionExpectedCash(activePersonalSession) : 0);
 
   const closeVariancePreview = useMemo(() => {
     const raw = actualClosing.trim();
@@ -283,12 +338,12 @@ export function TellerCalloverPage({ role }: Props) {
 
   async function handleCloseTill(e: FormEvent) {
     e.preventDefault();
-    if (!floatSession || floatSession.status !== "open") {
+    if (!activePersonalSession || activePersonalSession.status !== "open") {
       return;
     }
     if (!callover.allItemsChecked) {
       showToast(
-        "Check off all today's deposits and withdrawals before closing your till",
+        "Check off all deposits and withdrawals in Step 1 before closing your till",
         "error"
       );
       return;
@@ -313,13 +368,24 @@ export function TellerCalloverPage({ role }: Props) {
       );
       return;
     }
+    const checkedTxIds = [...callover.checkedIds];
     setBusy(true);
     try {
-      await closeBranchFloat(floatSession.id, {
+      await closeBranchFloat(activePersonalSession.id, {
         actualClosing: actual,
-        varianceNote: varianceNote.trim() || undefined
+        varianceNote: varianceNote.trim() || undefined,
+        calloverCheckedTxIds: checkedTxIds,
+        calloverConfirmed: true
       });
-      if (absVariance < 0.005) {
+      // Keep the completed call-over marked permanently after closing the till.
+      markTellerCalloverCompleted(activePersonalSession.id, checkedTxIds);
+
+      if (isPriorUnclosedTill) {
+        showToast(
+          `Closed ${activePersonalSession.businessDate} till — you can now open today's till`,
+          "success"
+        );
+      } else if (absVariance < 0.005) {
         showToast("Till closed — drawer balanced", "success");
       } else if (variance > 0) {
         showToast(
@@ -332,7 +398,6 @@ export function TellerCalloverPage({ role }: Props) {
           "success"
         );
       }
-      clearTellerCallover(floatSession.id);
       setActualClosing("");
       setVarianceNote("");
       await refresh();
@@ -344,12 +409,12 @@ export function TellerCalloverPage({ role }: Props) {
   }
 
   async function handleSettleTill() {
-    if (!floatSession || floatSession.status !== "closed") {
+    if (!activePersonalSession || activePersonalSession.status !== "closed") {
       return;
     }
     setBusy(true);
     try {
-      await settleBranchFloat(floatSession.id);
+      await settleBranchFloat(activePersonalSession.id);
       showToast("Till session settled", "success");
       await refresh();
     } catch (err) {
@@ -367,7 +432,7 @@ export function TellerCalloverPage({ role }: Props) {
           <h1>Teller call-over</h1>
           <p className="muted">
             Check every deposit slip and withdrawal voucher for{" "}
-            <strong>{branchLabel}</strong> ({activeDate}) before closing your till for the day.
+            <strong>{branchLabel}</strong> ({activeDate}) before closing your till.
           </p>
         </div>
         <div className="teller-callover-page__head-actions">
@@ -384,6 +449,18 @@ export function TellerCalloverPage({ role }: Props) {
           </button>
         </div>
       </div>
+
+      {isPriorUnclosedTill && activePersonalSession ? (
+        <section className="card eod-guard-banner" role="alert">
+          <div className="eod-guard-banner__body">
+            <strong>Unclosed till from {activePersonalSession.businessDate}</strong>
+            <p className="muted">
+              Complete your call-over for <strong>{activePersonalSession.businessDate}</strong> below
+              and close that till before opening today&apos;s till.
+            </p>
+          </div>
+        </section>
+      ) : null}
 
       {!isPersonalTillMode ? (
         <section className="card susu-closing-filters">
@@ -440,14 +517,14 @@ export function TellerCalloverPage({ role }: Props) {
             </p>
           </article>
           <article className="kpi-card kpi-card--success">
-            <span className="kpi-label">Deposits today</span>
+            <span className="kpi-label">Deposits ({activeDate})</span>
             <p className="kpi-value">+ {formatMoney(callover.depositTotal)}</p>
             <p className="kpi-meta muted">
               {callover.checkedDepositsCount}/{callover.deposits.length} checked
             </p>
           </article>
           <article className="kpi-card kpi-card--warning">
-            <span className="kpi-label">Withdrawals today</span>
+            <span className="kpi-label">Withdrawals ({activeDate})</span>
             <p className="kpi-value">− {formatMoney(callover.withdrawalTotal)}</p>
             <p className="kpi-meta muted">
               {callover.checkedWithdrawalsCount}/{callover.withdrawals.length} checked
@@ -462,7 +539,12 @@ export function TellerCalloverPage({ role }: Props) {
             <span className="kpi-label">Expected drawer cash</span>
             <p className="kpi-value">{formatMoney(expectedCash)}</p>
             <p className="kpi-meta muted">
-              Till status: <strong>{floatSummary?.statusLabel ?? floatSession?.status}</strong>
+              Till status:{" "}
+              <strong>
+                {isPriorUnclosedTill
+                  ? `Open (${activePersonalSession!.businessDate})`
+                  : floatSummary?.statusLabel ?? activePersonalSession?.status}
+              </strong>
             </p>
           </article>
         </section>
@@ -500,8 +582,9 @@ export function TellerCalloverPage({ role }: Props) {
             <p className="susu-closing-editor__eyebrow">Step 1 · Slip &amp; voucher verification</p>
             <h3>Deposits &amp; withdrawals checklist</h3>
             <p className="muted teller-callover__lead">
-              Tick off each customer deposit slip and withdrawal voucher below as you verify your
-              physical records.
+              {calloverLocked
+                ? "Call-over is completed and locked for this closed till session."
+                : "Tick off each customer deposit slip and withdrawal voucher below as you verify your physical records."}
             </p>
           </div>
           <div className="teller-callover-page__toolbar">
@@ -556,20 +639,24 @@ export function TellerCalloverPage({ role }: Props) {
             ) : null}
             <span
               className={`susu-closing-editor__pill ${
-                callover.allItemsChecked
+                calloverLocked || callover.allItemsChecked
                   ? "susu-closing-editor__pill--ok"
                   : "susu-closing-editor__pill--delta"
               }`}
             >
-              {callover.totalCount === 0
-                ? "No entries today"
-                : `${callover.checkedCount}/${callover.totalCount} checked`}
+              {calloverLocked
+                ? callover.totalCount === 0
+                  ? "Call-over verified & locked"
+                  : `Call-over locked · ${callover.checkedCount}/${callover.totalCount} checked`
+                : callover.totalCount === 0
+                  ? "No entries today"
+                  : `${callover.checkedCount}/${callover.totalCount} checked`}
             </span>
           </div>
         </div>
 
         {statementLoading && !activeStatement ? (
-          <p className="muted">Loading today&apos;s counter transactions…</p>
+          <p className="muted">Loading counter transactions…</p>
         ) : (
           <div className="teller-callover__grid teller-callover__grid--page">
             <div className="teller-callover__col">
@@ -582,7 +669,7 @@ export function TellerCalloverPage({ role }: Props) {
                     Total: + {formatMoney(callover.depositTotal)}
                   </span>
                 </div>
-                {callover.deposits.length > 0 ? (
+                {callover.deposits.length > 0 && !calloverLocked ? (
                   <button
                     type="button"
                     className="button secondary teller-callover__toggle-all"
@@ -620,7 +707,12 @@ export function TellerCalloverPage({ role }: Props) {
                           <input
                             type="checkbox"
                             checked={checked}
-                            onChange={() => toggleTellerCalloverTx(sessionKey, line.id)}
+                            disabled={calloverLocked}
+                            onChange={() => {
+                              if (!calloverLocked) {
+                                toggleTellerCalloverTx(sessionKey, line.id);
+                              }
+                            }}
                           />
                           <span className="teller-callover__row-main">
                             <strong>{line.customerName}</strong>
@@ -652,7 +744,7 @@ export function TellerCalloverPage({ role }: Props) {
                     Total: − {formatMoney(callover.withdrawalTotal)}
                   </span>
                 </div>
-                {callover.withdrawals.length > 0 ? (
+                {callover.withdrawals.length > 0 && !calloverLocked ? (
                   <button
                     type="button"
                     className="button secondary teller-callover__toggle-all"
@@ -691,7 +783,12 @@ export function TellerCalloverPage({ role }: Props) {
                           <input
                             type="checkbox"
                             checked={checked}
-                            onChange={() => toggleTellerCalloverTx(sessionKey, line.id)}
+                            disabled={calloverLocked}
+                            onChange={() => {
+                              if (!calloverLocked) {
+                                toggleTellerCalloverTx(sessionKey, line.id);
+                              }
+                            }}
                           />
                           <span className="teller-callover__row-main">
                             <strong>{line.customerName}</strong>
@@ -717,12 +814,16 @@ export function TellerCalloverPage({ role }: Props) {
       </section>
 
       {needsFloat ? (
-        tillOpen ? (
+        tillOpen && activePersonalSession ? (
           <form className="card teller-callover-page__close" onSubmit={(e) => void handleCloseTill(e)}>
             <div className="teller-callover__head">
               <div>
                 <p className="susu-closing-editor__eyebrow">Step 2 · Drawer count &amp; close</p>
-                <h3>Confirm call-over &amp; close till for today</h3>
+                <h3>
+                  {isPriorUnclosedTill
+                    ? `Confirm call-over & close ${activePersonalSession.businessDate} till`
+                    : "Confirm call-over & close till for today"}
+                </h3>
                 <p className="muted teller-callover__lead">
                   Count physical cash in your drawer. Expected cash:{" "}
                   <strong>{formatMoney(expectedCash)}</strong>
@@ -760,9 +861,9 @@ export function TellerCalloverPage({ role }: Props) {
               />
               <span>
                 {callover.totalCount === 0
-                  ? "I confirm I had no counter deposits or withdrawals today and am ready to close my till."
+                  ? `I confirm I had no counter deposits or withdrawals for ${activeDate} and am ready to close my till.`
                   : callover.allItemsChecked
-                    ? "I have called over and verified all today's deposits and withdrawals against my slips and vouchers."
+                    ? `I have called over and verified all deposits and withdrawals for ${activeDate} against my slips and vouchers.`
                     : `Check all ${callover.totalCount - callover.checkedCount} remaining item(s) in Step 1 above before confirming.`}
               </span>
             </label>
@@ -851,19 +952,27 @@ export function TellerCalloverPage({ role }: Props) {
                     : undefined
                 }
               >
-                {busy ? "Closing till…" : "Close till for today"}
+                {busy
+                  ? "Closing till…"
+                  : isPriorUnclosedTill
+                    ? `Close ${activePersonalSession.businessDate} till`
+                    : "Close till for today"}
               </button>
             </div>
           </form>
-        ) : floatSession?.status === "closed" ? (
+        ) : activePersonalSession?.status === "closed" ? (
           <section className="card teller-callover-page__status-card">
-            <h3>Till closed for {floatSession.businessDate}</h3>
+            <h3>Till closed for {activePersonalSession.businessDate}</h3>
             <p className="muted">
-              Expected {formatMoney(floatSession.expectedClosing ?? expectedCash)} · Counted{" "}
-              {formatMoney(floatSession.actualClosing ?? 0)}
-              {floatSession.variance != null && Math.abs(floatSession.variance) >= 0.005
-                ? ` · Variance ${floatSession.variance > 0 ? "+" : "−"} ${formatMoney(Math.abs(floatSession.variance))}`
+              Expected {formatMoney(activePersonalSession.expectedClosing ?? expectedCash)} ·
+              Counted {formatMoney(activePersonalSession.actualClosing ?? 0)}
+              {activePersonalSession.variance != null &&
+              Math.abs(activePersonalSession.variance) >= 0.005
+                ? ` · Variance ${activePersonalSession.variance > 0 ? "+" : "−"} ${formatMoney(Math.abs(activePersonalSession.variance))}`
                 : " · Balanced"}
+            </p>
+            <p className="muted">
+              Call-over verified ({callover.checkedCount}/{callover.totalCount} checked) and locked.
             </p>
             {isAdminLike ? (
               <div>
@@ -880,10 +989,11 @@ export function TellerCalloverPage({ role }: Props) {
               <p className="muted">Waiting for admin or coordinator settlement approval.</p>
             )}
           </section>
-        ) : floatSession?.status === "settled" ? (
+        ) : activePersonalSession?.status === "settled" ? (
           <section className="card teller-callover-page__status-card">
-            <h3>Till settled for {floatSession.businessDate}</h3>
+            <h3>Till settled for {activePersonalSession.businessDate}</h3>
             <p className="muted">
+              Call-over verified ({callover.checkedCount}/{callover.totalCount} checked) and locked.
               Your till closing for today has been approved and returned to vault.
             </p>
           </section>

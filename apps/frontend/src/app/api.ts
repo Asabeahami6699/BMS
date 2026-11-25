@@ -2859,6 +2859,8 @@ export type BranchFloatSession = {
   extraCashRequestNote?: string;
   expenseRequested?: number;
   expenseRequestNote?: string;
+  calloverCheckedTxIds?: string[];
+  calloverConfirmedAt?: string;
 };
 
 export function isFloatTopUpRequest(session: BranchFloatSession): boolean {
@@ -2937,7 +2939,12 @@ export async function allocateBranchFloat(
 
 export async function closeBranchFloat(
   sessionId: string,
-  payload: { actualClosing: number; varianceNote?: string }
+  payload: {
+    actualClosing: number;
+    varianceNote?: string;
+    calloverCheckedTxIds?: string[];
+    calloverConfirmed?: boolean;
+  }
 ): Promise<BranchFloatSession> {
   const res = await fetchJson<{ session: BranchFloatSession }>(
     `${API_BASE_URL}/api/v1/transactions/branch-float/${sessionId}/close`,

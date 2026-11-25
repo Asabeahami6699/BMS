@@ -393,7 +393,11 @@ transactionsRouter.post(
         sessionId,
         {
           actualClosing: Number(req.body?.actualClosing ?? 0),
-          varianceNote: typeof req.body?.varianceNote === "string" ? req.body.varianceNote : undefined
+          varianceNote: typeof req.body?.varianceNote === "string" ? req.body.varianceNote : undefined,
+          calloverCheckedTxIds: Array.isArray(req.body?.calloverCheckedTxIds)
+            ? req.body.calloverCheckedTxIds.filter((id: unknown): id is string => typeof id === "string")
+            : undefined,
+          calloverConfirmed: req.body?.calloverConfirmed === true
         }
       );
       res.json({ session });

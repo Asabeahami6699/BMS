@@ -2440,6 +2440,19 @@ html {
   cursor: pointer;
 }
 
+.teller-callover__row-label:has(input:disabled) {
+  cursor: default;
+}
+
+.teller-callover__row--checked input[type="checkbox"] {
+  accent-color: #007a32;
+}
+
+.teller-callover__row--checked input[type="checkbox"]:disabled {
+  opacity: 0.92;
+  cursor: default;
+}
+
 .teller-callover__row-main {
   display: grid;
   gap: 0.1rem;
