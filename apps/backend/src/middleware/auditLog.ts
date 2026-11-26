@@ -16,7 +16,8 @@ export function auditLog(req: Request, res: Response, next: NextFunction): void 
       return;
     }
 
-    if (!shouldWriteAuditLog(req.method, req.originalUrl)) {
+    const ctx = req.auditContext;
+    if (!ctx?.entityType && !ctx?.action && !shouldWriteAuditLog(req.method, req.originalUrl)) {
       return;
     }
 
@@ -26,9 +27,15 @@ export function auditLog(req: Request, res: Response, next: NextFunction): void 
       actorRole: req.userContext?.role,
       method: req.method,
       path: req.originalUrl,
+      action: ctx?.action,
       statusCode: res.statusCode,
-      branchId: req.userContext?.branchId,
-      ipAddress: req.ip
+      branchId: req.effectiveBranchId ?? req.userContext?.branchId,
+      ipAddress: req.ip,
+      entityType: ctx?.entityType,
+      entityId: ctx?.entityId,
+      beforeSnapshot: ctx?.before ?? null,
+      afterSnapshot: ctx?.after ?? null,
+      metadata: ctx?.metadata ?? null
     }).catch(() => {
       // Non-blocking logging by design.
     });

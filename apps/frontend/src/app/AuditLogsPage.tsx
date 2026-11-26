@@ -52,6 +52,55 @@ function statusClass(code: number): string {
   return "status-pill status-pill--active";
 }
 
+function formatEntityLabel(entityType?: string): string {
+  if (!entityType) return "";
+  return entityType.replace(/_/g, " ");
+}
+
+function formatSnapshotValue(value: unknown): string {
+  if (value === undefined) return "—";
+  if (value === null) return "null";
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (typeof value === "number") return Number.isFinite(value) ? String(value) : "—";
+  if (typeof value === "string") return value.trim() === "" ? '""' : value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+type DiffRow = {
+  field: string;
+  before: string;
+  after: string;
+  changed: boolean;
+};
+
+function buildSnapshotDiffRows(row: AuditRow): DiffRow[] {
+  const before = row.beforeSnapshot ?? null;
+  const after = row.afterSnapshot ?? null;
+  if (!before && !after) {
+    return [];
+  }
+  const changedSet = new Set(row.changedFields ?? []);
+  const keys = Array.from(
+    new Set([...Object.keys(before ?? {}), ...Object.keys(after ?? {})])
+  ).sort((a, b) => {
+    const ac = changedSet.has(a) ? 0 : 1;
+    const bc = changedSet.has(b) ? 0 : 1;
+    if (ac !== bc) return ac - bc;
+    return a.localeCompare(b);
+  });
+
+  return keys.map((field) => {
+    const bVal = before ? formatSnapshotValue(before[field]) : "—";
+    const aVal = after ? formatSnapshotValue(after[field]) : "—";
+    const changed = changedSet.size > 0 ? changedSet.has(field) : bVal !== aVal;
+    return { field, before: bVal, after: aVal, changed };
+  });
+}
+
 type AuditCategory =
   | "all"
   | "withdrawals"
@@ -71,12 +120,12 @@ const AUDIT_CATEGORY_CHIPS: Array<{ id: AuditCategory; label: string }> = [
 
 function matchesAuditCategory(row: AuditRow, cat: AuditCategory): boolean {
   if (cat === "all") return true;
-  const hay = `${row.action} ${row.path}`.toLowerCase();
+  const hay = `${row.action} ${row.path} ${row.entityType ?? ""}`.toLowerCase();
   if (cat === "withdrawals") return /withdraw|payout|momo/.test(hay);
   if (cat === "reversals") return /revers/.test(hay);
   if (cat === "till") return /float|till|closing|variance|overage|shortage|capital/.test(hay);
-  if (cat === "profiles_roles") return /profile|role|permission|user|password|commission/.test(hay);
-  if (cat === "approvals") return /approv|reject|callover|batch|registration/.test(hay);
+  if (cat === "profiles_roles") return /profile|role|permission|user|password|commission|customer/.test(hay);
+  if (cat === "approvals") return /approv|reject|callover|batch|registration|workflow/.test(hay);
   return true;
 }
 
@@ -89,19 +138,42 @@ function escapeCsvCell(value: unknown): string {
 }
 
 function downloadAuditLogsCsv(rows: AuditRow[]): void {
-  const header = ["Timestamp", "Action", "Method", "Path", "Status", "Actor Role", "Actor ID", "Branch"];
+  const header = [
+    "Seq #",
+    "Timestamp",
+    "Action",
+    "Entity Type",
+    "Entity ID",
+    "Changed Fields",
+    "Before Snapshot",
+    "After Snapshot",
+    "Method",
+    "Path",
+    "Status",
+    "Actor Role",
+    "Actor ID",
+    "Branch",
+    "Entry SHA-256"
+  ];
   const lines = [
     header.join(","),
     ...rows.map((r) =>
       [
+        r.seqNo ?? "",
         r.createdAt,
         r.action,
+        r.entityType ?? "",
+        r.entityId ?? "",
+        (r.changedFields ?? []).join("; "),
+        r.beforeSnapshot ? JSON.stringify(r.beforeSnapshot) : "",
+        r.afterSnapshot ? JSON.stringify(r.afterSnapshot) : "",
         r.method,
         r.path,
         formatStatus(r.statusCode),
         r.actorRole,
         r.actorUserId,
-        r.branchLabel
+        r.branchLabel,
+        r.entryHash ?? ""
       ]
         .map(escapeCsvCell)
         .join(",")
@@ -126,13 +198,27 @@ export function AuditLogsPage() {
   useBranchesLiveSync();
   const branches = useBranchesStore((s) => s.branches);
 
-  const { rows, loading, error, lastFetchedAt, hydrate, startLiveSync, stopLiveSync } = useAuditLogsStore(
+  const {
+    rows,
+    loading,
+    error,
+    lastFetchedAt,
+    verification,
+    verifying,
+    hydrate,
+    verifyChain,
+    startLiveSync,
+    stopLiveSync
+  } = useAuditLogsStore(
     useShallow((s) => ({
       rows: s.rows,
       loading: s.loading,
       error: s.error,
       lastFetchedAt: s.lastFetchedAt,
+      verification: s.verification,
+      verifying: s.verifying,
       hydrate: s.hydrate,
+      verifyChain: s.verifyChain,
       startLiveSync: s.startLiveSync,
       stopLiveSync: s.stopLiveSync
     }))
@@ -170,10 +256,35 @@ export function AuditLogsPage() {
     "actorUserId",
     "branchLabel",
     "method",
-    "path"
+    "path",
+    "entityType",
+    "entityId"
   ]);
 
+  const selectedDiffRows = useMemo(
+    () => (selected ? buildSnapshotDiffRows(selected) : []),
+    [selected]
+  );
+
   const showLoading = loading && lastFetchedAt == null;
+
+  async function handleVerifyIntegrity() {
+    const res = await verifyChain();
+    if (!res) return;
+    if (res.migrationPending) {
+      showToast("Apply migration 106 in Supabase to enable cryptographic chain sealing", "info");
+    } else if (res.valid) {
+      showToast(
+        `Audit chain intact — ${res.checkedCount} sealed record(s) verified`,
+        "success"
+      );
+    } else {
+      showToast(
+        `Integrity failure at sequence #${res.brokenSeqNo ?? "?"}: ${res.reason ?? "Tampering detected"}`,
+        "error"
+      );
+    }
+  }
 
   return (
     <div className="audit-logs-page">
@@ -181,11 +292,19 @@ export function AuditLogsPage() {
         <div>
           <h2>Audit logs</h2>
           <p className="muted">
-            Business activities performed in your workspace — who did what and when. Routine actions like marking
-            notifications read are not logged. Click a row for full details.
+            Append-only, SHA-256 hash-chained audit trail with before/after financial field
+            snapshots. Click any row to inspect field diffs and cryptographic seal metadata.
           </p>
         </div>
         <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className="button"
+            disabled={verifying}
+            onClick={() => void handleVerifyIntegrity()}
+          >
+            {verifying ? "Verifying chain…" : "Verify chain integrity"}
+          </button>
           <button
             type="button"
             className="button secondary"
@@ -213,6 +332,47 @@ export function AuditLogsPage() {
         </div>
       </header>
 
+      {verification ? (
+        <section
+          className={`card audit-integrity-banner ${
+            verification.migrationPending
+              ? "audit-integrity-banner--warn"
+              : verification.valid
+                ? "audit-integrity-banner--ok"
+                : "audit-integrity-banner--bad"
+          }`}
+          role="status"
+        >
+          <div className="audit-integrity-banner__main">
+            <strong>
+              {verification.migrationPending
+                ? "Hash-chain migration pending"
+                : verification.valid
+                  ? `Cryptographic chain intact · ${verification.checkedCount} sealed record(s) verified`
+                  : `Integrity alert · Chain broken at sequence #${verification.brokenSeqNo ?? "?"}`}
+            </strong>
+            <p className="muted">
+              {verification.reason
+                ? verification.reason
+                : verification.checkedCount > 0
+                  ? `Sequence #1 → #${verification.latestSeqNo} verified with zero gaps or tampering${
+                      verification.legacyUnchainedCount > 0
+                        ? ` (${verification.legacyUnchainedCount} legacy pre-migration row(s) excluded)`
+                        : ""
+                    }. Latest digest: ${verification.latestHash?.slice(0, 16) ?? "—"}…`
+                  : `No sealed entries yet${
+                      verification.legacyUnchainedCount > 0
+                        ? ` (${verification.legacyUnchainedCount} legacy pre-migration row(s))`
+                        : ""
+                    }. New mutations will be sealed automatically.`}
+            </p>
+          </div>
+          <span className="muted audit-integrity-banner__time">
+            Verified {formatWhen(verification.verifiedAt)}
+          </span>
+        </section>
+      ) : null}
+
       <div className="audit-filter-chips" role="group" aria-label="Quick audit category filters">
         {AUDIT_CATEGORY_CHIPS.map((chip) => (
           <button
@@ -234,7 +394,16 @@ export function AuditLogsPage() {
             {
               key: "when",
               label: "When",
-              render: (row) => formatWhen(row.createdAt)
+              render: (row) => (
+                <div>
+                  <span>{formatWhen(row.createdAt)}</span>
+                  {row.seqNo != null ? (
+                    <small className="muted audit-log-seq" style={{ display: "block" }}>
+                      Seq #{row.seqNo}
+                    </small>
+                  ) : null}
+                </div>
+              )
             },
             {
               key: "actor",
@@ -253,7 +422,27 @@ export function AuditLogsPage() {
             {
               key: "activity",
               label: "Activity",
-              render: (row) => <strong>{row.action}</strong>
+              render: (row) => (
+                <div className="audit-activity-cell">
+                  <strong>{row.action}</strong>
+                  {row.entityType || (row.changedFields && row.changedFields.length > 0) ? (
+                    <div className="audit-activity-cell__badges">
+                      {row.entityType ? (
+                        <span className="audit-meta-pill">
+                          {formatEntityLabel(row.entityType)}
+                        </span>
+                      ) : null}
+                      {row.changedFields && row.changedFields.length > 0 ? (
+                        <span className="audit-meta-pill audit-meta-pill--diff">
+                          {row.changedFields.length} field{row.changedFields.length === 1 ? "" : "s"} changed
+                        </span>
+                      ) : row.beforeSnapshot || row.afterSnapshot ? (
+                        <span className="audit-meta-pill audit-meta-pill--diff">Snapshot</span>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              )
             },
             {
               key: "status",
@@ -272,7 +461,7 @@ export function AuditLogsPage() {
           rowKey={(row) => row.id}
           search={search}
           onSearchChange={setSearch}
-          searchPlaceholder="Search activity, actor, branch…"
+          searchPlaceholder="Search activity, entity, actor, branch…"
           emptyMessage={showLoading ? "Loading audit logs…" : "No audit entries yet."}
           onRowClick={(row) => setSelected(row)}
         />
@@ -281,7 +470,11 @@ export function AuditLogsPage() {
       <Modal
         open={selected !== null}
         title="Audit log details"
-        subtitle={selected ? formatWhen(selected.createdAt) : undefined}
+        subtitle={
+          selected
+            ? `${formatWhen(selected.createdAt)}${selected.seqNo != null ? ` · Seq #${selected.seqNo}` : ""}`
+            : undefined
+        }
         onClose={() => setSelected(null)}
         panelClassName="modal-panel--audit-detail"
         footer={
@@ -291,52 +484,120 @@ export function AuditLogsPage() {
         }
       >
         {selected ? (
-          <dl className="audit-log-detail">
-            <div>
-              <dt>Activity</dt>
-              <dd>{selected.action}</dd>
-            </div>
-            <div>
-              <dt>Status</dt>
-              <dd>
-                <span className={statusClass(selected.statusCode)}>
-                  {formatStatus(selected.statusCode)}
-                </span>
-              </dd>
-            </div>
-            <div>
-              <dt>Actor role</dt>
-              <dd>{selected.actorRole ?? "—"}</dd>
-            </div>
-            <div>
-              <dt>Actor user</dt>
-              <dd className="audit-log-detail__mono">{selected.actorUserId ?? "—"}</dd>
-            </div>
-            <div>
-              <dt>Branch</dt>
-              <dd>{selected.branchLabel}</dd>
-            </div>
-            <div>
-              <dt>Method</dt>
-              <dd>{selected.method || "—"}</dd>
-            </div>
-            <div>
-              <dt>Path</dt>
-              <dd className="audit-log-detail__mono audit-logs-page__path">{selected.path || "—"}</dd>
-            </div>
-            <div>
-              <dt>IP address</dt>
-              <dd className="audit-log-detail__mono">{selected.ipAddress ?? "—"}</dd>
-            </div>
-            <div>
-              <dt>Log ID</dt>
-              <dd className="audit-log-detail__mono">{selected.id}</dd>
-            </div>
-            <div>
-              <dt>When</dt>
-              <dd>{formatWhen(selected.createdAt)}</dd>
-            </div>
-          </dl>
+          <div className="audit-detail-stack">
+            <dl className="audit-log-detail">
+              <div>
+                <dt>Activity</dt>
+                <dd>{selected.action}</dd>
+              </div>
+              <div>
+                <dt>Status</dt>
+                <dd>
+                  <span className={statusClass(selected.statusCode)}>
+                    {formatStatus(selected.statusCode)}
+                  </span>
+                </dd>
+              </div>
+              {selected.entityType ? (
+                <div>
+                  <dt>Entity</dt>
+                  <dd className="audit-log-detail__mono">
+                    {formatEntityLabel(selected.entityType)}
+                    {selected.entityId ? ` · ${selected.entityId}` : ""}
+                  </dd>
+                </div>
+              ) : null}
+              <div>
+                <dt>Actor role</dt>
+                <dd>{selected.actorRole ?? "—"}</dd>
+              </div>
+              <div>
+                <dt>Actor user</dt>
+                <dd className="audit-log-detail__mono">{selected.actorUserId ?? "—"}</dd>
+              </div>
+              <div>
+                <dt>Branch</dt>
+                <dd>{selected.branchLabel}</dd>
+              </div>
+              <div>
+                <dt>Method &amp; path</dt>
+                <dd className="audit-log-detail__mono audit-logs-page__path">
+                  {selected.method || "—"} {selected.path || "—"}
+                </dd>
+              </div>
+              <div>
+                <dt>IP address</dt>
+                <dd className="audit-log-detail__mono">{selected.ipAddress ?? "—"}</dd>
+              </div>
+              <div>
+                <dt>Log ID</dt>
+                <dd className="audit-log-detail__mono">{selected.id}</dd>
+              </div>
+            </dl>
+
+            {selectedDiffRows.length > 0 ? (
+              <section className="audit-diff-section">
+                <h4>Before vs. after field snapshot</h4>
+                <div className="audit-diff-table-wrap">
+                  <table className="audit-diff-table">
+                    <thead>
+                      <tr>
+                        <th>Field</th>
+                        <th>Before</th>
+                        <th>After</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedDiffRows.map((diff) => (
+                        <tr
+                          key={diff.field}
+                          className={diff.changed ? "audit-diff-row--changed" : undefined}
+                        >
+                          <td className="audit-log-detail__mono">{diff.field}</td>
+                          <td className="audit-diff-val audit-diff-val--before">{diff.before}</td>
+                          <td className="audit-diff-val audit-diff-val--after">{diff.after}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            ) : null}
+
+            {selected.metadata && Object.keys(selected.metadata).length > 0 ? (
+              <section className="audit-diff-section">
+                <h4>Context metadata</h4>
+                <dl className="audit-log-detail audit-log-detail--compact">
+                  {Object.entries(selected.metadata).map(([k, v]) => (
+                    <div key={k}>
+                      <dt>{k}</dt>
+                      <dd className="audit-log-detail__mono">{formatSnapshotValue(v)}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </section>
+            ) : null}
+
+            {selected.entryHash ? (
+              <section className="audit-seal-box">
+                <h4>Cryptographic integrity seal (append-only)</h4>
+                <dl className="audit-log-detail audit-log-detail--compact">
+                  <div>
+                    <dt>Sequence #</dt>
+                    <dd className="audit-log-detail__mono">#{selected.seqNo ?? "—"}</dd>
+                  </div>
+                  <div>
+                    <dt>Previous hash</dt>
+                    <dd className="audit-log-detail__mono">{selected.prevHash ?? "—"}</dd>
+                  </div>
+                  <div>
+                    <dt>Entry SHA-256</dt>
+                    <dd className="audit-log-detail__mono">{selected.entryHash}</dd>
+                  </div>
+                </dl>
+              </section>
+            ) : null}
+          </div>
         ) : null}
       </Modal>
     </div>

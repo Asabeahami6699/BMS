@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { requirePermission } from "../middleware/requirePermission.js";
 import { getApprovalWorkflow, updateApprovalWorkflow } from "../services/approvalWorkflowService.js";
+import { setRequestAuditContext } from "../services/auditService.js";
 
 export const approvalWorkflowRouter = Router();
 
@@ -33,7 +34,16 @@ approvalWorkflowRouter.put("/", requirePermission("users.update"), async (req, r
     return;
   }
   try {
-    res.json(await updateApprovalWorkflow(tenantId, req.body));
+    const before = await getApprovalWorkflow(tenantId).catch(() => null);
+    const updated = await updateApprovalWorkflow(tenantId, req.body);
+    setRequestAuditContext(req, {
+      entityType: "approval_workflow",
+      entityId: tenantId,
+      action: "Updated approval & withdrawal verification workflow",
+      before: before ? { ...before } : null,
+      after: { ...updated }
+    });
+    res.json(updated);
   } catch (error) {
     res.status(400).json({
       error: error instanceof Error ? error.message : "Failed to save approval workflows"

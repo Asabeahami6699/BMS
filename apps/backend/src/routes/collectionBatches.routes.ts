@@ -14,6 +14,7 @@ import {
   type CashVarianceSettlementMethod
 } from "../services/cashVarianceService.js";
 
+import { setRequestAuditContext } from "../services/auditService.js";
 import { resolveRequestBranchFilter } from "../middleware/branchScope.js";
 
 export const collectionBatchesRouter = Router();
@@ -260,6 +261,16 @@ collectionBatchesRouter.post("/:batchId/post", requirePermission("transactions.c
   const confirmDifferencesReviewed = req.body?.confirmDifferencesReviewed === true;
 
   try {
+    const before = await getCollectionBatchById(
+      {
+        tenantId: context.tenantId,
+        userId: context.userId,
+        role: context.role,
+        branchId: context.branchId,
+        scopeType: context.scopeType
+      },
+      batchId
+    ).catch(() => null);
     const batch = await postCollectionBatch(
       {
         tenantId: context.tenantId,
@@ -271,6 +282,30 @@ collectionBatchesRouter.post("/:batchId/post", requirePermission("transactions.c
       batchId,
       { cashReceivedAmount, confirmDifferencesReviewed }
     );
+    setRequestAuditContext(req, {
+      entityType: "collection_batch",
+      entityId: batchId,
+      action: "Posted field agent call-over batch",
+      before: before
+        ? {
+            status: before.status,
+            totalAmount: before.totalAmount,
+            lineCount: before.lineCount,
+            cashReceivedAmount: before.cashReceivedAmount ?? null
+          }
+        : null,
+      after: {
+        status: batch.status,
+        totalAmount: batch.totalAmount,
+        lineCount: batch.lineCount,
+        cashReceivedAmount: batch.cashReceivedAmount ?? cashReceivedAmount ?? null
+      },
+      metadata: {
+        fieldAgentId: batch.fieldAgentId,
+        businessDate: batch.businessDate,
+        confirmDifferencesReviewed
+      }
+    });
     res.json(batch);
   } catch (error) {
     res.status(400).json({
@@ -290,6 +325,16 @@ collectionBatchesRouter.post(
     const batchId = Array.isArray(req.params.batchId) ? req.params.batchId[0] : req.params.batchId;
     const reason = typeof req.body?.reason === "string" ? req.body.reason : undefined;
     try {
+      const before = await getCollectionBatchById(
+        {
+          tenantId: context.tenantId,
+          userId: context.userId,
+          role: context.role,
+          branchId: context.branchId,
+          scopeType: context.scopeType
+        },
+        batchId
+      ).catch(() => null);
       const batch = await rejectCollectionBatch(
         {
           tenantId: context.tenantId,
@@ -301,6 +346,14 @@ collectionBatchesRouter.post(
         batchId,
         reason
       );
+      setRequestAuditContext(req, {
+        entityType: "collection_batch",
+        entityId: batchId,
+        action: "Returned field agent call-over batch",
+        before: before ? { status: before.status, totalAmount: before.totalAmount } : null,
+        after: { status: batch.status, totalAmount: batch.totalAmount, reason: reason ?? null },
+        metadata: { fieldAgentId: batch.fieldAgentId, businessDate: batch.businessDate }
+      });
       res.json(batch);
     } catch (error) {
       res.status(400).json({

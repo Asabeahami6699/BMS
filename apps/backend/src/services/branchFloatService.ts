@@ -299,6 +299,14 @@ export function branchCounterRequiresFloat(role: string): boolean {
   return role === "teller" || role === "coordinator";
 }
 
+export async function getBranchFloatSessionById(
+  tenantId: string,
+  sessionId: string
+): Promise<BranchFloatSession | null> {
+  const sessions = await listSessions(tenantId);
+  return sessions.find((s) => s.id === sessionId) ?? null;
+}
+
 export async function getFloatSessionForCashier(
   tenantId: string,
   cashierUserId: string,

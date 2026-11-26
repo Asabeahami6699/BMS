@@ -28,6 +28,7 @@ import {
   approveTillExpense,
   closeBranchFloat,
   collectExtraCash,
+  getBranchFloatSessionById,
   getMyBranchFloatSession,
   listBranchFloatSessions,
   listPendingFloatRequests,
@@ -35,14 +36,39 @@ import {
   recordTillExpense,
   requestBranchFloat,
   settleBranchFloat,
+  type BranchFloatSession,
   type FloatSessionStatus
 } from "../services/branchFloatService.js";
+import { setRequestAuditContext } from "../services/auditService.js";
+import { computeCustomerBalance } from "../services/ledgerService.js";
 import {
   listTellerTillCashVariances,
   settleTellerTillCashVariance
 } from "../services/tellerTillCashVarianceService.js";
 
 export const transactionsRouter = Router();
+
+function floatAuditSnapshot(session: BranchFloatSession | null): Record<string, unknown> | null {
+  if (!session) return null;
+  return {
+    status: session.status,
+    branchId: session.branchId,
+    cashierUserId: session.cashierUserId,
+    businessDate: session.businessDate,
+    openingFloat: session.openingFloat,
+    initialCash: session.initialCash,
+    extraCash: session.extraCash,
+    totalExpenses: session.totalExpenses,
+    expectedClosing: session.expectedClosing,
+    actualClosing: session.actualClosing,
+    variance: session.variance,
+    varianceNote: session.varianceNote ?? null,
+    calloverConfirmedAt: session.calloverConfirmedAt ?? null,
+    calloverCheckedCount: session.calloverCheckedTxIds?.length ?? 0,
+    settledBy: session.settledBy ?? null,
+    settledAt: session.settledAt ?? null
+  };
+}
 
 function toTxContext(context: NonNullable<Request["userContext"]>): TransactionRequestContext {
   return {
@@ -74,6 +100,21 @@ transactionsRouter.post(
       : req.params.disclosureId;
     try {
       const result = await tellerPayWithdrawal(toTxContext(context), disclosureId);
+      setRequestAuditContext(req, {
+        entityType: "field_withdrawal_payout",
+        entityId: disclosureId,
+        action: "Paid field withdrawal cash from teller till",
+        before: { status: "approved_pending_payout", disclosureId },
+        after: {
+          status: result.status,
+          disclosureId: result.id,
+          amount: result.withdrawalAmount ?? null
+        },
+        metadata: {
+          customerId: result.customerId,
+          fieldAgentId: result.fieldAgentId
+        }
+      });
       res.json(result);
     } catch (error) {
       res.status(400).json({
@@ -151,7 +192,41 @@ transactionsRouter.post(
   }
 
   try {
+    const customerId = typeof req.body?.customerId === "string" ? req.body.customerId : "";
+    const balanceBefore = customerId
+      ? await computeCustomerBalance(context.tenantId, customerId).catch(() => null)
+      : null;
     const transaction = await createTransaction(context, req.body);
+    const balanceAfter = customerId
+      ? await computeCustomerBalance(context.tenantId, customerId).catch(() => null)
+      : null;
+    setRequestAuditContext(req, {
+      entityType: "transaction",
+      entityId: transaction.id,
+      action:
+        transaction.type === "withdrawal"
+          ? "Posted customer withdrawal"
+          : transaction.type === "daily_susu"
+            ? "Posted daily Susu collection"
+            : "Posted customer deposit",
+      before:
+        balanceBefore != null
+          ? { customerId: transaction.customerId, balance: balanceBefore }
+          : null,
+      after: {
+        transactionId: transaction.id,
+        customerId: transaction.customerId,
+        type: transaction.type,
+        amount: transaction.amount,
+        balance: balanceAfter,
+        transactionBranchId: transaction.transactionBranchId,
+        homeBranchId: transaction.homeBranchId
+      },
+      metadata: {
+        customerIdentityVerified: Boolean(req.body?.customerIdentityVerified),
+        notes: transaction.notes ?? null
+      }
+    });
     res.status(201).json(transaction);
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : "Invalid transaction" });
@@ -267,6 +342,7 @@ transactionsRouter.post(
     }
     const sessionId = Array.isArray(req.params.sessionId) ? req.params.sessionId[0] : req.params.sessionId;
     try {
+      const before = await getBranchFloatSessionById(context.tenantId, sessionId).catch(() => null);
       const session = await allocateBranchFloat(
         {
           tenantId: context.tenantId,
@@ -282,6 +358,13 @@ transactionsRouter.post(
             req.body?.initialCash != null ? Number(req.body.initialCash) : undefined
         }
       );
+      setRequestAuditContext(req, {
+        entityType: "branch_float",
+        entityId: session.id,
+        action: before?.status === "open" ? "Approved extra float for till" : "Opened teller till float",
+        before: floatAuditSnapshot(before),
+        after: floatAuditSnapshot(session)
+      });
       res.json({ session });
     } catch (error) {
       res.status(400).json({
@@ -382,6 +465,7 @@ transactionsRouter.post(
     }
     const sessionId = Array.isArray(req.params.sessionId) ? req.params.sessionId[0] : req.params.sessionId;
     try {
+      const before = await getBranchFloatSessionById(context.tenantId, sessionId).catch(() => null);
       const session = await closeBranchFloat(
         {
           tenantId: context.tenantId,
@@ -400,6 +484,13 @@ transactionsRouter.post(
           calloverConfirmed: req.body?.calloverConfirmed === true
         }
       );
+      setRequestAuditContext(req, {
+        entityType: "branch_float",
+        entityId: session.id,
+        action: "Closed teller till after call-over",
+        before: floatAuditSnapshot(before),
+        after: floatAuditSnapshot(session)
+      });
       res.json({ session });
     } catch (error) {
       res.status(400).json({
@@ -420,6 +511,7 @@ transactionsRouter.post(
     }
     const sessionId = Array.isArray(req.params.sessionId) ? req.params.sessionId[0] : req.params.sessionId;
     try {
+      const before = await getBranchFloatSessionById(context.tenantId, sessionId).catch(() => null);
       const session = await settleBranchFloat(
         {
           tenantId: context.tenantId,
@@ -430,6 +522,13 @@ transactionsRouter.post(
         },
         sessionId
       );
+      setRequestAuditContext(req, {
+        entityType: "branch_float",
+        entityId: session.id,
+        action: "Settled closed teller till",
+        before: floatAuditSnapshot(before),
+        after: floatAuditSnapshot(session)
+      });
       res.json({ session });
     } catch (error) {
       res.status(400).json({
@@ -698,7 +797,35 @@ transactionsRouter.post(
     }
     try {
       const transactionId = String(req.params.transactionId);
+      const beforeDetail = await getSusuCollectionDetail(context, transactionId).catch(() => null);
       const detail = await reverseSusuCollection(context, transactionId, req.body);
+      setRequestAuditContext(req, {
+        entityType: "susu_reversal",
+        entityId: detail.reversalTransactionId ?? transactionId,
+        action: "Reversed Susu collection",
+        before: beforeDetail
+          ? {
+              status: beforeDetail.status,
+              transactionId: beforeDetail.transactionId,
+              customerId: beforeDetail.customerId,
+              customerName: beforeDetail.customerName,
+              amount: beforeDetail.amount
+            }
+          : { status: "posted", transactionId },
+        after: {
+          status: detail.status,
+          transactionId: detail.transactionId,
+          reversalTransactionId: detail.reversalTransactionId ?? null,
+          reversalReference: detail.reversalReference ?? null,
+          reversalReason: detail.reversalReason ?? null,
+          reversedAt: detail.reversedAt ?? null,
+          amount: detail.amount
+        },
+        metadata: {
+          customerId: detail.customerId,
+          customerName: detail.customerName
+        }
+      });
       res.status(201).json(detail);
     } catch (error) {
       res.status(reversalErrorStatus(error)).json({

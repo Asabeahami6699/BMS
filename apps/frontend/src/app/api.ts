@@ -417,6 +417,28 @@ export type AuditLogRecord = {
   branchId?: string;
   ipAddress?: string;
   createdAt: string;
+  entityType?: string;
+  entityId?: string;
+  beforeSnapshot?: Record<string, unknown> | null;
+  afterSnapshot?: Record<string, unknown> | null;
+  changedFields?: string[];
+  metadata?: Record<string, unknown> | null;
+  seqNo?: number;
+  prevHash?: string;
+  entryHash?: string;
+};
+
+export type AuditChainVerification = {
+  valid: boolean;
+  checkedCount: number;
+  legacyUnchainedCount: number;
+  latestSeqNo: number | null;
+  latestHash: string | null;
+  brokenSeqNo?: number | null;
+  brokenId?: string | null;
+  reason?: string;
+  migrationPending?: boolean;
+  verifiedAt: string;
 };
 
 export type Transaction = {
@@ -3824,6 +3846,8 @@ export async function listAgentNotifications(): Promise<AgentNotification[]> {
 export async function listAuditLogs(options?: {
   limit?: number;
   offset?: number;
+  entityType?: string;
+  entityId?: string;
 }): Promise<AuditLogRecord[]> {
   const params = new URLSearchParams();
   if (options?.limit != null) {
@@ -3832,9 +3856,22 @@ export async function listAuditLogs(options?: {
   if (options?.offset != null) {
     params.set("offset", String(options.offset));
   }
+  if (options?.entityType) {
+    params.set("entityType", options.entityType);
+  }
+  if (options?.entityId) {
+    params.set("entityId", options.entityId);
+  }
   const q = params.toString();
   return fetchJson<AuditLogRecord[]>(
     `${API_BASE_URL}/api/v1/audit-logs${q ? `?${q}` : ""}`,
+    { headers: authHeaders() }
+  );
+}
+
+export async function verifyAuditLogChain(): Promise<AuditChainVerification> {
+  return fetchJson<AuditChainVerification>(
+    `${API_BASE_URL}/api/v1/audit-logs/verify`,
     { headers: authHeaders() }
   );
 }

@@ -7,6 +7,7 @@ import {
   getCustomerSusuCycleSummary,
   publishSusuCommissionPolicy
 } from "../services/susuCycleCommissionService.js";
+import { setRequestAuditContext } from "../services/auditService.js";
 
 export const susuCycleCommissionRouter = Router();
 
@@ -30,6 +31,7 @@ susuCycleCommissionRouter.put(
   async (req, res, next) => {
     try {
       const context = req.userContext!;
+      const before = await getActiveSusuCommissionPolicy(context.tenantId).catch(() => null);
       const policy = await publishSusuCommissionPolicy(
         {
           userId: context.userId,
@@ -39,6 +41,13 @@ susuCycleCommissionRouter.put(
         },
         req.body
       );
+      setRequestAuditContext(req, {
+        entityType: "susu_commission_policy",
+        entityId: context.tenantId,
+        action: "Updated Susu cycle commission policy",
+        before: before ? { ...before } : null,
+        after: { ...policy }
+      });
       res.json(policy);
     } catch (error) {
       if (error instanceof Error && error.message) {

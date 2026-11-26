@@ -23,6 +23,7 @@ import {
 
 import { resolveRequestBranchFilter } from "../middleware/branchScope.js";
 import { listBranches } from "../services/branchService.js";
+import { setRequestAuditContext } from "../services/auditService.js";
 
 export const reportsRouter = Router();
 
@@ -421,31 +422,67 @@ reportsRouter.put("/susu-closing-balance", requirePermission("transactions.read"
   }
 
   try {
-    res.json(
-      await saveSusuClosingRecord(
-        context.tenantId,
-        {
-          role: context.role,
-          scopeType: context.scopeType as "head_office" | "branch",
-          branchId: context.branchId,
-          userId: context.userId
-        },
-        {
-          branchId: body.branchId,
-          businessDate: body.businessDate,
-          openingVault: Number(body.openingVault ?? body.initialCash ?? 0),
-          cashToBank: Number(body.cashToBank ?? 0),
-          closingVaultCounted:
-            body.closingVaultCounted === null || body.closingVaultCounted === undefined
-              ? null
-              : Number(body.closingVaultCounted),
-          initialCash:
-            body.initialCash != null ? Number(body.initialCash) : undefined,
-          susuExpenses: Number(body.susuExpenses ?? 0),
-          notes: body.notes
-        }
-      )
+    const before = await getSusuClosingBalance(
+      context.tenantId,
+      {
+        role: context.role,
+        scopeType: context.scopeType as "head_office" | "branch",
+        branchId: context.branchId
+      },
+      body.branchId,
+      body.businessDate
+    ).catch(() => null);
+    const saved = await saveSusuClosingRecord(
+      context.tenantId,
+      {
+        role: context.role,
+        scopeType: context.scopeType as "head_office" | "branch",
+        branchId: context.branchId,
+        userId: context.userId
+      },
+      {
+        branchId: body.branchId,
+        businessDate: body.businessDate,
+        openingVault: Number(body.openingVault ?? body.initialCash ?? 0),
+        cashToBank: Number(body.cashToBank ?? 0),
+        closingVaultCounted:
+          body.closingVaultCounted === null || body.closingVaultCounted === undefined
+            ? null
+            : Number(body.closingVaultCounted),
+        initialCash:
+          body.initialCash != null ? Number(body.initialCash) : undefined,
+        susuExpenses: Number(body.susuExpenses ?? 0),
+        notes: body.notes
+      }
     );
+    setRequestAuditContext(req, {
+      entityType: "susu_closing",
+      entityId: `${body.branchId}:${body.businessDate}`,
+      action: "Saved branch vault EOD closing balance",
+      before: before
+        ? {
+            openingVault: before.openingVault,
+            cashToBank: before.cashToBank,
+            susuExpenses: before.susuExpenses,
+            closingVaultCounted: before.closingVaultCounted,
+            vaultCountVariance: before.vaultCountVariance
+          }
+        : null,
+      after: {
+        openingVault: saved.openingVault,
+        cashToBank: saved.cashToBank,
+        susuExpenses: saved.susuExpenses,
+        closingVaultCounted: saved.closingVaultCounted,
+        vaultCountVariance: saved.vaultCountVariance,
+        expectedClosingVault: saved.expectedClosingVault
+      },
+      metadata: {
+        branchId: body.branchId,
+        businessDate: body.businessDate,
+        notes: body.notes ?? null
+      }
+    });
+    res.json(saved);
   } catch (error) {
     res.status(400).json({
       error: error instanceof Error ? error.message : "Failed to save susu closing record"

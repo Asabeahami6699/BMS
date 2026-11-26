@@ -14,6 +14,7 @@ import { resolveRequestBranchFilter } from "../middleware/branchScope.js";
 import { requireAnyPermission, requirePermission } from "../middleware/requirePermission.js";
 
 import { validateBody } from "../middleware/validateBody.js";
+import { setRequestAuditContext } from "../services/auditService.js";
 
 import {
 
@@ -605,7 +606,18 @@ customersRouter.patch("/:customerId/status", async (req, res) => {
     return;
   }
   try {
-    res.json(await updateCustomerStatus(context.tenantId, String(req.params.customerId), req.body));
+    const customerId = String(req.params.customerId);
+    const before = await getCustomerById(context.tenantId, customerId).catch(() => null);
+    const updated = await updateCustomerStatus(context.tenantId, customerId, req.body);
+    setRequestAuditContext(req, {
+      entityType: "customer",
+      entityId: customerId,
+      action: "Updated customer account status",
+      before: before ? { status: before.status, fullName: before.fullName } : null,
+      after: { status: updated.status, fullName: updated.fullName },
+      metadata: { reason: req.body?.reason ?? null }
+    });
+    res.json(updated);
   } catch (error) {
     res.status(400).json({
       error: error instanceof Error ? error.message : "Failed to update customer status"
@@ -641,14 +653,31 @@ customersRouter.patch(
       ? req.params.customerId[0]
       : req.params.customerId;
     try {
-      res.json(
-        await scheduleNextCardDailySusu(
-          context.tenantId,
-          customerId,
-          context.userId,
-          req.body
-        )
+      const before = await getCustomerById(context.tenantId, customerId).catch(() => null);
+      const updated = await scheduleNextCardDailySusu(
+        context.tenantId,
+        customerId,
+        context.userId,
+        req.body
       );
+      setRequestAuditContext(req, {
+        entityType: "customer",
+        entityId: customerId,
+        action: "Scheduled next-card daily Susu amount",
+        before: before
+          ? {
+              dailyContributionAmount: before.dailyContributionAmount,
+              pendingDailyContributionAmount: before.pendingDailyContributionAmount ?? null
+            }
+          : null,
+        after: {
+          dailyContributionAmount: updated.customer.dailyContributionAmount,
+          pendingDailyContributionAmount: updated.customer.pendingDailyContributionAmount ?? null,
+          appliedImmediately: updated.appliedImmediately,
+          effectiveCardNumber: updated.effectiveCardNumber
+        }
+      });
+      res.json(updated);
     } catch (error) {
       res.status(400).json({
         error: error instanceof Error ? error.message : "Failed to update daily Susu amount"

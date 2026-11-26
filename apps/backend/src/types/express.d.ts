@@ -18,12 +18,23 @@ export interface UserContext {
   tenantSubdomain?: string;
 }
 
+export interface RequestAuditContext {
+  entityType?: string;
+  entityId?: string;
+  action?: string;
+  before?: Record<string, unknown> | null;
+  after?: Record<string, unknown> | null;
+  metadata?: Record<string, unknown> | null;
+}
+
 declare global {
   namespace Express {
     interface Request {
       userContext?: UserContext;
       /** Resolved after branch-scope middleware (query param or user branch). */
       effectiveBranchId?: string;
+      /** Structured before/after domain audit snapshot attached by route handlers. */
+      auditContext?: RequestAuditContext;
     }
   }
 }

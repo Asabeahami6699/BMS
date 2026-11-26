@@ -1,6 +1,6 @@
 import { create } from "zustand";
-import type { AuditLogRecord } from "../api";
-import { getTenantId, listAuditLogs } from "../api";
+import type { AuditChainVerification, AuditLogRecord } from "../api";
+import { getTenantId, listAuditLogs, verifyAuditLogChain } from "../api";
 import { toUserFacingError } from "../../lib/networkError";
 import {
   createLiveSyncManager,
@@ -17,10 +17,13 @@ type AuditLogsState = {
   error: string | null;
   lastFetchedAt: number | null;
   liveSyncActive: boolean;
+  verification: AuditChainVerification | null;
+  verifying: boolean;
 
   hydrate: (options?: { force?: boolean }) => void;
   refresh: () => Promise<void>;
   refreshSilent: () => Promise<void>;
+  verifyChain: () => Promise<AuditChainVerification | null>;
   startLiveSync: () => void;
   stopLiveSync: () => void;
 };
@@ -31,7 +34,7 @@ const silentScheduler = createSilentRefreshScheduler();
 const liveSync = createLiveSyncManager();
 
 function rowsSnapshotKey(rows: AuditLogRecord[]): string {
-  return rows.map((r) => `${r.id}:${r.createdAt}`).join("|");
+  return rows.map((r) => `${r.id}:${r.createdAt}:${r.entryHash ?? ""}`).join("|");
 }
 
 export const useAuditLogsStore = create<AuditLogsState>((set, get) => ({
@@ -40,6 +43,8 @@ export const useAuditLogsStore = create<AuditLogsState>((set, get) => ({
   error: null,
   lastFetchedAt: null,
   liveSyncActive: false,
+  verification: null,
+  verifying: false,
 
   hydrate: (options) => {
     const { loading, lastFetchedAt } = get();
@@ -110,6 +115,24 @@ export const useAuditLogsStore = create<AuditLogsState>((set, get) => ({
       }
     })();
     return fetchInFlight;
+  },
+
+  verifyChain: async () => {
+    if (get().verifying) {
+      return get().verification;
+    }
+    set({ verifying: true, error: null });
+    try {
+      const verification = await verifyAuditLogChain();
+      set({ verification, verifying: false });
+      return verification;
+    } catch (error) {
+      set({
+        verifying: false,
+        error: toUserFacingError(error, "Failed to verify audit log integrity")
+      });
+      return null;
+    }
   },
 
   startLiveSync: () => {
