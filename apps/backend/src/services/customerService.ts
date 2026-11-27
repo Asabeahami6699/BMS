@@ -1070,7 +1070,7 @@ export async function rejectCustomerRegistration(
 
       tenantId,
 
-      userId: rejected.createdByFieldAgentId,
+      userId: rejected.assignedFieldAgentId ?? rejected.createdByFieldAgentId,
 
       customerId: rejected.id,
 
@@ -1078,7 +1078,7 @@ export async function rejectCustomerRegistration(
 
       title: "Registration rejected",
 
-      body: `${rejected.fullName} was not approved.${reason ? ` Reason: ${reason}` : ""}`
+      body: `${rejected.fullName} was not approved.${reason ? ` Reason: ${reason}` : ""} Open Customers to fix details and resubmit.`
 
     });
 
@@ -1108,7 +1108,7 @@ export async function rejectCustomerRegistration(
 
     tenantId,
 
-    userId: target.createdByFieldAgentId,
+    userId: target.assignedFieldAgentId ?? target.createdByFieldAgentId,
 
     customerId: target.id,
 
@@ -1116,12 +1116,334 @@ export async function rejectCustomerRegistration(
 
     title: "Registration rejected",
 
-    body: `${target.fullName} was not approved.${reason ? ` Reason: ${reason}` : ""}`
+    body: `${target.fullName} was not approved.${reason ? ` Reason: ${reason}` : ""} Open Customers to fix details and resubmit.`
 
   });
 
   return enrichCustomerWithAgentNames(tenantId, target);
 
+}
+
+/**
+ * Send an already-rejected registration back to the assigned mobilizer (field agent)
+ * with updated correction instructions and a fresh notification so they can fix & resubmit it.
+ */
+export async function returnRejectedCustomerToAgent(
+  tenantId: string,
+  customerId: string,
+  raw: unknown
+): Promise<Customer> {
+  const parsed = rejectCustomerSchema.safeParse(raw ?? {});
+  const providedReason = parsed.success ? parsed.data.reason?.trim() : undefined;
+  const existing = await getCustomerById(tenantId, customerId);
+
+  if (!existing) {
+    throw new Error("Customer not found");
+  }
+
+  if (existing.status !== "rejected") {
+    throw new Error("Only rejected registrations can be sent back to the mobilizer");
+  }
+
+  const targetAgentId = existing.assignedFieldAgentId ?? existing.createdByFieldAgentId;
+  if (!targetAgentId) {
+    throw new Error("This customer has no assigned field agent to send back to");
+  }
+
+  const instruction =
+    providedReason && providedReason.length > 0
+      ? providedReason
+      : existing.rejectionReason?.trim() || "Please correct the registration details and resubmit.";
+
+  const supabase = getSupabaseAdminClient();
+
+  if (supabase) {
+    const { data, error } = await supabase
+      .from("customers")
+      .update({ status: "rejected", rejection_reason: instruction })
+      .eq("tenant_id", tenantId)
+      .eq("id", customerId)
+      .select("*")
+      .single();
+
+    if (error || !data) {
+      throw new Error(`Failed to send registration back to mobilizer: ${error?.message ?? "unknown"}`);
+    }
+
+    const updated = mapCustomerRow(data as Record<string, unknown>);
+    try {
+      await createAgentNotification({
+        tenantId,
+        userId: targetAgentId,
+        customerId: updated.id,
+        kind: "registration_rejected",
+        title: "Registration sent back for correction",
+        body: `${updated.fullName} was sent back by the coordinator: ${instruction}. Open Customers to edit and resubmit.`
+      });
+    } catch {
+      /* non-blocking */
+    }
+    return enrichCustomerWithAgentNames(tenantId, updated);
+  }
+
+  const customers = getTenantCustomers(tenantId);
+  const target = customers.find((c) => c.id === customerId);
+  if (!target) {
+    throw new Error("Customer not found");
+  }
+  target.rejectionReason = instruction;
+  setTenantCustomers(tenantId, customers);
+
+  try {
+    await createAgentNotification({
+      tenantId,
+      userId: targetAgentId,
+      customerId: target.id,
+      kind: "registration_rejected",
+      title: "Registration sent back for correction",
+      body: `${target.fullName} was sent back by the coordinator: ${instruction}. Open Customers to edit and resubmit.`
+    });
+  } catch {
+    /* non-blocking */
+  }
+
+  return enrichCustomerWithAgentNames(tenantId, target);
+}
+
+/**
+ * Allows the mobilizer (or coordinator/admin) to update a rejected registration in place
+ * and resubmit it into the coordinator approval queue (`pending_activation`).
+ */
+export async function resubmitCustomerRegistration(
+  tenantId: string,
+  actorUserId: string,
+  actorRole: string,
+  customerId: string,
+  input: unknown
+): Promise<Customer> {
+  const existing = await getCustomerById(tenantId, customerId);
+  if (!existing) {
+    throw new Error("Customer not found");
+  }
+  if (existing.status !== "rejected") {
+    throw new Error("Only rejected registrations can be edited and resubmitted");
+  }
+  const isOwner =
+    existing.createdByFieldAgentId === actorUserId ||
+    existing.assignedFieldAgentId === actorUserId;
+  const isStaff =
+    actorRole === "admin" || actorRole === "super_admin" || actorRole === "coordinator";
+  if (actorRole === "field_agent" && !isOwner) {
+    throw new Error("You can only resubmit registrations assigned to you");
+  }
+  if (!isOwner && !isStaff) {
+    throw new Error("Not allowed to resubmit this registration");
+  }
+
+  const payload = customerRegistrationInputSchema.parse(input) as CustomerRegistrationInput;
+  const formSetup = await getRegistrationFormSetup(tenantId);
+  const formIssue = registrationFormIssue(payload, formSetup);
+  if (formIssue) {
+    throw new Error(formIssue);
+  }
+
+  let resolvedInitialDepositAmount: number | undefined;
+  let resolvedSavingsOpeningFeeCollected = false;
+  let resolvedSavingsLockTargetAmount: number | undefined;
+
+  if (payload.accountType === "savings") {
+    const lockedTarget = Math.round(formSetup.savingsOpeningFeeGhs * 100) / 100;
+    if (payload.initialDepositAmount !== undefined) {
+      const initialDeposit = Math.round(payload.initialDepositAmount * 100) / 100;
+      if (initialDeposit < lockedTarget) {
+        throw new Error(
+          `Initial deposit must be at least GHS ${formatAccountAmount(lockedTarget)} (the required locked minimum balance).`
+        );
+      }
+      resolvedInitialDepositAmount = initialDeposit;
+      resolvedSavingsOpeningFeeCollected = true;
+      resolvedSavingsLockTargetAmount = lockedTarget;
+    } else {
+      if (lockedTarget > 0) {
+        if (
+          formSetup.savingsOpeningFeeHandling === "cash_now" &&
+          payload.savingsOpeningFeeCollected !== true
+        ) {
+          throw new Error(
+            `This company requires an initial deposit of at least GHS ${formatAccountAmount(lockedTarget)} at registration.`
+          );
+        }
+        if (
+          formSetup.savingsOpeningFeeHandling === "deduct_later" &&
+          payload.savingsOpeningFeeCollected !== false
+        ) {
+          throw new Error(
+            `This company is configured to defer the GHS ${formatAccountAmount(lockedTarget)} savings opening fee to first deposit(s).`
+          );
+        }
+      }
+      resolvedSavingsOpeningFeeCollected = Boolean(payload.savingsOpeningFeeCollected);
+      if (resolvedSavingsOpeningFeeCollected) {
+        resolvedInitialDepositAmount = lockedTarget;
+        resolvedSavingsLockTargetAmount = lockedTarget;
+      }
+    }
+  }
+
+  const normalized = registrationPayloadForSetup(payload, formSetup);
+  const homeBranchId = payload.homeBranchId
+    ? await resolveHomeBranchId(tenantId, existing.homeBranchId, payload.homeBranchId)
+    : existing.homeBranchId;
+
+  const updatedCustomer: Customer = customerSchema.parse({
+    ...existing,
+    fullName: payload.fullName,
+    email: normalized.email || undefined,
+    phone: payload.phone,
+    location: payload.location,
+    houseNumber: normalized.houseNumber,
+    dateOfBirth: normalized.dateOfBirth,
+    occupation: normalized.occupation,
+    accountType: payload.accountType,
+    idCardType: (normalized.idCardType as Customer["idCardType"]) ?? undefined,
+    idCardNumber: normalized.idCardNumber,
+    kycTier: normalized.idCardType === "no_id_simplified_kyc" ? "simplified" : "full",
+    nationality: normalized.nationality,
+    kycIntroducer: normalized.kycIntroducer
+      ? {
+          fullName: normalized.kycIntroducer.fullName,
+          phone: normalized.kycIntroducer.phone,
+          relationship: normalized.kycIntroducer.relationship,
+          ghanaCardNumber: normalized.kycIntroducer.ghanaCardNumber
+        }
+      : undefined,
+    photoUrl: normalized.photoUrl,
+    idCardPhotoUrl: normalized.idCardPhotoUrl,
+    savingsOpeningFeeCollected: resolvedSavingsOpeningFeeCollected,
+    savingsOpeningFeeRecovered: 0,
+    initialDepositAmount: resolvedInitialDepositAmount,
+    savingsLockTargetAmount: resolvedSavingsLockTargetAmount,
+    nextOfKin:
+      normalized.nextOfKin?.fullName && normalized.nextOfKin.phone && normalized.nextOfKin.location
+        ? {
+            fullName: normalized.nextOfKin.fullName,
+            phone: normalized.nextOfKin.phone,
+            location: normalized.nextOfKin.location,
+            houseNumber: normalized.nextOfKin.houseNumber
+          }
+        : undefined,
+    homeBranchId,
+    assignedFieldAgentId:
+      isStaff && payload.assignedFieldAgentId
+        ? payload.assignedFieldAgentId
+        : existing.assignedFieldAgentId,
+    dailyContributionAmount: normalized.dailyContributionAmount ?? 0,
+    rejectionReason: undefined,
+    status: "pending_activation"
+  });
+
+  const supabase = getSupabaseAdminClient();
+  if (supabase) {
+    const fullRow = insertRowFromCustomer(updatedCustomer);
+    delete fullRow.id;
+    delete fullRow.tenant_id;
+    delete fullRow.created_by_field_agent_id;
+    delete fullRow.account_number;
+    fullRow.rejection_reason = null;
+
+    let patch = fullRow;
+    let { data, error } = await supabase
+      .from("customers")
+      .update(patch)
+      .eq("tenant_id", tenantId)
+      .eq("id", customerId)
+      .select("*")
+      .single();
+
+    if (
+      error &&
+      (isMissingIdCardTypeColumn(error.message) || isMissingSavingsInitialDepositColumn(error.message))
+    ) {
+      const missingKyc = isMissingIdCardTypeColumn(error.message);
+      const missingSavingsCols = isMissingSavingsInitialDepositColumn(error.message);
+      if (missingKyc) {
+        patch = stripKycColumns(patch);
+      }
+      if (missingSavingsCols) {
+        patch = stripSavingsInitialDepositColumns(patch);
+      }
+      const retry = await supabase
+        .from("customers")
+        .update(patch)
+        .eq("tenant_id", tenantId)
+        .eq("id", customerId)
+        .select("*")
+        .single();
+      data = retry.data;
+      error = retry.error;
+      if (!error) {
+        if (missingKyc) {
+          kycMetadataFallback.set(pendingDailyKey(tenantId, updatedCustomer.id), {
+            idCardType: updatedCustomer.idCardType,
+            kycTier: updatedCustomer.kycTier,
+            nationality: updatedCustomer.nationality,
+            kycIntroducer: updatedCustomer.kycIntroducer,
+            kycUpgradedAt: updatedCustomer.kycUpgradedAt
+          });
+        }
+        if (missingSavingsCols && updatedCustomer.accountType === "savings") {
+          savingsDepositMetadataFallback.set(pendingDailyKey(tenantId, updatedCustomer.id), {
+            initialDepositAmount: updatedCustomer.initialDepositAmount,
+            initialDepositCreditedAt: updatedCustomer.initialDepositCreditedAt,
+            savingsLockTiming: updatedCustomer.savingsLockTiming,
+            savingsLockTargetAmount: updatedCustomer.savingsLockTargetAmount
+          });
+        }
+      }
+    }
+
+    if (error || !data) {
+      throw new Error(`Failed to resubmit registration: ${error?.message ?? "unknown"}`);
+    }
+
+    const mapped = mapCustomerRow(data as Record<string, unknown>);
+    try {
+      await notifyTenantStaff({
+        tenantId,
+        roles: ["admin", "coordinator"],
+        kind: "registration_pending",
+        customerId: mapped.id,
+        title: "Registration corrected & resubmitted",
+        body: `${mapped.fullName} (${mapped.phone}) was corrected and resubmitted for coordinator approval.`
+      });
+    } catch {
+      /* non-blocking */
+    }
+    return enrichCustomerWithAgentNames(tenantId, mapped);
+  }
+
+  const customers = getTenantCustomers(tenantId);
+  const idx = customers.findIndex((c) => c.id === customerId);
+  if (idx < 0) {
+    throw new Error("Customer not found");
+  }
+  const nextList = customers.map((c, i) => (i === idx ? updatedCustomer : c));
+  setTenantCustomers(tenantId, nextList);
+
+  try {
+    await notifyTenantStaff({
+      tenantId,
+      roles: ["admin", "coordinator"],
+      kind: "registration_pending",
+      customerId: updatedCustomer.id,
+      title: "Registration corrected & resubmitted",
+      body: `${updatedCustomer.fullName} (${updatedCustomer.phone}) was corrected and resubmitted for coordinator approval.`
+    });
+  } catch {
+    /* non-blocking */
+  }
+
+  return enrichCustomerWithAgentNames(tenantId, updatedCustomer);
 }
 
 

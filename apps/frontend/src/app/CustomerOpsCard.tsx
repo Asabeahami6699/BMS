@@ -169,9 +169,27 @@ export function CustomerOpsCard({ role }: Props) {
     [customers, statementCustomerId]
   );
 
+  const approvedCustomers = useMemo(
+    () =>
+      customers.filter(
+        (c) => c.status !== "rejected" && c.status !== "pending_activation"
+      ),
+    [customers]
+  );
+
+  const pendingRegistrationCount = useMemo(
+    () => customers.filter((c) => c.status === "pending_activation").length,
+    [customers]
+  );
+
+  const rejectedRegistrationCount = useMemo(
+    () => customers.filter((c) => c.status === "rejected").length,
+    [customers]
+  );
+
   const filtered = useMemo(
     () =>
-      filterRowsBySearch(customers, search, [
+      filterRowsBySearch(approvedCustomers, search, [
         "fullName",
         "phone",
         "accountNumber",
@@ -182,7 +200,7 @@ export function CustomerOpsCard({ role }: Props) {
         "createdByFieldAgentName",
         "assignedFieldAgentName"
       ] as (keyof Customer)[]),
-    [customers, search]
+    [approvedCustomers, search]
   );
 
   const statusLine = useMemo(() => {
@@ -401,8 +419,8 @@ export function CustomerOpsCard({ role }: Props) {
           <div>
             <h2>Customers</h2>
             <p className="muted">
-              Browse and search customer records. Use Register customer for walk-in onboarding (full KYC, pending
-              approval).
+              Approved customer accounts only. Pending and rejected registrations are managed under{" "}
+              <Link to="/app/susu/pending-approvals?tab=registrations">Pending approvals</Link>.
               {canManageStatus
                 ? " Admins can flag accounts closed, inactive, or dormant, and reactivate them."
                 : ""}
@@ -411,6 +429,22 @@ export function CustomerOpsCard({ role }: Props) {
             </p>
           </div>
           <div className="customers-card-head-actions">
+            {rejectedRegistrationCount > 0 ? (
+              <Link
+                to="/app/susu/pending-approvals?tab=rejected"
+                className="button secondary"
+              >
+                Rejected ({rejectedRegistrationCount})
+              </Link>
+            ) : null}
+            {pendingRegistrationCount > 0 ? (
+              <Link
+                to="/app/susu/pending-approvals?tab=registrations"
+                className="button secondary"
+              >
+                Pending ({pendingRegistrationCount})
+              </Link>
+            ) : null}
             <button
               type="button"
               className="button secondary"

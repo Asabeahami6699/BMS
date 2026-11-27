@@ -8,8 +8,10 @@ import { AdminDataTable, filterRowsBySearch } from "../components/AdminDataTable
 import { useToast } from "../components/Toast";
 import { formatFieldAgent } from "../lib/formatFieldAgent";
 import { formatNextOfKin } from "../lib/formatNextOfKin";
+import { CustomerDetailModal } from "./CustomerDetailModal";
 import { PendingApprovalsCard } from "./PendingApprovalsCard";
 import { RegistrationReviewModal } from "./RegistrationReviewModal";
+import { SendBackToAgentModal } from "./SendBackToAgentModal";
 import { useCoordinatorLiveSync } from "./hooks/useCoordinatorLiveSync";
 import { useCustomersLiveSync } from "./hooks/useCustomersLiveSync";
 import { useCoordinatorStore } from "./stores/coordinatorStore";
@@ -50,9 +52,16 @@ export function CustomerOnboardingPage({ role }: Props) {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [reviewCustomer, setReviewCustomer] = useState<Customer | null>(null);
+  const [detailCustomer, setDetailCustomer] = useState<Customer | null>(null);
+  const [sendBackCustomer, setSendBackCustomer] = useState<Customer | null>(null);
   const [search, setSearch] = useState("");
 
   const recentPending = useMemo(() => [...pending], [pending]);
+
+  const rejectedRegistrations = useMemo(
+    () => customers.filter((c) => c.status === "rejected"),
+    [customers]
+  );
 
   const recentlyActivated = useMemo(
     () => customers.filter((c) => c.status === "active").slice(0, 12),
@@ -107,6 +116,10 @@ export function CustomerOnboardingPage({ role }: Props) {
           <span className="kpi-label">Pending approval</span>
           <p className="kpi-value">{pending.length}</p>
         </article>
+        <article className="kpi-card kpi-card--danger">
+          <span className="kpi-label">Rejected registrations</span>
+          <p className="kpi-value">{rejectedRegistrations.length}</p>
+        </article>
         <article className="kpi-card kpi-card--success">
           <span className="kpi-label">Active customers</span>
           <p className="kpi-value">{customers.filter((c) => c.status === "active").length}</p>
@@ -134,6 +147,54 @@ export function CustomerOnboardingPage({ role }: Props) {
       </section>
 
       {canReview ? <PendingApprovalsCard /> : null}
+
+      {rejectedRegistrations.length > 0 ? (
+        <section className="card">
+          <h3>Rejected registrations ({rejectedRegistrations.length})</h3>
+          <p className="muted" style={{ marginTop: "0.2rem" }}>
+            Not yet approved customers. Send back to the mobilizer so they can fix details and
+            resubmit for approval.
+          </p>
+          <div className="lines">
+            {rejectedRegistrations.map((c) => (
+              <div className="line tenant-line" key={c.id}>
+                <div>
+                  <strong>{c.fullName}</strong>{" "}
+                  <span className="status-pill status-pill--inactive">Rejected</span>
+                  <small style={{ display: "block" }}>
+                    {c.phone} · {c.accountType?.replace(/_/g, " ") ?? "—"} · Agent:{" "}
+                    {formatFieldAgent(c)}
+                    {branchLabel(c) ? ` · ${branchLabel(c)}` : ""}
+                  </small>
+                  {c.rejectionReason ? (
+                    <small style={{ display: "block" }}>
+                      <strong>Reason:</strong> {c.rejectionReason}
+                    </small>
+                  ) : null}
+                </div>
+                <div className="platform-actions-buttons">
+                  <button
+                    type="button"
+                    className="button secondary"
+                    onClick={() => setDetailCustomer(c)}
+                  >
+                    View details
+                  </button>
+                  {canReview ? (
+                    <button
+                      type="button"
+                      className="button"
+                      onClick={() => setSendBackCustomer(c)}
+                    >
+                      Send back to mobilizer
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {!canReview && recentPending.length > 0 ? (
         <section className="card">
@@ -242,6 +303,26 @@ export function CustomerOnboardingPage({ role }: Props) {
           if (reviewCustomer) {
             useCoordinatorStore.getState().removePendingRegistration(reviewCustomer.id);
           }
+          void useCoordinatorStore.getState().refreshSilent();
+          void useCustomersStore.getState().refreshSilent();
+        }}
+      />
+
+      <CustomerDetailModal
+        open={detailCustomer !== null}
+        customer={detailCustomer}
+        branchLabel={detailCustomer ? branchLabel(detailCustomer) : undefined}
+        agentLabel={detailCustomer ? formatFieldAgent(detailCustomer) : undefined}
+        onSendBackToAgent={canReview ? (c) => setSendBackCustomer(c) : undefined}
+        onClose={() => setDetailCustomer(null)}
+      />
+
+      <SendBackToAgentModal
+        open={sendBackCustomer !== null}
+        customer={sendBackCustomer}
+        agentLabel={sendBackCustomer ? formatFieldAgent(sendBackCustomer) : undefined}
+        onClose={() => setSendBackCustomer(null)}
+        onSent={() => {
           void useCoordinatorStore.getState().refreshSilent();
           void useCustomersStore.getState().refreshSilent();
         }}

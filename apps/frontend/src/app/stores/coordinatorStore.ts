@@ -82,6 +82,7 @@ const silentScheduler = createSilentRefreshScheduler();
 const liveSync = createLiveSyncManager();
 
 function coordinatorSnapshotKey(data: {
+  customers: Customer[];
   pendingRegistrations: Customer[];
   pendingRequests: BalanceDisclosure[];
   summary: SummaryReport | null;
@@ -90,6 +91,10 @@ function coordinatorSnapshotKey(data: {
   customersCount: number;
 }): string {
   const pendingReg = data.pendingRegistrations.map((c) => `${c.id}:${c.status}`).join(",");
+  const rejectedReg = data.customers
+    .filter((c) => c.status === "rejected")
+    .map((c) => `${c.id}:${c.rejectionReason ?? ""}`)
+    .join(",");
   const pendingReq = data.pendingRequests.map((r) => `${r.id}:${r.status}:${r.requestType}`).join(",");
   const summary = data.summary
     ? `${data.summary.totalTransactions}:${data.summary.totalDeposits}:${data.summary.totalWithdrawals}:${data.summary.totalDailySusu}`
@@ -102,13 +107,14 @@ function coordinatorSnapshotKey(data: {
     .slice(0, 20)
     .map((b) => `${b.branchId}:${b.totalAmount}`)
     .join(",");
-  return `${data.customersCount}|${pendingReg}|${pendingReq}|${summary}|${agents}|${branches}`;
+  return `${data.customersCount}|${pendingReg}|${rejectedReg}|${pendingReq}|${summary}|${agents}|${branches}`;
 }
 
 function applyCoordinatorBootstrap(
   data: Awaited<ReturnType<typeof getCoordinatorBootstrap>>
 ): Partial<CoordinatorState> | null {
   const key = coordinatorSnapshotKey({
+    customers: data.customers,
     pendingRegistrations: data.pendingRegistrations,
     pendingRequests: data.pendingRequests,
     summary: data.summary,

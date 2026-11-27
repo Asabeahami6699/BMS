@@ -106,9 +106,32 @@ export function AgentHomePage() {
           <p className="muted agent-home-stats">
             <strong>{stats.active || "—"}</strong> ready to collect · <strong>{stats.pending || "—"}</strong>{" "}
             awaiting approval
+            {stats.rejected > 0 ? (
+              <>
+                {" "}
+                · <strong>{stats.rejected}</strong> needs fix
+              </>
+            ) : null}
           </p>
         ) : null}
       </article>
+
+      {stats.rejected > 0 ? (
+        <article className="card agent-card agent-extra-batch-banner" role="alert">
+          <div className="agent-extra-batch-banner__head">
+            <span className="status-pill status-pill--inactive">
+              {stats.rejected} registration{stats.rejected === 1 ? "" : "s"} returned for correction
+            </span>
+          </div>
+          <p className="muted">
+            Your coordinator returned {stats.rejected === 1 ? "an account" : `${stats.rejected} accounts`} so you can
+            fix the details and resubmit for approval.
+          </p>
+          <Link to="/app/agent/customers" className="button btn-sm">
+            Review &amp; fix now
+          </Link>
+        </article>
+      ) : null}
 
       <AgentCashVariancePanel />
 

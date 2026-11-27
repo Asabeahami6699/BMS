@@ -4016,6 +4016,34 @@ export async function rejectCustomer(customerId: string, reason?: string): Promi
   });
 }
 
+export async function returnRejectedCustomerToAgent(
+  customerId: string,
+  reason?: string
+): Promise<Customer> {
+  return fetchJson<Customer>(
+    `${API_BASE_URL}/api/v1/customers/${encodeURIComponent(customerId)}/return-to-agent`,
+    {
+      method: "PATCH",
+      headers: authHeaders(),
+      body: JSON.stringify({ reason: reason?.trim() || undefined })
+    }
+  );
+}
+
+export async function resubmitCustomerRegistration(
+  customerId: string,
+  payload: CustomerRegistrationInput
+): Promise<Customer> {
+  return fetchJson<Customer>(
+    `${API_BASE_URL}/api/v1/customers/${encodeURIComponent(customerId)}/resubmit`,
+    {
+      method: "PUT",
+      headers: authHeaders(),
+      body: JSON.stringify(payload)
+    }
+  );
+}
+
 export async function assignCustomerFieldAgent(
   customerId: string,
   assignedFieldAgentId: string | null,

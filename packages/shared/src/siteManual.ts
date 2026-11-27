@@ -91,16 +91,25 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
   {
     id: "susu-onboarding-accounts",
     department: "susu",
-    title: "Customer onboarding, ID card types, Simplified KYC & Savings opening fee",
-    howTo: "How to register customers (including foreigners without national ID) and approve accounts",
+    title: "Customer onboarding, Savings initial deposit, Simplified KYC, editing & rejected registrations",
+    howTo: "How to register, approve, edit, or send back rejected registrations",
     keywords: [
       "susu",
       "onboarding",
       "register",
       "customer",
       "pending approvals",
+      "rejected",
+      "send back",
+      "mobilizer",
+      "resubmit",
+      "fix and resubmit",
+      "update details",
+      "edit customer",
       "account type",
       "savings",
+      "initial deposit",
+      "locked balance",
       "opening fee",
       "daily contribution",
       "meba daakye",
@@ -123,12 +132,15 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
     modules: ["susu_management"],
     body: [
       "New customers can be registered in the office under Susu → Customer Onboarding or in the field via the Field agent mobile app.",
-      "Supported account types include Susu, Savings (with an admin-configured fixed/locked opening amount and preferred collection handling: Cash collected now only, Not collected — deduct later only, or Show both), Group, and Meba Daakye.",
+      "Supported account types include Susu, Savings, Group, and Meba Daakye. Daily contribution amount is captured for Susu / Group / Meba Daakye accounts only and is automatically hidden on Normal Savings accounts.",
+      "Normal Savings initial deposit & locked minimum balance: Savings registrations require an Initial deposit at least equal to your company’s configured locked minimum balance (e.g. GHS 20). On coordinator approval, the full initial deposit is credited to the customer’s Savings account, the minimum balance is locked automatically per your commission timing policy (keeping only the excess withdrawable), and the customer receives two ordered SMS/email alerts — Account Approved first, followed by Deposit Confirmed.",
       "Supported ID card types under Identity & KYC: Ghana Card, Non-Citizen Ghana Card, ECOWAS National ID, Voter's ID, Health Insurance (NHIS), Driver's Licence, Passport, and No National ID (Tier 1 · Simplified KYC + Local Introducer).",
       "Tier 1 · Simplified KYC (BoG-aligned onboarding for foreign residents or applicants without a national ID): selecting No National ID requires the customer’s Nationality (grouped West Africa / global dropdown), a mandatory live Customer Face Photo, and a verified Local Introducer (full name, phone, relationship, and valid Ghana Card number).",
       "Tier 1 · Simplified KYC guardrails: accounts are tagged Simplified KYC, capped at the tenant’s configured maximum balance (default GHS 5,000, configurable in Settings → Form setup), and locked from Loans and Investments until upgraded. By default, Simplified KYC customers withdraw in person at the branch with face verification, or the admin can toggle Allow field agent withdrawal requests in Settings → Form setup.",
       "Upgrade to Full KYC: once a Simplified KYC customer obtains a Non-Citizen Ghana Card, ECOWAS ID, Passport, or other approved ID, an admin, branch manager, or coordinator opens the customer’s profile and clicks Upgrade to Full KYC to lift Tier 1 limits (logged in Audit logs).",
-      "Every new registration lands in Susu → Pending Approvals. Admin or coordinator verifies the customer details, photo, and ID/introducer information, then approves or rejects the account so it becomes Active with an account number."
+      "Approved Customers vs Pending & Rejected registrations: Susu → Customers lists approved accounts only (Active, Inactive, Dormant, Suspended, Closed). Pending and rejected registrations stay under Susu → Pending Approvals (separate Registrations and Rejected registrations tabs) and Susu → Customer Onboarding so unapproved sign-ups never mix into approved customers.",
+      "Sending rejected accounts back to the mobilizer: open Susu → Pending Approvals → Rejected registrations (or Customer Onboarding) and click Send back to mobilizer with clear instructions on what to fix. The mobilizer receives an alert and taps Fix & resubmit on their Customers or Registrations screen to edit all saved fields/photos and resubmit the exact same record back to Pending Approvals (no duplicate customer created).",
+      "Updating customer details: authorized office staff (Admin, Coordinator, Customer Service) can click Update details from a customer’s row menu or detail modal to correct profile, contact, address, ID, next-of-kin, or branch details — every change is recorded with before/after values in Audit logs."
     ]
   },
   {
@@ -173,12 +185,18 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
   {
     id: "susu-callover-batches",
     department: "susu",
-    title: "Callover batches (reviewing, overdue reminders & posting field agent daily Susu)",
-    howTo: "How to approve callover batches",
+    title: "Callover batches (posting, removing mistaken lines, canceling unposted batches & Batch #2+)",
+    howTo: "How to review, clean up, unlock extra batches, and post callover batches",
     keywords: [
       "callover",
       "call over",
       "batch",
+      "batch 2",
+      "extra batch",
+      "unlock extra",
+      "cancel batch",
+      "remove line",
+      "duplicate",
       "daily susu",
       "field agent",
       "coordinator",
@@ -194,9 +212,11 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
       "Go to Susu → Callover batches to review pending agent submissions for your branch.",
       "Overdue batch guard: any submitted batch from an earlier date that was not posted yet is automatically pinned at the top of the queue with an Overdue badge so it is never hidden behind today’s date.",
       "If a field agent forgot to submit yesterday’s draft collections, their Field agent Home screen highlights the overdue batch with a 1-tap Submit button so they can send it without losing a single collection.",
+      "Removing a mistaken line or canceling an unposted batch: while a batch is still pending (unposted), no customer has been credited and no customer SMS/email has fired. Click View lines → Remove on an individual duplicate/mistaken line (with a required audit reason) to drop just that line and recalculate the batch total — or click Cancel batch to discard the entire unposted batch so the agent can start fresh. Removing the only line in a batch automatically cancels the empty unposted batch. Already-posted batches cannot be canceled or edited (use ledger Reversal for posted errors).",
       "Count the physical cash handed over by the agent and compare it against the batch total.",
       "Approve and post the batch: each customer’s account is credited, their Susu passbook boxes check off automatically, Susu cycle commission is applied per policy, and customer SMS receipts fire if enabled.",
-      "If physical cash handed over differs from the submitted batch total, the difference automatically creates a Field agent case under Susu → Overages/Shortages."
+      "If physical cash handed over differs from the submitted batch total, the difference automatically creates a Field agent case under Susu → Overages/Shortages.",
+      "Coordinator-unlocked extra batches (Batch #2+): if a field agent accidentally submitted and posted call-over early in the day, scroll to Posted batches on Susu → Callover batches and click Allow extra batch (Batch #2) with a required audit reason. Batch #1 stays locked and audited, the agent can continue collecting into Batch #2 and submit it separately, and today’s combined totals add up automatically."
     ]
   },
   {
@@ -620,14 +640,20 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
   {
     id: "agent-collect",
     department: "field_agent",
-    title: "Field agent daily collection, late batch reminders & Susu passbook",
-    howTo: "How field agents collect",
+    title: "Field agent daily collection, extra batches, fixing rejected registrations & Susu passbook",
+    howTo: "How field agents collect, fix returned accounts, and submit call-over",
     keywords: [
       "field agent",
+      "mobilizer",
       "collect",
       "offline",
       "sync",
       "daily susu",
+      "extra batch",
+      "batch 2",
+      "rejected",
+      "fix and resubmit",
+      "returned registration",
       "passbook",
       "susu passbook",
       "unsubmitted batch",
@@ -639,6 +665,8 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
       "Select the customer, enter the daily Susu amount (single day, multi-day, or partial payment), and save. (Branch counter does not post Daily Susu.)",
       "Offline collections queue on the device and sync automatically when the phone is back online. Whenever items are queued offline, an Offline sync queue inspector card appears on the Home screen showing every pending collection/registration with a manual Retry sync now button.",
       "Use Call over to submit the day's batch for coordinator approval and posting. If a previous day’s draft batch was never submitted, an amber reminder card appears at the top of the Home screen with a 1-tap Submit button.",
+      "Extra batches (Batch #2+): if you accidentally submitted call-over early and your coordinator unlocks Batch #2, a Batch #2 unlocked banner appears on your Home screen and Collect page so you can keep recording remaining collections for the day separately from Batch #1.",
+      "Fixing returned / rejected registrations: if a coordinator rejects or sends back a customer registration for correction, a highlighted alert banner appears on your Home screen and a Needs fix tab appears under Customers. Tap Fix & resubmit to open the pre-filled form (with saved photos and the coordinator’s note), make the requested changes, and resubmit for approval without creating a duplicate customer.",
       "Tap Susu passbook on any active Susu customer card under Customers to show the customer their checked boxes, partial progress, Balance Brought Forward (BBF), Fee box, and past completed or red-line cancelled pages."
     ]
   },
@@ -772,7 +800,7 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
     ],
     body: [
       "Go to Settings → Form setup to customize registration account types, required/optional/hidden fields, and downloadable paper sheets.",
-      "Savings opening fee controls: set your company’s Fixed / locked initial opening amount (GHS) and choose Opening fee options shown to field agents (Show both, Cash collected now only, or Not collected — deduct later only). Field agents only see the option(s) you allow, and the server enforces your preference on submission.",
+      "Savings initial deposit & locked minimum balance: set your company’s Minimum locked balance / initial deposit (GHS, e.g. GHS 20) under Settings → Form setup. Normal Savings registrations automatically hide Daily contribution and require an initial deposit at least equal to that minimum. Lock timing follows your When to deduct rule under Susu → Susu cycle fees.",
       "Tier 1 · Simplified KYC settings: toggle Allow Simplified KYC registration ON/OFF, set the Maximum account balance cap (GHS, default 5,000; 0 for no cap), and toggle Allow field agent withdrawal requests for Simplified KYC accounts (off by default for branch face-verified withdrawals; turn on to let field agents request withdrawals for coordinator approval).",
       "Printable single-page A4 paper forms: print or download your company’s Standard Registration Form, the dedicated single-page A4 Simplified KYC (Tier 1) Registration & Local Introducer Attestation Form, the Daily Tally Sheet (40 rows), and 6-per-sheet Walk-in Deposit Slips."
     ]

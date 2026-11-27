@@ -10,6 +10,7 @@ type Props = {
   branchLabel?: string;
   agentLabel?: string;
   onEdit?: (customer: Customer) => void;
+  onSendBackToAgent?: (customer: Customer) => void;
   onClose: () => void;
 };
 
@@ -23,6 +24,7 @@ export function CustomerDetailModal({
   branchLabel,
   agentLabel,
   onEdit,
+  onSendBackToAgent,
   onClose
 }: Props) {
   const navigate = useNavigate();
@@ -52,6 +54,18 @@ export function CustomerDetailModal({
       panelClassName="modal-panel--70 modal-panel--customer"
       footer={
         <>
+          {customer.status === "rejected" && onSendBackToAgent ? (
+            <button
+              type="button"
+              className="button"
+              onClick={() => {
+                onClose();
+                onSendBackToAgent(customer);
+              }}
+            >
+              Send back to mobilizer
+            </button>
+          ) : null}
           {onEdit ? (
             <button
               type="button"

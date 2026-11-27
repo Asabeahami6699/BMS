@@ -35,6 +35,10 @@ import {
 
   resetCustomerAccount,
 
+  resubmitCustomerRegistration,
+
+  returnRejectedCustomerToAgent,
+
   scheduleNextCardDailySusu,
 
   searchActiveCustomers,
@@ -385,6 +389,122 @@ customersRouter.patch("/:customerId/reject", requireAnyPermission("customers.cre
   }
 
 });
+
+customersRouter.patch(
+  "/:customerId/return-to-agent",
+  requireAnyPermission("customers.create", "customers.read"),
+  async (req, res) => {
+    const context = req.userContext;
+    if (!context) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    const workflow = await getApprovalWorkflow(context.tenantId);
+    const allowed =
+      context.role === "admin" ||
+      context.role === "super_admin" ||
+      context.role === "coordinator" ||
+      roleMayApprove(workflow, "registration", context.role);
+    if (!allowed) {
+      res
+        .status(403)
+        .json({ error: "Your role is not allowed to send registrations back to field agents." });
+      return;
+    }
+
+    const customerId = Array.isArray(req.params.customerId)
+      ? req.params.customerId[0]
+      : req.params.customerId;
+    const parsed = rejectCustomerSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid return-to-agent payload" });
+      return;
+    }
+
+    try {
+      const before = await getCustomerById(context.tenantId, customerId).catch(() => null);
+      const updated = await returnRejectedCustomerToAgent(
+        context.tenantId,
+        customerId,
+        parsed.data
+      );
+      setRequestAuditContext(req, {
+        entityType: "customer",
+        entityId: customerId,
+        action: "Sent rejected registration back to mobilizer for correction",
+        before: before
+          ? {
+              status: before.status,
+              rejectionReason: before.rejectionReason ?? null,
+              assignedFieldAgentId: before.assignedFieldAgentId ?? null
+            }
+          : null,
+        after: {
+          status: updated.status,
+          rejectionReason: updated.rejectionReason ?? null,
+          assignedFieldAgentId: updated.assignedFieldAgentId ?? null
+        }
+      });
+      res.json(updated);
+    } catch (error) {
+      res.status(400).json({
+        error:
+          error instanceof Error ? error.message : "Failed to send registration back to mobilizer"
+      });
+    }
+  }
+);
+
+customersRouter.put(
+  "/:customerId/resubmit",
+  requireAnyPermission("customers.create", "customers.read"),
+  validateBody(customerRegistrationInputSchema),
+  async (req, res) => {
+    const context = req.userContext;
+    if (!context) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    const customerId = Array.isArray(req.params.customerId)
+      ? req.params.customerId[0]
+      : req.params.customerId;
+
+    try {
+      const before = await getCustomerById(context.tenantId, customerId).catch(() => null);
+      const updated = await resubmitCustomerRegistration(
+        context.tenantId,
+        context.userId,
+        context.role,
+        customerId,
+        req.body
+      );
+      setRequestAuditContext(req, {
+        entityType: "customer",
+        entityId: customerId,
+        action: "Corrected and resubmitted rejected registration",
+        before: before
+          ? {
+              status: before.status,
+              fullName: before.fullName,
+              phone: before.phone,
+              rejectionReason: before.rejectionReason ?? null
+            }
+          : null,
+        after: {
+          status: updated.status,
+          fullName: updated.fullName,
+          phone: updated.phone,
+          rejectionReason: null
+        }
+      });
+      res.json(updated);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "Failed to resubmit registration";
+      const statusCode = /not allowed|only resubmit registrations assigned/i.test(msg) ? 403 : 400;
+      res.status(statusCode).json({ error: msg });
+    }
+  }
+);
 
 customersRouter.patch(
   "/:customerId/assignment",

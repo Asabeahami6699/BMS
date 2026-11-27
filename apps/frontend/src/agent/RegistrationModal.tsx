@@ -15,7 +15,13 @@ import {
   showDailyContributionForAccountType
 } from "@bms/shared";
 import type { Branch, Customer, FieldAgentOption } from "../app/api";
-import { getRegistrationFormSetup, listFieldAgents, submitCustomerRegistration } from "../app/api";
+import {
+  getCustomer,
+  getRegistrationFormSetup,
+  listFieldAgents,
+  resubmitCustomerRegistration,
+  submitCustomerRegistration
+} from "../app/api";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { AgentPhotoField } from "./components/AgentPhotoField";
 import { Modal } from "../components/Modal";
@@ -118,7 +124,49 @@ type Props = {
   variant?: RegistrationVariant;
   defaultBranchId?: string;
   branches?: Branch[];
+  /** When set, opens in "Fix & resubmit" mode for a rejected registration. */
+  editCustomer?: Customer | null;
 };
+
+function formStateFromCustomer(customer: Customer): typeof EMPTY_FORM {
+  const kinLoc = customer.nextOfKin?.location ?? "";
+  const kinHouse = customer.nextOfKin?.houseNumber ?? "";
+  const custLoc = customer.location ?? "";
+  const custHouse = customer.houseNumber ?? "";
+  const kinMatchesCustomer =
+    !kinLoc ||
+    (kinLoc.trim().toLowerCase() === custLoc.trim().toLowerCase() &&
+      kinHouse.trim().toLowerCase() === custHouse.trim().toLowerCase());
+
+  return {
+    fullName: customer.fullName ?? "",
+    email: customer.email ?? "",
+    phone: customer.phone ?? "",
+    location: custLoc,
+    houseNumber: custHouse,
+    dateOfBirth: customer.dateOfBirth ?? "",
+    occupation: customer.occupation ?? "",
+    accountType: (customer.accountType ?? "susu") as AccountType,
+    idCardType: (customer.idCardType ?? "ghana_card") as CustomerIdCardType,
+    idCardNumber: customer.idCardNumber ?? "",
+    nationality: customer.nationality ?? "",
+    introducerName: customer.kycIntroducer?.fullName ?? "",
+    introducerPhone: customer.kycIntroducer?.phone ?? "",
+    introducerRelationship: customer.kycIntroducer?.relationship ?? "",
+    introducerGhanaCard: customer.kycIntroducer?.ghanaCardNumber ?? "",
+    kinName: customer.nextOfKin?.fullName ?? "",
+    kinPhone: customer.nextOfKin?.phone ?? "",
+    kinUseCustomerAddress: kinMatchesCustomer,
+    kinLocation: kinMatchesCustomer ? "" : kinLoc,
+    kinHouseNumber: kinMatchesCustomer ? "" : kinHouse,
+    dailyContributionAmount:
+      customer.dailyContributionAmount > 0 ? customer.dailyContributionAmount.toFixed(2) : "0",
+    initialDepositAmount:
+      customer.initialDepositAmount != null && customer.initialDepositAmount > 0
+        ? customer.initialDepositAmount.toFixed(2)
+        : "20"
+  };
+}
 
 async function preparePhoto(dataUrl: string | undefined): Promise<string | undefined> {
   if (!dataUrl) {
@@ -406,11 +454,14 @@ export function RegistrationModal({
   onSubmitted,
   variant = "agent",
   defaultBranchId,
-  branches: branchesProp = []
+  branches: branchesProp = [],
+  editCustomer = null
 }: Props) {
   const { showToast } = useToast();
   const isOffice = variant === "office";
+  const isEditMode = Boolean(editCustomer);
   const [submitting, setSubmitting] = useState(false);
+  const [loadingExisting, setLoadingExisting] = useState(false);
   const [step, setStep] = useState<"form" | "preview">("form");
   const [form, setForm] = useState(EMPTY_FORM);
   const [customNationalityMode, setCustomNationalityMode] = useState(false);
@@ -493,8 +544,52 @@ export function RegistrationModal({
       setIdCardPhotoName(undefined);
       setHomeBranchId("");
       setAssignedFieldAgentId("");
+      setLoadingExisting(false);
+      return;
     }
-  }, [open]);
+    if (!editCustomer) {
+      return;
+    }
+    const applyCustomer = (c: Customer) => {
+      setForm(formStateFromCustomer(c));
+      const nat = (c.nationality ?? "").trim();
+      setCustomNationalityMode(Boolean(nat) && !NATIONALITY_OPTION_SET.has(nat));
+      if (c.photoUrl) {
+        setPhotoUrl(c.photoUrl);
+        setPhotoName("Saved customer photo");
+      }
+      if (c.idCardPhotoUrl) {
+        setIdCardPhotoUrl(c.idCardPhotoUrl);
+        setIdCardPhotoName("Saved ID photo");
+      }
+      if (c.homeBranchId) {
+        setHomeBranchId(c.homeBranchId);
+      }
+      if (c.assignedFieldAgentId) {
+        setAssignedFieldAgentId(c.assignedFieldAgentId);
+      }
+    };
+    applyCustomer(editCustomer);
+    let cancelled = false;
+    setLoadingExisting(true);
+    void getCustomer(editCustomer.id)
+      .then((full) => {
+        if (!cancelled) {
+          applyCustomer(full);
+        }
+      })
+      .catch(() => {
+        /* keep fields from list record */
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoadingExisting(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, editCustomer]);
 
   useEffect(() => {
     if (!formSetup.simplifiedKyc.enabled && form.idCardType === "no_id_simplified_kyc") {
@@ -512,6 +607,9 @@ export function RegistrationModal({
   useEffect(() => {
     if (!open) {
       appliedDailyKey.current = "";
+      return;
+    }
+    if (isEditMode) {
       return;
     }
     const selected = formSetup.forms.find((item) => item.id === form.accountType);
@@ -726,7 +824,12 @@ export function RegistrationModal({
           ? { homeBranchId, assignedFieldAgentId }
           : {})
       };
-      if (isOffice) {
+      if (isEditMode && editCustomer) {
+        const customer = await resubmitCustomerRegistration(editCustomer.id, payload);
+        showToast("Registration corrected and resubmitted for coordinator approval", "success");
+        onSubmitted(customer);
+        onClose();
+      } else if (isOffice) {
         const customer = await submitCustomerRegistration(payload);
         showToast("Registration submitted for coordinator approval", "success");
         onSubmitted(customer);
@@ -764,11 +867,19 @@ export function RegistrationModal({
     <>
     <Modal
       open={open}
-      title={isOffice ? "Register walk-in customer" : "Create new account"}
+      title={
+        isEditMode
+          ? "Fix & resubmit registration"
+          : isOffice
+            ? "Register walk-in customer"
+            : "Create new account"
+      }
       subtitle={
-        isOffice
-          ? "Full registration at the branch — same as field agent onboarding. Account number after approval."
-          : "Account number is assigned after coordinator approval."
+        isEditMode
+          ? "Correct the details requested by the coordinator and resubmit for approval."
+          : isOffice
+            ? "Full registration at the branch — same as field agent onboarding. Account number after approval."
+            : "Account number is assigned after coordinator approval."
       }
       onClose={onClose}
       panelClassName="modal-panel--70 modal-panel--registration"
@@ -782,9 +893,14 @@ export function RegistrationModal({
             type="submit"
             form="agent-registration-form"
             className="button"
-            disabled={submitting || (isOffice && !officeReady) || initialDepositBelowMin}
+            disabled={
+              submitting ||
+              loadingExisting ||
+              (isOffice && !officeReady) ||
+              initialDepositBelowMin
+            }
           >
-            Review details
+            {loadingExisting ? "Loading saved details…" : "Review details"}
           </button>
         </>
       }
@@ -795,6 +911,24 @@ export function RegistrationModal({
         onSubmit={handleReview}
         autoComplete="off"
       >
+        {isEditMode && editCustomer ? (
+          <div
+            className="callover-danger-form"
+            role="status"
+            style={{ marginBottom: "0.75rem" }}
+          >
+            <p className="callover-danger-form__note">
+              <strong>Returned by coordinator — action required:</strong>{" "}
+              {editCustomer.rejectionReason?.trim() ||
+                "Please review and correct the customer details, then resubmit for approval."}
+            </p>
+            {loadingExisting ? (
+              <p className="muted" style={{ margin: 0, fontSize: "0.8rem" }}>
+                Loading saved photos and KYC details…
+              </p>
+            ) : null}
+          </div>
+        ) : null}
         {isOffice ? (
           <section className="agent-form__section">
             <h3 className="agent-form__section-title">Branch &amp; servicing</h3>
@@ -1335,7 +1469,13 @@ export function RegistrationModal({
             Back
           </button>
           <button type="button" className="button" onClick={() => void handleSubmit()} disabled={submitting}>
-            {submitting ? "Submitting…" : "Confirm and submit"}
+            {submitting
+              ? isEditMode
+                ? "Resubmitting…"
+                : "Submitting…"
+              : isEditMode
+                ? "Resubmit for approval"
+                : "Confirm and submit"}
           </button>
         </>
       }

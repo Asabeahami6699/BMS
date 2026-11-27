@@ -13,6 +13,7 @@ type Props = {
 export function AgentRegisterPage({ onQueueChange }: Props) {
   const { canRegisterCustomers } = useFieldAgentCapabilities();
   const [open, setOpen] = useState(false);
+  const [resubmitCustomer, setResubmitCustomer] = useState<Customer | null>(null);
   const customers = useAgentCustomerStore((s) => s.customers);
   const hydrated = useAgentCustomerStore((s) => s.hydrated);
   const error = useAgentCustomerStore((s) => s.error);
@@ -61,7 +62,22 @@ export function AgentRegisterPage({ onQueueChange }: Props) {
               <p className="muted">Submitted by: {formatFieldAgent(c)}</p>
               <p className="muted">Next of kin: {formatNextOfKin(c.nextOfKin)}</p>
               {c.accountNumber ? <p className="muted">Account: {c.accountNumber}</p> : null}
-              {c.rejectionReason ? <p className="muted">Reason: {c.rejectionReason}</p> : null}
+              {c.rejectionReason ? (
+                <p className="muted">
+                  <strong>Coordinator note:</strong> {c.rejectionReason}
+                </p>
+              ) : null}
+              {c.status === "rejected" ? (
+                <div className="agent-customer-card-actions">
+                  <button
+                    type="button"
+                    className="button btn-sm"
+                    onClick={() => setResubmitCustomer(c)}
+                  >
+                    Fix &amp; resubmit
+                  </button>
+                </div>
+              ) : null}
             </article>
           ))
         )}
@@ -81,6 +97,21 @@ export function AgentRegisterPage({ onQueueChange }: Props) {
           }}
         />
       ) : null}
+
+      <RegistrationModal
+        open={resubmitCustomer !== null}
+        editCustomer={resubmitCustomer}
+        onClose={() => setResubmitCustomer(null)}
+        onSubmitted={(customer) => {
+          onQueueChange();
+          if (customer) {
+            mergeCustomer(customer);
+          } else {
+            void refreshSilent();
+          }
+          setResubmitCustomer(null);
+        }}
+      />
     </div>
   );
 }

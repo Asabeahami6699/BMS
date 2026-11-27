@@ -17,7 +17,7 @@ import {
 } from "../stores/agentCustomerStore";
 import { useAgentBalanceStore } from "../stores/agentBalanceStore";
 
-const FILTERS: { id: AgentCustomerFilter; label: string }[] = [
+const BASE_FILTERS: { id: AgentCustomerFilter; label: string }[] = [
   { id: "all", label: "All" },
   { id: "active", label: "Active" },
   { id: "pending", label: "Pending" }
@@ -75,6 +75,15 @@ export function AgentCustomersPage({
 
   const [registerOpenLocal, setRegisterOpenLocal] = useState(false);
   const [passbookCustomer, setPassbookCustomer] = useState<Customer | null>(null);
+  const [resubmitCustomer, setResubmitCustomer] = useState<Customer | null>(null);
+
+  const filters = useMemo(
+    () =>
+      stats.rejected > 0
+        ? [...BASE_FILTERS, { id: "rejected" as const, label: "Needs fix" }]
+        : BASE_FILTERS,
+    [stats.rejected]
+  );
 
   const registerOpen = registerOpenProp ?? registerOpenLocal;
   function setRegisterOpen(open: boolean) {
@@ -117,6 +126,7 @@ export function AgentCustomersPage({
           <p className="muted agent-page-sub">
             {stats.active || "—"} active
             {stats.pending ? ` · ${stats.pending} pending` : ""}
+            {stats.rejected ? ` · ${stats.rejected} needs fix` : ""}
             {lastUpdatedLabel ? ` · ${lastUpdatedLabel}` : ""}
           </p>
         </div>
@@ -126,7 +136,7 @@ export function AgentCustomersPage({
       {error ? <p className="agent-inline-error">{error}</p> : null}
 
       {pendingRegistrations.length > 0 ? (
-        <details className="agent-pending-panel">
+        <details className="agent-pending-panel" open={stats.rejected > 0 || undefined}>
           <summary>
             Submitted accounts
             <span className="agent-pending-panel__count">{pendingRegistrations.length}</span>
@@ -138,12 +148,27 @@ export function AgentCustomersPage({
                 <span
                   className={`status-pill status-pill--${c.status === "pending_activation" ? "pending" : "inactive"}`}
                 >
-                  {c.status === "pending_activation" ? "Pending approval" : "Rejected"}
+                  {c.status === "pending_activation" ? "Pending approval" : "Rejected · Needs fix"}
                 </span>
                 <p className="muted">
                   {c.phone} · {c.location ?? "—"}
                 </p>
-                {c.rejectionReason ? <p className="muted">Reason: {c.rejectionReason}</p> : null}
+                {c.rejectionReason ? (
+                  <p className="muted">
+                    <strong>Coordinator note:</strong> {c.rejectionReason}
+                  </p>
+                ) : null}
+                {c.status === "rejected" ? (
+                  <div className="agent-customer-card-actions">
+                    <button
+                      type="button"
+                      className="button btn-sm"
+                      onClick={() => setResubmitCustomer(c)}
+                    >
+                      Fix &amp; resubmit
+                    </button>
+                  </div>
+                ) : null}
               </article>
             ))}
           </div>
@@ -161,9 +186,15 @@ export function AgentCustomersPage({
       </label>
 
       <div className="agent-filter-tabs" role="tablist" aria-label="Filter customers">
-        {FILTERS.map((tab) => {
+        {filters.map((tab) => {
           const count =
-            tab.id === "all" ? stats.total : tab.id === "active" ? stats.active : stats.pending;
+            tab.id === "all"
+              ? stats.total
+              : tab.id === "active"
+                ? stats.active
+                : tab.id === "pending"
+                  ? stats.pending
+                  : stats.rejected;
           return (
             <button
               key={tab.id}
@@ -228,6 +259,22 @@ export function AgentCustomersPage({
                   Daily plan: GHS {formatAccountAmount(customer.dailyContributionAmount)}
                 </p>
               )}
+              {customer.status === "rejected" && customer.rejectionReason ? (
+                <p className="muted" style={{ margin: "0.25rem 0 0", fontSize: "0.82rem" }}>
+                  <strong>Coordinator note:</strong> {customer.rejectionReason}
+                </p>
+              ) : null}
+              {customer.status === "rejected" ? (
+                <div className="agent-customer-card-actions">
+                  <button
+                    type="button"
+                    className="button btn-sm"
+                    onClick={() => setResubmitCustomer(customer)}
+                  >
+                    Fix &amp; resubmit
+                  </button>
+                </div>
+              ) : null}
               {customer.status === "active" && customer.accountType === "susu" ? (
                 <div className="agent-customer-card-actions">
                   <button
@@ -283,6 +330,21 @@ export function AgentCustomersPage({
           }}
         />
       ) : null}
+
+      <RegistrationModal
+        open={resubmitCustomer !== null}
+        editCustomer={resubmitCustomer}
+        onClose={() => setResubmitCustomer(null)}
+        onSubmitted={(customer) => {
+          onQueueChange();
+          if (customer) {
+            mergeCustomer(customer);
+          } else {
+            void refreshSilent();
+          }
+          setResubmitCustomer(null);
+        }}
+      />
     </div>
   );
 }

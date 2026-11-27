@@ -5,7 +5,7 @@ import { toUserFacingError } from "../../lib/networkError";
 
 const STORAGE_KEY = "bms.agent.customerStore.v1";
 
-export type AgentCustomerFilter = "all" | "active" | "pending";
+export type AgentCustomerFilter = "all" | "active" | "pending" | "rejected";
 
 type PersistedPayload = {
   customers: Customer[];
@@ -202,6 +202,8 @@ export function selectFilteredCustomers(state: AgentCustomerState): Customer[] {
     list = list.filter((c) => c.status === "active");
   } else if (state.filter === "pending") {
     list = list.filter((c) => c.status === "pending_activation");
+  } else if (state.filter === "rejected") {
+    list = list.filter((c) => c.status === "rejected");
   }
   if (!q) {
     return list;

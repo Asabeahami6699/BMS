@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   DEFAULT_APPROVAL_WORKFLOW,
   formatAccountAmount,
@@ -7,20 +8,29 @@ import {
 } from "@bms/shared";
 import { useAuth } from "../auth/AuthContext";
 import type { BalanceDisclosure, Customer } from "./api";
-import { approveBalanceDisclosure, rejectBalanceDisclosure } from "./api";
+import {
+  approveBalanceDisclosure,
+  deleteCustomer,
+  rejectBalanceDisclosure
+} from "./api";
 import { BalanceApproveModal } from "./BalanceApproveModal";
+import { CustomerDetailModal } from "./CustomerDetailModal";
 import { DeclineRequestModal } from "./DeclineRequestModal";
 import { RegistrationReviewModal } from "./RegistrationReviewModal";
+import { SendBackToAgentModal } from "./SendBackToAgentModal";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Modal } from "../components/Modal";
 import { useToast } from "../components/Toast";
+import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { toUserFacingError } from "../lib/networkError";
 import { formatFieldAgent } from "../lib/formatFieldAgent";
 import { formatNextOfKin } from "../lib/formatNextOfKin";
 import { useCoordinatorLiveSync } from "./hooks/useCoordinatorLiveSync";
 import { useCoordinatorStore } from "./stores/coordinatorStore";
+import { useCustomersStore } from "./stores/customersStore";
 import { usePageLoading } from "./hooks/usePageLoading";
 
-type TabId = "withdrawals" | "registrations";
+type TabId = "withdrawals" | "registrations" | "rejected";
 
 function requestTypeLabel(type: BalanceDisclosure["requestType"]): string {
   return type === "withdrawal" ? "Withdrawal" : "Balance";
@@ -53,6 +63,9 @@ export function PendingApprovalsPage() {
   useCoordinatorLiveSync();
 
   const { showToast } = useToast();
+  const { confirm, dialogProps } = useConfirmDialog();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const allCustomers = useCoordinatorStore((s) => s.customers);
   const pendingRequests = useCoordinatorStore((s) => s.pendingRequests);
   const pendingRegistrations = useCoordinatorStore((s) => s.pendingRegistrations);
   const branches = useCoordinatorStore((s) => s.branches);
@@ -64,13 +77,46 @@ export function PendingApprovalsPage() {
 
   usePageLoading(loading, "pending-approvals");
 
-  const [tab, setTab] = useState<TabId>("withdrawals");
+  const initialTabParam = searchParams.get("tab");
+  const [tab, setTab] = useState<TabId>(
+    initialTabParam === "registrations" || initialTabParam === "rejected"
+      ? initialTabParam
+      : "withdrawals"
+  );
+  useEffect(() => {
+    const param = searchParams.get("tab");
+    if (param === "withdrawals" || param === "registrations" || param === "rejected") {
+      setTab(param);
+    }
+  }, [searchParams]);
+
+  function selectTab(next: TabId) {
+    setTab(next);
+    const params = new URLSearchParams(searchParams);
+    params.set("tab", next);
+    setSearchParams(params, { replace: true });
+  }
+
   const [busyId, setBusyId] = useState<string | null>(null);
   const [balanceApproveTarget, setBalanceApproveTarget] = useState<BalanceDisclosure | null>(null);
   const [declineTarget, setDeclineTarget] = useState<BalanceDisclosure | null>(null);
   const [callConfirmTarget, setCallConfirmTarget] = useState<BalanceDisclosure | null>(null);
   const [callConfirmed, setCallConfirmed] = useState(false);
   const [reviewCustomer, setReviewCustomer] = useState<Customer | null>(null);
+  const [detailCustomer, setDetailCustomer] = useState<Customer | null>(null);
+  const [sendBackCustomer, setSendBackCustomer] = useState<Customer | null>(null);
+
+  const canPurge = user?.role === "super_admin";
+  const canReturnToAgent =
+    user?.role === "admin" ||
+    user?.role === "super_admin" ||
+    user?.role === "coordinator" ||
+    canReviewRegistration;
+
+  const rejectedRegistrations = useMemo(
+    () => allCustomers.filter((c) => c.status === "rejected"),
+    [allCustomers]
+  );
 
   const branchById = useMemo(() => new Map(branches.map((b) => [b.id, b])), [branches]);
 
@@ -94,9 +140,32 @@ export function PendingApprovalsPage() {
   const withdrawalCount = visibleRequests.filter((r) => r.requestType === "withdrawal").length;
   const balanceCount = visibleRequests.filter((r) => r.requestType === "balance").length;
   const registrationCount = canReviewRegistration ? pendingRegistrations.length : 0;
+  const rejectedCount = canReviewRegistration ? rejectedRegistrations.length : 0;
 
   const showWithdrawalsTab = canApproveWithdrawal || canReviewBalance;
   const showRegistrationsTab = canReviewRegistration;
+
+  async function handleDeleteRejected(customer: Customer) {
+    const ok = await confirm({
+      title: "Delete rejected registration",
+      message: `Permanently delete the rejected registration for ${customer.fullName}? This cannot be undone.`,
+      confirmLabel: "Delete",
+      danger: true
+    });
+    if (!ok) {
+      return;
+    }
+    setBusyId(customer.id);
+    try {
+      await deleteCustomer(customer.id);
+      showToast(`Deleted rejected registration for ${customer.fullName}`, "success");
+      await Promise.all([refreshSilent(), useCustomersStore.getState().refreshSilent()]);
+    } catch (error) {
+      showToast(toUserFacingError(error, "Could not delete rejected registration"), "error");
+    } finally {
+      setBusyId(null);
+    }
+  }
 
   async function handleApproveCash(row: BalanceDisclosure, visibleHours?: number) {
     setBusyId(row.id);
@@ -192,11 +261,13 @@ export function PendingApprovalsPage() {
   }
 
   const activeTab: TabId =
-    tab === "registrations" && showRegistrationsTab
-      ? "registrations"
-      : showWithdrawalsTab
-        ? "withdrawals"
-        : "registrations";
+    tab === "rejected" && showRegistrationsTab
+      ? "rejected"
+      : tab === "registrations" && showRegistrationsTab
+        ? "registrations"
+        : showWithdrawalsTab
+          ? "withdrawals"
+          : "registrations";
 
   return (
     <div className="pending-approvals-page">
@@ -232,7 +303,9 @@ export function PendingApprovalsPage() {
         <article className="kpi-card kpi-card--primary">
           <p className="kpi-label">Registrations</p>
           <p className="kpi-value">{loading && registrationCount === 0 ? "—" : registrationCount}</p>
-          <p className="kpi-meta muted">Awaiting account approval</p>
+          <p className="kpi-meta muted">
+            Awaiting approval{rejectedCount > 0 ? ` · ${rejectedCount} rejected` : ""}
+          </p>
         </article>
         <article className="kpi-card kpi-card--success">
           <p className="kpi-label">Your role</p>
@@ -249,7 +322,7 @@ export function PendingApprovalsPage() {
               role="tab"
               aria-selected={activeTab === "withdrawals"}
               className={`pending-approvals-tabs__btn${activeTab === "withdrawals" ? " is-active" : ""}`}
-              onClick={() => setTab("withdrawals")}
+              onClick={() => selectTab("withdrawals")}
             >
               Withdrawals &amp; balance
               <span className="pending-approvals-tabs__count">{visibleRequests.length}</span>
@@ -261,10 +334,22 @@ export function PendingApprovalsPage() {
               role="tab"
               aria-selected={activeTab === "registrations"}
               className={`pending-approvals-tabs__btn${activeTab === "registrations" ? " is-active" : ""}`}
-              onClick={() => setTab("registrations")}
+              onClick={() => selectTab("registrations")}
             >
               Registrations
               <span className="pending-approvals-tabs__count">{registrationCount}</span>
+            </button>
+          ) : null}
+          {showRegistrationsTab ? (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "rejected"}
+              className={`pending-approvals-tabs__btn${activeTab === "rejected" ? " is-active" : ""}`}
+              onClick={() => selectTab("rejected")}
+            >
+              Rejected registrations
+              <span className="pending-approvals-tabs__count">{rejectedCount}</span>
             </button>
           ) : null}
         </div>
@@ -413,6 +498,89 @@ export function PendingApprovalsPage() {
         </section>
       ) : null}
 
+      {activeTab === "rejected" && showRegistrationsTab ? (
+        <section className="pending-approvals-section" aria-label="Rejected registrations">
+          {loading && rejectedRegistrations.length === 0 ? (
+            <p className="muted pending-approvals-empty">Loading rejected registrations…</p>
+          ) : null}
+          {!loading && rejectedRegistrations.length === 0 ? (
+            <div className="pending-approvals-empty-card">
+              <strong>No rejected registrations</strong>
+              <p className="muted">
+                Rejected sign-ups stay here (separate from approved Customers) until the mobilizer
+                fixes and resubmits them for approval.
+              </p>
+            </div>
+          ) : (
+            <ul className="pending-approvals-list">
+              {rejectedRegistrations.map((c) => (
+                <li key={c.id} className="pending-approvals-card">
+                  <div className="pending-approvals-card__avatar" aria-hidden>
+                    {initials(c.fullName)}
+                  </div>
+                  <div className="pending-approvals-card__main">
+                    <div className="pending-approvals-card__title-row">
+                      <strong>{c.fullName}</strong>
+                      <span className="status-pill status-pill--inactive">Rejected</span>
+                    </div>
+                    <p className="pending-approvals-card__meta muted">
+                      {c.phone} · {c.accountType?.replace(/_/g, " ") ?? "—"}
+                      {c.location ? ` · ${c.location}` : ""}
+                      {c.houseNumber ? ` · House ${c.houseNumber}` : ""}
+                    </p>
+                    <div className="pending-approvals-card__facts">
+                      <span className="pending-approvals-chip">Agent: {formatFieldAgent(c)}</span>
+                      {branchLabel(c) ? (
+                        <span className="pending-approvals-chip">{branchLabel(c)}</span>
+                      ) : null}
+                      {c.dailyContributionAmount > 0 ? (
+                        <span className="pending-approvals-chip">
+                          Daily: GHS {formatAccountAmount(c.dailyContributionAmount)}
+                        </span>
+                      ) : null}
+                    </div>
+                    {c.rejectionReason ? (
+                      <p className="pending-approvals-card__reason">
+                        <strong>Reason:</strong> {c.rejectionReason}
+                      </p>
+                    ) : null}
+                  </div>
+                  <div className="pending-approvals-card__actions">
+                    <button
+                      type="button"
+                      className="button secondary"
+                      onClick={() => setDetailCustomer(c)}
+                    >
+                      View details
+                    </button>
+                    {canReturnToAgent ? (
+                      <button
+                        type="button"
+                        className="button"
+                        disabled={busyId === c.id}
+                        onClick={() => setSendBackCustomer(c)}
+                      >
+                        Send back to mobilizer
+                      </button>
+                    ) : null}
+                    {canPurge ? (
+                      <button
+                        type="button"
+                        className="button secondary"
+                        disabled={busyId === c.id}
+                        onClick={() => void handleDeleteRejected(c)}
+                      >
+                        {busyId === c.id ? "Deleting…" : "Delete"}
+                      </button>
+                    ) : null}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      ) : null}
+
       <Modal
         open={callConfirmTarget !== null}
         title="Confirm customer call"
@@ -512,8 +680,33 @@ export function PendingApprovalsPage() {
             removePendingRegistration(reviewCustomer.id);
           }
           void refreshSilent();
+          void useCustomersStore.getState().refreshSilent();
         }}
       />
+
+      <CustomerDetailModal
+        open={detailCustomer !== null}
+        customer={detailCustomer}
+        branchLabel={detailCustomer ? branchLabel(detailCustomer) : undefined}
+        agentLabel={detailCustomer ? formatFieldAgent(detailCustomer) : undefined}
+        onSendBackToAgent={
+          canReturnToAgent ? (c) => setSendBackCustomer(c) : undefined
+        }
+        onClose={() => setDetailCustomer(null)}
+      />
+
+      <SendBackToAgentModal
+        open={sendBackCustomer !== null}
+        customer={sendBackCustomer}
+        agentLabel={sendBackCustomer ? formatFieldAgent(sendBackCustomer) : undefined}
+        onClose={() => setSendBackCustomer(null)}
+        onSent={() => {
+          void refreshSilent();
+          void useCustomersStore.getState().refreshSilent();
+        }}
+      />
+
+      <ConfirmDialog {...dialogProps} />
     </div>
   );
 }
