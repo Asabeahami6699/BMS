@@ -219,6 +219,20 @@ export const PERMISSION_CATALOG: PermissionCatalogEntry[] = [
     group: "customers"
   },
   {
+    id: "field_agent.withdrawals.request",
+    label: "Submit withdrawal requests (field agent)",
+    description: "Field app only: allow field agents to submit customer withdrawal requests for coordinator approval.",
+    group: "customers",
+    requires: ["customers.read"]
+  },
+  {
+    id: "field_agent.balance.request",
+    label: "Request balance disclosures (field agent)",
+    description: "Field app only: allow field agents to request temporary customer balance views from a coordinator.",
+    group: "customers",
+    requires: ["customers.read"]
+  },
+  {
     id: "transactions.create.daily_susu",
     label: "Record daily Susu",
     description: "Post daily collection amounts at branch counter or in the field.",
@@ -1566,11 +1580,16 @@ export function isPermissionGroupVisibleForTenant(
   return hasTenantModule(subscribedModules, scope);
 }
 
+const FIELD_AGENT_ONLY_PERMISSION_IDS = new Set<Permission>([
+  "field_agent.withdrawals.request",
+  "field_agent.balance.request"
+]);
+
 function isCatalogEntryVisibleForTenant(
   entry: PermissionCatalogEntry,
   subscribedModules: TenantProductModule[] | undefined
 ): boolean {
-  if (entry.group === "platform") {
+  if (entry.group === "platform" || FIELD_AGENT_ONLY_PERMISSION_IDS.has(entry.id)) {
     return false;
   }
   if (entry.group === "agency_banking") {
@@ -1620,7 +1639,7 @@ function isCatalogEntryInCustomRoleScope(
   roleScope: CustomRoleProductScope,
   subscribedModules: TenantProductModule[] | undefined
 ): boolean {
-  if (entry.group === "platform") {
+  if (entry.group === "platform" || FIELD_AGENT_ONLY_PERMISSION_IDS.has(entry.id)) {
     return false;
   }
   if (roleScope === "all") {

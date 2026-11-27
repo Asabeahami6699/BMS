@@ -27,7 +27,7 @@ import {
 
 export const fieldAgentsRouter = Router();
 
-fieldAgentsRouter.get("/me/dashboard", requirePermission("payroll.read"), async (req, res) => {
+fieldAgentsRouter.get("/me/dashboard", requirePermission("transactions.read"), async (req, res) => {
   const context = req.userContext;
   if (!context) {
     res.status(401).json({ error: "Unauthorized" });
@@ -39,15 +39,18 @@ fieldAgentsRouter.get("/me/dashboard", requirePermission("payroll.read"), async 
   }
 
   try {
-    const dashboard = await getFieldAgentDashboard({
-      userId: context.userId,
-      tenantId: context.tenantId,
-      role: context.role,
-      email: context.email,
-      fullName: context.fullName,
-      branchId: context.branchId,
-      tenantName: context.tenantName
-    });
+    const dashboard = await getFieldAgentDashboard(
+      {
+        userId: context.userId,
+        tenantId: context.tenantId,
+        role: context.role,
+        email: context.email,
+        fullName: context.fullName,
+        branchId: context.branchId,
+        tenantName: context.tenantName
+      },
+      { includePayroll: context.permissions.includes("payroll.read") }
+    );
     res.json(dashboard);
   } catch (error) {
     res.status(500).json({
@@ -206,6 +209,26 @@ async function handleCustomerRequest(req: Request, res: Response): Promise<void>
     return;
   }
 
+  const requestType = req.body?.type === "withdrawal" ? "withdrawal" : "balance";
+  if (
+    requestType === "withdrawal" &&
+    !context.permissions.includes("field_agent.withdrawals.request")
+  ) {
+    res.status(403).json({
+      error: "Field agent withdrawal requests are disabled by your company admin."
+    });
+    return;
+  }
+  if (
+    requestType === "balance" &&
+    !context.permissions.includes("field_agent.balance.request")
+  ) {
+    res.status(403).json({
+      error: "Customer balance disclosure requests are disabled by your company admin."
+    });
+    return;
+  }
+
   const customerId = Array.isArray(req.params.customerId)
     ? req.params.customerId[0]
     : req.params.customerId;
@@ -244,6 +267,12 @@ fieldAgentsRouter.post(
     }
     if (context.role !== "field_agent") {
       res.status(403).json({ error: "Field agent access only" });
+      return;
+    }
+    if (!context.permissions.includes("field_agent.balance.request")) {
+      res.status(403).json({
+        error: "Customer balance disclosure requests are disabled by your company admin."
+      });
       return;
     }
     const customerId = Array.isArray(req.params.customerId)

@@ -233,6 +233,8 @@ export const permissionSchema = z.enum([
   "branches.delete",
   "customers.create",
   "customers.read",
+  "field_agent.withdrawals.request",
+  "field_agent.balance.request",
   "transactions.create.daily_susu",
   "transactions.create.deposit",
   "transactions.create.withdrawal",

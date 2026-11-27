@@ -1,23 +1,29 @@
 import {
   getPermissionsForRole,
   isBuiltinRole,
-  isTenantEditableBuiltinRole,
+  isTenantCustomizableBuiltinRole,
   PERMISSION_CATALOG,
   PERMISSION_GROUP_PRODUCT,
   permissionSchema,
   resolveRolePermissions,
+  sanitizeFieldAgentDuties,
   type Permission,
   type Role,
   TENANT_EDITABLE_BUILTIN_ROLES,
-  type TenantEditableBuiltinRole,
+  type TenantCustomizableBuiltinRole,
   type TenantProductModule
 } from "@bms/shared";
 import { z } from "zod";
 import { getSupabaseAdminClient } from "../config/supabaseClient.js";
 import { loadTenantJobTitleDuties } from "./tenantJobTitleService.js";
 
+const CUSTOMIZABLE_BUILTIN_ROLES: readonly TenantCustomizableBuiltinRole[] = [
+  ...TENANT_EDITABLE_BUILTIN_ROLES,
+  "field_agent"
+];
+
 export type BuiltinRolePermissionView = {
-  role: TenantEditableBuiltinRole;
+  role: TenantCustomizableBuiltinRole;
   defaultDuties: Permission[];
   effectiveDuties: Permission[];
   isCustomized: boolean;
@@ -257,7 +263,7 @@ async function loadBuiltinRoleOverrides(
   const overrides = new Map<Role, { duties: Permission[] }>();
   if (!supabase) {
     await Promise.all(
-      TENANT_EDITABLE_BUILTIN_ROLES.map(async (role) => {
+      CUSTOMIZABLE_BUILTIN_ROLES.map(async (role) => {
         const row = await loadOverrideRow(tenantId, role);
         if (row) {
           overrides.set(role, row);
@@ -271,14 +277,14 @@ async function loadBuiltinRoleOverrides(
     .from("tenant_builtin_role_overrides")
     .select("role, duties")
     .eq("tenant_id", tenantId)
-    .in("role", [...TENANT_EDITABLE_BUILTIN_ROLES]);
+    .in("role", [...CUSTOMIZABLE_BUILTIN_ROLES]);
 
   if (error) {
     throw new Error(`Failed to load role permissions: ${error.message}`);
   }
 
   for (const row of data ?? []) {
-    if (!isTenantEditableBuiltinRole(row.role as Role)) {
+    if (!isTenantCustomizableBuiltinRole(row.role as Role)) {
       continue;
     }
     const parsed = z.array(permissionSchema).safeParse(row.duties ?? []);
@@ -295,7 +301,7 @@ export async function listBuiltinRolePermissions(
 ): Promise<BuiltinRolePermissionView[]> {
   const views: BuiltinRolePermissionView[] = [];
 
-  for (const role of TENANT_EDITABLE_BUILTIN_ROLES) {
+  for (const role of CUSTOMIZABLE_BUILTIN_ROLES) {
     const row = await loadOverrideRow(tenantId, role);
     const effectiveDuties = resolveRolePermissions(role, row?.duties ?? null);
     views.push({
@@ -321,7 +327,7 @@ export async function saveBuiltinRolePermissions(
   input: unknown,
   updatedBy: string
 ): Promise<BuiltinRolePermissionView> {
-  if (!isTenantEditableBuiltinRole(role)) {
+  if (!isTenantCustomizableBuiltinRole(role)) {
     throw new Error("This job title cannot be customized");
   }
 
@@ -330,7 +336,10 @@ export async function saveBuiltinRolePermissions(
     throw new Error("Invalid duties payload");
   }
 
-  const duties = [...new Set(parsed.data.duties)];
+  const duties =
+    role === "field_agent"
+      ? sanitizeFieldAgentDuties(parsed.data.duties)
+      : [...new Set(parsed.data.duties)];
   const supabase = getSupabaseAdminClient();
   let persisted = duties;
   let updatedAt: string | undefined;
@@ -353,6 +362,11 @@ export async function saveBuiltinRolePermissions(
       .single();
 
     if (error || !data) {
+      if (error?.message?.includes("tenant_builtin_role_overrides_role_check")) {
+        throw new Error(
+          "Database migration 107_field_agent_role_controls.sql must be applied before saving field agent controls."
+        );
+      }
       throw new Error(`Failed to save role permissions: ${error?.message ?? "no row returned"}`);
     }
 
@@ -360,7 +374,10 @@ export async function saveBuiltinRolePermissions(
     if (!dutiesParsed.success) {
       throw new Error("Saved permissions could not be read back from the database");
     }
-    persisted = [...new Set(dutiesParsed.data)];
+    persisted =
+      role === "field_agent"
+        ? sanitizeFieldAgentDuties(dutiesParsed.data)
+        : [...new Set(dutiesParsed.data)];
     updatedAt = data.updated_at ?? undefined;
     updatedByOut = data.updated_by ?? updatedBy;
   } else {
@@ -381,7 +398,7 @@ export async function resetBuiltinRolePermissions(
   tenantId: string,
   role: Role
 ): Promise<BuiltinRolePermissionView> {
-  if (!isTenantEditableBuiltinRole(role)) {
+  if (!isTenantCustomizableBuiltinRole(role)) {
     throw new Error("This job title cannot be customized");
   }
 

@@ -84,6 +84,8 @@ export const permissionsByRole: Record<Role, Permission[]> = {
   field_agent: [
     "customers.create",
     "customers.read",
+    "field_agent.withdrawals.request",
+    "field_agent.balance.request",
     "transactions.create.daily_susu",
     "transactions.read",
     "ledger.read",
@@ -166,7 +168,71 @@ export const permissionsByRole: Record<Role, Permission[]> = {
   ]
 };
 
-/** Built-in job titles a tenant admin may customize (not field_agent / super_admin). */
+/** Core duties always kept on field_agent so collections, call-over, and offline sync never break. */
+export const FIELD_AGENT_LOCKED_PERMISSIONS = [
+  "customers.read",
+  "transactions.create.daily_susu",
+  "transactions.read",
+  "ledger.read",
+  "reports.read",
+  "workspace.notifications"
+] as const satisfies readonly Permission[];
+
+/** Curated, safe capabilities a tenant admin may switch on or off for field agents. */
+export const FIELD_AGENT_TOGGLEABLE_PERMISSIONS = [
+  "customers.create",
+  "field_agent.withdrawals.request",
+  "field_agent.balance.request",
+  "payroll.read"
+] as const satisfies readonly Permission[];
+
+export type FieldAgentToggleablePermission = (typeof FIELD_AGENT_TOGGLEABLE_PERMISSIONS)[number];
+
+export const FIELD_AGENT_CONTROL_OPTIONS: ReadonlyArray<{
+  permission: FieldAgentToggleablePermission;
+  label: string;
+  description: string;
+}> = [
+  {
+    permission: "customers.create",
+    label: "Can register new customers",
+    description:
+      "Allow field agents to open the registration form and submit new customer accounts (including offline sync)."
+  },
+  {
+    permission: "field_agent.withdrawals.request",
+    label: "Can submit withdrawal requests",
+    description:
+      "Allow field agents to submit customer withdrawal requests for coordinator approval. Existing approved withdrawals can still be confirmed as delivered."
+  },
+  {
+    permission: "field_agent.balance.request",
+    label: "Can request customer balance disclosures",
+    description:
+      "Allow field agents to request temporary 6-hour customer balance views from a coordinator."
+  },
+  {
+    permission: "payroll.read",
+    label: "Can view own commission/payslip",
+    description:
+      "Show projected commission and monthly payslip breakdown inside the field agent profile menu."
+  }
+];
+
+const FIELD_AGENT_TOGGLEABLE_SET = new Set<Permission>(FIELD_AGENT_TOGGLEABLE_PERMISSIONS);
+
+/**
+ * Normalize field_agent duties so core collection/sync permissions can never be removed
+ * and office/approval permissions can never be added.
+ */
+export function sanitizeFieldAgentDuties(duties: readonly Permission[]): Permission[] {
+  const allowedToggles = FIELD_AGENT_TOGGLEABLE_PERMISSIONS.filter(
+    (perm) => FIELD_AGENT_TOGGLEABLE_SET.has(perm) && duties.includes(perm)
+  );
+  return [...FIELD_AGENT_LOCKED_PERMISSIONS, ...allowedToggles];
+}
+
+/** Built-in job titles a tenant admin may customize via the full permission editor (not field_agent / super_admin). */
 export const TENANT_EDITABLE_BUILTIN_ROLES = [
   "admin",
   "coordinator",
@@ -179,8 +245,14 @@ export const TENANT_EDITABLE_BUILTIN_ROLES = [
 
 export type TenantEditableBuiltinRole = (typeof TENANT_EDITABLE_BUILTIN_ROLES)[number];
 
+export type TenantCustomizableBuiltinRole = TenantEditableBuiltinRole | "field_agent";
+
 export function isTenantEditableBuiltinRole(role: Role): role is TenantEditableBuiltinRole {
   return (TENANT_EDITABLE_BUILTIN_ROLES as readonly Role[]).includes(role);
+}
+
+export function isTenantCustomizableBuiltinRole(role: Role): role is TenantCustomizableBuiltinRole {
+  return isTenantEditableBuiltinRole(role) || role === "field_agent";
 }
 
 /** Job titles assignable when creating tenant staff (excludes super_admin). */
@@ -206,6 +278,11 @@ export function resolveRolePermissions(
   role: Role,
   overrideDuties: Permission[] | null | undefined
 ): Permission[] {
+  if (role === "field_agent") {
+    return overrideDuties != null
+      ? sanitizeFieldAgentDuties(overrideDuties)
+      : getPermissionsForRole("field_agent");
+  }
   const resolved =
     overrideDuties != null ? [...new Set(overrideDuties)] : getPermissionsForRole(role);
   if (

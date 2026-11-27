@@ -9,6 +9,7 @@ import { getPendingCount } from "../lib/offlineQueue";
 import { toUserFacingError } from "../lib/networkError";
 import { useAgentCustomerLiveSync } from "./hooks/useAgentCustomerLiveSync";
 import { useAgentRequestToasts } from "./hooks/useAgentRequestToasts";
+import { useFieldAgentCapabilities } from "./hooks/useFieldAgentCapabilities";
 import { flushOfflineQueue } from "./agentSync";
 import { FieldAgentShell } from "./FieldAgentShell";
 import { AgentAlertsPage } from "./pages/AgentAlertsPage";
@@ -31,6 +32,7 @@ export function FieldAgentApp() {
   const [registerOpen, setRegisterOpen] = useState(false);
 
   const { online } = useNetworkStatus();
+  const { canRegisterCustomers } = useFieldAgentCapabilities();
 
   useAgentCustomerLiveSync(user?.tenantId);
   useAgentRequestToasts();
@@ -101,6 +103,9 @@ export function FieldAgentApp() {
   }
 
   function handleCreateAccount() {
+    if (!canRegisterCustomers) {
+      return;
+    }
     setRegisterOpen(true);
     navigate("/app/agent/customers");
   }
@@ -112,6 +117,7 @@ export function FieldAgentApp() {
       syncing={syncing}
       pendingCount={pendingCount}
       online={online}
+      canCreateAccount={canRegisterCustomers}
       onCreateAccount={handleCreateAccount}
     >
       <Routes>

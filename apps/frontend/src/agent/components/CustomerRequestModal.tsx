@@ -78,6 +78,8 @@ type Props = {
   open: boolean;
   customerName?: string;
   kycTier?: "full" | "simplified";
+  canRequestBalance?: boolean;
+  canRequestWithdrawals?: boolean;
   priorDeclineReason?: string;
   submitting: boolean;
   onClose: () => void;
@@ -88,12 +90,15 @@ export function CustomerRequestModal({
   open,
   customerName,
   kycTier,
+  canRequestBalance = true,
+  canRequestWithdrawals = true,
   priorDeclineReason,
   submitting,
   onClose,
   onSubmit
 }: Props) {
-  const [requestType, setRequestType] = useState<CustomerRequestType>("balance");
+  const defaultType: CustomerRequestType = canRequestBalance ? "balance" : "withdrawal";
+  const [requestType, setRequestType] = useState<CustomerRequestType>(defaultType);
   const [allowSimplifiedWithdrawal, setAllowSimplifiedWithdrawal] = useState<boolean>(true);
   const [reason, setReason] = useState("");
   const [amount, setAmount] = useState("");
@@ -107,7 +112,7 @@ export function CustomerRequestModal({
 
   useEffect(() => {
     if (open) {
-      setRequestType("balance");
+      setRequestType(canRequestBalance ? "balance" : "withdrawal");
       setReason("");
       setAmount("");
       setFulfillmentMode("next_day_cash");
@@ -132,7 +137,7 @@ export function CustomerRequestModal({
         setAllowSimplifiedWithdrawal(true);
       }
     }
-  }, [open, kycTier]);
+  }, [open, kycTier, canRequestBalance]);
 
   const withdrawalBlockedForSimplified =
     kycTier === "simplified" && !allowSimplifiedWithdrawal;
@@ -223,6 +228,9 @@ export function CustomerRequestModal({
       return;
     }
     if (requestType === "withdrawal") {
+      if (!canRequestWithdrawals || withdrawalBlockedForSimplified) {
+        return;
+      }
       const parsed = Number(amount);
       if (!Number.isFinite(parsed) || parsed <= 0) {
         return;
@@ -247,6 +255,9 @@ export function CustomerRequestModal({
         amount: parsed,
         fulfillmentMode
       });
+      return;
+    }
+    if (!canRequestBalance) {
       return;
     }
     onSubmit({ type: "balance", reason: trimmedReason });
@@ -279,51 +290,55 @@ export function CustomerRequestModal({
 
         <fieldset className="agent-request-type-fieldset">
           <legend className="agent-request-type-legend">Request type</legend>
-          <label className="agent-request-type-option">
-            <input
-              type="radio"
-              name="requestType"
-              value="balance"
-              checked={requestType === "balance"}
-              onChange={() => setRequestType("balance")}
-              disabled={submitting}
-            />
-            <span>
-              <strong>View balance</strong>
-              <small className="muted">Visible for 6 hours after approval</small>
-            </span>
-          </label>
-          <label className="agent-request-type-option">
-            <input
-              type="radio"
-              name="requestType"
-              value="withdrawal"
-              checked={requestType === "withdrawal"}
-              onChange={() => setRequestType("withdrawal")}
-              disabled={submitting || withdrawalBlockedForSimplified}
-            />
-            <span>
-              <strong>Request withdrawal</strong>
-              {withdrawalBlockedForSimplified ? (
-                <small className="muted" style={{ display: "block", color: "var(--warning)" }}>
-                  Disabled for Simplified KYC (Tier 1) accounts — direct customer to the branch for
-                  face-verified withdrawal.
-                </small>
-              ) : (
-                <>
-                  <span className="muted">
-                    {" "}
-                    — opening savings deposit cannot be withdrawn
-                  </span>
-                  <small className="muted">
-                    {kycTier === "simplified"
-                      ? "Simplified KYC account — agent withdrawal requests enabled by admin"
-                      : "Customer wants money from their account"}
+          {canRequestBalance ? (
+            <label className="agent-request-type-option">
+              <input
+                type="radio"
+                name="requestType"
+                value="balance"
+                checked={requestType === "balance"}
+                onChange={() => setRequestType("balance")}
+                disabled={submitting}
+              />
+              <span>
+                <strong>View balance</strong>
+                <small className="muted">Visible for 6 hours after approval</small>
+              </span>
+            </label>
+          ) : null}
+          {canRequestWithdrawals ? (
+            <label className="agent-request-type-option">
+              <input
+                type="radio"
+                name="requestType"
+                value="withdrawal"
+                checked={requestType === "withdrawal"}
+                onChange={() => setRequestType("withdrawal")}
+                disabled={submitting || withdrawalBlockedForSimplified}
+              />
+              <span>
+                <strong>Request withdrawal</strong>
+                {withdrawalBlockedForSimplified ? (
+                  <small className="muted" style={{ display: "block", color: "var(--warning)" }}>
+                    Disabled for Simplified KYC (Tier 1) accounts — direct customer to the branch for
+                    face-verified withdrawal.
                   </small>
-                </>
-              )}
-            </span>
-          </label>
+                ) : (
+                  <>
+                    <span className="muted">
+                      {" "}
+                      — opening savings deposit cannot be withdrawn
+                    </span>
+                    <small className="muted">
+                      {kycTier === "simplified"
+                        ? "Simplified KYC account — agent withdrawal requests enabled by admin"
+                        : "Customer wants money from their account"}
+                    </small>
+                  </>
+                )}
+              </span>
+            </label>
+          ) : null}
         </fieldset>
 
         {requestType === "withdrawal" ? (
@@ -468,7 +483,15 @@ export function CustomerRequestModal({
           <button
             type="submit"
             className="button"
-            disabled={submitting || reason.trim().length < 3 || !amountValid || !momoValid}
+            disabled={
+              submitting ||
+              reason.trim().length < 3 ||
+              !amountValid ||
+              !momoValid ||
+              (requestType === "withdrawal" &&
+                (!canRequestWithdrawals || withdrawalBlockedForSimplified)) ||
+              (requestType === "balance" && !canRequestBalance)
+            }
           >
             {submitting ? "Sending…" : "Send for approval"}
           </button>

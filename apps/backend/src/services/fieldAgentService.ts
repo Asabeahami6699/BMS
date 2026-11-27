@@ -40,6 +40,7 @@ export type FieldAgentTodayCollections = {
 };
 
 export type FieldAgentDashboard = {
+  canViewPayroll: boolean;
   profile: {
     userId: string;
     fullName: string;
@@ -213,15 +214,13 @@ async function resolveProfile(context: AgentContext): Promise<FieldAgentDashboar
   };
 }
 
-export async function getFieldAgentDashboard(context: AgentContext): Promise<FieldAgentDashboard> {
+export async function getFieldAgentDashboard(
+  context: AgentContext,
+  options?: { includePayroll?: boolean }
+): Promise<FieldAgentDashboard> {
+  const includePayroll = options?.includePayroll ?? true;
   const period = periodMeta();
-  const policy = await getCommissionPolicy(context.tenantId);
   const profile = await resolveProfile(context);
-  const payrollProfile = await getUserPayrollProfile(context.tenantId, context.userId);
-  const roleDefault = await getRolePayrollDefault(context.tenantId, context.role as Role);
-  const effectiveComp = resolveEffectivePayroll(roleDefault, payrollProfile);
-  const percent = effectiveCommissionPercent(context.role as Role, policy, payrollProfile);
-  const formula = effectiveCommissionFormula(context.role as Role, policy, payrollProfile);
 
   const customers = await listCustomers(context.tenantId, { agentId: context.userId });
   const activeCustomers = customers.filter((c) => c.status === "active");
@@ -254,21 +253,6 @@ export async function getFieldAgentDashboard(context: AgentContext): Promise<Fie
       isInRange(tx.createdAt, period.startIso, period.endIso)
   );
   const totalCollectedThisMonth = agentMonthTx.reduce((sum, tx) => sum + tx.amount, 0);
-  const preview = computeStaffPayrollPreview({
-    baseSalary: effectiveComp.baseSalary,
-    monthlyBonus: effectiveComp.monthlyBonus,
-    collections: totalCollectedThisMonth,
-    commissionPercent: percent,
-    commissionFormula: formula,
-    commissionsApply: true,
-    policyEnabled: policy.enabled,
-    bonusRules: policy.bonusRules,
-    deductions: profileDeductions(effectiveComp)
-  });
-  const projectedCommission = preview.projectedCommission;
-  const projectedTierBonus = preview.projectedTierBonus;
-  const projectedGross = preview.projectedGross;
-  const projectedNet = preview.projectedNet;
 
   const todayCollections = await getFieldAgentTodayCollections(context);
   const collectedToday = todayCollections.customerIds.length;
@@ -285,54 +269,97 @@ export async function getFieldAgentDashboard(context: AgentContext): Promise<Fie
       ? Math.min(100, Math.round((totalCollectedThisMonth / monthCollectionTarget) * 100))
       : 0;
 
-  const payslips = await getMyPayslips(context.tenantId, context.userId);
-  const periodPayslip = payslips.find((p) => p.periodId === period.id);
-  const payrollLines = periodPayslip
-    ? [...periodPayslip.lines, ...periodPayslip.deductionLines.map((d) => ({ ...d, amount: -d.amount }))]
-    : [
-        ...(effectiveComp.baseSalary > 0
-          ? [{ key: "basic_salary", label: "Basic salary", amount: effectiveComp.baseSalary }]
-          : []),
-        {
-          key: "collection_base",
-          label: "Collections (month to date)",
-          amount: totalCollectedThisMonth
-        },
-        {
-          key: "commission",
-          label: `Projected commission (${percent}%)`,
-          amount: projectedCommission
-        },
-        ...(projectedTierBonus > 0
-          ? [{ key: "tier_bonus", label: "Performance bonus (tiers)", amount: projectedTierBonus }]
-          : []),
-        ...(effectiveComp.monthlyBonus > 0
-          ? [{ key: "monthly_bonus", label: "Monthly bonus", amount: effectiveComp.monthlyBonus }]
-          : []),
-        ...preview.deductionLines.map((d) => ({ ...d, amount: -d.amount }))
-      ];
-  const grossPay = periodPayslip?.grossPay ?? projectedGross;
-  const projectedNetPay = periodPayslip?.netPay ?? projectedNet;
+  let commission: FieldAgentDashboard["commission"] = {
+    enabled: false,
+    percent: 0,
+    basis: "hidden",
+    projectedAmount: 0
+  };
+  let payroll: FieldAgentDashboard["payroll"] = {
+    periodId: period.id,
+    projectedNetPay: 0,
+    grossPay: 0,
+    lines: [],
+    fromPayslip: false
+  };
 
-  return {
-    profile,
-    period: { id: period.id, label: period.label },
-    accountsCreatedThisMonth,
-    totalCollectedThisMonth,
-    todayCollections,
-    commission: {
+  if (includePayroll) {
+    const policy = await getCommissionPolicy(context.tenantId);
+    const payrollProfile = await getUserPayrollProfile(context.tenantId, context.userId);
+    const roleDefault = await getRolePayrollDefault(context.tenantId, context.role as Role);
+    const effectiveComp = resolveEffectivePayroll(roleDefault, payrollProfile);
+    const percent = effectiveCommissionPercent(context.role as Role, policy, payrollProfile);
+    const formula = effectiveCommissionFormula(context.role as Role, policy, payrollProfile);
+
+    const preview = computeStaffPayrollPreview({
+      baseSalary: effectiveComp.baseSalary,
+      monthlyBonus: effectiveComp.monthlyBonus,
+      collections: totalCollectedThisMonth,
+      commissionPercent: percent,
+      commissionFormula: formula,
+      commissionsApply: true,
+      policyEnabled: policy.enabled,
+      bonusRules: policy.bonusRules,
+      deductions: profileDeductions(effectiveComp)
+    });
+    const projectedCommission = preview.projectedCommission;
+    const projectedTierBonus = preview.projectedTierBonus;
+    const projectedGross = preview.projectedGross;
+    const projectedNet = preview.projectedNet;
+
+    const payslips = await getMyPayslips(context.tenantId, context.userId);
+    const periodPayslip = payslips.find((p) => p.periodId === period.id);
+    const payrollLines = periodPayslip
+      ? [...periodPayslip.lines, ...periodPayslip.deductionLines.map((d) => ({ ...d, amount: -d.amount }))]
+      : [
+          ...(effectiveComp.baseSalary > 0
+            ? [{ key: "basic_salary", label: "Basic salary", amount: effectiveComp.baseSalary }]
+            : []),
+          {
+            key: "collection_base",
+            label: "Collections (month to date)",
+            amount: totalCollectedThisMonth
+          },
+          {
+            key: "commission",
+            label: `Projected commission (${percent}%)`,
+            amount: projectedCommission
+          },
+          ...(projectedTierBonus > 0
+            ? [{ key: "tier_bonus", label: "Performance bonus (tiers)", amount: projectedTierBonus }]
+            : []),
+          ...(effectiveComp.monthlyBonus > 0
+            ? [{ key: "monthly_bonus", label: "Monthly bonus", amount: effectiveComp.monthlyBonus }]
+            : []),
+          ...preview.deductionLines.map((d) => ({ ...d, amount: -d.amount }))
+        ];
+    const grossPay = periodPayslip?.grossPay ?? projectedGross;
+    const projectedNetPay = periodPayslip?.netPay ?? projectedNet;
+
+    commission = {
       enabled: policy.enabled,
       percent,
       basis: policy.basis,
       projectedAmount: projectedCommission
-    },
-    payroll: {
+    };
+    payroll = {
       periodId: period.id,
       projectedNetPay,
       grossPay,
       lines: payrollLines.map((l) => ({ key: l.key, label: l.label, amount: l.amount })),
       fromPayslip: Boolean(periodPayslip)
-    },
+    };
+  }
+
+  return {
+    canViewPayroll: includePayroll,
+    profile,
+    period: { id: period.id, label: period.label },
+    accountsCreatedThisMonth,
+    totalCollectedThisMonth,
+    todayCollections,
+    commission,
+    payroll,
     performance: {
       activeCustomers: activeCustomers.length,
       collectedToday,

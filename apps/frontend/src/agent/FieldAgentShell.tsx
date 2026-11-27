@@ -14,6 +14,7 @@ type Props = {
   syncing: boolean;
   pendingCount: number;
   online: boolean;
+  canCreateAccount: boolean;
   onCreateAccount: () => void;
   children: ReactNode;
 };
@@ -24,6 +25,7 @@ export function FieldAgentShell({
   syncing,
   pendingCount,
   online,
+  canCreateAccount,
   onCreateAccount,
   children
 }: Props) {
@@ -74,15 +76,17 @@ export function FieldAgentShell({
           </div>
 
           <div className="agent-topbar__actions">
-            <button
-              type="button"
-              className="agent-topbar__icon-btn agent-topbar__icon-btn--accent"
-              onClick={onCreateAccount}
-              aria-label="Create new account"
-              title="Create new account"
-            >
-              <span aria-hidden>+</span>
-            </button>
+            {canCreateAccount ? (
+              <button
+                type="button"
+                className="agent-topbar__icon-btn agent-topbar__icon-btn--accent"
+                onClick={onCreateAccount}
+                aria-label="Create new account"
+                title="Create new account"
+              >
+                <span aria-hidden>+</span>
+              </button>
+            ) : null}
             <button
               type="button"
               className={`agent-topbar__icon-btn${pendingCount > 0 ? " agent-topbar__icon-btn--badge" : ""}${syncing ? " agent-topbar__icon-btn--busy" : ""}`}

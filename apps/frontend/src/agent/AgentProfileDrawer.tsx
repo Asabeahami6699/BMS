@@ -6,6 +6,8 @@ import { getFieldAgentDashboard, type FieldAgentDashboard } from "../app/api";
 import { isOfflineOrNetworkError } from "../lib/useNetworkStatus";
 import { toUserFacingError } from "../lib/networkError";
 import { InstallAppButton } from "../pwa/InstallAppButton";
+import { useFieldAgentCapabilities } from "./hooks/useFieldAgentCapabilities";
+import { useAgentWithdrawalActivityStore } from "./stores/agentWithdrawalActivityStore";
 
 type Props = {
   open: boolean;
@@ -26,6 +28,8 @@ function statDisplay(value: number, asMoney = false): string {
 
 export function AgentProfileDrawer({ open, onClose, onLogout }: Props) {
   const { user } = useAuth();
+  const { canViewPayroll, canRequestWithdrawals } = useFieldAgentCapabilities();
+  const hasWithdrawalActivity = useAgentWithdrawalActivityStore((s) => s.items.length > 0);
   const [dashboard, setDashboard] = useState<FieldAgentDashboard | null>(null);
   const [status, setStatus] = useState("");
 
@@ -109,40 +113,44 @@ export function AgentProfileDrawer({ open, onClose, onLogout }: Props) {
                 </div>
               </details>
 
-              <details className="agent-drawer-panel">
-                <summary>Commission</summary>
-                <div className="agent-drawer-panel-body">
-                  <p className="muted">
-                    {dashboard.commission.enabled
-                      ? `${dashboard.commission.percent}% on ${dashboard.commission.basis.replace(/_/g, " ")}`
-                      : "Commission policy is disabled"}
-                  </p>
-                  <p className="agent-drawer-highlight">
-                    Projected: {statDisplay(dashboard.commission.projectedAmount, true)}
-                  </p>
-                </div>
-              </details>
-
-              <details className="agent-drawer-panel">
-                <summary>Payroll (end of month)</summary>
-                <div className="agent-drawer-panel-body">
-                  <p className="muted">
-                    {dashboard.payroll.fromPayslip
-                      ? `Official payslip · ${dashboard.payroll.periodId}`
-                      : `Estimate · ${dashboard.payroll.periodId}`}
-                  </p>
-                  {dashboard.payroll.lines.map((line) => (
-                    <div className="agent-drawer-line" key={line.key}>
-                      <span>{line.label}</span>
-                      <strong>{statDisplay(line.amount, true)}</strong>
+              {canViewPayroll && dashboard.canViewPayroll !== false ? (
+                <>
+                  <details className="agent-drawer-panel">
+                    <summary>Commission</summary>
+                    <div className="agent-drawer-panel-body">
+                      <p className="muted">
+                        {dashboard.commission.enabled
+                          ? `${dashboard.commission.percent}% on ${dashboard.commission.basis.replace(/_/g, " ")}`
+                          : "Commission policy is disabled"}
+                      </p>
+                      <p className="agent-drawer-highlight">
+                        Projected: {statDisplay(dashboard.commission.projectedAmount, true)}
+                      </p>
                     </div>
-                  ))}
-                  <div className="agent-drawer-line agent-drawer-line--total">
-                    <span>Projected net pay</span>
-                    <strong>{statDisplay(dashboard.payroll.projectedNetPay, true)}</strong>
-                  </div>
-                </div>
-              </details>
+                  </details>
+
+                  <details className="agent-drawer-panel">
+                    <summary>Payroll (end of month)</summary>
+                    <div className="agent-drawer-panel-body">
+                      <p className="muted">
+                        {dashboard.payroll.fromPayslip
+                          ? `Official payslip · ${dashboard.payroll.periodId}`
+                          : `Estimate · ${dashboard.payroll.periodId}`}
+                      </p>
+                      {dashboard.payroll.lines.map((line) => (
+                        <div className="agent-drawer-line" key={line.key}>
+                          <span>{line.label}</span>
+                          <strong>{statDisplay(line.amount, true)}</strong>
+                        </div>
+                      ))}
+                      <div className="agent-drawer-line agent-drawer-line--total">
+                        <span>Projected net pay</span>
+                        <strong>{statDisplay(dashboard.payroll.projectedNetPay, true)}</strong>
+                      </div>
+                    </div>
+                  </details>
+                </>
+              ) : null}
 
               <details className="agent-drawer-panel">
                 <summary>Performance</summary>
@@ -178,15 +186,17 @@ export function AgentProfileDrawer({ open, onClose, onLogout }: Props) {
             </>
           ) : null}
 
-          <div className="agent-drawer-links">
-            <Link
-              to="/app/agent/withdrawals"
-              className="agent-drawer-link"
-              onClick={onClose}
-            >
-              Withdrawal activity
-            </Link>
-          </div>
+          {canRequestWithdrawals || hasWithdrawalActivity ? (
+            <div className="agent-drawer-links">
+              <Link
+                to="/app/agent/withdrawals"
+                className="agent-drawer-link"
+                onClick={onClose}
+              >
+                Withdrawal activity
+              </Link>
+            </div>
+          ) : null}
 
           <div className="agent-drawer-install">
             <InstallAppButton variant="button" onInstalled={onClose} />

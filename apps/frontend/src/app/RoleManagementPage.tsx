@@ -10,6 +10,8 @@ import type {
 } from "@bms/shared";
 import {
   BUILTIN_ROLE_LABELS,
+  FIELD_AGENT_CONTROL_OPTIONS,
+  FIELD_AGENT_LOCKED_PERMISSIONS,
   MODULE_LABELS,
   PERMISSION_GROUP_LABELS,
   TENANT_EDITABLE_BUILTIN_ROLES,
@@ -20,6 +22,7 @@ import {
   hasTenantModule,
   permissionProductSectionsForCustomRoleScope,
   permissionProductSectionsForTenant,
+  sanitizeFieldAgentDuties,
   validateCustomRoleDuties,
   validateDutySelection,
   validateSusuNavVisibilityItems
@@ -41,6 +44,7 @@ import { UserFormModal } from "./UserFormModal";
 import { useBranchesLiveSync } from "./hooks/useBranchesLiveSync";
 import { useBranchesStore } from "./stores/branchesStore";
 import { useRoleManagementStore } from "./stores/roleManagementStore";
+import { useSettingsWorkspaceStore } from "./stores/settingsWorkspaceStore";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useToast } from "../components/Toast";
 import { useConfirmDialog } from "../hooks/useConfirmDialog";
@@ -124,6 +128,21 @@ export function RoleManagementPage({ role }: Props) {
   const [editingBuiltin, setEditingBuiltin] = useState<Role | null>(null);
   const [builtinDraft, setBuiltinDraft] = useState<Permission[]>([]);
   const [builtinSaving, setBuiltinSaving] = useState(false);
+  const [fieldAgentDraft, setFieldAgentDraft] = useState<Permission[] | null>(null);
+  const [simplifiedWithdrawalDraft, setSimplifiedWithdrawalDraft] = useState<boolean | null>(null);
+  const [fieldAgentSaving, setFieldAgentSaving] = useState(false);
+
+  const {
+    formSetup,
+    hydrateSettingsSection,
+    saveFormSetup
+  } = useSettingsWorkspaceStore(
+    useShallow((s) => ({
+      formSetup: s.formSetup,
+      hydrateSettingsSection: s.hydrateSection,
+      saveFormSetup: s.saveFormSetup
+    }))
+  );
   const [jobTitleKey, setJobTitleKey] = useState("branch_supervisor");
   const [jobTitleName, setJobTitleName] = useState("Branch supervisor");
   const [jobTitleScope, setJobTitleScope] = useState<CustomRoleProductScope>("susu_management");
@@ -320,9 +339,23 @@ export function RoleManagementPage({ role }: Props) {
   }
 
   function openBuiltinEditor(builtinRole: Role) {
+    if (builtinRole === "field_agent") {
+      setEditingBuiltin("field_agent");
+      setFieldAgentDraft(null);
+      setSimplifiedWithdrawalDraft(null);
+      return;
+    }
     const view = builtinViews.find((v) => v.role === builtinRole);
     setEditingBuiltin(builtinRole);
     setBuiltinDraft(view?.effectiveDuties ?? []);
+    setFieldAgentDraft(null);
+    setSimplifiedWithdrawalDraft(null);
+  }
+
+  function closeBuiltinEditor() {
+    setEditingBuiltin(null);
+    setFieldAgentDraft(null);
+    setSimplifiedWithdrawalDraft(null);
   }
 
   function toggleBuiltinDuty(duty: Permission) {
@@ -380,6 +413,134 @@ export function RoleManagementPage({ role }: Props) {
       showToast(toUserFacingError(error, "Failed to reset role"), "error");
     } finally {
       setBuiltinSaving(false);
+    }
+  }
+
+  const fieldAgentView = useMemo(
+    () => builtinViews.find((v) => v.role === "field_agent"),
+    [builtinViews]
+  );
+
+  const fieldAgentEffective = useMemo(
+    () =>
+      fieldAgentDraft ??
+      fieldAgentView?.effectiveDuties ??
+      sanitizeFieldAgentDuties([
+        ...FIELD_AGENT_LOCKED_PERMISSIONS,
+        ...FIELD_AGENT_CONTROL_OPTIONS.map((opt) => opt.permission)
+      ]),
+    [fieldAgentDraft, fieldAgentView]
+  );
+
+  const fieldAgentRoleDirty = useMemo(() => {
+    if (!fieldAgentDraft) {
+      return false;
+    }
+    const saved = new Set(fieldAgentView?.effectiveDuties ?? []);
+    return FIELD_AGENT_CONTROL_OPTIONS.some(
+      (opt) => fieldAgentDraft.includes(opt.permission) !== saved.has(opt.permission)
+    );
+  }, [fieldAgentDraft, fieldAgentView]);
+
+  const savedSimplifiedWithdrawal = Boolean(
+    formSetup.simplifiedKyc?.allowFieldAgentWithdrawalRequest
+  );
+  const simplifiedKycEnabled = Boolean(formSetup.simplifiedKyc?.enabled);
+  const simplifiedWithdrawalEffective =
+    simplifiedWithdrawalDraft ?? savedSimplifiedWithdrawal;
+  const simplifiedWithdrawalDirty =
+    simplifiedWithdrawalDraft !== null &&
+    simplifiedWithdrawalDraft !== savedSimplifiedWithdrawal;
+
+  const fieldAgentDirty = fieldAgentRoleDirty || simplifiedWithdrawalDirty;
+  const fieldAgentWithdrawalsOn = fieldAgentEffective.includes(
+    "field_agent.withdrawals.request"
+  );
+  const fieldAgentCustomized =
+    Boolean(fieldAgentView?.isCustomized) || savedSimplifiedWithdrawal;
+  const fieldAgentEnabledCount =
+    FIELD_AGENT_CONTROL_OPTIONS.filter((opt) =>
+      fieldAgentEffective.includes(opt.permission)
+    ).length + (fieldAgentWithdrawalsOn && simplifiedKycEnabled && simplifiedWithdrawalEffective ? 1 : 0);
+
+  function toggleFieldAgentControl(permission: Permission, enabled: boolean) {
+    const base = fieldAgentDraft ?? fieldAgentEffective;
+    const next = enabled
+      ? [...base, permission]
+      : base.filter((item) => item !== permission);
+    setFieldAgentDraft(sanitizeFieldAgentDuties(next));
+  }
+
+  async function handleSaveFieldAgentControls() {
+    if (!canManageRoles || !fieldAgentDirty) {
+      return;
+    }
+    const nextDuties = sanitizeFieldAgentDuties(fieldAgentEffective);
+    setFieldAgentSaving(true);
+    try {
+      if (fieldAgentRoleDirty) {
+        await saveBuiltinRolePermissions("field_agent", nextDuties);
+        const refreshed = await getBuiltinRolePermissions();
+        setBuiltinViews(refreshed);
+      }
+      if (simplifiedWithdrawalDirty) {
+        await saveFormSetup({
+          ...formSetup,
+          simplifiedKyc: {
+            ...formSetup.simplifiedKyc,
+            allowFieldAgentWithdrawalRequest: simplifiedWithdrawalEffective
+          }
+        });
+      }
+      setFieldAgentDraft(null);
+      setSimplifiedWithdrawalDraft(null);
+      showToast(
+        "Field agent controls saved. Field agents will pick up changes after refreshing or signing in again.",
+        "success"
+      );
+    } catch (error) {
+      showToast(toUserFacingError(error, "Failed to save field agent controls"), "error");
+    } finally {
+      setFieldAgentSaving(false);
+    }
+  }
+
+  async function handleResetFieldAgentControls() {
+    const ok = await confirm({
+      title: "Reset field agent controls",
+      message:
+        "Reset Field Agent switches to platform defaults (4 core controls ON, Simplified KYC withdrawal requests OFF)?",
+      confirmLabel: "Reset",
+      danger: true
+    });
+    if (!ok) {
+      return;
+    }
+    setFieldAgentSaving(true);
+    try {
+      const updated = await resetBuiltinRolePermissions("field_agent");
+      const current = useRoleManagementStore.getState().builtinViews;
+      setBuiltinViews(
+        current.some((v) => v.role === updated.role)
+          ? current.map((v) => (v.role === updated.role ? updated : v))
+          : [...current, updated]
+      );
+      if (savedSimplifiedWithdrawal) {
+        await saveFormSetup({
+          ...formSetup,
+          simplifiedKyc: {
+            ...formSetup.simplifiedKyc,
+            allowFieldAgentWithdrawalRequest: false
+          }
+        });
+      }
+      setFieldAgentDraft(null);
+      setSimplifiedWithdrawalDraft(null);
+      showToast("Reset Field Agent controls to platform defaults.", "success");
+    } catch (error) {
+      showToast(toUserFacingError(error, "Failed to reset field agent controls"), "error");
+    } finally {
+      setFieldAgentSaving(false);
     }
   }
 
@@ -473,6 +634,7 @@ export function RoleManagementPage({ role }: Props) {
 
   useEffect(() => {
     hydrate();
+    hydrateSettingsSection("formSetup");
     startLiveSync();
     const extraRoles = useRoleManagementStore
       .getState()
@@ -481,7 +643,7 @@ export function RoleManagementPage({ role }: Props) {
       setAssignRoleKey(extraRoles[0].roleKey);
     }
     return () => stopLiveSync();
-  }, [hydrate, startLiveSync, stopLiveSync]);
+  }, [hydrate, hydrateSettingsSection, startLiveSync, stopLiveSync]);
 
   useEffect(() => {
     const extraRoles = roles.filter((item) => (item.roleKind ?? "extra_duties") === "extra_duties");
@@ -773,7 +935,7 @@ export function RoleManagementPage({ role }: Props) {
                           <button
                             type="button"
                             className="button-link"
-                            onClick={() => setEditingBuiltin(null)}
+                            onClick={closeBuiltinEditor}
                           >
                             Close
                           </button>
@@ -828,6 +990,223 @@ export function RoleManagementPage({ role }: Props) {
                 </article>
               );
             })}
+
+            {(() => {
+              const isEditingFieldAgent = editingBuiltin === "field_agent";
+              const fieldAgentActiveList = [
+                ...(fieldAgentView?.effectiveDuties ?? fieldAgentEffective),
+                ...(savedSimplifiedWithdrawal ? ["simplified_kyc.withdrawal_request"] : [])
+              ];
+              return (
+                <article
+                  key="field_agent"
+                  className={`roles-page__builtin-card roles-animate-in${isEditingFieldAgent ? " is-editing" : ""}`}
+                  style={{ animationDelay: `${TENANT_EDITABLE_BUILTIN_ROLES.length * 40}ms` }}
+                >
+                  <div className="roles-page__builtin-card-head">
+                    <div>
+                      <h4>{BUILTIN_ROLE_LABELS.field_agent}</h4>
+                      <p className="muted">
+                        <code>field_agent</code> · {fieldAgentActiveList.length} active
+                        {fieldAgentCustomized ? (
+                          <span className="roles-page__custom-badge"> Customized</span>
+                        ) : (
+                          <span> · defaults</span>
+                        )}
+                      </p>
+                    </div>
+                    {canManageRoles ? (
+                      <div className="roles-page__builtin-actions">
+                        {!isEditingFieldAgent ? (
+                          <button
+                            type="button"
+                            className="button secondary"
+                            onClick={() => openBuiltinEditor("field_agent")}
+                          >
+                            Edit permissions
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="button-link"
+                            onClick={closeBuiltinEditor}
+                          >
+                            Close
+                          </button>
+                        )}
+                        {fieldAgentCustomized ? (
+                          <button
+                            type="button"
+                            className="button-link"
+                            disabled={fieldAgentSaving}
+                            onClick={() => void handleResetFieldAgentControls()}
+                          >
+                            Reset to defaults
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  {!isEditingFieldAgent ? (
+                    <ul className="roles-page__perm-list">
+                      {fieldAgentActiveList.map((p) => (
+                        <li key={p}>
+                          <code>{p}</code>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div className="roles-page__builtin-editor fa-controls__editor">
+                      <div className="fa-controls__editor-meta">
+                        <p className="fa-controls__subtitle">
+                          Curated switches for the Field Agent mobile app. Core collection,
+                          call-over, and offline sync duties remain locked on so field operations
+                          and maker–checker safeguards cannot be broken.
+                        </p>
+                        <div className="fa-controls__editor-badges">
+                          <span className="fa-controls__chip">
+                            {fieldAgentEnabledCount} / 5 enabled
+                          </span>
+                          <span className="fa-controls__pill">Field app · Curated</span>
+                        </div>
+                      </div>
+
+                      <div className="fa-controls__grid">
+                        {FIELD_AGENT_CONTROL_OPTIONS.map((option) => {
+                          const checked = fieldAgentEffective.includes(option.permission);
+                          const disabled = !canManageRoles || fieldAgentSaving;
+                          return (
+                            <label
+                              key={option.permission}
+                              className={`fa-control-card${checked ? " fa-control-card--on" : ""}${disabled ? " fa-control-card--disabled" : ""}`}
+                            >
+                              <div className="fa-control-card__top">
+                                <div className="fa-control-card__heading">
+                                  <strong>{option.label}</strong>
+                                  <code className="fa-control-card__code">{option.permission}</code>
+                                </div>
+                                <span className="fa-switch">
+                                  <input
+                                    type="checkbox"
+                                    role="switch"
+                                    aria-checked={checked}
+                                    checked={checked}
+                                    disabled={disabled}
+                                    onChange={(event) =>
+                                      toggleFieldAgentControl(option.permission, event.target.checked)
+                                    }
+                                  />
+                                  <span className="fa-switch__track" aria-hidden="true">
+                                    <span className="fa-switch__thumb" />
+                                  </span>
+                                </span>
+                              </div>
+                              <p className="fa-control-card__desc">{option.description}</p>
+                            </label>
+                          );
+                        })}
+
+                        {(() => {
+                          const simplifiedToggleDisabled =
+                            !canManageRoles ||
+                            fieldAgentSaving ||
+                            !fieldAgentWithdrawalsOn ||
+                            !simplifiedKycEnabled;
+                          const simplifiedVisualOn =
+                            fieldAgentWithdrawalsOn &&
+                            simplifiedKycEnabled &&
+                            simplifiedWithdrawalEffective;
+                          return (
+                            <label
+                              className={`fa-control-card fa-control-card--full${simplifiedVisualOn ? " fa-control-card--on" : ""}${simplifiedToggleDisabled ? " fa-control-card--disabled" : ""}`}
+                            >
+                              <div className="fa-control-card__top">
+                                <div className="fa-control-card__heading">
+                                  <div className="fa-control-card__title-inline">
+                                    <strong>Can make Simplified KYC withdrawal requests</strong>
+                                    <span className="fa-controls__chip fa-controls__chip--warn">
+                                      BoG Tier 1
+                                    </span>
+                                  </div>
+                                  <code className="fa-control-card__code">
+                                    simplified_kyc.withdrawal_request
+                                  </code>
+                                </div>
+                                <span className="fa-switch">
+                                  <input
+                                    type="checkbox"
+                                    role="switch"
+                                    aria-checked={simplifiedVisualOn}
+                                    checked={simplifiedVisualOn}
+                                    disabled={simplifiedToggleDisabled}
+                                    onChange={(event) =>
+                                      setSimplifiedWithdrawalDraft(event.target.checked)
+                                    }
+                                  />
+                                  <span className="fa-switch__track" aria-hidden="true">
+                                    <span className="fa-switch__thumb" />
+                                  </span>
+                                </span>
+                              </div>
+                              <p className="fa-control-card__desc">
+                                {!fieldAgentWithdrawalsOn
+                                  ? "Turn on “Can submit withdrawal requests” above to enable Simplified KYC withdrawal requests."
+                                  : !simplifiedKycEnabled
+                                    ? "Simplified KYC registration is currently turned off in Settings → Form setup."
+                                    : "Default off — Tier 1 Simplified KYC customers withdraw in person at the branch with face verification. Turn on to let field agents request Simplified KYC withdrawals for coordinator approval (synced with Settings → Form setup)."}
+                              </p>
+                            </label>
+                          );
+                        })()}
+                      </div>
+
+                      <div className="fa-controls__locked" aria-label="Locked core field agent capabilities">
+                        <span className="fa-controls__locked-label">Always protected:</span>
+                        <span className="fa-controls__locked-pill">Daily collections</span>
+                        <span className="fa-controls__locked-pill">Customer lookup</span>
+                        <span className="fa-controls__locked-pill">Call-over</span>
+                        <span className="fa-controls__locked-pill">Offline sync</span>
+                        <span className="fa-controls__locked-pill">Alerts</span>
+                      </div>
+
+                      <div className="fa-controls__footer">
+                        <span className="fa-controls__hint">
+                          {fieldAgentDirty ? (
+                            <span className="fa-controls__dirty-dot">Unsaved changes</span>
+                          ) : (
+                            "Changes apply when field agents refresh or sign in again."
+                          )}
+                        </span>
+                        <div className="fa-controls__actions">
+                          {fieldAgentDirty ? (
+                            <button
+                              type="button"
+                              className="button secondary"
+                              disabled={fieldAgentSaving}
+                              onClick={() => {
+                                setFieldAgentDraft(null);
+                                setSimplifiedWithdrawalDraft(null);
+                              }}
+                            >
+                              Discard
+                            </button>
+                          ) : null}
+                          <button
+                            type="button"
+                            className="button"
+                            disabled={fieldAgentSaving || !fieldAgentDirty || !canManageRoles}
+                            onClick={() => void handleSaveFieldAgentControls()}
+                          >
+                            {fieldAgentSaving ? "Saving…" : "Save permissions"}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </article>
+              );
+            })()}
           </div>
 
           <RolesSectionHeader

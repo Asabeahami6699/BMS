@@ -6,16 +6,20 @@ import { useToast } from "../../components/Toast";
 import { toUserFacingError } from "../../lib/networkError";
 import { AgentCashVariancePanel } from "../components/AgentCashVariancePanel";
 import { OfflineSyncInspector } from "../components/OfflineSyncInspector";
+import { useFieldAgentCapabilities } from "../hooks/useFieldAgentCapabilities";
 import { useAgentCollectionStore } from "../stores/agentCollectionStore";
 import { useAgentCustomerStore, selectCustomerStats } from "../stores/agentCustomerStore";
+import { useAgentWithdrawalActivityStore } from "../stores/agentWithdrawalActivityStore";
 
 export function AgentHomePage() {
   const { showToast } = useToast();
+  const { canRegisterCustomers, canRequestWithdrawals } = useFieldAgentCapabilities();
   const online = typeof navigator === "undefined" ? true : navigator.onLine;
   const stats = useAgentCustomerStore(useShallow(selectCustomerStats));
   const hydrated = useAgentCustomerStore((s) => s.hydrated);
   const priorUnsubmittedBatches = useAgentCollectionStore((s) => s.priorUnsubmittedBatches);
   const refreshToday = useAgentCollectionStore((s) => s.refreshToday);
+  const hasWithdrawalActivity = useAgentWithdrawalActivityStore((s) => s.items.length > 0);
   const [submittingDate, setSubmittingDate] = useState<string | null>(null);
 
   async function handleSubmitPriorBatch(businessDate: string) {
@@ -96,7 +100,11 @@ export function AgentHomePage() {
       <div className="agent-action-grid">
         <Link to="/app/agent/customers" className="agent-action-card agent-action-card--primary">
           <strong>Customers</strong>
-          <p className="muted">Browse, collect, and create new accounts</p>
+          <p className="muted">
+            {canRegisterCustomers
+              ? "Browse, collect, and create new accounts"
+              : "Browse and collect from your customers"}
+          </p>
         </Link>
         <Link to="/app/agent/collect" className="agent-action-card">
           <strong>Daily collection</strong>
@@ -110,10 +118,12 @@ export function AgentHomePage() {
           <strong>Alerts</strong>
           <p className="muted">Approval and rejection updates</p>
         </Link>
-        <Link to="/app/agent/withdrawals" className="agent-action-card">
-          <strong>Withdrawals</strong>
-          <p className="muted">Requested, approved, and cash from office</p>
-        </Link>
+        {canRequestWithdrawals || hasWithdrawalActivity ? (
+          <Link to="/app/agent/withdrawals" className="agent-action-card">
+            <strong>Withdrawals</strong>
+            <p className="muted">Requested, approved, and cash from office</p>
+          </Link>
+        ) : null}
       </div>
     </div>
   );

@@ -13,6 +13,7 @@ import {
   useAgentBalanceStore
 } from "../stores/agentBalanceStore";
 import { useAgentCustomerStore } from "../stores/agentCustomerStore";
+import { useFieldAgentCapabilities } from "../hooks/useFieldAgentCapabilities";
 import { CustomerRequestModal } from "./CustomerRequestModal";
 import { CustomerRequestUpdatesModal } from "./CustomerRequestUpdatesModal";
 
@@ -52,6 +53,7 @@ function formatMoney(amount: number): string {
 export function CustomerRequestsRow({ customerId, customerName, compact }: Props) {
   const { online } = useNetworkStatus();
   const { showToast } = useToast();
+  const { canRequestBalance, canRequestWithdrawals } = useFieldAgentCapabilities();
   const balance = useAgentBalanceStore(selectBalanceForCustomer(customerId));
   const withdrawal = useAgentBalanceStore(selectWithdrawalForCustomer(customerId));
   const submitRequest = useAgentBalanceStore((s) => s.submitRequest);
@@ -78,7 +80,13 @@ export function CustomerRequestsRow({ customerId, customerName, compact }: Props
   const canOpenRequest =
     online &&
     !submitting &&
-    (canRequestType(balance, online, "balance") || canRequestType(withdrawal, online, "withdrawal"));
+    ((canRequestBalance && canRequestType(balance, online, "balance")) ||
+      (canRequestWithdrawals && canRequestType(withdrawal, online, "withdrawal")));
+
+  const anyRequestEnabled = canRequestBalance || canRequestWithdrawals;
+  if (!balanceVisible && !pendingAny && !canOpenRequest && !hasUpdates && !anyRequestEnabled) {
+    return null;
+  }
 
   function openModal(e: React.MouseEvent) {
     e.preventDefault();
@@ -162,6 +170,8 @@ export function CustomerRequestsRow({ customerId, customerName, compact }: Props
         open={modalOpen}
         customerName={customerName}
         kycTier={customerKycTier}
+        canRequestBalance={canRequestBalance}
+        canRequestWithdrawals={canRequestWithdrawals}
         submitting={submitting}
         onClose={() => setModalOpen(false)}
         onSubmit={(payload) => void handleSubmit(payload)}

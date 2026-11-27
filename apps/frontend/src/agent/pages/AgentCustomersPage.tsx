@@ -7,6 +7,7 @@ import { RowActionsMenu } from "../../components/RowActionsMenu";
 import { SusuPassbookCard } from "../../components/SusuPassbookCard";
 import { CustomerRequestsRow } from "../components/CustomerRequestsRow";
 import { RegistrationModal } from "../RegistrationModal";
+import { useFieldAgentCapabilities } from "../hooks/useFieldAgentCapabilities";
 import {
   formatCustomerAddress,
   selectFilteredCustomers,
@@ -56,6 +57,7 @@ export function AgentCustomersPage({
   registerOpen: registerOpenProp,
   onRegisterOpenChange
 }: Props) {
+  const { canRegisterCustomers } = useFieldAgentCapabilities();
   const customers = useAgentCustomerStore(useShallow(selectFilteredCustomers));
   const allCustomers = useAgentCustomerStore((s) => s.customers);
   const stats = useAgentCustomerStore(useShallow(selectCustomerStats));
@@ -185,7 +187,9 @@ export function AgentCustomersPage({
               ? "Loading customers…"
               : search.trim()
                 ? "No customers match your search."
-                : "No customers in this view yet. Tap + in the top bar to create one."}
+                : canRegisterCustomers
+                  ? "No customers in this view yet. Tap + in the top bar to create one."
+                  : "No customers in this view yet."}
           </p>
         ) : (
           customers.map((customer) => (
@@ -256,19 +260,21 @@ export function AgentCustomersPage({
         ) : null}
       </Modal>
 
-      <RegistrationModal
-        open={registerOpen}
-        onClose={() => setRegisterOpen(false)}
-        onSubmitted={(customer) => {
-          onQueueChange();
-          if (customer) {
-            mergeCustomer(customer);
-          } else {
-            void refreshSilent();
-          }
-          setRegisterOpen(false);
-        }}
-      />
+      {canRegisterCustomers ? (
+        <RegistrationModal
+          open={registerOpen}
+          onClose={() => setRegisterOpen(false)}
+          onSubmitted={(customer) => {
+            onQueueChange();
+            if (customer) {
+              mergeCustomer(customer);
+            } else {
+              void refreshSilent();
+            }
+            setRegisterOpen(false);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

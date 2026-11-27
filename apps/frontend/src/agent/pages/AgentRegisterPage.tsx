@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type { Customer } from "../../app/api";
 import { RegistrationModal } from "../RegistrationModal";
+import { useFieldAgentCapabilities } from "../hooks/useFieldAgentCapabilities";
 import { formatNextOfKin } from "../../lib/formatNextOfKin";
 import { formatFieldAgent } from "../../lib/formatFieldAgent";
 import { useAgentCustomerStore } from "../stores/agentCustomerStore";
@@ -10,6 +11,7 @@ type Props = {
 };
 
 export function AgentRegisterPage({ onQueueChange }: Props) {
+  const { canRegisterCustomers } = useFieldAgentCapabilities();
   const [open, setOpen] = useState(false);
   const customers = useAgentCustomerStore((s) => s.customers);
   const hydrated = useAgentCustomerStore((s) => s.hydrated);
@@ -29,16 +31,22 @@ export function AgentRegisterPage({ onQueueChange }: Props) {
     <div className="agent-page">
       <div className="agent-page-head">
         <h2>Registrations</h2>
-        <button type="button" className="button" onClick={() => setOpen(true)}>
-          + New
-        </button>
+        {canRegisterCustomers ? (
+          <button type="button" className="button" onClick={() => setOpen(true)}>
+            + New
+          </button>
+        ) : null}
       </div>
 
       {status ? <p className="muted">{status}</p> : null}
 
       <div className="agent-list">
         {registrations.length === 0 ? (
-          <p className="muted">No submissions yet. Tap + New to register a customer.</p>
+          <p className="muted">
+            {canRegisterCustomers
+              ? "No submissions yet. Tap + New to register a customer."
+              : "Customer registration is disabled by your company admin."}
+          </p>
         ) : (
           registrations.map((c) => (
             <article className="agent-list-item" key={c.id}>
@@ -59,18 +67,20 @@ export function AgentRegisterPage({ onQueueChange }: Props) {
         )}
       </div>
 
-      <RegistrationModal
-        open={open}
-        onClose={() => setOpen(false)}
-        onSubmitted={(customer) => {
-          onQueueChange();
-          if (customer) {
-            mergeCustomer(customer);
-          } else {
-            void refreshSilent();
-          }
-        }}
-      />
+      {canRegisterCustomers ? (
+        <RegistrationModal
+          open={open}
+          onClose={() => setOpen(false)}
+          onSubmitted={(customer) => {
+            onQueueChange();
+            if (customer) {
+              mergeCustomer(customer);
+            } else {
+              void refreshSilent();
+            }
+          }}
+        />
+      ) : null}
     </div>
   );
 }

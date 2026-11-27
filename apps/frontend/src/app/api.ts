@@ -532,6 +532,7 @@ export type SubmitCalloverReportInput = {
 };
 
 export type FieldAgentDashboard = {
+  canViewPayroll?: boolean;
   profile: {
     userId: string;
     fullName: string;

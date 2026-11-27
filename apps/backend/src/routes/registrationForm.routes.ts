@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { requirePermission } from "../middleware/requirePermission.js";
+import { requireAnyPermission } from "../middleware/requirePermission.js";
 import { getRegistrationFormSetup, updateRegistrationFormSetup } from "../services/registrationFormService.js";
 
 export const registrationFormRouter = Router();
@@ -27,7 +27,10 @@ registrationFormRouter.get("/", async (req, res) => {
   }
 });
 
-registrationFormRouter.put("/", requirePermission("users.update"), async (req, res) => {
+registrationFormRouter.put(
+  "/",
+  requireAnyPermission("users.update", "roles.create"),
+  async (req, res) => {
   const tenantId = tenantIdOrReject(req, res);
   if (!tenantId) {
     return;
