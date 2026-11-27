@@ -274,7 +274,7 @@ export function BranchFloatAdminPage({ role, currentUserId }: Props) {
           <Modal
             open={Boolean(closingTarget)}
             onClose={() => !busy && setClosingTarget(null)}
-            title={`Close unclosed till (${closingTarget?.businessDate ?? ""})`}
+            title={`Close till (${closingTarget?.businessDate ?? ""})`}
             subtitle={closingTarget ? `${userLabel(closingTarget.cashierUserId)} · ${branchLabel(closingTarget.branchId)}` : undefined}
             panelClassName="modal-panel--till-movement"
             footer={
@@ -569,30 +569,67 @@ export function BranchFloatAdminPage({ role, currentUserId }: Props) {
                       <th>Cash / capital</th>
                       <th>Expected</th>
                       <th>Variance</th>
+                      <th>Action</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {todaySessions.map((s) => (
-                      <tr key={s.id}>
-                        <td>{userLabel(s.cashierUserId)}</td>
-                        <td>{branchLabel(s.branchId)}</td>
-                        <td>{STATUS_LABEL[s.status]}</td>
-                        <td>{formatMoney(s.openingFloat)}</td>
-                        <td>
-                          {formatMoney((s.initialCash ?? 0) + (s.extraCash ?? 0))}
-                          <span className="muted">
-                            {" "}
-                            / {formatMoney(s.openingFloat + (s.initialCash ?? 0) + (s.extraCash ?? 0))}
-                          </span>
-                        </td>
-                        <td>
-                          {s.status === "open" || s.status === "closed" || s.status === "settled"
-                            ? formatMoney(s.expectedClosing ?? 0)
-                            : "—"}
-                        </td>
-                        <td>{s.variance != null ? formatMoney(s.variance) : "—"}</td>
-                      </tr>
-                    ))}
+                    {todaySessions.map((s) => {
+                      const exp = expectedCashForSession(s);
+                      return (
+                        <tr key={s.id}>
+                          <td>{userLabel(s.cashierUserId)}</td>
+                          <td>{branchLabel(s.branchId)}</td>
+                          <td>{STATUS_LABEL[s.status]}</td>
+                          <td>{formatMoney(s.openingFloat)}</td>
+                          <td>
+                            {formatMoney((s.initialCash ?? 0) + (s.extraCash ?? 0))}
+                            <span className="muted">
+                              {" "}
+                              / {formatMoney(s.openingFloat + (s.initialCash ?? 0) + (s.extraCash ?? 0))}
+                            </span>
+                          </td>
+                          <td>
+                            {s.status === "open" || s.status === "closed" || s.status === "settled"
+                              ? formatMoney(s.expectedClosing ?? 0)
+                              : "—"}
+                          </td>
+                          <td>{s.variance != null ? formatMoney(s.variance) : "—"}</td>
+                          <td>
+                            {s.status === "open" ? (
+                              currentUserId && s.cashierUserId === currentUserId ? (
+                                <Link to="/app/susu/teller-callover" className="button secondary">
+                                  Teller call-over
+                                </Link>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="button secondary"
+                                  disabled={busy}
+                                  onClick={() => {
+                                    setClosingTarget(s);
+                                    setClosingCash(exp.toFixed(2));
+                                    setClosingNote("");
+                                  }}
+                                >
+                                  Close till
+                                </button>
+                              )
+                            ) : s.status === "closed" ? (
+                              <button
+                                type="button"
+                                className="button secondary"
+                                disabled={busy}
+                                onClick={() => void handleSettle(s)}
+                              >
+                                Settle
+                              </button>
+                            ) : (
+                              <span className="muted">—</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

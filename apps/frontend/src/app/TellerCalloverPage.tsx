@@ -66,6 +66,28 @@ function isFieldPayoutLine(line: BranchCounterStatementLine): boolean {
   );
 }
 
+/**
+ * Field-agent call-over batches (already verified on Susu -> Callover batches) and
+ * Savings initial deposits credited on account approval bypass the teller cash drawer
+ * (`branch_float_sessions`), so exclude them from a cashier's personal drawer call-over.
+ */
+function isNonDrawerCounterLine(line: BranchCounterStatementLine): boolean {
+  const notes = (line.notes ?? "").toLowerCase();
+  if (isFieldPayoutLine(line)) {
+    return false;
+  }
+  if (notes.includes("batch ")) {
+    return true;
+  }
+  if (
+    notes.startsWith("savings initial deposit") ||
+    notes.startsWith("balance of savings initial deposit")
+  ) {
+    return true;
+  }
+  return false;
+}
+
 export function TellerCalloverPage({ role }: Props) {
   const { showToast } = useToast();
   const isHeadOfficeRole = role === "admin" || role === "accountant" || role === "auditor";
@@ -218,6 +240,9 @@ export function TellerCalloverPage({ role }: Props) {
         line.notes?.includes(SUSU_COMMISSION_DEBIT_TAG) ||
         line.notes?.includes(SUSU_COMMISSION_REFUND_TAG)
       ) {
+        continue;
+      }
+      if (isPersonalTillMode && isNonDrawerCounterLine(line)) {
         continue;
       }
       if (line.type === "deposit" || line.type === "daily_susu") {
@@ -975,7 +1000,7 @@ export function TellerCalloverPage({ role }: Props) {
               Call-over verified ({callover.checkedCount}/{callover.totalCount} checked) and locked.
             </p>
             {isAdminLike ? (
-              <div>
+              <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
                 <button
                   type="button"
                   className="button"
@@ -984,6 +1009,9 @@ export function TellerCalloverPage({ role }: Props) {
                 >
                   {busy ? "Settling…" : "Settle & approve balancing"}
                 </button>
+                <Link to="/app/susu/closing-balances" className="button secondary">
+                  Open Closing balances (Vault close)
+                </Link>
               </div>
             ) : (
               <p className="muted">Waiting for admin or coordinator settlement approval.</p>
@@ -996,6 +1024,13 @@ export function TellerCalloverPage({ role }: Props) {
               Call-over verified ({callover.checkedCount}/{callover.totalCount} checked) and locked.
               Your till closing for today has been approved and returned to vault.
             </p>
+            {isAdminLike ? (
+              <div style={{ marginTop: "0.75rem" }}>
+                <Link to="/app/susu/closing-balances" className="button">
+                  Proceed to Closing balances (Vault close)
+                </Link>
+              </div>
+            ) : null}
           </section>
         ) : (
           <section className="card teller-callover-page__status-card">
@@ -1007,7 +1042,27 @@ export function TellerCalloverPage({ role }: Props) {
             </p>
           </section>
         )
-      ) : null}
+      ) : (
+        <section className="card teller-callover-page__status-card">
+          <h3>Review mode — next steps for closing</h3>
+          <p className="muted">
+            {callover.allItemsChecked
+              ? `All ${callover.totalCount} counter item(s) checked for ${activeDate}. `
+              : `${callover.checkedCount}/${callover.totalCount} counter item(s) checked for ${activeDate}. `}
+            Closing an open till happens in <strong>Susu → Till float</strong> (or by the cashier on
+            their own Teller call-over screen), and saving the branch vault count happens in{" "}
+            <strong>Susu → Closing balances</strong>.
+          </p>
+          <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginTop: "0.75rem" }}>
+            <Link to="/app/susu/till-float" className="button">
+              Open Till float (close / settle tills)
+            </Link>
+            <Link to="/app/susu/closing-balances" className="button secondary">
+              Open Closing balances (Vault close)
+            </Link>
+          </div>
+        </section>
+      )}
     </div>
   );
 }
