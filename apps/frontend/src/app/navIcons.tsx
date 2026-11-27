@@ -31,7 +31,8 @@ const iconByLabel: Record<string, string> = {
   "Live chat": "💬",
   "Company chats": "💬",
   Announcements: "📢",
-  "Floating Announcements": "📢"
+  "Floating Announcements": "📢",
+  "Backups & Snapshots": "🗄"
 };
 
 const iconByPath: Record<string, string> = {
@@ -79,6 +80,7 @@ const iconByPath: Record<string, string> = {
   "susu/performance": "▲",
   "susu/onboarding": "✚",
   "susu/closing-balances": "≡",
+  backups: "🗄",
   banking: "🏦",
   loans: "◈",
   investments: "◆",

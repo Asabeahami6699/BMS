@@ -22,6 +22,7 @@ import { useLoansStore } from "./stores/loansStore";
 import { useLoanCustomersStore } from "./stores/loanCustomersStore";
 import { useAuditLogsStore } from "./stores/auditLogsStore";
 import { usePlatformAdminStore } from "./stores/platformAdminStore";
+import { usePlatformBackupsStore } from "./stores/platformBackupsStore";
 import { useRoleManagementStore } from "./stores/roleManagementStore";
 import { useSettingsWorkspaceStore } from "./stores/settingsWorkspaceStore";
 import { useBranchesStore } from "./stores/branchesStore";
@@ -434,6 +435,11 @@ export function computeDashboardPageLoading(pathname: string): boolean {
     return useInstitutionalIncomeStore.getState().loading;
   }
 
+  if (path === "backups") {
+    const bk = usePlatformBackupsStore.getState();
+    return bk.loading || bk.downloadingKey !== null || bk.verifyingTenantId !== null;
+  }
+
   if (path === "announcements") {
     const ann = useSiteAnnouncementsStore.getState();
     return ann.managedLoading || ann.saving || ann.busyId !== null;
@@ -489,6 +495,7 @@ const WATCHED_STORES: StoreLike[] = [
   useRoleManagementStore,
   useAuditLogsStore,
   usePlatformAdminStore,
+  usePlatformBackupsStore,
   useSettingsWorkspaceStore,
   useSubscriptionBillingStore,
   useSiteAnnouncementsStore,

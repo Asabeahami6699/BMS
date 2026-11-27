@@ -31,6 +31,14 @@ import {
   updateCompanyProfile
 } from "../services/tenantProfileService.js";
 import { listPlatformTenantHealth } from "../services/platformHealthService.js";
+import {
+  buildAllTenantsSnapshot,
+  buildTenantBalancesCsv,
+  buildTenantFinancialSnapshot,
+  getPlatformBackupOverview,
+  verifyTenantAuditIntegrity
+} from "../services/platformBackupService.js";
+import { setRequestAuditContext } from "../services/auditService.js";
 import { requirePermission } from "../middleware/requirePermission.js";
 
 const subscriptionUpdateSchema = z.object({
@@ -419,6 +427,147 @@ platformRouter.delete(
     } catch (error) {
       res.status(400).json({
         error: error instanceof Error ? error.message : "Failed to delete all customers"
+      });
+    }
+  }
+);
+
+/* ── Super Admin Financial Backups & Snapshots ────────────────────────────── */
+
+platformRouter.get(
+  "/backups/overview",
+  requirePermission("platform.tenants.read"),
+  async (_req, res) => {
+    try {
+      res.json(await getPlatformBackupOverview());
+    } catch (error) {
+      res.status(500).json({
+        error: error instanceof Error ? error.message : "Failed to load backup overview"
+      });
+    }
+  }
+);
+
+platformRouter.post(
+  "/backups/verify-chain/:tenantId",
+  requirePermission("platform.tenants.read"),
+  async (req, res) => {
+    const tenantId = String(req.params.tenantId);
+    try {
+      const result = await verifyTenantAuditIntegrity(tenantId);
+      setRequestAuditContext(req, {
+        entityType: "platform_backup",
+        entityId: tenantId,
+        action: "Verified tenant immutable audit log chain",
+        after: {
+          ok: result.ok,
+          checkedCount: result.checkedCount,
+          firstBrokenId: result.firstBrokenId ?? null
+        }
+      });
+      res.json(result);
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Failed to verify audit chain"
+      });
+    }
+  }
+);
+
+platformRouter.get(
+  "/backups/snapshot/:tenantId",
+  requirePermission("platform.tenants.read"),
+  async (req, res) => {
+    const tenantId = String(req.params.tenantId);
+    const includePhotos =
+      req.query.includePhotos === "true" || req.query.includePhotos === "1";
+    try {
+      const snapshot = await buildTenantFinancialSnapshot(tenantId, { includePhotos });
+      const slug = (snapshot.tenant.subdomain || snapshot.tenant.name || tenantId)
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "");
+      const stamp = snapshot.generatedAt.slice(0, 10);
+      const filename = `${slug || "tenant"}-snapshot-${stamp}.json`;
+
+      setRequestAuditContext(req, {
+        entityType: "platform_backup",
+        entityId: tenantId,
+        action: "Downloaded tenant financial JSON snapshot",
+        after: {
+          filename,
+          includePhotos,
+          sha256: snapshot.integrity.sha256,
+          summary: snapshot.summary
+        }
+      });
+
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.setHeader("X-Snapshot-Sha256", snapshot.integrity.sha256);
+      res.send(JSON.stringify(snapshot, null, 2));
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Failed to build tenant snapshot"
+      });
+    }
+  }
+);
+
+platformRouter.get(
+  "/backups/balances/:tenantId.csv",
+  requirePermission("platform.tenants.read"),
+  async (req, res) => {
+    const tenantId = String(req.params.tenantId);
+    try {
+      const { filename, csv, rowCount } = await buildTenantBalancesCsv(tenantId);
+      setRequestAuditContext(req, {
+        entityType: "platform_backup",
+        entityId: tenantId,
+        action: "Downloaded tenant customer balances CSV backup",
+        after: { filename, rowCount }
+      });
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.send(csv);
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Failed to export balances CSV"
+      });
+    }
+  }
+);
+
+platformRouter.get(
+  "/backups/snapshot-all",
+  requirePermission("platform.tenants.read"),
+  async (req, res) => {
+    const includePhotos =
+      req.query.includePhotos === "true" || req.query.includePhotos === "1";
+    try {
+      const bundle = await buildAllTenantsSnapshot({ includePhotos });
+      const stamp = bundle.generatedAt.slice(0, 10);
+      const filename = `bms-platform-snapshot-${stamp}.json`;
+
+      setRequestAuditContext(req, {
+        entityType: "platform_backup",
+        entityId: "all-tenants",
+        action: "Downloaded consolidated platform-wide financial snapshot",
+        after: {
+          filename,
+          includePhotos,
+          tenantCount: bundle.tenantCount,
+          sha256: bundle.integrity.sha256
+        }
+      });
+
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.setHeader("X-Snapshot-Sha256", bundle.integrity.sha256);
+      res.send(JSON.stringify(bundle, null, 2));
+    } catch (error) {
+      res.status(500).json({
+        error: error instanceof Error ? error.message : "Failed to build platform snapshot"
       });
     }
   }

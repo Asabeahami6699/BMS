@@ -5,6 +5,7 @@ import { DashboardShell } from "./DashboardShell";
 import { PlatformLiveChatPage } from "./PlatformLiveChatPage";
 import { CompaniesPage } from "./platform/CompaniesPage";
 import { PlatformAddonPage } from "./platform/PlatformAddonPage";
+import { PlatformBackupsPage } from "./platform/PlatformBackupsPage";
 import { PlatformProductPage } from "./platform/PlatformProductPage";
 import { SubscriptionManagementPage } from "./platform/SubscriptionManagementPage";
 import { SiteAnnouncementsManagerPage } from "./SiteAnnouncementsManagerPage";
@@ -53,6 +54,7 @@ export function PlatformApp() {
         <Route path="/subscriptions" element={<SubscriptionManagementPage />} />
         <Route path="/products/:slug" element={<ProductRoute />} />
         <Route path="/addons/:slug" element={<AddonRoute />} />
+        <Route path="/backups" element={<PlatformBackupsPage />} />
         <Route path="/announcements" element={<SiteAnnouncementsManagerPage scope="platform" />} />
         <Route path="/live-chat" element={<PlatformLiveChatPage />} />
         <Route path="*" element={<Navigate to="companies" replace />} />

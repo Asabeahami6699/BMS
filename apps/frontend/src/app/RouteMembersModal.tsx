@@ -13,6 +13,21 @@ type Props = {
   onUpdated: () => void;
 };
 
+function formatAccountTypeLabel(accountType?: Customer["accountType"]): string | null {
+  switch (accountType) {
+    case "susu":
+      return "Susu";
+    case "savings":
+      return "Savings";
+    case "group":
+      return "Group";
+    case "meba_daakye":
+      return "Meba Daakye";
+    default:
+      return accountType ? String(accountType).replace(/_/g, " ") : null;
+  }
+}
+
 export function RouteMembersModal({ route, open, onClose, onUpdated }: Props) {
   const { showToast } = useToast();
   const allCustomers = useCustomersStore((s) => s.customers);
@@ -55,12 +70,15 @@ export function RouteMembersModal({ route, open, onClose, onUpdated }: Props) {
     if (!q) {
       return candidates;
     }
-    return candidates.filter(
-      (c) =>
+    return candidates.filter((c) => {
+      const typeLabel = formatAccountTypeLabel(c.accountType)?.toLowerCase() ?? "";
+      return (
         c.fullName.toLowerCase().includes(q) ||
         c.phone.includes(q) ||
-        (c.accountNumber?.toLowerCase().includes(q) ?? false)
-    );
+        (c.accountNumber?.toLowerCase().includes(q) ?? false) ||
+        typeLabel.includes(q)
+      );
+    });
   }, [candidates, query]);
 
   function toggleMember(customerId: string) {
@@ -123,28 +141,49 @@ export function RouteMembersModal({ route, open, onClose, onUpdated }: Props) {
               type="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Name, phone, account #"
+              placeholder="Name, phone, account #, or account type"
             />
           </label>
           <div className="route-members-list">
             {filtered.length === 0 ? (
               <p className="muted">No eligible customers.</p>
             ) : (
-              filtered.map((c) => (
-                <label key={c.id} className="route-members-row">
-                  <input
-                    type="checkbox"
-                    checked={members.includes(c.id)}
-                    onChange={() => toggleMember(c.id)}
-                  />
-                  <span>
-                    <strong>{c.fullName}</strong>
-                    <small className="muted">
-                      {c.accountNumber ?? "No account #"} · {c.phone}
-                    </small>
-                  </span>
-                </label>
-              ))
+              filtered.map((c) => {
+                const accountTypeLabel = formatAccountTypeLabel(c.accountType);
+                return (
+                  <label key={c.id} className="route-members-row">
+                    <input
+                      type="checkbox"
+                      checked={members.includes(c.id)}
+                      onChange={() => toggleMember(c.id)}
+                    />
+                    <span>
+                      <span
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "0.45rem",
+                          flexWrap: "wrap"
+                        }}
+                      >
+                        <strong>{c.fullName}</strong>
+                        {accountTypeLabel ? (
+                          <span
+                            className={`status-pill status-pill--${c.accountType === "savings" ? "pending" : "active"}`}
+                            style={{ fontSize: "0.7rem", padding: "0.1rem 0.45rem" }}
+                          >
+                            {accountTypeLabel}
+                          </span>
+                        ) : null}
+                      </span>
+                      <small className="muted">
+                        {c.accountNumber ?? "No account #"}
+                        {accountTypeLabel ? ` · ${accountTypeLabel}` : ""} · {c.phone}
+                      </small>
+                    </span>
+                  </label>
+                );
+              })
             )}
           </div>
         </>

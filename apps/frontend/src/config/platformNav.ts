@@ -31,6 +31,7 @@ export const PLATFORM_NAV: DashboardNavItem[] = [
       { kind: "link", to: "addons/branding", label: "Custom Branding" }
     ]
   },
+  { kind: "link", to: "backups", label: "Backups & Snapshots" },
   { kind: "link", to: "announcements", label: "Announcements" },
   { kind: "link", to: "live-chat", label: "Live chat" }
 ];

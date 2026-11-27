@@ -777,7 +777,7 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
       "Go to Settings → Audit logs to review a full timestamped trail of staff actions across your workspace.",
       "Use the quick filter chips (All events, Withdrawals, Reversals, Till & Cash, Profiles & Roles, Approvals) combined with text search to isolate specific events in seconds.",
       "Click Export CSV to download the currently filtered audit rows for external or internal audit review.",
-      "Platform Super Admins can also update any company’s profile, logo, brand color, and contact details via Companies → Edit profile, and monitor live per-company health badges (active staff, active customers, prior open tills, SMS status, and last activity) directly on the Companies screen."
+      "Platform Super Admins can also update any company’s profile, logo, brand color, and contact details via Companies → Edit profile, monitor live per-company health badges (active staff, active customers, prior open tills, SMS status, and last activity) directly on the Companies screen, and open Platform → Backups & Snapshots to verify any company’s immutable audit hash chain, download checksummed per-tenant or all-tenant financial JSON snapshots, export customer balances CSV sheets, and manage automated nightly GPG AES-256 encrypted GitHub database backups."
     ]
   },
   {

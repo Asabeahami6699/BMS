@@ -1,0 +1,198 @@
+name: Nightly Encrypted Database Backup
+
+on:
+  schedule:
+    # Runs every night at 23:30 UTC (after End-of-Day in Ghana / GMT)
+    - cron: "30 23 * * *"
+  workflow_dispatch:
+    inputs:
+      label:
+        description: "Optional backup label (e.g. pre-migration, month-end)"
+        required: false
+        default: "manual"
+      retention_days:
+        description: "GitHub artifact retention in days (1-90)"
+        required: false
+        default: "90"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: db-nightly-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    name: Encrypted PostgreSQL Dump
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Validate required backup secrets
+        env:
+          SUPABASE_DB_BACKUP_URL: ${{ secrets.SUPABASE_DB_BACKUP_URL }}
+          BACKUP_ENCRYPTION_PASSPHRASE: ${{ secrets.BACKUP_ENCRYPTION_PASSPHRASE }}
+        run: |
+          if [ -z "$SUPABASE_DB_BACKUP_URL" ]; then
+            echo "::error::Missing secret SUPABASE_DB_BACKUP_URL. Add your read-only Supabase Postgres direct URI in Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+          if [ -z "$BACKUP_ENCRYPTION_PASSPHRASE" ] || [ "${#BACKUP_ENCRYPTION_PASSPHRASE}" -lt 16 ]; then
+            echo "::error::Missing or short secret BACKUP_ENCRYPTION_PASSPHRASE (must be at least 16 characters)."
+            exit 1
+          fi
+
+      - name: Install PostgreSQL 17 client and GPG
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gnupg curl ca-certificates lsb-release
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-17
+          pg_dump --version
+
+      - name: Run pg_dump and verify archive integrity
+        id: dump
+        env:
+          SUPABASE_DB_BACKUP_URL: ${{ secrets.SUPABASE_DB_BACKUP_URL }}
+          BACKUP_LABEL: ${{ github.event.inputs.label || 'nightly' }}
+        run: |
+          set -euo pipefail
+          STAMP=$(date -u +"%Y-%m-%d_%H%M%SZ")
+          SAFE_LABEL=$(echo "$BACKUP_LABEL" | tr -cd '[:alnum:]_-' | cut -c1-32)
+          BASE_NAME="bms-backup-${STAMP}-${SAFE_LABEL:-nightly}"
+          mkdir -p /tmp/bms-backup
+
+          DUMP_FILE="/tmp/bms-backup/${BASE_NAME}.dump"
+          echo "base_name=${BASE_NAME}" >> "$GITHUB_OUTPUT"
+          echo "dump_file=${DUMP_FILE}" >> "$GITHUB_OUTPUT"
+          echo "stamp=${STAMP}" >> "$GITHUB_OUTPUT"
+
+          # Dump both public (financial ledgers, customers, audit_logs) and auth (staff accounts)
+          pg_dump \
+            --format=custom \
+            --compress=9 \
+            --no-owner \
+            --no-acl \
+            --schema=public \
+            --schema=auth \
+            --file="$DUMP_FILE" \
+            "$SUPABASE_DB_BACKUP_URL"
+
+          # Sanity-check the custom archive is readable and non-empty
+          TABLE_COUNT=$(pg_restore --list "$DUMP_FILE" | grep -c " TABLE DATA " || true)
+          DUMP_BYTES=$(stat -c%s "$DUMP_FILE")
+          echo "table_count=${TABLE_COUNT}" >> "$GITHUB_OUTPUT"
+          echo "dump_bytes=${DUMP_BYTES}" >> "$GITHUB_OUTPUT"
+
+          if [ "$DUMP_BYTES" -lt 4096 ] || [ "$TABLE_COUNT" -lt 1 ]; then
+            echo "::error::Backup sanity check failed (bytes=${DUMP_BYTES}, tables=${TABLE_COUNT})"
+            exit 1
+          fi
+          echo "Verified pg_dump archive: ${DUMP_BYTES} bytes, ${TABLE_COUNT} data tables."
+
+      - name: Encrypt dump with GPG AES-256 and compute SHA-256
+        id: encrypt
+        env:
+          BACKUP_ENCRYPTION_PASSPHRASE: ${{ secrets.BACKUP_ENCRYPTION_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          DUMP_FILE="${{ steps.dump.outputs.dump_file }}"
+          BASE_NAME="${{ steps.dump.outputs.base_name }}"
+          ENC_FILE="/tmp/bms-backup/${BASE_NAME}.dump.gpg"
+          SHA_FILE="/tmp/bms-backup/${BASE_NAME}.dump.gpg.sha256"
+          MANIFEST_FILE="/tmp/bms-backup/${BASE_NAME}.manifest.json"
+
+          gpg --batch --yes --symmetric \
+            --cipher-algo AES256 \
+            --digest-algo SHA512 \
+            --s2k-mode 3 \
+            --s2k-count 65011712 \
+            --passphrase-fd 3 3<<< "$BACKUP_ENCRYPTION_PASSPHRASE" \
+            --output "$ENC_FILE" \
+            "$DUMP_FILE"
+
+          # Immediately shred & delete plaintext dump
+          shred -u "$DUMP_FILE" || rm -f "$DUMP_FILE"
+
+          (cd /tmp/bms-backup && sha256sum "${BASE_NAME}.dump.gpg" > "${BASE_NAME}.dump.gpg.sha256")
+          ENC_BYTES=$(stat -c%s "$ENC_FILE")
+          SHA256=$(cut -d' ' -f1 "$SHA_FILE")
+
+          cat > "$MANIFEST_FILE" <<EOF
+          {
+            "backupName": "${BASE_NAME}",
+            "createdAtUtc": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+            "trigger": "${{ github.event_name }}",
+            "schemas": ["public", "auth"],
+            "tableDataCount": ${{ steps.dump.outputs.table_count }},
+            "unencryptedBytes": ${{ steps.dump.outputs.dump_bytes }},
+            "encryptedBytes": ${ENC_BYTES},
+            "cipher": "AES256 (GPG symmetric)",
+            "encryptedSha256": "${SHA256}"
+          }
+          EOF
+
+          echo "enc_file=${ENC_FILE}" >> "$GITHUB_OUTPUT"
+          echo "sha_file=${SHA_FILE}" >> "$GITHUB_OUTPUT"
+          echo "manifest_file=${MANIFEST_FILE}" >> "$GITHUB_OUTPUT"
+          echo "enc_bytes=${ENC_BYTES}" >> "$GITHUB_OUTPUT"
+          echo "sha256=${SHA256}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload encrypted backup as GitHub Actions Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.dump.outputs.base_name }}
+          path: |
+            ${{ steps.encrypt.outputs.enc_file }}
+            ${{ steps.encrypt.outputs.sha_file }}
+            ${{ steps.encrypt.outputs.manifest_file }}
+          retention-days: ${{ github.event.inputs.retention_days || 90 }}
+          if-no-files-found: error
+
+      - name: Optional off-site upload to S3 / Cloudflare R2 / Backblaze B2
+        if: ${{ secrets.BACKUP_S3_BUCKET != '' }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.BACKUP_S3_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_S3_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.BACKUP_S3_REGION || 'auto' }}
+          BACKUP_S3_BUCKET: ${{ secrets.BACKUP_S3_BUCKET }}
+          BACKUP_S3_ENDPOINT: ${{ secrets.BACKUP_S3_ENDPOINT }}
+        run: |
+          set -euo pipefail
+          BASE_NAME="${{ steps.dump.outputs.base_name }}"
+          ENDPOINT_ARG=""
+          if [ -n "$BACKUP_S3_ENDPOINT" ]; then
+            ENDPOINT_ARG="--endpoint-url $BACKUP_S3_ENDPOINT"
+          fi
+
+          aws s3 cp $ENDPOINT_ARG "${{ steps.encrypt.outputs.enc_file }}" "s3://${BACKUP_S3_BUCKET}/daily/${BASE_NAME}.dump.gpg"
+          aws s3 cp $ENDPOINT_ARG "${{ steps.encrypt.outputs.sha_file }}" "s3://${BACKUP_S3_BUCKET}/daily/${BASE_NAME}.dump.gpg.sha256"
+          aws s3 cp $ENDPOINT_ARG "${{ steps.encrypt.outputs.manifest_file }}" "s3://${BACKUP_S3_BUCKET}/daily/${BASE_NAME}.manifest.json"
+
+          # Keep weekly archive every Sunday
+          if [ "$(date -u +%u)" = "7" ]; then
+            aws s3 cp $ENDPOINT_ARG "${{ steps.encrypt.outputs.enc_file }}" "s3://${BACKUP_S3_BUCKET}/weekly/${BASE_NAME}.dump.gpg"
+          fi
+          # Keep monthly archive on the 1st of every month
+          if [ "$(date -u +%d)" = "01" ]; then
+            aws s3 cp $ENDPOINT_ARG "${{ steps.encrypt.outputs.enc_file }}" "s3://${BACKUP_S3_BUCKET}/monthly/${BASE_NAME}.dump.gpg"
+          fi
+
+      - name: Write job summary
+        run: |
+          {
+            echo "### Encrypted Database Backup Succeeded"
+            echo "- **Archive:** \`${{ steps.dump.outputs.base_name }}.dump.gpg\`"
+            echo "- **Data tables backed up:** \`${{ steps.dump.outputs.table_count }}\`"
+            echo "- **Encrypted size:** \`${{ steps.encrypt.outputs.enc_bytes }}\` bytes"
+            echo "- **SHA-256:** \`${{ steps.encrypt.outputs.sha256 }}\`"
+            echo "- **Off-site S3/R2 copy:** \`$([ -n "${{ secrets.BACKUP_S3_BUCKET != '' && 'yes' || '' }}" ] && echo 'Uploaded' || echo 'GitHub Artifact only')\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Clean up temporary workspace
+        if: always()
+        run: rm -rf /tmp/bms-backup

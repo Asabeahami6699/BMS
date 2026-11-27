@@ -34,6 +34,21 @@ type Props = {
   onTransferred: () => void;
 };
 
+function formatAccountTypeLabel(accountType?: Customer["accountType"]): string | null {
+  switch (accountType) {
+    case "susu":
+      return "Susu";
+    case "savings":
+      return "Savings";
+    case "group":
+      return "Group";
+    case "meba_daakye":
+      return "Meba Daakye";
+    default:
+      return accountType ? String(accountType).replace(/_/g, " ") : null;
+  }
+}
+
 export function RouteTransfersPanel({ canManage, onTransferred }: Props) {
   const { showToast } = useToast();
   const allCustomers = useCustomersStore((s) => s.customers);
@@ -252,12 +267,31 @@ export function RouteTransfersPanel({ canManage, onTransferred }: Props) {
               ? routesForAgent(target.agentId, customer.homeBranchId)
               : [];
             const currentRoute = customer.routeId ? routeById.get(customer.routeId) : undefined;
+            const accountTypeLabel = formatAccountTypeLabel(customer.accountType);
             return (
               <li key={customer.id} className="routes-transfer-row">
                 <div className="routes-transfer-row__main">
-                  <strong>{customer.fullName}</strong>
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "0.45rem",
+                      flexWrap: "wrap"
+                    }}
+                  >
+                    <strong>{customer.fullName}</strong>
+                    {accountTypeLabel ? (
+                      <span
+                        className={`status-pill status-pill--${customer.accountType === "savings" ? "pending" : "active"}`}
+                        style={{ fontSize: "0.7rem", padding: "0.1rem 0.45rem" }}
+                      >
+                        {accountTypeLabel}
+                      </span>
+                    ) : null}
+                  </span>
                   <span className="muted">
-                    {customer.accountNumber ?? "No account #"} · {customer.phone}
+                    {customer.accountNumber ?? "No account #"}
+                    {accountTypeLabel ? ` · ${accountTypeLabel}` : ""} · {customer.phone}
                   </span>
                   <span className="muted">
                     Agent: {customer.assignedFieldAgentName ?? "—"}
