@@ -3385,8 +3385,10 @@ export type SusuClosingBalanceSnapshot = {
   initialCash: number;
   fieldAgentDeposits: number;
   walkInDeposits: number;
+  directToVaultDeposits?: number;
   fieldAgentWithdrawals: number;
   walkInWithdrawals: number;
+  directFromVaultWithdrawals?: number;
   susuExpenses: number;
   totalInflows: number;
   totalOutflows: number;
@@ -5367,5 +5369,128 @@ export async function deleteSiteAnnouncementApi(id: string): Promise<{ ok: true 
       method: "DELETE",
       headers: authHeaders()
     }
+  );
+}
+
+/* ── Platform Super Admin Backups & Snapshots ─────────────────────────────── */
+
+export type PlatformTenantBackupSummary = {
+  tenantId: string;
+  companyName: string;
+  subdomain?: string;
+  subscriptionStatus: "active" | "inactive";
+  totalCustomers: number;
+  activeCustomers: number;
+  totalTransactions: number;
+  totalCustomerBalance: number;
+  totalAuditLogs: number;
+  lastTransactionAt: string | null;
+  lastAuditAt: string | null;
+};
+
+export type PlatformBackupOverview = {
+  generatedAt: string;
+  storageMode: "supabase" | "memory";
+  totals: {
+    tenants: number;
+    activeTenants: number;
+    totalCustomers: number;
+    activeCustomers: number;
+    totalTransactions: number;
+    totalCustomerBalance: number;
+    totalAuditLogs: number;
+  };
+  tenants: PlatformTenantBackupSummary[];
+};
+
+export type PlatformAuditChainResult = {
+  tenantId: string;
+  checkedAt: string;
+  ok: boolean;
+  checkedCount: number;
+  firstBrokenId?: string;
+  firstBrokenReason?: string;
+};
+
+export async function getPlatformBackupOverview(): Promise<PlatformBackupOverview> {
+  return fetchJson<PlatformBackupOverview>(`${API_BASE_URL}/api/v1/platform/backups/overview`, {
+    headers: authHeaders()
+  });
+}
+
+export async function verifyPlatformTenantAuditChain(
+  tenantId: string
+): Promise<PlatformAuditChainResult> {
+  return fetchJson<PlatformAuditChainResult>(
+    `${API_BASE_URL}/api/v1/platform/backups/verify-chain/${encodeURIComponent(tenantId)}`,
+    {
+      method: "POST",
+      headers: authHeaders()
+    }
+  );
+}
+
+async function fetchPlatformDownloadBlob(
+  url: string,
+  fallbackFilename: string
+): Promise<{ filename: string; sha256: string | null; sizeBytes: number }> {
+  const response = await fetch(url, { headers: authHeaders() });
+  if (!response.ok) {
+    let message = `Download failed (${response.status})`;
+    try {
+      const body = (await response.json()) as { error?: string; message?: string };
+      message = body.error ?? body.message ?? message;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(message);
+  }
+  const blob = await response.blob();
+  const disposition = response.headers.get("Content-Disposition") ?? "";
+  const match = /filename="([^"]+)"/i.exec(disposition);
+  const filename = match?.[1] ?? fallbackFilename;
+  const sha256 = response.headers.get("X-Snapshot-Sha256");
+
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const a = document.createElement("a");
+    a.href = objectUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+  return { filename, sha256, sizeBytes: blob.size };
+}
+
+export async function downloadPlatformTenantSnapshot(
+  tenantId: string,
+  options?: { includePhotos?: boolean }
+): Promise<{ filename: string; sha256: string | null; sizeBytes: number }> {
+  const qs = options?.includePhotos ? "?includePhotos=true" : "";
+  return fetchPlatformDownloadBlob(
+    `${API_BASE_URL}/api/v1/platform/backups/snapshot/${encodeURIComponent(tenantId)}${qs}`,
+    `tenant-snapshot-${new Date().toISOString().slice(0, 10)}.json`
+  );
+}
+
+export async function downloadPlatformTenantBalancesCsv(
+  tenantId: string
+): Promise<{ filename: string; sha256: string | null; sizeBytes: number }> {
+  return fetchPlatformDownloadBlob(
+    `${API_BASE_URL}/api/v1/platform/backups/balances/${encodeURIComponent(tenantId)}.csv`,
+    `tenant-balances-${new Date().toISOString().slice(0, 10)}.csv`
+  );
+}
+
+export async function downloadPlatformAllTenantsSnapshot(options?: {
+  includePhotos?: boolean;
+}): Promise<{ filename: string; sha256: string | null; sizeBytes: number }> {
+  const qs = options?.includePhotos ? "?includePhotos=true" : "";
+  return fetchPlatformDownloadBlob(
+    `${API_BASE_URL}/api/v1/platform/backups/snapshot-all${qs}`,
+    `bms-platform-snapshot-${new Date().toISOString().slice(0, 10)}.json`
   );
 }

@@ -154,14 +154,19 @@ export function SusuClosingBalancesPage({ role }: Props) {
       : snapshot.tillExpenses;
     const extraBranchExpenses = Math.max(0, effectiveExpenses - snapshot.tillExpenses);
 
+    const directToVaultDeposits = snapshot.directToVaultDeposits ?? 0;
+    const directFromVaultWithdrawals = snapshot.directFromVaultWithdrawals ?? 0;
+
     return (
       Math.round(
         (effectiveOpening +
           capitalInjectedToday -
           capitalDrawingsToday -
           snapshot.tillPhysicalCash +
-          snapshot.fieldAgentDeposits -
-          snapshot.fieldAgentWithdrawals +
+          snapshot.fieldAgentDeposits +
+          directToVaultDeposits -
+          snapshot.fieldAgentWithdrawals -
+          directFromVaultWithdrawals +
           snapshot.cashReturnedFromClosedTills -
           effectiveCashToBank -
           extraBranchExpenses) *
@@ -529,10 +534,22 @@ export function SusuClosingBalancesPage({ role }: Props) {
                 <span className="muted">Field deposits</span>
                 <strong>+ {formatMoney(snapshot.fieldAgentDeposits)}</strong>
               </div>
+              {(snapshot.directToVaultDeposits ?? 0) > 0 ? (
+                <div>
+                  <span className="muted">Direct / approval deposits (off-till)</span>
+                  <strong>+ {formatMoney(snapshot.directToVaultDeposits ?? 0)}</strong>
+                </div>
+              ) : null}
               <div>
                 <span className="muted">Field withdrawals</span>
                 <strong>− {formatMoney(snapshot.fieldAgentWithdrawals)}</strong>
               </div>
+              {(snapshot.directFromVaultWithdrawals ?? 0) > 0 ? (
+                <div>
+                  <span className="muted">Direct withdrawals (off-till)</span>
+                  <strong>− {formatMoney(snapshot.directFromVaultWithdrawals ?? 0)}</strong>
+                </div>
+              ) : null}
               <div>
                 <span className="muted">Returned closed tills</span>
                 <strong>+ {formatMoney(snapshot.cashReturnedFromClosedTills)}</strong>

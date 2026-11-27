@@ -27,8 +27,12 @@ export type SusuClosingBalanceSnapshot = {
   initialCash: number;
   fieldAgentDeposits: number;
   walkInDeposits: number;
+  /** Counter / approval deposits not recorded inside any teller till session (go straight to vault). */
+  directToVaultDeposits: number;
   fieldAgentWithdrawals: number;
   walkInWithdrawals: number;
+  /** Counter withdrawals not recorded inside any teller till session (paid directly from vault). */
+  directFromVaultWithdrawals: number;
   susuExpenses: number;
   totalInflows: number;
   totalOutflows: number;
@@ -77,6 +81,10 @@ type TillCashRollup = {
   sessionCount: number;
   cashReturnedFromClosedTills: number;
   cashStillInOpenTills: number;
+  /** Total customer deposit + daily_susu inflows already accounted for inside teller till sessions. */
+  recordedInflows: number;
+  /** Total customer withdrawals already accounted for inside teller till sessions. */
+  recordedWithdrawals: number;
 };
 
 type SavedClosingRecord = {
@@ -233,7 +241,9 @@ async function loadTillCashRollup(
     expectedCash: 0,
     sessionCount: 0,
     cashReturnedFromClosedTills: 0,
-    cashStillInOpenTills: 0
+    cashStillInOpenTills: 0,
+    recordedInflows: 0,
+    recordedWithdrawals: 0
   };
   const supabase = getSupabaseAdminClient();
   if (!supabase) {
@@ -263,6 +273,8 @@ async function loadTillCashRollup(
   let sessionCount = 0;
   let cashReturnedFromClosedTills = 0;
   let cashStillInOpenTills = 0;
+  let recordedInflows = 0;
+  let recordedWithdrawals = 0;
 
   for (const row of data ?? []) {
     const status = String((row as Record<string, unknown>).status);
@@ -271,8 +283,13 @@ async function loadTillCashRollup(
     const initialCash = Number(r.initial_cash ?? 0);
     const extraCash = Number(r.extra_cash ?? 0);
     const totalExpenses = Number(r.total_expenses ?? 0);
+    const deposits = Number(r.total_deposits ?? 0);
+    const dailySusu = Number(r.total_daily_susu ?? 0);
+    const withdrawals = Number(r.total_withdrawals ?? 0);
     physicalCash += initialCash + extraCash;
     expenses += totalExpenses;
+    recordedInflows += deposits + dailySusu;
+    recordedWithdrawals += withdrawals;
     const expected = sessionExpectedCash(r);
     expectedCash += expected;
     if (status === "closed" || status === "settled") {
@@ -289,7 +306,9 @@ async function loadTillCashRollup(
     expectedCash: roundMoney(expectedCash),
     sessionCount,
     cashReturnedFromClosedTills: roundMoney(cashReturnedFromClosedTills),
-    cashStillInOpenTills: roundMoney(cashStillInOpenTills)
+    cashStillInOpenTills: roundMoney(cashStillInOpenTills),
+    recordedInflows: roundMoney(recordedInflows),
+    recordedWithdrawals: roundMoney(recordedWithdrawals)
   };
 }
 
@@ -570,12 +589,18 @@ async function computeSuggestedOpeningVault(
         loadTillCashRollup(tenantId, branchId, cursor),
         loadDayBranchCapitalTotals(tenantId, branchId, cursor)
       ]);
+      const { directToVaultDeposits, directFromVaultWithdrawals } = computeOffTillVaultFlows(
+        activity,
+        till
+      );
       const dayDelta = roundMoney(
         capital.dayInjections -
           capital.dayDrawings -
           till.physicalCash +
-          activity.fieldAgentDeposits -
-          activity.fieldAgentWithdrawals +
+          activity.fieldAgentDeposits +
+          directToVaultDeposits -
+          activity.fieldAgentWithdrawals -
+          directFromVaultWithdrawals +
           till.cashReturnedFromClosedTills
       );
       runningVault = roundMoney(runningVault + dayDelta);
@@ -652,6 +677,42 @@ async function loadPriorDayEodStatus(
     unclosedTillCount,
     unpostedBatchCount,
     unsubmittedDraftBatchCount
+  };
+}
+
+/**
+ * Parses any Savings opening fee retained directly from a collection so physical cash
+ * totals reflect the full gross amount handed over by the customer (net credit + retained fee).
+ */
+export function parseRetainedOpeningFeeFromNotes(notes: string | undefined): number {
+  if (!notes) {
+    return 0;
+  }
+  const match = notes.match(/Opening fee GHS\s+([\d,]+(?:\.\d+)?)\s+retained from collection/i);
+  if (!match) {
+    return 0;
+  }
+  const parsed = Number(match[1].replace(/,/g, ""));
+  return Number.isFinite(parsed) && parsed > 0 ? roundMoney(parsed) : 0;
+}
+
+/**
+ * Computes counter / approval deposits and withdrawals that did NOT pass through any teller
+ * till session (`branch_float_sessions`). Typical examples: Savings initial deposits credited
+ * on account approval or coordinator/admin direct postings without an open till.
+ * Cash already captured inside teller tills stays inside till cash (no double-counting).
+ */
+export function computeOffTillVaultFlows(
+  activity: { walkInDeposits: number; walkInWithdrawals: number },
+  till: { recordedInflows: number; recordedWithdrawals: number }
+): { directToVaultDeposits: number; directFromVaultWithdrawals: number } {
+  return {
+    directToVaultDeposits: roundMoney(
+      Math.max(0, activity.walkInDeposits - till.recordedInflows)
+    ),
+    directFromVaultWithdrawals: roundMoney(
+      Math.max(0, activity.walkInWithdrawals - till.recordedWithdrawals)
+    )
   };
 }
 
@@ -752,10 +813,13 @@ async function loadDayActivity(
       continue;
     }
 
+    const grossCashCollected = roundMoney(
+      tx.amount + parseRetainedOpeningFeeFromNotes(tx.notes)
+    );
     if (isField) {
-      fieldAgentDeposits += tx.amount;
+      fieldAgentDeposits += grossCashCollected;
     } else if (isHall) {
-      walkInDeposits += tx.amount;
+      walkInDeposits += grossCashCollected;
     }
   }
 
@@ -802,15 +866,24 @@ async function buildSnapshot(
   const closingVaultCounted =
     saved?.closingVaultCounted != null ? roundMoney(saved.closingVaultCounted) : null;
 
-  // Walk-in stays inside tills — do not add walk-in to vault again.
+  // Teller-till walk-in stays inside till cash (returned when till closes);
+  // off-till direct / approval deposits (e.g. Savings initial deposits credited on approval)
+  // did not enter any teller till and move the vault directly.
+  const { directToVaultDeposits, directFromVaultWithdrawals } = computeOffTillVaultFlows(
+    activity,
+    till
+  );
+
   // Capital injections add physical cash into the vault; owner drawings remove it.
   const expectedClosingVault = roundMoney(
     openingVault +
       capital.dayInjections -
       capital.dayDrawings -
       till.physicalCash +
-      activity.fieldAgentDeposits -
-      activity.fieldAgentWithdrawals +
+      activity.fieldAgentDeposits +
+      directToVaultDeposits -
+      activity.fieldAgentWithdrawals -
+      directFromVaultWithdrawals +
       till.cashReturnedFromClosedTills -
       cashToBank -
       extraBranchExpenses
@@ -847,8 +920,10 @@ async function buildSnapshot(
     initialCash,
     fieldAgentDeposits: activity.fieldAgentDeposits,
     walkInDeposits: activity.walkInDeposits,
+    directToVaultDeposits,
     fieldAgentWithdrawals: activity.fieldAgentWithdrawals,
     walkInWithdrawals: activity.walkInWithdrawals,
+    directFromVaultWithdrawals,
     susuExpenses,
     totalInflows,
     totalOutflows,

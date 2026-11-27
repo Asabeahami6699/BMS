@@ -1127,11 +1127,13 @@ export async function createTransaction(
   }
 
   // Teller till cash & float must reflect the full physical cash handed over (payload.amount),
-  // even when Susu Box 1 commission splits part or all of the deposit into institutional income.
+  // even when Susu Box 1 commission or a retained Savings opening fee splits part of the deposit
+  // into institutional income.
   // Field-agent call-over batches bypass teller counter float (cash goes directly to the branch vault).
   if (!options?.skipBranchFloat) {
     const floatTransaction =
-      susuAllocation && (transaction.type === "deposit" || transaction.type === "daily_susu")
+      (susuAllocation || feeDeduction) &&
+      (transaction.type === "deposit" || transaction.type === "daily_susu")
         ? { ...transaction, amount: payload.amount }
         : transaction;
     await applyTransactionToFloat(context, floatTransaction);

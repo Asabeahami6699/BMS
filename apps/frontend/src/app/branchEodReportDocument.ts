@@ -106,9 +106,11 @@ export async function printBranchEodSummary(options: {
       <tr><td>− Cash issued to teller tills (${snapshot.tillSessionCount} session(s))</td><td class="num">−${money(snapshot.tillPhysicalCash)}</td></tr>
       <tr><td>+ Closed teller tills returned to vault</td><td class="num">+${money(snapshot.cashReturnedFromClosedTills)}</td></tr>
       <tr><td>+ Field agent callover deposits posted</td><td class="num">+${money(snapshot.fieldAgentDeposits)}</td></tr>
+      ${(snapshot.directToVaultDeposits ?? 0) > 0 ? `<tr><td>+ Direct / approval deposits (off-till into vault)</td><td class="num">+${money(snapshot.directToVaultDeposits ?? 0)}</td></tr>` : ""}
       <tr><td>− Field agent withdrawals from vault</td><td class="num">−${money(snapshot.fieldAgentWithdrawals)}</td></tr>
+      ${(snapshot.directFromVaultWithdrawals ?? 0) > 0 ? `<tr><td>− Direct withdrawals (off-till from vault)</td><td class="num">−${money(snapshot.directFromVaultWithdrawals ?? 0)}</td></tr>` : ""}
       <tr><td>− Cash banked (Cash to bank)</td><td class="num">−${money(snapshot.cashToBank)}</td></tr>
-      <tr><td>− Extra branch expenses</td><td class="num">−${money(snapshot.susuExpenses)}</td></tr>
+      <tr><td>− Extra branch expenses</td><td class="num">−${money(Math.max(0, snapshot.susuExpenses - snapshot.tillExpenses))}</td></tr>
       <tr class="total"><td>Expected closing vault (in safe)</td><td class="num">${money(snapshot.expectedClosingVault)}</td></tr>
       <tr><td>Cash still held in open teller tills</td><td class="num">${money(snapshot.cashStillInOpenTills)}</td></tr>
       <tr class="total"><td>Total branch cash position (vault + open tills)</td><td class="num">${money(snapshot.branchCashPosition)}</td></tr>
