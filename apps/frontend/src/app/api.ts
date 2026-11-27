@@ -513,6 +513,7 @@ export type FieldAgentTodayCollections = {
   postedBatchesTodayCount?: number;
   postedTotalToday?: number;
   combinedTotalToday?: number;
+  postedCustomerTotalsToday?: Record<string, number>;
   unlockReason?: string;
   priorUnsubmittedBatches?: PriorUnsubmittedBatchSummary[];
 };
@@ -1763,6 +1764,19 @@ export type AgentCashVarianceSummary = {
   totalOverageOutstanding: number;
 };
 
+export type SameDayDuplicateMatch = {
+  lineId: string;
+  customerId: string;
+  customerName: string;
+  accountNumber?: string;
+  lineAmount: number;
+  existingAmount: number;
+  exactAmountMatch: boolean;
+  source: "posted_batch" | "counter_or_initial_deposit" | "same_batch";
+  existingNotes?: string;
+  existingCreatedAt: string;
+};
+
 export type PendingCollectionBatch = {
   id: string;
   tenantId: string;
@@ -1791,6 +1805,8 @@ export type PendingCollectionBatch = {
   branchId?: string;
   hasReportedDifferences?: boolean;
   reportedDifferences?: CalloverReportLine[];
+  hasSameDayDuplicates?: boolean;
+  sameDayDuplicates?: SameDayDuplicateMatch[];
 };
 
 export type PostedCollectionBatch = PendingCollectionBatch & {
@@ -1913,7 +1929,11 @@ export async function getCollectionBatch(batchId: string): Promise<PendingCollec
 
 export async function postCollectionBatch(
   batchId: string,
-  body?: { cashReceivedAmount: number; confirmDifferencesReviewed?: boolean }
+  body?: {
+    cashReceivedAmount: number;
+    confirmDifferencesReviewed?: boolean;
+    confirmDuplicatesReviewed?: boolean;
+  }
 ): Promise<PendingCollectionBatch> {
   return fetchJson<PendingCollectionBatch>(
     `${API_BASE_URL}/api/v1/collection-batches/${batchId}/post`,
@@ -1944,8 +1964,18 @@ export async function postAllCollectionBatches(body?: {
   fieldAgentId?: string;
   branchId?: string;
   cashByBatchId?: Record<string, number>;
-}): Promise<{ posted: number; batchIds: string[]; skippedWithDifferences?: number }> {
-  return fetchJson<{ posted: number; batchIds: string[]; skippedWithDifferences?: number }>(
+}): Promise<{
+  posted: number;
+  batchIds: string[];
+  skippedWithDifferences?: number;
+  skippedWithDuplicates?: number;
+}> {
+  return fetchJson<{
+    posted: number;
+    batchIds: string[];
+    skippedWithDifferences?: number;
+    skippedWithDuplicates?: number;
+  }>(
     `${API_BASE_URL}/api/v1/collection-batches/post-all`,
     {
       method: "POST",
@@ -3425,6 +3455,20 @@ export type SusuClosingBalanceSnapshot = {
     unclosedTillCount: number;
     unpostedBatchCount: number;
     unsubmittedDraftBatchCount: number;
+  };
+  todayEodStatus?: {
+    openTillCount: number;
+    closedUnsettledTillCount: number;
+    pendingBatchCount: number;
+    draftBatchCount: number;
+    priorClosingSaved: boolean;
+    priorBusinessDate: string;
+  };
+  reconciliationCheck?: {
+    balanced: boolean;
+    expectedPosition: number;
+    actualPosition: number;
+    discrepancy: number;
   };
 };
 

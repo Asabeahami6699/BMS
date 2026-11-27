@@ -345,6 +345,7 @@ collectionBatchesRouter.post("/:batchId/post", requirePermission("transactions.c
         ? Number(req.body.cashReceivedAmount)
         : undefined;
   const confirmDifferencesReviewed = req.body?.confirmDifferencesReviewed === true;
+  const confirmDuplicatesReviewed = req.body?.confirmDuplicatesReviewed === true;
 
   try {
     const before = await getCollectionBatchById(
@@ -366,7 +367,7 @@ collectionBatchesRouter.post("/:batchId/post", requirePermission("transactions.c
         scopeType: context.scopeType
       },
       batchId,
-      { cashReceivedAmount, confirmDifferencesReviewed }
+      { cashReceivedAmount, confirmDifferencesReviewed, confirmDuplicatesReviewed }
     );
     setRequestAuditContext(req, {
       entityType: "collection_batch",

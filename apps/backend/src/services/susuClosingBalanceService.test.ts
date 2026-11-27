@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  checkCashConservationInvariant,
   computeOffTillVaultFlows,
   parseRetainedOpeningFeeFromNotes
 } from "./susuClosingBalanceService.js";
@@ -61,5 +62,46 @@ describe("susuClosingBalanceService physical vault cash helpers", () => {
       directToVaultDeposits: 0,
       directFromVaultWithdrawals: 0
     });
+  });
+
+  it("verifies cash-conservation invariant on a balanced branch day with open till + direct approval deposits", () => {
+    // Opening 1,200 + Field 2,620 + Walk-in 3,000 (2,400 off-till + 600 open till) = 6,820 position
+    const res = checkCashConservationInvariant({
+      openingVault: 1200,
+      capitalInjectedToday: 0,
+      capitalDrawingsToday: 0,
+      fieldAgentDeposits: 2620,
+      walkInDeposits: 3000,
+      fieldAgentWithdrawals: 0,
+      walkInWithdrawals: 0,
+      effectiveTotalExpenses: 0,
+      closedTillVariance: 0,
+      branchCashPosition: 6820
+    });
+    expect(res).toEqual({
+      balanced: true,
+      expectedPosition: 6820,
+      actualPosition: 6820,
+      discrepancy: 0
+    });
+  });
+
+  it("flags an unreconciled discrepancy when physical cash position drifts from ledger cash flows", () => {
+    const res = checkCashConservationInvariant({
+      openingVault: 1200,
+      capitalInjectedToday: 0,
+      capitalDrawingsToday: 0,
+      fieldAgentDeposits: 2620,
+      walkInDeposits: 3000,
+      fieldAgentWithdrawals: 0,
+      walkInWithdrawals: 0,
+      effectiveTotalExpenses: 0,
+      closedTillVariance: 0,
+      branchCashPosition: 4370
+    });
+    expect(res.balanced).toBe(false);
+    expect(res.expectedPosition).toBe(6820);
+    expect(res.actualPosition).toBe(4370);
+    expect(res.discrepancy).toBe(-2450);
   });
 });

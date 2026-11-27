@@ -117,6 +117,7 @@ export function CalloverBatchesPage({ role }: Props) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [cashByBatchId, setCashByBatchId] = useState<Record<string, string>>({});
   const [reviewedDiffByBatchId, setReviewedDiffByBatchId] = useState<Record<string, boolean>>({});
+  const [reviewedDupByBatchId, setReviewedDupByBatchId] = useState<Record<string, boolean>>({});
   const [settleId, setSettleId] = useState<string | null>(null);
   const [settleAmount, setSettleAmount] = useState("");
   const [settleMethod, setSettleMethod] = useState<CashVarianceSettlementMethod>("cash_repayment");
@@ -198,7 +199,7 @@ export function CalloverBatchesPage({ role }: Props) {
   }, [fieldAgentId, setFieldAgentId, visibleAgents]);
 
   const autoPostableBatches = useMemo(
-    () => batches.filter((b) => !b.hasReportedDifferences),
+    () => batches.filter((b) => !b.hasReportedDifferences && !b.hasSameDayDuplicates),
     [batches]
   );
 
@@ -208,7 +209,8 @@ export function CalloverBatchesPage({ role }: Props) {
       amount: batches.reduce((sum, b) => sum + b.totalAmount, 0),
       lines: batches.reduce((sum, b) => sum + b.lineCount, 0),
       ready: autoPostableBatches.filter((b) => batchTotalsMatch(b)).length,
-      heldWithDiffs: batches.filter((b) => b.hasReportedDifferences).length
+      heldWithDiffs: batches.filter((b) => b.hasReportedDifferences).length,
+      heldWithDups: batches.filter((b) => b.hasSameDayDuplicates).length
     }),
     [batches, autoPostableBatches]
   );
@@ -234,6 +236,14 @@ export function CalloverBatchesPage({ role }: Props) {
       );
       return;
     }
+    const hasDups = Boolean(batch.hasSameDayDuplicates);
+    if (hasDups && !reviewedDupByBatchId[batch.id]) {
+      showToast(
+        "Review the same-day duplicate deposit alert first — remove duplicate line(s) or confirm they are separate physical payments.",
+        "error"
+      );
+      return;
+    }
     const cash = cashFlag(batch.totalAmount, cashByBatchId[batch.id] ?? "");
     if (cash.amount == null) {
       showToast("Enter the cash amount the mobilizer brought before posting", "error");
@@ -242,7 +252,8 @@ export function CalloverBatchesPage({ role }: Props) {
     postingRef.current = true;
     try {
       const posted = await postBatch(batch.id, cash.amount, {
-        confirmDifferencesReviewed: hasDiffs
+        confirmDifferencesReviewed: hasDiffs,
+        confirmDuplicatesReviewed: hasDups
       });
       const flag =
         posted.cashVarianceStatus === "balanced"
@@ -426,9 +437,11 @@ export function CalloverBatchesPage({ role }: Props) {
   async function handlePostAll() {
     if (autoPostableBatches.length === 0) {
       showToast(
-        totals.heldWithDiffs > 0
-          ? "Batches with reported differences are held and cannot be auto-posted."
-          : "No pending batches to post",
+        totals.heldWithDups > 0
+          ? "Batches with same-day duplicate alerts are held and cannot be auto-posted."
+          : totals.heldWithDiffs > 0
+            ? "Batches with reported differences are held and cannot be auto-posted."
+            : "No pending batches to post",
         "info"
       );
       return;
@@ -455,10 +468,14 @@ export function CalloverBatchesPage({ role }: Props) {
         cashMap[batch.id] = cash.amount;
       }
       const result = await postAll(cashMap);
-      const skipped = result.skippedWithDifferences ?? 0;
+      const skippedDiffs = result.skippedWithDifferences ?? 0;
+      const skippedDups = result.skippedWithDuplicates ?? 0;
+      const heldParts: string[] = [];
+      if (skippedDiffs > 0) heldParts.push(`${skippedDiffs} held with differences`);
+      if (skippedDups > 0) heldParts.push(`${skippedDups} held with duplicate alerts`);
       showToast(
-        skipped > 0
-          ? `Posted ${result.posted} batch${result.posted === 1 ? "" : "es"} · ${skipped} held with reported differences`
+        heldParts.length > 0
+          ? `Posted ${result.posted} batch${result.posted === 1 ? "" : "es"} · ${heldParts.join(" · ")}`
           : `Posted ${result.posted} batch${result.posted === 1 ? "" : "es"}`,
         "success"
       );
@@ -671,11 +688,13 @@ export function CalloverBatchesPage({ role }: Props) {
             const cash = cashFlag(batch.totalAmount, cashByBatchId[batch.id] ?? "");
             const hasDiffs = Boolean(batch.hasReportedDifferences);
             const diffConfirmed = !hasDiffs || Boolean(reviewedDiffByBatchId[batch.id]);
-            const canPost = totalsMatch && cash.amount != null && diffConfirmed;
+            const hasDups = Boolean(batch.hasSameDayDuplicates);
+            const dupConfirmed = !hasDups || Boolean(reviewedDupByBatchId[batch.id]);
+            const canPost = totalsMatch && cash.amount != null && diffConfirmed && dupConfirmed;
             return (
               <article
                 key={batch.id}
-                className={`callover-batch-card${expanded ? " callover-batch-card--expanded" : ""}${!totalsMatch || hasDiffs ? " callover-batch-card--warn" : ""}`}
+                className={`callover-batch-card${expanded ? " callover-batch-card--expanded" : ""}${!totalsMatch || hasDiffs || hasDups ? " callover-batch-card--warn" : ""}`}
               >
                 <div className="callover-batch-card__head">
                   <div className="callover-batch-card__agent">
@@ -697,22 +716,26 @@ export function CalloverBatchesPage({ role }: Props) {
                         ) : null}
                         <span
                           className={`callover-batch-card__badge${
-                            hasDiffs || !totalsMatch || cash.tone === "muted"
-                              ? " callover-batch-card__badge--warn"
-                              : cash.tone === "ok"
-                                ? " callover-batch-card__badge--ready"
-                                : cash.tone === "bad"
-                                  ? " callover-batch-card__badge--shortage"
-                                  : " callover-batch-card__badge--overage"
+                            hasDups && !dupConfirmed
+                              ? " callover-batch-card__badge--shortage"
+                              : hasDiffs || !totalsMatch || cash.tone === "muted"
+                                ? " callover-batch-card__badge--warn"
+                                : cash.tone === "ok"
+                                  ? " callover-batch-card__badge--ready"
+                                  : cash.tone === "bad"
+                                    ? " callover-batch-card__badge--shortage"
+                                    : " callover-batch-card__badge--overage"
                           }`}
                         >
-                          {hasDiffs && !diffConfirmed
-                            ? "Difference reported · Held"
-                            : canPost
-                              ? cash.label
-                              : !totalsMatch
-                                ? "Totals mismatch"
-                                : "Enter cash brought"}
+                          {hasDups && !dupConfirmed
+                            ? "Duplicate alert · Held"
+                            : hasDiffs && !diffConfirmed
+                              ? "Difference reported · Held"
+                              : canPost
+                                ? cash.label
+                                : !totalsMatch
+                                  ? "Totals mismatch"
+                                  : "Enter cash brought"}
                         </span>
                       </div>
                       <p className="muted callover-batch-card__meta">
@@ -859,6 +882,63 @@ export function CalloverBatchesPage({ role }: Props) {
                   <p className="callover-batch-card__alert">
                     Line amounts do not match the batch total. Review collections before posting.
                   </p>
+                ) : null}
+
+                {hasDups && batch.sameDayDuplicates && batch.sameDayDuplicates.length > 0 ? (
+                  <div className="callover-batch-card__diff-box" role="alert">
+                    <strong>
+                      Same-day duplicate deposit alert ({batch.sameDayDuplicates.length} line
+                      {batch.sameDayDuplicates.length === 1 ? "" : "s"}) — held from auto-posting
+                    </strong>
+                    <ul className="callover-batch-card__diff-list">
+                      {batch.sameDayDuplicates.map((dup) => (
+                        <li key={dup.lineId}>
+                          <span>
+                            <strong>{dup.customerName}</strong>
+                            {dup.accountNumber ? ` (${dup.accountNumber})` : ""}
+                          </span>
+                          <span style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+                            <span>
+                              Line {formatMoney(dup.lineAmount)} · Already credited{" "}
+                              {formatMoney(dup.existingAmount)} today (
+                              {dup.source === "posted_batch"
+                                ? "earlier posted batch"
+                                : dup.source === "same_batch"
+                                  ? "duplicate line in this batch"
+                                  : "counter / initial deposit"}
+                              {dup.exactAmountMatch ? " — EXACT MATCH" : ""})
+                            </span>
+                            <button
+                              type="button"
+                              className="button secondary callover-batch-card__line-remove"
+                              disabled={busyId !== null}
+                              onClick={() => {
+                                setExpandedId(batch.id);
+                                openRemoveLine(batch.id, dup.lineId);
+                              }}
+                            >
+                              Remove line
+                            </button>
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                    <label className="callover-batch-card__diff-confirm">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(reviewedDupByBatchId[batch.id])}
+                        onChange={(e) =>
+                          setReviewedDupByBatchId((prev) => ({
+                            ...prev,
+                            [batch.id]: e.target.checked
+                          }))
+                        }
+                      />
+                      <span>
+                        I have verified these are separate physical payments and NOT duplicate entries
+                      </span>
+                    </label>
+                  </div>
                 ) : null}
 
                 {hasDiffs && batch.reportedDifferences && batch.reportedDifferences.length > 0 ? (

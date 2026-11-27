@@ -17,6 +17,7 @@ type AgentCollectionState = {
   postedBatchesTodayCount: number;
   postedTotalToday: number;
   combinedTotalToday: number;
+  postedCustomerTotalsToday: Record<string, number>;
   unlockReason?: string;
   priorUnsubmittedBatches: PriorUnsubmittedBatchSummary[];
   loading: boolean;
@@ -66,6 +67,7 @@ function buildState(
   | "postedBatchesTodayCount"
   | "postedTotalToday"
   | "combinedTotalToday"
+  | "postedCustomerTotalsToday"
   | "unlockReason"
   | "priorUnsubmittedBatches"
 > {
@@ -104,6 +106,7 @@ function buildState(
     postedBatchesTodayCount,
     postedTotalToday,
     combinedTotalToday,
+    postedCustomerTotalsToday: server.postedCustomerTotalsToday ?? {},
     unlockReason: server.unlockReason,
     priorUnsubmittedBatches: server.priorUnsubmittedBatches ?? [],
     pendingLocalIds: pendingLocal
@@ -122,6 +125,7 @@ export const useAgentCollectionStore = create<AgentCollectionState>((set, get) =
   postedBatchesTodayCount: 0,
   postedTotalToday: 0,
   combinedTotalToday: 0,
+  postedCustomerTotalsToday: {},
   unlockReason: undefined,
   priorUnsubmittedBatches: [],
   loading: false,

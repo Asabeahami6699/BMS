@@ -65,12 +65,17 @@ type CalloverBatchesState = {
   postBatch: (
     batchId: string,
     cashReceivedAmount: number,
-    options?: { confirmDifferencesReviewed?: boolean }
+    options?: { confirmDifferencesReviewed?: boolean; confirmDuplicatesReviewed?: boolean }
   ) => Promise<PendingCollectionBatch>;
   rejectBatch: (batchId: string, reason?: string) => Promise<PendingCollectionBatch>;
   postAll: (
     cashByBatchId: Record<string, number>
-  ) => Promise<{ posted: number; batchIds: string[]; skippedWithDifferences?: number }>;
+  ) => Promise<{
+    posted: number;
+    batchIds: string[];
+    skippedWithDifferences?: number;
+    skippedWithDuplicates?: number;
+  }>;
   settleVariance: (
     varianceId: string,
     input: { amount: number; method: CashVarianceSettlementMethod; notes?: string }
@@ -300,7 +305,8 @@ export const useCalloverBatchesStore = create<CalloverBatchesState>((set, get) =
     try {
       const posted = await postCollectionBatch(batchId, {
         cashReceivedAmount,
-        ...(options?.confirmDifferencesReviewed ? { confirmDifferencesReviewed: true } : {})
+        ...(options?.confirmDifferencesReviewed ? { confirmDifferencesReviewed: true } : {}),
+        ...(options?.confirmDuplicatesReviewed ? { confirmDuplicatesReviewed: true } : {})
       });
       await get().refreshSilent();
       return posted;

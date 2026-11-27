@@ -20,10 +20,15 @@ type Props = {
 export function CollectionModal({ open, customer, topUp, priorAmount = 0, onClose, onSaved }: Props) {
   const { showToast } = useToast();
   const { user } = useAuth();
+  const postedCustomerTotalsToday = useAgentCollectionStore((s) => s.postedCustomerTotalsToday);
   const [amountText, setAmountText] = useState("");
   const [notes, setNotes] = useState("");
+  const [confirmSecondPayment, setConfirmSecondPayment] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const submitLock = useRef(false);
+
+  const alreadyPostedTodayAmount = customer ? (postedCustomerTotalsToday[customer.id] ?? 0) : 0;
+  const needsDuplicateConfirm = alreadyPostedTodayAmount > 0;
 
   useEffect(() => {
     if (!open) {
@@ -31,6 +36,7 @@ export function CollectionModal({ open, customer, topUp, priorAmount = 0, onClos
     }
     setAmountText("");
     setNotes("");
+    setConfirmSecondPayment(false);
   }, [open, customer?.id]);
 
   async function handleSubmit(event: FormEvent) {
@@ -117,7 +123,7 @@ export function CollectionModal({ open, customer, topUp, priorAmount = 0, onClos
             type="submit"
             form="agent-collection-form"
             className="button"
-            disabled={submitting || !customer}
+            disabled={submitting || !customer || (needsDuplicateConfirm && !confirmSecondPayment)}
           >
             {submitting ? "Saving…" : topUp ? "Add amount" : "Record collection"}
           </button>
@@ -125,6 +131,25 @@ export function CollectionModal({ open, customer, topUp, priorAmount = 0, onClos
       }
     >
       <form id="agent-collection-form" className="stack-form agent-form" onSubmit={handleSubmit}>
+        {needsDuplicateConfirm ? (
+          <div className="callover-danger-form" role="alert">
+            <p className="callover-danger-form__note" style={{ margin: "0 0 0.5rem" }}>
+              <strong>
+                Already collected GHS {formatAccountAmount(alreadyPostedTodayAmount)} today
+              </strong>{" "}
+              for {customer?.fullName} in an earlier posted batch. Do not re-enter an earlier
+              collection — only proceed if the customer handed you new physical cash.
+            </p>
+            <label className="callover-batch-card__diff-confirm">
+              <input
+                type="checkbox"
+                checked={confirmSecondPayment}
+                onChange={(e) => setConfirmSecondPayment(e.target.checked)}
+              />
+              <span>Confirm this is a separate new physical payment from the customer</span>
+            </label>
+          </div>
+        ) : null}
         {topUp ? (
           <p className="muted agent-amount-hint">
             Customer changed their mind or paid more? Enter the extra amount — it adds to today&apos;s

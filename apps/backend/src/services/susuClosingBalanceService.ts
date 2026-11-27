@@ -72,6 +72,22 @@ export type SusuClosingBalanceSnapshot = {
     unpostedBatchCount: number;
     unsubmittedDraftBatchCount: number;
   };
+  /** Guided EOD readiness checklist for the selected business date. */
+  todayEodStatus?: {
+    openTillCount: number;
+    closedUnsettledTillCount: number;
+    pendingBatchCount: number;
+    draftBatchCount: number;
+    priorClosingSaved: boolean;
+    priorBusinessDate: string;
+  };
+  /** Automated cash-conservation invariant verifying vault + open tills against ledger flows. */
+  reconciliationCheck?: {
+    balanced: boolean;
+    expectedPosition: number;
+    actualPosition: number;
+    discrepancy: number;
+  };
 };
 
 type TillCashRollup = {
@@ -79,8 +95,12 @@ type TillCashRollup = {
   expenses: number;
   expectedCash: number;
   sessionCount: number;
+  openSessionCount: number;
+  closedUnsettledCount: number;
   cashReturnedFromClosedTills: number;
   cashStillInOpenTills: number;
+  /** Sum of (actual_closing - expected_closing) across closed/settled tills (teller overages/shortages). */
+  closedTillVariance: number;
   /** Total customer deposit + daily_susu inflows already accounted for inside teller till sessions. */
   recordedInflows: number;
   /** Total customer withdrawals already accounted for inside teller till sessions. */
@@ -240,8 +260,11 @@ async function loadTillCashRollup(
     expenses: 0,
     expectedCash: 0,
     sessionCount: 0,
+    openSessionCount: 0,
+    closedUnsettledCount: 0,
     cashReturnedFromClosedTills: 0,
     cashStillInOpenTills: 0,
+    closedTillVariance: 0,
     recordedInflows: 0,
     recordedWithdrawals: 0
   };
@@ -271,8 +294,11 @@ async function loadTillCashRollup(
   let expenses = 0;
   let expectedCash = 0;
   let sessionCount = 0;
+  let openSessionCount = 0;
+  let closedUnsettledCount = 0;
   let cashReturnedFromClosedTills = 0;
   let cashStillInOpenTills = 0;
+  let closedTillVariance = 0;
   let recordedInflows = 0;
   let recordedWithdrawals = 0;
 
@@ -293,9 +319,14 @@ async function loadTillCashRollup(
     const expected = sessionExpectedCash(r);
     expectedCash += expected;
     if (status === "closed" || status === "settled") {
-      cashReturnedFromClosedTills +=
-        r.actual_closing != null ? Number(r.actual_closing) : expected;
+      const returned = r.actual_closing != null ? Number(r.actual_closing) : expected;
+      cashReturnedFromClosedTills += returned;
+      closedTillVariance += returned - expected;
+      if (status === "closed") {
+        closedUnsettledCount += 1;
+      }
     } else if (status === "open" || status === "approved") {
+      openSessionCount += 1;
       cashStillInOpenTills += expected;
     }
   }
@@ -305,8 +336,11 @@ async function loadTillCashRollup(
     expenses: roundMoney(expenses),
     expectedCash: roundMoney(expectedCash),
     sessionCount,
+    openSessionCount,
+    closedUnsettledCount,
     cashReturnedFromClosedTills: roundMoney(cashReturnedFromClosedTills),
     cashStillInOpenTills: roundMoney(cashStillInOpenTills),
+    closedTillVariance: roundMoney(closedTillVariance),
     recordedInflows: roundMoney(recordedInflows),
     recordedWithdrawals: roundMoney(recordedWithdrawals)
   };
@@ -716,6 +750,98 @@ export function computeOffTillVaultFlows(
   };
 }
 
+/**
+ * Automated cash-conservation invariant:
+ * Compares physical branch cash position (expectedClosingVault + cashStillInOpenTills + cashToBank)
+ * against ledger-level inflows/outflows (openingVault + net capital + all customer deposits
+ * - all customer withdrawals - total effective expenses + closed till count variances).
+ * Any non-zero discrepancy indicates an accounting drift (e.g. a post-close reversal on a closed till).
+ */
+export function checkCashConservationInvariant(input: {
+  openingVault: number;
+  capitalInjectedToday: number;
+  capitalDrawingsToday: number;
+  fieldAgentDeposits: number;
+  walkInDeposits: number;
+  fieldAgentWithdrawals: number;
+  walkInWithdrawals: number;
+  effectiveTotalExpenses: number;
+  closedTillVariance: number;
+  branchCashPosition: number;
+}): {
+  balanced: boolean;
+  expectedPosition: number;
+  actualPosition: number;
+  discrepancy: number;
+} {
+  const expectedPosition = roundMoney(
+    input.openingVault +
+      input.capitalInjectedToday -
+      input.capitalDrawingsToday +
+      input.fieldAgentDeposits +
+      input.walkInDeposits -
+      input.fieldAgentWithdrawals -
+      input.walkInWithdrawals -
+      input.effectiveTotalExpenses +
+      input.closedTillVariance
+  );
+  const actualPosition = roundMoney(input.branchCashPosition);
+  const discrepancy = roundMoney(actualPosition - expectedPosition);
+  return {
+    balanced: Math.abs(discrepancy) < 0.01,
+    expectedPosition,
+    actualPosition,
+    discrepancy
+  };
+}
+
+async function loadDateBatchPendingCounts(
+  tenantId: string,
+  branchId: string,
+  businessDate: string
+): Promise<{ pendingBatchCount: number; draftBatchCount: number }> {
+  const supabase = getSupabaseAdminClient();
+  if (!supabase) {
+    return { pendingBatchCount: 0, draftBatchCount: 0 };
+  }
+  try {
+    const [{ data: branchAgents }, { data: batches }] = await Promise.all([
+      supabase
+        .from("users")
+        .select("id, branch_id")
+        .eq("tenant_id", tenantId)
+        .eq("role", "field_agent"),
+      supabase
+        .from("field_agent_collection_batches")
+        .select("field_agent_id, status, line_count")
+        .eq("tenant_id", tenantId)
+        .eq("business_date", businessDate)
+        .in("status", ["pending_approval", "draft", "rejected"])
+        .gt("line_count", 0)
+    ]);
+    const branchAgentIds = new Set(
+      (branchAgents ?? [])
+        .filter((u) => !u.branch_id || String(u.branch_id) === branchId)
+        .map((u) => String(u.id))
+    );
+    let pendingBatchCount = 0;
+    let draftBatchCount = 0;
+    for (const row of batches ?? []) {
+      if (!branchAgentIds.has(String(row.field_agent_id))) {
+        continue;
+      }
+      if (row.status === "pending_approval") {
+        pendingBatchCount += 1;
+      } else {
+        draftBatchCount += 1;
+      }
+    }
+    return { pendingBatchCount, draftBatchCount };
+  } catch {
+    return { pendingBatchCount: 0, draftBatchCount: 0 };
+  }
+}
+
 function isNonCashSystemEntry(notes: string | undefined): boolean {
   if (!notes) {
     return false;
@@ -851,9 +977,23 @@ async function buildSnapshot(
       : 0
     : await computeSuggestedOpeningVault(tenantId, context, branchId, businessDate);
 
-  const priorDayStatus = options?.skipPriorSuggestion
+  const [priorDayStatus, todayBatches] = options?.skipPriorSuggestion
+    ? [undefined, { pendingBatchCount: 0, draftBatchCount: 0 }]
+    : await Promise.all([
+        loadPriorDayEodStatus(tenantId, branchId, businessDate).catch(() => undefined),
+        loadDateBatchPendingCounts(tenantId, branchId, businessDate)
+      ]);
+
+  const todayEodStatus = options?.skipPriorSuggestion
     ? undefined
-    : await loadPriorDayEodStatus(tenantId, branchId, businessDate).catch(() => undefined);
+    : {
+        openTillCount: till.openSessionCount,
+        closedUnsettledTillCount: till.closedUnsettledCount,
+        pendingBatchCount: todayBatches.pendingBatchCount,
+        draftBatchCount: todayBatches.draftBatchCount,
+        priorClosingSaved: priorDayStatus ? priorDayStatus.closingSaved : true,
+        priorBusinessDate: priorDayStatus ? priorDayStatus.businessDate : priorBusinessDate(businessDate)
+      };
 
   const openingVault =
     saved?.openingVault != null ? roundMoney(saved.openingVault) : suggestedOpeningVault;
@@ -898,6 +1038,19 @@ async function buildSnapshot(
   const branchCashPosition = roundMoney(
     expectedClosingVault + till.cashStillInOpenTills + cashToBank
   );
+
+  const reconciliationCheck = checkCashConservationInvariant({
+    openingVault,
+    capitalInjectedToday: capital.dayInjections,
+    capitalDrawingsToday: capital.dayDrawings,
+    fieldAgentDeposits: activity.fieldAgentDeposits,
+    walkInDeposits: activity.walkInDeposits,
+    fieldAgentWithdrawals: activity.fieldAgentWithdrawals,
+    walkInWithdrawals: activity.walkInWithdrawals,
+    effectiveTotalExpenses: roundMoney(till.expenses + extraBranchExpenses),
+    closedTillVariance: till.closedTillVariance,
+    branchCashPosition
+  });
 
   // Legacy worksheet fields for older UI/clients.
   const initialCash =
@@ -954,7 +1107,9 @@ async function buildSnapshot(
     notes: saved?.notes,
     recordedBy: saved?.recordedBy,
     updatedAt: saved?.updatedAt,
-    priorDayStatus
+    priorDayStatus,
+    todayEodStatus,
+    reconciliationCheck
   };
 }
 

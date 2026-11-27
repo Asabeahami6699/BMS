@@ -433,6 +433,24 @@ export function SusuClosingBalancesPage({ role }: Props) {
             </article>
           </div>
 
+          {snapshot.reconciliationCheck && !snapshot.reconciliationCheck.balanced ? (
+            <div className="eod-guard-banner" role="alert">
+              <div className="eod-guard-banner__body">
+                <strong>
+                  Cash conservation alert — discrepancy of{" "}
+                  {formatMoney(Math.abs(snapshot.reconciliationCheck.discrepancy))}
+                </strong>
+                <p className="muted" style={{ margin: "0.25rem 0 0" }}>
+                  Branch cash position ({formatMoney(snapshot.reconciliationCheck.actualPosition)})
+                  differs from ledger cash flows (
+                  {formatMoney(snapshot.reconciliationCheck.expectedPosition)}). Check for a
+                  post-close transaction reversal on a closed till or review today&apos;s branch
+                  entries before finalizing EOD.
+                </p>
+              </div>
+            </div>
+          ) : null}
+
           {snapshot.vaultCountVariance != null &&
           Math.abs(snapshot.vaultCountVariance) >= 0.005 ? (
             <p
@@ -782,6 +800,68 @@ export function SusuClosingBalancesPage({ role }: Props) {
               </p>
             )}
           </section>
+
+          {canEdit && snapshot.todayEodStatus ? (
+            <section className="card susu-closing-till-source" aria-label="Today's EOD readiness checklist">
+              <h3>Today&apos;s EOD readiness checklist ({businessDate})</h3>
+              <p className="muted">
+                Complete all three steps in order so every cedi in branch tills and field batches
+                settles cleanly into Expected closing vault before saving.
+              </p>
+              <div className="susu-closing-formula__grid">
+                <div>
+                  <span className="muted">1. Prior-day vault close ({snapshot.todayEodStatus.priorBusinessDate})</span>
+                  <strong>
+                    {snapshot.todayEodStatus.priorClosingSaved ? "Saved ✓" : "Not saved yet"}
+                  </strong>
+                  {!snapshot.todayEodStatus.priorClosingSaved ? (
+                    <div style={{ marginTop: "0.35rem" }}>
+                      <button
+                        type="button"
+                        className="button secondary button--sm"
+                        onClick={() => setBusinessDate(snapshot.todayEodStatus!.priorBusinessDate)}
+                      >
+                        Open {snapshot.todayEodStatus.priorBusinessDate} &amp; close
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+                <div>
+                  <span className="muted">2. Field agent batches ({businessDate})</span>
+                  <strong>
+                    {snapshot.todayEodStatus.pendingBatchCount === 0 &&
+                    snapshot.todayEodStatus.draftBatchCount === 0
+                      ? "All posted ✓"
+                      : `${snapshot.todayEodStatus.pendingBatchCount} pending · ${snapshot.todayEodStatus.draftBatchCount} draft`}
+                  </strong>
+                  {snapshot.todayEodStatus.pendingBatchCount > 0 ? (
+                    <div style={{ marginTop: "0.35rem" }}>
+                      <Link to="/app/susu/callover-batches" className="button secondary button--sm">
+                        Review Callover batches
+                      </Link>
+                    </div>
+                  ) : null}
+                </div>
+                <div>
+                  <span className="muted">3. Branch teller tills ({businessDate})</span>
+                  <strong>
+                    {snapshot.todayEodStatus.openTillCount === 0 &&
+                    snapshot.todayEodStatus.closedUnsettledTillCount === 0
+                      ? "All closed & settled ✓"
+                      : `${snapshot.todayEodStatus.openTillCount} open · ${snapshot.todayEodStatus.closedUnsettledTillCount} awaiting settlement`}
+                  </strong>
+                  {snapshot.todayEodStatus.openTillCount > 0 ||
+                  snapshot.todayEodStatus.closedUnsettledTillCount > 0 ? (
+                    <div style={{ marginTop: "0.35rem" }}>
+                      <Link to="/app/susu/till-float" className="button secondary button--sm">
+                        Manage tills (Till float)
+                      </Link>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </section>
+          ) : null}
 
           {canEdit ? (
             <form className="card susu-closing-editor" onSubmit={(e) => void handleSave(e)}>

@@ -11,7 +11,7 @@ import {
 import { getCustomerById } from "./customerService.js";
 import { getSupabaseAdminClient } from "../config/supabaseClient.js";
 import { beginIdempotency } from "../middleware/idempotency.js";
-import { createTransaction } from "./transactionService.js";
+import { createTransaction, listTransactions } from "./transactionService.js";
 import { createAgentNotification, notifyTenantStaff } from "./notificationService.js";
 import { openCashVarianceFromBatch } from "./cashVarianceService.js";
 import { listUsersByTenant } from "./authStore.js";
@@ -95,9 +95,24 @@ export type FieldAgentTodayCollections = {
   postedBatchesTodayCount?: number;
   postedTotalToday?: number;
   combinedTotalToday?: number;
+  /** Customer ID → total already posted today in earlier batches by this agent (used for Batch #2 duplicate guard). */
+  postedCustomerTotalsToday?: Record<string, number>;
   unlockReason?: string;
   /** Earlier-date draft/rejected batches with recorded lines that were never submitted. */
   priorUnsubmittedBatches?: PriorUnsubmittedBatchSummary[];
+};
+
+export type SameDayDuplicateMatch = {
+  lineId: string;
+  customerId: string;
+  customerName: string;
+  accountNumber?: string;
+  lineAmount: number;
+  existingAmount: number;
+  exactAmountMatch: boolean;
+  source: "posted_batch" | "counter_or_initial_deposit" | "same_batch";
+  existingNotes?: string;
+  existingCreatedAt: string;
 };
 
 type AgentContext = {
@@ -189,11 +204,19 @@ function aggregateItems(lines: CollectionBatchLine[]): FieldAgentTodayCollection
 
 function toTodayCollections(
   batch: CollectionBatch | null,
-  postedSummary?: { count: number; totalAmount: number }
+  postedSummary?: {
+    count: number;
+    totalAmount: number;
+    customerTotals?: Record<string, number>;
+  }
 ): FieldAgentTodayCollections {
   const postedCount = postedSummary?.count ?? (batch?.status === "posted" ? 1 : 0);
   const postedTotal =
     postedSummary?.totalAmount ?? (batch?.status === "posted" ? batch.totalAmount : 0);
+  const postedCustomerTotalsToday =
+    postedSummary?.customerTotals && Object.keys(postedSummary.customerTotals).length > 0
+      ? postedSummary.customerTotals
+      : undefined;
   if (!batch) {
     return {
       customerIds: [],
@@ -201,7 +224,8 @@ function toTodayCollections(
       items: [],
       postedBatchesTodayCount: postedCount,
       postedTotalToday: postedTotal,
-      combinedTotalToday: postedTotal
+      combinedTotalToday: postedTotal,
+      ...(postedCustomerTotalsToday ? { postedCustomerTotalsToday } : {})
     };
   }
   const combinedTotalToday =
@@ -219,6 +243,7 @@ function toTodayCollections(
       postedBatchesTodayCount: postedCount,
       postedTotalToday: postedTotal,
       combinedTotalToday,
+      ...(postedCustomerTotalsToday ? { postedCustomerTotalsToday } : {}),
       unlockReason: batch.unlockReason
     };
   }
@@ -233,6 +258,7 @@ function toTodayCollections(
     postedBatchesTodayCount: postedCount,
     postedTotalToday: postedTotal,
     combinedTotalToday,
+    ...(postedCustomerTotalsToday ? { postedCustomerTotalsToday } : {}),
     unlockReason: batch.unlockReason
   };
 }
@@ -363,31 +389,52 @@ async function loadPostedSummaryForDay(
   tenantId: string,
   fieldAgentId: string,
   businessDate: string
-): Promise<{ count: number; totalAmount: number }> {
+): Promise<{ count: number; totalAmount: number; customerTotals: Record<string, number> }> {
   const supabase = getSupabaseAdminClient();
   if (supabase) {
     const { data, error } = await supabase
       .from("field_agent_collection_batches")
-      .select("total_amount")
+      .select("id, total_amount")
       .eq("tenant_id", tenantId)
       .eq("field_agent_id", fieldAgentId)
       .eq("business_date", businessDate)
       .eq("status", "posted");
     if (error) {
-      return { count: 0, totalAmount: 0 };
+      return { count: 0, totalAmount: 0, customerTotals: {} };
     }
     const rows = data ?? [];
     const totalAmount =
       Math.round(rows.reduce((sum, r) => sum + Number(r.total_amount ?? 0), 0) * 100) / 100;
-    return { count: rows.length, totalAmount };
+    const customerTotals: Record<string, number> = {};
+    const postedBatchIds = rows.map((r) => String(r.id));
+    if (postedBatchIds.length > 0) {
+      const { data: lineRows } = await supabase
+        .from("field_agent_collection_batch_lines")
+        .select("customer_id, amount")
+        .in("batch_id", postedBatchIds);
+      for (const lr of lineRows ?? []) {
+        const cid = String(lr.customer_id);
+        customerTotals[cid] =
+          Math.round(((customerTotals[cid] ?? 0) + Number(lr.amount ?? 0)) * 100) / 100;
+      }
+    }
+    return { count: rows.length, totalAmount, customerTotals };
   }
 
   const posted = findMemoryBatchesForAgentDate(tenantId, fieldAgentId, businessDate).filter(
     (b) => b.status === "posted"
   );
+  const customerTotals: Record<string, number> = {};
+  for (const b of posted) {
+    for (const l of b.lines) {
+      customerTotals[l.customerId] =
+        Math.round(((customerTotals[l.customerId] ?? 0) + l.amount) * 100) / 100;
+    }
+  }
   return {
     count: posted.length,
-    totalAmount: Math.round(posted.reduce((sum, b) => sum + b.totalAmount, 0) * 100) / 100
+    totalAmount: Math.round(posted.reduce((sum, b) => sum + b.totalAmount, 0) * 100) / 100,
+    customerTotals
   };
 }
 
@@ -811,7 +858,198 @@ export type PendingCollectionBatchView = CollectionBatch & {
   branchId?: string;
   hasReportedDifferences?: boolean;
   reportedDifferences?: CalloverReportLineInput[];
+  hasSameDayDuplicates?: boolean;
+  sameDayDuplicates?: SameDayDuplicateMatch[];
 };
+
+function isSystemFeeOrLoanNote(notes: string | undefined): boolean {
+  if (!notes) {
+    return false;
+  }
+  const lower = notes.toLowerCase();
+  return (
+    lower.includes("susu_comm_tx:") ||
+    lower.includes("susu_comm_refund:") ||
+    lower.includes("sms_charge:") ||
+    lower.includes("loan_disburse:") ||
+    lower.includes("loan_repay:") ||
+    lower.includes("loan_repay_reverse:")
+  );
+}
+
+/**
+ * Safeguard against duplicate same-day collections (e.g. an agent re-entering a Batch #1
+ * customer in Batch #2, or entering a customer whose Savings initial deposit was already
+ * credited on approval / at the counter today).
+ */
+export async function detectSameDayDuplicateLines(
+  tenantId: string,
+  batch: CollectionBatch
+): Promise<SameDayDuplicateMatch[]> {
+  if (!batch.lines || batch.lines.length === 0) {
+    return [];
+  }
+
+  const customerIds = Array.from(new Set(batch.lines.map((l) => l.customerId)));
+  const startIso = `${batch.businessDate}T00:00:00.000Z`;
+  const endIso = `${batch.businessDate}T23:59:59.999Z`;
+  const linkedTxIds = new Set(
+    batch.lines.map((l) => l.transactionId).filter((id): id is string => Boolean(id))
+  );
+
+  type ExistingCredit = {
+    id: string;
+    customerId: string;
+    amount: number;
+    notes?: string;
+    createdAt: string;
+  };
+
+  const existingByCustomer = new Map<string, ExistingCredit[]>();
+  const supabase = getSupabaseAdminClient();
+  if (supabase) {
+    const { data, error } = await supabase
+      .from("customer_transactions")
+      .select("id, customer_id, type, amount, notes, created_at, reversed_at, execution_status")
+      .eq("tenant_id", tenantId)
+      .in("customer_id", customerIds)
+      .in("type", ["deposit", "daily_susu"])
+      .gte("created_at", startIso)
+      .lte("created_at", endIso);
+
+    if (!error) {
+      for (const row of data ?? []) {
+        const r = row as Record<string, unknown>;
+        if (r.reversed_at != null) {
+          continue;
+        }
+        const execStatus = typeof r.execution_status === "string" ? r.execution_status : null;
+        if (execStatus && execStatus !== "completed" && execStatus !== "settled") {
+          continue;
+        }
+        const txId = String(r.id);
+        if (linkedTxIds.has(txId)) {
+          continue;
+        }
+        const notes = r.notes != null ? String(r.notes) : undefined;
+        if (isSystemFeeOrLoanNote(notes)) {
+          continue;
+        }
+        const cid = String(r.customer_id);
+        const list = existingByCustomer.get(cid) ?? [];
+        list.push({
+          id: txId,
+          customerId: cid,
+          amount: Math.round(Number(r.amount ?? 0) * 100) / 100,
+          notes,
+          createdAt: String(r.created_at)
+        });
+        existingByCustomer.set(cid, list);
+      }
+    }
+  } else {
+    const allTx = await listTransactions(tenantId);
+    for (const tx of allTx) {
+      if (!customerIds.includes(tx.customerId)) {
+        continue;
+      }
+      if (tx.type !== "deposit" && tx.type !== "daily_susu") {
+        continue;
+      }
+      if (tx.reversedAt) {
+        continue;
+      }
+      if (
+        tx.executionStatus &&
+        tx.executionStatus !== "completed" &&
+        tx.executionStatus !== "bank_executed"
+      ) {
+        continue;
+      }
+      if (tx.createdAt < startIso || tx.createdAt > endIso) {
+        continue;
+      }
+      if (linkedTxIds.has(tx.id)) {
+        continue;
+      }
+      if (isSystemFeeOrLoanNote(tx.notes)) {
+        continue;
+      }
+      const list = existingByCustomer.get(tx.customerId) ?? [];
+      list.push({
+        id: tx.id,
+        customerId: tx.customerId,
+        amount: Math.round(tx.amount * 100) / 100,
+        notes: tx.notes,
+        createdAt: tx.createdAt
+      });
+      existingByCustomer.set(tx.customerId, list);
+    }
+  }
+
+  const customerMap = new Map<string, { fullName: string; accountNumber?: string }>();
+  await Promise.all(
+    customerIds.map(async (cid) => {
+      const cust = await getCustomerById(tenantId, cid).catch(() => null);
+      customerMap.set(cid, {
+        fullName: cust?.fullName ?? cid,
+        accountNumber: cust?.accountNumber
+      });
+    })
+  );
+
+  const matches: SameDayDuplicateMatch[] = [];
+  const seenInBatch = new Map<string, CollectionBatchLine>();
+
+  for (const line of batch.lines) {
+    const cust = customerMap.get(line.customerId) ?? { fullName: line.customerId };
+    const existingList = existingByCustomer.get(line.customerId) ?? [];
+
+    if (existingList.length > 0) {
+      // Aggregate existing credits today on this customer (catches split initial deposits like 20 + 2,380 = 2,400!)
+      const existingTotal =
+        Math.round(existingList.reduce((sum, item) => sum + item.amount, 0) * 100) / 100;
+      const exactSingle = existingList.find((item) => Math.abs(item.amount - line.amount) < 0.005);
+      const exactTotal = Math.abs(existingTotal - line.amount) < 0.005;
+      const ref = exactSingle ?? existingList[existingList.length - 1]!;
+      const existingAmount = exactSingle ? exactSingle.amount : existingTotal;
+      const isPostedBatch = (ref.notes ?? "").toLowerCase().includes("batch ");
+
+      matches.push({
+        lineId: line.id,
+        customerId: line.customerId,
+        customerName: cust.fullName,
+        accountNumber: cust.accountNumber,
+        lineAmount: line.amount,
+        existingAmount,
+        exactAmountMatch: Boolean(exactSingle || exactTotal),
+        source: isPostedBatch ? "posted_batch" : "counter_or_initial_deposit",
+        existingNotes: ref.notes,
+        existingCreatedAt: ref.createdAt
+      });
+    } else if (seenInBatch.has(line.customerId)) {
+      const first = seenInBatch.get(line.customerId)!;
+      matches.push({
+        lineId: line.id,
+        customerId: line.customerId,
+        customerName: cust.fullName,
+        accountNumber: cust.accountNumber,
+        lineAmount: line.amount,
+        existingAmount: first.amount,
+        exactAmountMatch: Math.abs(first.amount - line.amount) < 0.005,
+        source: "same_batch",
+        existingNotes: first.notes ?? "Earlier entry in this same batch",
+        existingCreatedAt: first.createdAt
+      });
+    }
+
+    if (!seenInBatch.has(line.customerId)) {
+      seenInBatch.set(line.customerId, line);
+    }
+  }
+
+  return matches;
+}
 
 async function loadReportedDifferencesForBatch(
   batch: CollectionBatch
@@ -915,14 +1153,19 @@ export async function listPendingCollectionBatches(
       if (!agentMatchesBranchFilter(agent.branchId, context, options?.branchId)) {
         continue;
       }
-      const reportedDifferences = await loadReportedDifferencesForBatch(batch);
+      const [reportedDifferences, sameDayDuplicates] = await Promise.all([
+        loadReportedDifferencesForBatch(batch),
+        detectSameDayDuplicateLines(context.tenantId, batch)
+      ]);
       results.push({
         ...batch,
         fieldAgentName: agent.name,
         fieldAgentEmail: agent.email,
         branchId: agent.branchId,
         hasReportedDifferences: reportedDifferences.length > 0,
-        reportedDifferences
+        reportedDifferences,
+        hasSameDayDuplicates: sameDayDuplicates.length > 0,
+        sameDayDuplicates
       });
     }
     return results;
@@ -939,14 +1182,19 @@ export async function listPendingCollectionBatches(
       if (!agentMatchesBranchFilter(agent.branchId, context, options?.branchId)) {
         continue;
       }
-      const reportedDifferences = await loadReportedDifferencesForBatch(batch);
+      const [reportedDifferences, sameDayDuplicates] = await Promise.all([
+        loadReportedDifferencesForBatch(batch),
+        detectSameDayDuplicateLines(context.tenantId, batch)
+      ]);
       results.push({
         ...batch,
         fieldAgentName: agent.name,
         fieldAgentEmail: agent.email,
         branchId: agent.branchId,
         hasReportedDifferences: reportedDifferences.length > 0,
-        reportedDifferences
+        reportedDifferences,
+        hasSameDayDuplicates: sameDayDuplicates.length > 0,
+        sameDayDuplicates
       });
     }
   }
@@ -1204,7 +1452,11 @@ function withBatchLock<T>(batchId: string, work: () => Promise<T>): Promise<T> {
 async function postSingleBatch(
   context: CoordinatorContext,
   batch: CollectionBatch,
-  options?: { cashReceivedAmount?: number; confirmDifferencesReviewed?: boolean }
+  options?: {
+    cashReceivedAmount?: number;
+    confirmDifferencesReviewed?: boolean;
+    confirmDuplicatesReviewed?: boolean;
+  }
 ): Promise<CollectionBatch> {
   return withBatchLock(batch.id, () => postSingleBatchUnlocked(context, batch, options));
 }
@@ -1212,7 +1464,11 @@ async function postSingleBatch(
 async function postSingleBatchUnlocked(
   context: CoordinatorContext,
   batch: CollectionBatch,
-  options?: { cashReceivedAmount?: number; confirmDifferencesReviewed?: boolean }
+  options?: {
+    cashReceivedAmount?: number;
+    confirmDifferencesReviewed?: boolean;
+    confirmDuplicatesReviewed?: boolean;
+  }
 ): Promise<CollectionBatch> {
   const fresh = await loadBatchById(context.tenantId, batch.id);
   const current = fresh ?? batch;
@@ -1227,6 +1483,16 @@ async function postSingleBatchUnlocked(
   if (reportedDifferences.length > 0 && !options?.confirmDifferencesReviewed) {
     throw new Error(
       "This call-over has reported differences from the field agent and cannot be auto-posted. Review the differences first, then return to the agent or explicitly confirm before posting."
+    );
+  }
+
+  const sameDayDuplicates = await detectSameDayDuplicateLines(context.tenantId, current);
+  if (sameDayDuplicates.length > 0 && !options?.confirmDuplicatesReviewed) {
+    const names = Array.from(new Set(sameDayDuplicates.map((d) => d.customerName)))
+      .slice(0, 3)
+      .join(", ");
+    throw new Error(
+      `Same-day duplicate deposit alert for ${names}. Remove the duplicate line(s) or explicitly confirm they are separate physical payments before posting.`
     );
   }
 
@@ -1364,7 +1630,11 @@ async function postSingleBatchUnlocked(
 export async function postCollectionBatch(
   context: CoordinatorContext,
   batchId: string,
-  options?: { cashReceivedAmount?: number; confirmDifferencesReviewed?: boolean }
+  options?: {
+    cashReceivedAmount?: number;
+    confirmDifferencesReviewed?: boolean;
+    confirmDuplicatesReviewed?: boolean;
+  }
 ): Promise<CollectionBatch> {
   const batchView = await getCollectionBatchById(context, batchId);
   return postSingleBatch(context, batchView, options);
@@ -1597,19 +1867,30 @@ export async function postAllPendingCollectionBatches(
     /** Map of batchId → cash brought. Required for each pending batch. */
     cashByBatchId?: Record<string, number>;
   }
-): Promise<{ posted: number; batchIds: string[]; skippedWithDifferences: number }> {
+): Promise<{
+  posted: number;
+  batchIds: string[];
+  skippedWithDifferences: number;
+  skippedWithDuplicates: number;
+}> {
   const pending = await listPendingCollectionBatches(context, options);
   const batchIds: string[] = [];
   let skippedWithDifferences = 0;
+  let skippedWithDuplicates = 0;
   for (const batch of pending) {
     if (batch.hasReportedDifferences) {
       // Never auto-post a call-over where the agent reported differences.
       skippedWithDifferences += 1;
       continue;
     }
+    if (batch.hasSameDayDuplicates) {
+      // Never auto-post a batch with same-day duplicate deposit alerts.
+      skippedWithDuplicates += 1;
+      continue;
+    }
     const cash = options?.cashByBatchId?.[batch.id];
     await postSingleBatch(context, batch, { cashReceivedAmount: cash });
     batchIds.push(batch.id);
   }
-  return { posted: batchIds.length, batchIds, skippedWithDifferences };
+  return { posted: batchIds.length, batchIds, skippedWithDifferences, skippedWithDuplicates };
 }

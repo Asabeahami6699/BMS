@@ -580,3 +580,169 @@ describe("coordinator cancel unposted batch & remove single line", () => {
     expect(evansTxs).toHaveLength(0);
   });
 });
+
+describe("same-day duplicate deposit guard across Batch #2 and approval/counter credits", () => {
+  const DUP_AGENT_ID = "agent-dup-guard-3";
+
+  function dupAgentHeaders() {
+    return {
+      "x-user-id": DUP_AGENT_ID,
+      "x-tenant-id": TENANT_ID,
+      "x-role": "field_agent",
+      "x-scope-type": "branch",
+      "x-branch-id": BRANCH_ID
+    };
+  }
+
+  it("flags and holds Batch #2 when an agent re-enters a customer already posted in Batch #1, blocks auto-post, and posts cleanly after removing the duplicate line", async () => {
+    const customerDupId = await createActiveSusuCustomer(
+      "Evans Botwe Susu",
+      "0244300301",
+      "GHA-DUP-001",
+      dupAgentHeaders()
+    );
+    const customerFreshId = await createActiveSusuCustomer(
+      "Peter Nyarko",
+      "0244300302",
+      "GHA-DUP-002",
+      dupAgentHeaders()
+    );
+
+    // 1. Batch #1: collect 1,300 from Evans Botwe Susu and post
+    const add1 = await request(app)
+      .post("/api/v1/field-agents/me/collection-batches/lines")
+      .set(dupAgentHeaders())
+      .send({ customerId: customerDupId, amount: 1300, transactionBranchId: BRANCH_ID });
+    expect(add1.status, JSON.stringify(add1.body)).toBe(201);
+
+    const sub1 = await request(app)
+      .post("/api/v1/field-agents/me/collection-batches/submit-for-approval")
+      .set(dupAgentHeaders())
+      .send({
+        lines: [
+          {
+            customerId: customerDupId,
+            customerName: "Evans Botwe Susu",
+            documentAmount: 1300,
+            appAmount: 1300,
+            varianceType: "match"
+          }
+        ],
+        summary: { totalDocument: 1300, totalApp: 1300, totalVariance: 0, unresolvedCount: 0 }
+      });
+    expect(sub1.status).toBe(201);
+    const batch1Id = String(sub1.body.batchId);
+
+    const post1 = await request(app)
+      .post(`/api/v1/collection-batches/${batch1Id}/post`)
+      .set(coordinatorHeaders())
+      .send({ cashReceivedAmount: 1300 });
+    expect(post1.status, JSON.stringify(post1.body)).toBe(200);
+
+    // 2. Coordinator unlocks Batch #2
+    const unlockRes = await request(app)
+      .post(`/api/v1/collection-batches/${batch1Id}/unlock-extra`)
+      .set(coordinatorHeaders())
+      .send({ reason: "Continuing afternoon collections" });
+    expect(unlockRes.status).toBe(201);
+
+    // 3. Agent's today endpoint exposes postedCustomerTotalsToday so CollectionModal warns the agent
+    const todayAfterUnlock = await request(app)
+      .get("/api/v1/field-agents/me/collections/today")
+      .set(dupAgentHeaders());
+    expect(todayAfterUnlock.status).toBe(200);
+    expect(todayAfterUnlock.body.postedCustomerTotalsToday?.[customerDupId]).toBe(1300);
+
+    // 4. Agent accidentally re-enters Evans Botwe Susu (1,300) + valid Peter Nyarko (60) in Batch #2
+    const add2a = await request(app)
+      .post("/api/v1/field-agents/me/collection-batches/lines")
+      .set(dupAgentHeaders())
+      .send({ customerId: customerDupId, amount: 1300, transactionBranchId: BRANCH_ID });
+    expect(add2a.status, JSON.stringify(add2a.body)).toBe(201);
+    const add2b = await request(app)
+      .post("/api/v1/field-agents/me/collection-batches/lines")
+      .set(dupAgentHeaders())
+      .send({ customerId: customerFreshId, amount: 60, transactionBranchId: BRANCH_ID });
+    expect(add2b.status, JSON.stringify(add2b.body)).toBe(201);
+
+    const sub2 = await request(app)
+      .post("/api/v1/field-agents/me/collection-batches/submit-for-approval")
+      .set(dupAgentHeaders())
+      .send({
+        lines: [
+          {
+            customerId: customerDupId,
+            customerName: "Evans Botwe Susu",
+            documentAmount: 1300,
+            appAmount: 1300,
+            varianceType: "match"
+          },
+          {
+            customerId: customerFreshId,
+            customerName: "Peter Nyarko",
+            documentAmount: 60,
+            appAmount: 60,
+            varianceType: "match"
+          }
+        ],
+        summary: { totalDocument: 1360, totalApp: 1360, totalVariance: 0, unresolvedCount: 0 }
+      });
+    expect(sub2.status).toBe(201);
+    const batch2Id = String(sub2.body.batchId);
+
+    // 5. Pending list flags the exact same-day duplicate
+    const pendingRes = await request(app)
+      .get("/api/v1/collection-batches/pending")
+      .set(coordinatorHeaders());
+    expect(pendingRes.status).toBe(200);
+    const pendingB2 = (
+      pendingRes.body as Array<{
+        id: string;
+        hasSameDayDuplicates?: boolean;
+        sameDayDuplicates?: Array<{
+          lineId: string;
+          customerId: string;
+          exactAmountMatch: boolean;
+          source: string;
+        }>;
+      }>
+    ).find((b) => b.id === batch2Id);
+    expect(pendingB2?.hasSameDayDuplicates).toBe(true);
+    expect(pendingB2?.sameDayDuplicates).toHaveLength(1);
+    expect(pendingB2?.sameDayDuplicates?.[0]?.customerId).toBe(customerDupId);
+    expect(pendingB2?.sameDayDuplicates?.[0]?.exactAmountMatch).toBe(true);
+    expect(pendingB2?.sameDayDuplicates?.[0]?.source).toBe("posted_batch");
+
+    // 6. Posting without confirmDuplicatesReviewed is blocked
+    const blockedPost = await request(app)
+      .post(`/api/v1/collection-batches/${batch2Id}/post`)
+      .set(coordinatorHeaders())
+      .send({ cashReceivedAmount: 1360 });
+    expect(blockedPost.status).toBe(400);
+    expect(String(blockedPost.body.error)).toMatch(/duplicate deposit alert/i);
+
+    // 7. Post-all skips the duplicate-flagged batch
+    const postAllRes = await request(app)
+      .post("/api/v1/collection-batches/post-all")
+      .set(coordinatorHeaders())
+      .send({ cashByBatchId: { [batch2Id]: 1360 } });
+    expect(postAllRes.status).toBe(200);
+    expect(postAllRes.body.posted).toBe(0);
+    expect(postAllRes.body.skippedWithDuplicates).toBeGreaterThanOrEqual(1);
+
+    // 8. Removing the duplicate line clears the alert and allows posting the valid GHS 60 cleanly
+    const dupLineId = pendingB2!.sameDayDuplicates![0]!.lineId;
+    const rmRes = await request(app)
+      .delete(`/api/v1/collection-batches/${batch2Id}/lines/${dupLineId}`)
+      .set(coordinatorHeaders())
+      .send({ reason: "Duplicate of Batch #1 entry" });
+    expect(rmRes.status).toBe(200);
+    expect(rmRes.body.newTotalAmount).toBe(60);
+
+    const cleanPost = await request(app)
+      .post(`/api/v1/collection-batches/${batch2Id}/post`)
+      .set(coordinatorHeaders())
+      .send({ cashReceivedAmount: 60 });
+    expect(cleanPost.status, JSON.stringify(cleanPost.body)).toBe(200);
+  });
+});
