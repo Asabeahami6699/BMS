@@ -1404,6 +1404,190 @@ export async function rejectCollectionBatch(
   return batch;
 }
 
+export type CancelUnpostedBatchResult = {
+  deletedBatchId: string;
+  fieldAgentId: string;
+  businessDate: string;
+  removedLineCount: number;
+  removedTotalAmount: number;
+};
+
+/**
+ * Cancels/deletes an UNPOSTED collection batch (pending_approval, draft, or rejected).
+ * Posted batches can never be canceled. Touches zero customer ledgers or alerts.
+ */
+export async function cancelUnpostedCollectionBatch(
+  context: CoordinatorContext,
+  batchId: string,
+  reason: string
+): Promise<CancelUnpostedBatchResult> {
+  if (context.role !== "admin" && context.role !== "coordinator") {
+    throw new Error("Only admin or coordinator can cancel an unposted collection batch");
+  }
+  const trimmedReason = reason?.trim() ?? "";
+  if (trimmedReason.length < 3) {
+    throw new Error("Enter a short reason before canceling an unposted batch");
+  }
+
+  const batch = await getCollectionBatchById(context, batchId);
+  if (batch.status === "posted") {
+    throw new Error("Posted collection batches cannot be canceled");
+  }
+
+  const supabase = getSupabaseAdminClient();
+  if (supabase) {
+    const { error: deleteErr } = await supabase
+      .from("field_agent_collection_batches")
+      .delete()
+      .eq("tenant_id", context.tenantId)
+      .eq("id", batch.id)
+      .neq("status", "posted");
+    if (deleteErr) {
+      throw new Error(`Failed to cancel collection batch: ${deleteErr.message}`);
+    }
+    if (batch.calloverReportId) {
+      await supabase
+        .from("field_agent_callover_reports")
+        .delete()
+        .eq("tenant_id", context.tenantId)
+        .eq("id", batch.calloverReportId);
+    }
+  } else {
+    memoryBatches.delete(batch.id);
+  }
+
+  try {
+    await createAgentNotification({
+      tenantId: context.tenantId,
+      userId: batch.fieldAgentId,
+      kind: "collection_batch_pending",
+      title: "Unposted call-over batch canceled",
+      body: `Your unposted call-over batch for ${batch.businessDate} (GHS ${batch.totalAmount.toFixed(2)}) was canceled by the coordinator: ${trimmedReason}. You can record collections cleanly.`
+    });
+  } catch {
+    /* non-blocking */
+  }
+
+  return {
+    deletedBatchId: batch.id,
+    fieldAgentId: batch.fieldAgentId,
+    businessDate: batch.businessDate,
+    removedLineCount: batch.lines.length,
+    removedTotalAmount: batch.totalAmount
+  };
+}
+
+export type RemoveCollectionBatchLineResult = {
+  batchDeleted: boolean;
+  batch: CollectionBatch | null;
+  removedLine: CollectionBatchLine;
+  previousTotalAmount: number;
+  newTotalAmount: number;
+};
+
+/**
+ * Removes a single line from an UNPOSTED collection batch and recalculates the batch total.
+ * If it was the last remaining line, automatically deletes the now-empty unposted batch.
+ */
+export async function removeCollectionBatchLine(
+  context: CoordinatorContext,
+  batchId: string,
+  lineId: string,
+  reason: string
+): Promise<RemoveCollectionBatchLineResult> {
+  if (context.role !== "admin" && context.role !== "coordinator") {
+    throw new Error("Only admin or coordinator can remove a line from a collection batch");
+  }
+  const trimmedReason = reason?.trim() ?? "";
+  if (trimmedReason.length < 3) {
+    throw new Error("Enter a short reason before removing a collection line");
+  }
+
+  const batch = await getCollectionBatchById(context, batchId);
+  if (batch.status === "posted") {
+    throw new Error("Lines cannot be removed from a posted collection batch");
+  }
+
+  const targetLine = batch.lines.find((line) => line.id === lineId);
+  if (!targetLine) {
+    throw new Error("Collection line not found in this batch");
+  }
+
+  const previousTotalAmount = batch.totalAmount;
+  const remainingLines = batch.lines.filter((line) => line.id !== lineId);
+
+  if (remainingLines.length === 0) {
+    await cancelUnpostedCollectionBatch(context, batchId, trimmedReason);
+    return {
+      batchDeleted: true,
+      batch: null,
+      removedLine: targetLine,
+      previousTotalAmount,
+      newTotalAmount: 0
+    };
+  }
+
+  const newTotalAmount =
+    Math.round(remainingLines.reduce((sum, line) => sum + line.amount, 0) * 100) / 100;
+
+  const supabase = getSupabaseAdminClient();
+  if (supabase) {
+    const { error: delLineErr } = await supabase
+      .from("field_agent_collection_batch_lines")
+      .delete()
+      .eq("batch_id", batch.id)
+      .eq("id", targetLine.id);
+    if (delLineErr) {
+      throw new Error(`Failed to remove collection line: ${delLineErr.message}`);
+    }
+    const { error: updBatchErr } = await supabase
+      .from("field_agent_collection_batches")
+      .update({
+        total_amount: newTotalAmount,
+        updated_at: new Date().toISOString()
+      })
+      .eq("tenant_id", context.tenantId)
+      .eq("id", batch.id)
+      .neq("status", "posted");
+    if (updBatchErr) {
+      throw new Error(`Failed to update batch total: ${updBatchErr.message}`);
+    }
+  } else {
+    const stored = memoryBatches.get(batch.id);
+    if (stored) {
+      stored.lines = remainingLines;
+      stored.totalAmount = newTotalAmount;
+      memoryBatches.set(batch.id, stored);
+    }
+  }
+
+  const updatedBatch: CollectionBatch = {
+    ...batch,
+    lines: remainingLines,
+    totalAmount: newTotalAmount
+  };
+
+  try {
+    await createAgentNotification({
+      tenantId: context.tenantId,
+      userId: batch.fieldAgentId,
+      kind: "collection_batch_pending",
+      title: "Collection line removed from unposted batch",
+      body: `A GHS ${targetLine.amount.toFixed(2)} entry was removed from your unposted ${batch.businessDate} batch by the coordinator (${trimmedReason}). Updated batch total: GHS ${newTotalAmount.toFixed(2)}.`
+    });
+  } catch {
+    /* non-blocking */
+  }
+
+  return {
+    batchDeleted: false,
+    batch: updatedBatch,
+    removedLine: targetLine,
+    previousTotalAmount,
+    newTotalAmount
+  };
+}
+
 export async function postAllPendingCollectionBatches(
   context: CoordinatorContext,
   options?: {

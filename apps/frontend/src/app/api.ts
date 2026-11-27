@@ -1864,6 +1864,47 @@ export async function unlockExtraCollectionBatch(
   );
 }
 
+export async function cancelUnpostedCollectionBatch(
+  batchId: string,
+  reason: string
+): Promise<{
+  deletedBatchId: string;
+  fieldAgentId: string;
+  businessDate: string;
+  removedLineCount: number;
+  removedTotalAmount: number;
+}> {
+  return fetchJson(
+    `${API_BASE_URL}/api/v1/collection-batches/${encodeURIComponent(batchId)}`,
+    {
+      method: "DELETE",
+      headers: authHeaders(),
+      body: JSON.stringify({ reason })
+    }
+  );
+}
+
+export async function removeCollectionBatchLine(
+  batchId: string,
+  lineId: string,
+  reason: string
+): Promise<{
+  batchDeleted: boolean;
+  batch: PendingCollectionBatch | null;
+  removedLine: { id: string; customerId: string; amount: number };
+  previousTotalAmount: number;
+  newTotalAmount: number;
+}> {
+  return fetchJson(
+    `${API_BASE_URL}/api/v1/collection-batches/${encodeURIComponent(batchId)}/lines/${encodeURIComponent(lineId)}`,
+    {
+      method: "DELETE",
+      headers: authHeaders(),
+      body: JSON.stringify({ reason })
+    }
+  );
+}
+
 export async function getCollectionBatch(batchId: string): Promise<PendingCollectionBatch> {
   return fetchJson<PendingCollectionBatch>(`${API_BASE_URL}/api/v1/collection-batches/${batchId}`, {
     headers: authHeaders()

@@ -111,6 +111,8 @@ export function CalloverBatchesPage({ role }: Props) {
   const postAll = useCalloverBatchesStore((s) => s.postAll);
   const settleVariance = useCalloverBatchesStore((s) => s.settleVariance);
   const unlockExtraBatch = useCalloverBatchesStore((s) => s.unlockExtraBatch);
+  const cancelBatch = useCalloverBatchesStore((s) => s.cancelBatch);
+  const removeLine = useCalloverBatchesStore((s) => s.removeLine);
 
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [cashByBatchId, setCashByBatchId] = useState<Record<string, string>>({});
@@ -121,6 +123,10 @@ export function CalloverBatchesPage({ role }: Props) {
   const [settleNotes, setSettleNotes] = useState("");
   const [unlockingBatchId, setUnlockingBatchId] = useState<string | null>(null);
   const [unlockReason, setUnlockReason] = useState("");
+  const [cancelingBatchId, setCancelingBatchId] = useState<string | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
+  const [removingLineKey, setRemovingLineKey] = useState<string | null>(null);
+  const [removeLineReason, setRemoveLineReason] = useState("");
 
   usePageLoading(loading || busyId !== null, "callover-batches");
 
@@ -264,6 +270,96 @@ export function CalloverBatchesPage({ role }: Props) {
       showToast(`Returned ${batch.fieldAgentName}'s call-over to the agent`, "info");
     } catch (error) {
       showToast(toUserFacingError(error, "Failed to return batch"), "error");
+    } finally {
+      postingRef.current = false;
+    }
+  }
+
+  function openCancelBatch(batch: PendingCollectionBatch) {
+    setRemovingLineKey(null);
+    setRemoveLineReason("");
+    setCancelingBatchId(batch.id);
+    setCancelReason("");
+  }
+
+  async function handleConfirmCancelBatch(batch: PendingCollectionBatch) {
+    const trimmed = cancelReason.trim();
+    if (trimmed.length < 3) {
+      showToast("Enter a short reason before canceling this batch", "error");
+      return;
+    }
+    if (postingRef.current) {
+      return;
+    }
+    postingRef.current = true;
+    try {
+      await cancelBatch(batch.id, trimmed);
+      setCancelingBatchId(null);
+      setCancelReason("");
+      setCashByBatchId((prev) => {
+        const next = { ...prev };
+        delete next[batch.id];
+        return next;
+      });
+      if (expandedId === batch.id) {
+        setExpandedId(null);
+      }
+      showToast(
+        `Canceled ${batch.fieldAgentName}'s unposted batch (${formatMoney(batch.totalAmount)}). No customer was credited or alerted.`,
+        "success"
+      );
+    } catch (error) {
+      showToast(toUserFacingError(error, "Failed to cancel unposted batch"), "error");
+    } finally {
+      postingRef.current = false;
+    }
+  }
+
+  function openRemoveLine(batchId: string, lineId: string) {
+    setCancelingBatchId(null);
+    setCancelReason("");
+    setRemovingLineKey(`${batchId}:${lineId}`);
+    setRemoveLineReason("");
+  }
+
+  async function handleConfirmRemoveLine(
+    batch: PendingCollectionBatch,
+    line: PendingCollectionBatch["lines"][number]
+  ) {
+    const trimmed = removeLineReason.trim();
+    if (trimmed.length < 3) {
+      showToast("Enter a short reason before removing this line", "error");
+      return;
+    }
+    if (postingRef.current) {
+      return;
+    }
+    postingRef.current = true;
+    try {
+      const result = await removeLine(batch.id, line.id, trimmed);
+      setRemovingLineKey(null);
+      setRemoveLineReason("");
+      setCashByBatchId((prev) => {
+        const next = { ...prev };
+        delete next[batch.id];
+        return next;
+      });
+      if (result.batchDeleted) {
+        if (expandedId === batch.id) {
+          setExpandedId(null);
+        }
+        showToast(
+          `Removed ${formatMoney(line.amount)} line and canceled the empty unposted batch for ${batch.fieldAgentName}.`,
+          "success"
+        );
+      } else {
+        showToast(
+          `Removed ${formatMoney(line.amount)} line. Updated batch total: ${formatMoney(result.newTotalAmount)}.`,
+          "success"
+        );
+      }
+    } catch (error) {
+      showToast(toUserFacingError(error, "Failed to remove collection line"), "error");
     } finally {
       postingRef.current = false;
     }
@@ -647,6 +743,18 @@ export function CalloverBatchesPage({ role }: Props) {
                     </button>
                     <button
                       type="button"
+                      className="button secondary callover-batch-card__danger-btn"
+                      disabled={busyId !== null}
+                      onClick={() =>
+                        cancelingBatchId === batch.id
+                          ? setCancelingBatchId(null)
+                          : openCancelBatch(batch)
+                      }
+                    >
+                      {busyId === `cancel:${batch.id}` ? "Canceling…" : "Cancel batch"}
+                    </button>
+                    <button
+                      type="button"
                       className="button"
                       disabled={busyId !== null || !canPost}
                       onClick={() => void handlePostBatch(batch)}
@@ -655,6 +763,49 @@ export function CalloverBatchesPage({ role }: Props) {
                     </button>
                   </div>
                 </div>
+
+                {cancelingBatchId === batch.id ? (
+                  <div className="callover-danger-form" role="region" aria-label="Confirm cancel unposted batch">
+                    <p className="callover-danger-form__note">
+                      <strong>Cancel this unposted batch ({formatMoney(batch.totalAmount)})?</strong> This batch has not
+                      been posted, so no customer has been credited or alerted. Canceling removes all{" "}
+                      {batch.lineCount} line{batch.lineCount === 1 ? "" : "s"} and lets {batch.fieldAgentName} record
+                      fresh collections.
+                    </p>
+                    <label className="field">
+                      <span>Reason for canceling (recorded in Audit logs)</span>
+                      <input
+                        type="text"
+                        value={cancelReason}
+                        maxLength={240}
+                        placeholder="e.g. Duplicate deposit already resolved separately"
+                        onChange={(e) => setCancelReason(e.target.value)}
+                        disabled={busyId === `cancel:${batch.id}`}
+                      />
+                    </label>
+                    <div className="callover-unlock-form__actions">
+                      <button
+                        type="button"
+                        className="button callover-danger-form__confirm"
+                        disabled={busyId !== null || cancelReason.trim().length < 3}
+                        onClick={() => void handleConfirmCancelBatch(batch)}
+                      >
+                        {busyId === `cancel:${batch.id}` ? "Canceling…" : "Confirm cancel batch"}
+                      </button>
+                      <button
+                        type="button"
+                        className="button secondary"
+                        disabled={busyId === `cancel:${batch.id}`}
+                        onClick={() => {
+                          setCancelingBatchId(null);
+                          setCancelReason("");
+                        }}
+                      >
+                        Keep batch
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
 
                 <div className="callover-batch-card__stats">
                   <div className="callover-batch-card__stat">
@@ -765,19 +916,93 @@ export function CalloverBatchesPage({ role }: Props) {
                     <ul className="callover-batch-card__line-list">
                       {batch.lines.map((line, idx) => {
                         const customer = customerLabel(line.customerId);
+                        const lineKey = `${batch.id}:${line.id}`;
+                        const isRemoving = removingLineKey === lineKey;
+                        const removeBusy = busyId === `remove-line:${line.id}`;
+                        const isOnlyLine = batch.lines.length <= 1;
                         return (
-                          <li key={line.id} className="callover-batch-card__line">
-                            <div className="callover-batch-card__line-main">
-                              <strong>
-                                <span className="callover-batch-card__line-num">#{idx + 1}</span>{" "}
-                                {customer.name}
-                              </strong>
-                              {customer.sub ? <span className="muted">{customer.sub}</span> : null}
+                          <li key={line.id} className="callover-batch-card__line-wrap">
+                            <div className="callover-batch-card__line">
+                              <div className="callover-batch-card__line-main">
+                                <strong>
+                                  <span className="callover-batch-card__line-num">#{idx + 1}</span>{" "}
+                                  {customer.name}
+                                </strong>
+                                {customer.sub ? <span className="muted">{customer.sub}</span> : null}
+                              </div>
+                              <div className="callover-batch-card__line-side">
+                                <div className="callover-batch-card__line-side-top">
+                                  <strong>{formatMoney(line.amount)}</strong>
+                                  <button
+                                    type="button"
+                                    className="button secondary callover-batch-card__line-remove"
+                                    disabled={busyId !== null}
+                                    onClick={() =>
+                                      isRemoving
+                                        ? setRemovingLineKey(null)
+                                        : openRemoveLine(batch.id, line.id)
+                                    }
+                                  >
+                                    {removeBusy ? "Removing…" : isRemoving ? "Close" : "Remove"}
+                                  </button>
+                                </div>
+                                {line.notes ? (
+                                  <span className="muted callover-batch-card__line-note">{line.notes}</span>
+                                ) : null}
+                              </div>
                             </div>
-                            <div className="callover-batch-card__line-side">
-                              <strong>{formatMoney(line.amount)}</strong>
-                              {line.notes ? <span className="muted callover-batch-card__line-note">{line.notes}</span> : null}
-                            </div>
+                            {isRemoving ? (
+                              <div
+                                className="callover-danger-form callover-danger-form--inline"
+                                role="region"
+                                aria-label={`Confirm remove line for ${customer.name}`}
+                              >
+                                <p className="callover-danger-form__note">
+                                  Remove <strong>{formatMoney(line.amount)}</strong> for{" "}
+                                  <strong>{customer.name}</strong>?{" "}
+                                  {isOnlyLine
+                                    ? "This is the only line in the batch, so the empty unposted batch will be canceled."
+                                    : `Batch total will update to ${formatMoney(Math.max(0, batch.totalAmount - line.amount))}.`}{" "}
+                                  No customer has been credited or alerted.
+                                </p>
+                                <label className="field">
+                                  <span>Reason (recorded in Audit logs)</span>
+                                  <input
+                                    type="text"
+                                    value={removeLineReason}
+                                    maxLength={240}
+                                    placeholder="e.g. Duplicate initial deposit — already settled"
+                                    onChange={(e) => setRemoveLineReason(e.target.value)}
+                                    disabled={removeBusy}
+                                  />
+                                </label>
+                                <div className="callover-unlock-form__actions">
+                                  <button
+                                    type="button"
+                                    className="button callover-danger-form__confirm"
+                                    disabled={busyId !== null || removeLineReason.trim().length < 3}
+                                    onClick={() => void handleConfirmRemoveLine(batch, line)}
+                                  >
+                                    {removeBusy
+                                      ? "Removing…"
+                                      : isOnlyLine
+                                        ? "Remove & cancel batch"
+                                        : "Confirm remove line"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="button secondary"
+                                    disabled={removeBusy}
+                                    onClick={() => {
+                                      setRemovingLineKey(null);
+                                      setRemoveLineReason("");
+                                    }}
+                                  >
+                                    Keep line
+                                  </button>
+                                </div>
+                              </div>
+                            ) : null}
                           </li>
                         );
                       })}

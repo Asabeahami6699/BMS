@@ -1,12 +1,14 @@
 import { Router } from "express";
 import { requirePermission } from "../middleware/requirePermission.js";
 import {
+  cancelUnpostedCollectionBatch,
   getCollectionBatchById,
   listPendingCollectionBatches,
   listPostedCollectionBatches,
   postAllPendingCollectionBatches,
   postCollectionBatch,
   rejectCollectionBatch,
+  removeCollectionBatchLine,
   unlockExtraCollectionBatch
 } from "../services/collectionBatchService.js";
 import {
@@ -442,6 +444,165 @@ collectionBatchesRouter.post(
     } catch (error) {
       res.status(400).json({
         error: error instanceof Error ? error.message : "Failed to return batch to agent"
+      });
+    }
+  }
+);
+
+collectionBatchesRouter.delete(
+  "/:batchId/lines/:lineId",
+  requirePermission("transactions.create.daily_susu"),
+  async (req, res) => {
+    if (!requireCoordinator(req, res)) {
+      return;
+    }
+    const context = req.userContext!;
+    const batchId = Array.isArray(req.params.batchId) ? req.params.batchId[0] : req.params.batchId;
+    const lineId = Array.isArray(req.params.lineId) ? req.params.lineId[0] : req.params.lineId;
+    const reason =
+      typeof req.body?.reason === "string"
+        ? req.body.reason
+        : typeof req.query.reason === "string"
+          ? req.query.reason
+          : "";
+
+    try {
+      const before = await getCollectionBatchById(
+        {
+          tenantId: context.tenantId,
+          userId: context.userId,
+          role: context.role,
+          branchId: context.branchId,
+          scopeType: context.scopeType
+        },
+        batchId
+      ).catch(() => null);
+
+      const result = await removeCollectionBatchLine(
+        {
+          tenantId: context.tenantId,
+          userId: context.userId,
+          role: context.role,
+          branchId: context.branchId,
+          scopeType: context.scopeType
+        },
+        batchId,
+        lineId,
+        reason
+      );
+
+      setRequestAuditContext(req, {
+        entityType: "collection_batch",
+        entityId: batchId,
+        action: result.batchDeleted
+          ? "Removed last line & canceled unposted collection batch"
+          : "Removed collection line from unposted batch",
+        before: before
+          ? {
+              status: before.status,
+              totalAmount: before.totalAmount,
+              lineCount: before.lines.length,
+              removedLine: {
+                id: result.removedLine.id,
+                customerId: result.removedLine.customerId,
+                amount: result.removedLine.amount
+              }
+            }
+          : null,
+        after: {
+          batchDeleted: result.batchDeleted,
+          totalAmount: result.newTotalAmount,
+          lineCount: result.batch ? result.batch.lines.length : 0,
+          reason: reason.trim()
+        },
+        metadata: {
+          fieldAgentId: before?.fieldAgentId ?? null,
+          businessDate: before?.businessDate ?? null,
+          lineId
+        }
+      });
+
+      res.json(result);
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Failed to remove collection line"
+      });
+    }
+  }
+);
+
+collectionBatchesRouter.delete(
+  "/:batchId",
+  requirePermission("transactions.create.daily_susu"),
+  async (req, res) => {
+    if (!requireCoordinator(req, res)) {
+      return;
+    }
+    const context = req.userContext!;
+    const batchId = Array.isArray(req.params.batchId) ? req.params.batchId[0] : req.params.batchId;
+    const reason =
+      typeof req.body?.reason === "string"
+        ? req.body.reason
+        : typeof req.query.reason === "string"
+          ? req.query.reason
+          : "";
+
+    try {
+      const before = await getCollectionBatchById(
+        {
+          tenantId: context.tenantId,
+          userId: context.userId,
+          role: context.role,
+          branchId: context.branchId,
+          scopeType: context.scopeType
+        },
+        batchId
+      ).catch(() => null);
+
+      const result = await cancelUnpostedCollectionBatch(
+        {
+          tenantId: context.tenantId,
+          userId: context.userId,
+          role: context.role,
+          branchId: context.branchId,
+          scopeType: context.scopeType
+        },
+        batchId,
+        reason
+      );
+
+      setRequestAuditContext(req, {
+        entityType: "collection_batch",
+        entityId: batchId,
+        action: "Canceled unposted field agent collection batch",
+        before: before
+          ? {
+              status: before.status,
+              totalAmount: before.totalAmount,
+              lineCount: before.lines.length,
+              lines: before.lines.map((l) => ({
+                id: l.id,
+                customerId: l.customerId,
+                amount: l.amount
+              }))
+            }
+          : null,
+        after: {
+          deleted: true,
+          reason: reason.trim()
+        },
+        metadata: {
+          fieldAgentId: result.fieldAgentId,
+          businessDate: result.businessDate,
+          removedLineCount: result.removedLineCount,
+          removedTotalAmount: result.removedTotalAmount
+        }
+      });
+
+      res.json(result);
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Failed to cancel unposted batch"
       });
     }
   }

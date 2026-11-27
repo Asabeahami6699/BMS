@@ -42,10 +42,15 @@ function adminHeaders() {
   };
 }
 
-async function createActiveSusuCustomer(name: string, phone: string, idCard: string): Promise<string> {
+async function createActiveSusuCustomer(
+  name: string,
+  phone: string,
+  idCard: string,
+  headers: Record<string, string> = agentHeaders()
+): Promise<string> {
   const reg = await request(app)
     .post("/api/v1/customers/registrations")
-    .set(agentHeaders())
+    .set(headers)
     .send({
       fullName: name,
       phone,
@@ -308,5 +313,270 @@ describe("coordinator-unlocked extra collection batches (Batch #2)", () => {
     expect(todayFinal.body.postedBatchesTodayCount).toBe(2);
     expect(todayFinal.body.postedTotalToday).toBe(130);
     expect(todayFinal.body.combinedTotalToday).toBe(130);
+  });
+});
+
+describe("coordinator cancel unposted batch & remove single line", () => {
+  const CANCEL_AGENT_ID = "agent-cancel-batch-2";
+
+  function cancelAgentHeaders() {
+    return {
+      "x-user-id": CANCEL_AGENT_ID,
+      "x-tenant-id": TENANT_ID,
+      "x-role": "field_agent",
+      "x-scope-type": "branch",
+      "x-branch-id": BRANCH_ID
+    };
+  }
+
+  it("removes a single duplicate line from a pending batch, recalculates total, and only posts the remaining line", async () => {
+    const customerKeepId = await createActiveSusuCustomer(
+      "Abena Osei",
+      "0244200201",
+      "GHA-RM-001",
+      cancelAgentHeaders()
+    );
+    const customerDropId = await createActiveSusuCustomer(
+      "Kwame Asare",
+      "0244200202",
+      "GHA-RM-002",
+      cancelAgentHeaders()
+    );
+
+    // Agent records 2 collections (one valid, one duplicate)
+    const add1 = await request(app)
+      .post("/api/v1/field-agents/me/collection-batches/lines")
+      .set(cancelAgentHeaders())
+      .send({ customerId: customerKeepId, amount: 120, transactionBranchId: BRANCH_ID });
+    expect(add1.status, JSON.stringify(add1.body)).toBe(201);
+
+    const add2 = await request(app)
+      .post("/api/v1/field-agents/me/collection-batches/lines")
+      .set(cancelAgentHeaders())
+      .send({ customerId: customerDropId, amount: 2400, transactionBranchId: BRANCH_ID });
+    expect(add2.status, JSON.stringify(add2.body)).toBe(201);
+
+    const submit = await request(app)
+      .post("/api/v1/field-agents/me/collection-batches/submit-for-approval")
+      .set(cancelAgentHeaders())
+      .send({
+        lines: [
+          {
+            customerId: customerKeepId,
+            customerName: "Abena Osei",
+            documentAmount: 120,
+            appAmount: 120,
+            varianceType: "match"
+          },
+          {
+            customerId: customerDropId,
+            customerName: "Kwame Asare",
+            documentAmount: 2400,
+            appAmount: 2400,
+            varianceType: "match"
+          }
+        ],
+        summary: { totalDocument: 2520, totalApp: 2520, totalVariance: 0, unresolvedCount: 0 }
+      });
+    expect(submit.status, JSON.stringify(submit.body)).toBe(201);
+    const batchId = String(submit.body.batchId);
+
+    const pendingBefore = await request(app)
+      .get("/api/v1/collection-batches/pending")
+      .set(coordinatorHeaders());
+    expect(pendingBefore.status).toBe(200);
+    const pendingBatch = (
+      pendingBefore.body as Array<{
+        id: string;
+        totalAmount: number;
+        lines: Array<{ id: string; customerId: string; amount: number }>;
+      }>
+    ).find((b) => b.id === batchId);
+    expect(pendingBatch?.totalAmount).toBe(2520);
+    const dropLine = pendingBatch?.lines.find((l) => l.customerId === customerDropId);
+    expect(dropLine).toBeTruthy();
+
+    // Guard: field agent cannot remove a line
+    const agentAttempt = await request(app)
+      .delete(`/api/v1/collection-batches/${batchId}/lines/${dropLine!.id}`)
+      .set(cancelAgentHeaders())
+      .send({ reason: "Self removal" });
+    expect(agentAttempt.status).toBe(403);
+
+    // Guard: reason is required
+    const shortReason = await request(app)
+      .delete(`/api/v1/collection-batches/${batchId}/lines/${dropLine!.id}`)
+      .set(coordinatorHeaders())
+      .send({ reason: "no" });
+    expect(shortReason.status).toBe(400);
+
+    // Coordinator removes the duplicate GHS 2,400 line
+    const removeRes = await request(app)
+      .delete(`/api/v1/collection-batches/${batchId}/lines/${dropLine!.id}`)
+      .set(coordinatorHeaders())
+      .send({ reason: "Duplicate initial deposit already settled separately" });
+    expect(removeRes.status, JSON.stringify(removeRes.body)).toBe(200);
+    expect(removeRes.body.batchDeleted).toBe(false);
+    expect(removeRes.body.previousTotalAmount).toBe(2520);
+    expect(removeRes.body.newTotalAmount).toBe(120);
+    expect(removeRes.body.batch?.lines).toHaveLength(1);
+
+    // Post the cleaned batch (GHS 120 only)
+    const postRes = await request(app)
+      .post(`/api/v1/collection-batches/${batchId}/post`)
+      .set(adminHeaders())
+      .send({ cashReceivedAmount: 120 });
+    expect(postRes.status, JSON.stringify(postRes.body)).toBe(200);
+
+    // Guard: posted batch cannot be canceled or have lines removed
+    const cancelPosted = await request(app)
+      .delete(`/api/v1/collection-batches/${batchId}`)
+      .set(coordinatorHeaders())
+      .send({ reason: "Trying to cancel posted batch" });
+    expect(cancelPosted.status).toBe(400);
+
+    const remainingLineId = String(removeRes.body.batch?.lines?.[0]?.id);
+    const removeFromPosted = await request(app)
+      .delete(`/api/v1/collection-batches/${batchId}/lines/${remainingLineId}`)
+      .set(coordinatorHeaders())
+      .send({ reason: "Trying to remove posted line" });
+    expect(removeFromPosted.status).toBe(400);
+
+    // Verify ledger: customerKeep credited GHS 120; customerDrop has ZERO transactions
+    const txRes = await request(app).get("/api/v1/transactions").set(coordinatorHeaders());
+    expect(txRes.status).toBe(200);
+    const txs = txRes.body as Array<{ customerId: string; type: string; amount: number }>;
+    const keepTxs = txs.filter((t) => t.customerId === customerKeepId && t.type === "daily_susu");
+    const dropTxs = txs.filter((t) => t.customerId === customerDropId && t.type === "daily_susu");
+    expect(keepTxs).toHaveLength(1);
+    expect(keepTxs[0]?.amount).toBe(120);
+    expect(dropTxs).toHaveLength(0);
+  });
+
+  it("cancels an entire pending batch cleanly (and auto-cancels when removing the only line), letting the agent collect fresh", async () => {
+    const FRESH_AGENT_ID = "agent-cancel-batch-3";
+    const freshAgentHeaders = () => ({
+      "x-user-id": FRESH_AGENT_ID,
+      "x-tenant-id": TENANT_ID,
+      "x-role": "field_agent",
+      "x-scope-type": "branch",
+      "x-branch-id": BRANCH_ID
+    });
+
+    const customerId = await createActiveSusuCustomer(
+      "Evans Botwe",
+      "0244300301",
+      "GHA-CN-001",
+      freshAgentHeaders()
+    );
+
+    // 1. Agent submits a single-line mistaken batch of GHS 2,400
+    const add = await request(app)
+      .post("/api/v1/field-agents/me/collection-batches/lines")
+      .set(freshAgentHeaders())
+      .send({ customerId, amount: 2400, transactionBranchId: BRANCH_ID });
+    expect(add.status, JSON.stringify(add.body)).toBe(201);
+
+    const submit = await request(app)
+      .post("/api/v1/field-agents/me/collection-batches/submit-for-approval")
+      .set(freshAgentHeaders())
+      .send({
+        lines: [
+          {
+            customerId,
+            customerName: "Evans Botwe",
+            documentAmount: 2400,
+            appAmount: 2400,
+            varianceType: "match"
+          }
+        ],
+        summary: { totalDocument: 2400, totalApp: 2400, totalVariance: 0, unresolvedCount: 0 }
+      });
+    expect(submit.status, JSON.stringify(submit.body)).toBe(201);
+    const firstBatchId = String(submit.body.batchId);
+
+    // Guard: field agent cannot cancel batch
+    const forbiddenCancel = await request(app)
+      .delete(`/api/v1/collection-batches/${firstBatchId}`)
+      .set(freshAgentHeaders())
+      .send({ reason: "Agent self cancel" });
+    expect(forbiddenCancel.status).toBe(403);
+
+    // Coordinator cancels the entire unposted batch
+    const cancelRes = await request(app)
+      .delete(`/api/v1/collection-batches/${firstBatchId}`)
+      .set(coordinatorHeaders())
+      .send({ reason: "Duplicate initial deposit entry" });
+    expect(cancelRes.status, JSON.stringify(cancelRes.body)).toBe(200);
+    expect(cancelRes.body.deletedBatchId).toBe(firstBatchId);
+    expect(cancelRes.body.removedLineCount).toBe(1);
+    expect(cancelRes.body.removedTotalAmount).toBe(2400);
+
+    // Pending list no longer has the batch
+    const pendingAfterCancel = await request(app)
+      .get("/api/v1/collection-batches/pending")
+      .set(coordinatorHeaders());
+    expect(
+      (pendingAfterCancel.body as Array<{ id: string }>).some((b) => b.id === firstBatchId)
+    ).toBe(false);
+
+    // Agent sees an empty fresh day (no active batch yet) and can record a new collection
+    const todayAfterCancel = await request(app)
+      .get("/api/v1/field-agents/me/collections/today")
+      .set(freshAgentHeaders());
+    expect(todayAfterCancel.status).toBe(200);
+    expect(todayAfterCancel.body.totalAmount).toBe(0);
+    expect(todayAfterCancel.body.batchId).toBeUndefined();
+    expect(todayAfterCancel.body.batchStatus).toBeUndefined();
+
+    // 2. Agent records another single-line batch, submits it, and coordinator removes its ONLY line -> auto-cancels batch
+    const addAgain = await request(app)
+      .post("/api/v1/field-agents/me/collection-batches/lines")
+      .set(freshAgentHeaders())
+      .send({ customerId, amount: 300, transactionBranchId: BRANCH_ID });
+    expect(addAgain.status, JSON.stringify(addAgain.body)).toBe(201);
+
+    const submitAgain = await request(app)
+      .post("/api/v1/field-agents/me/collection-batches/submit-for-approval")
+      .set(freshAgentHeaders())
+      .send({
+        lines: [
+          {
+            customerId,
+            customerName: "Evans Botwe",
+            documentAmount: 300,
+            appAmount: 300,
+            varianceType: "match"
+          }
+        ],
+        summary: { totalDocument: 300, totalApp: 300, totalVariance: 0, unresolvedCount: 0 }
+      });
+    expect(submitAgain.status, JSON.stringify(submitAgain.body)).toBe(201);
+    const secondBatchId = String(submitAgain.body.batchId);
+
+    const pendingSecond = await request(app)
+      .get("/api/v1/collection-batches/pending")
+      .set(coordinatorHeaders());
+    const batch2 = (
+      pendingSecond.body as Array<{ id: string; lines: Array<{ id: string }> }>
+    ).find((b) => b.id === secondBatchId);
+    const onlyLineId = batch2?.lines[0]?.id;
+    expect(onlyLineId).toBeTruthy();
+
+    const removeOnlyLine = await request(app)
+      .delete(`/api/v1/collection-batches/${secondBatchId}/lines/${onlyLineId}`)
+      .set(coordinatorHeaders())
+      .send({ reason: "Only line entered by mistake" });
+    expect(removeOnlyLine.status, JSON.stringify(removeOnlyLine.body)).toBe(200);
+    expect(removeOnlyLine.body.batchDeleted).toBe(true);
+    expect(removeOnlyLine.body.batch).toBeNull();
+    expect(removeOnlyLine.body.newTotalAmount).toBe(0);
+
+    // Zero transactions posted for Evans Botwe
+    const txRes = await request(app).get("/api/v1/transactions").set(coordinatorHeaders());
+    const evansTxs = (txRes.body as Array<{ customerId: string }>).filter(
+      (t) => t.customerId === customerId
+    );
+    expect(evansTxs).toHaveLength(0);
   });
 });

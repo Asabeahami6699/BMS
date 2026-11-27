@@ -14888,6 +14888,12 @@ button.cif-ledger__row:hover {
   gap: 0.45rem;
 }
 
+.callover-batch-card__line-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
 .callover-batch-card__line {
   display: flex;
   flex-wrap: wrap;
@@ -14897,6 +14903,52 @@ button.cif-ledger__row:hover {
   padding: 0.7rem 0.85rem;
   border-radius: var(--radius-sm);
   background: var(--bg-input);
+}
+
+.callover-batch-card__line-side-top {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.callover-batch-card__line-remove {
+  padding: 0.22rem 0.55rem;
+  font-size: 0.76rem;
+  min-height: 0;
+  color: var(--danger, #b91c1c);
+  border-color: rgba(185, 28, 28, 0.28);
+}
+
+.callover-batch-card__danger-btn {
+  color: var(--danger, #b91c1c);
+  border-color: rgba(185, 28, 28, 0.3);
+}
+
+.callover-danger-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(185, 28, 28, 0.28);
+  background: rgba(185, 28, 28, 0.05);
+}
+
+.callover-danger-form--inline {
+  margin-left: 0.5rem;
+}
+
+.callover-danger-form__note {
+  margin: 0;
+  font-size: 0.83rem;
+  line-height: 1.45;
+  color: var(--text-primary);
+}
+
+.callover-danger-form__confirm {
+  background: var(--danger, #b91c1c);
+  border-color: var(--danger, #b91c1c);
+  color: #fff;
 }
 
 .callover-batch-card__line-main {

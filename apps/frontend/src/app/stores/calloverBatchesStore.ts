@@ -8,6 +8,7 @@ import type {
   PostedCollectionBatch
 } from "../api";
 import {
+  cancelUnpostedCollectionBatch,
   getAuthMe,
   getTenantId,
   listBranches,
@@ -19,6 +20,7 @@ import {
   postAllCollectionBatches,
   postCollectionBatch,
   rejectCollectionBatch,
+  removeCollectionBatchLine,
   settleCashVariance,
   unlockExtraCollectionBatch
 } from "../api";
@@ -81,6 +83,27 @@ type CalloverBatchesState = {
     priorPostedCount: number;
     priorPostedTotal: number;
     fieldAgentName: string;
+  }>;
+  cancelBatch: (
+    batchId: string,
+    reason: string
+  ) => Promise<{
+    deletedBatchId: string;
+    fieldAgentId: string;
+    businessDate: string;
+    removedLineCount: number;
+    removedTotalAmount: number;
+  }>;
+  removeLine: (
+    batchId: string,
+    lineId: string,
+    reason: string
+  ) => Promise<{
+    batchDeleted: boolean;
+    batch: PendingCollectionBatch | null;
+    removedLine: { id: string; customerId: string; amount: number };
+    previousTotalAmount: number;
+    newTotalAmount: number;
   }>;
 };
 
@@ -329,6 +352,36 @@ export const useCalloverBatchesStore = create<CalloverBatchesState>((set, get) =
     set({ busyId: `unlock:${batchId}` });
     try {
       const result = await unlockExtraCollectionBatch(batchId, reason);
+      await get().refreshSilent();
+      return result;
+    } finally {
+      set({ busyId: null });
+    }
+  },
+
+  cancelBatch: async (batchId, reason) => {
+    set({ busyId: `cancel:${batchId}` });
+    try {
+      const result = await cancelUnpostedCollectionBatch(batchId, reason);
+      set((state) => ({
+        batches: state.batches.filter((b) => b.id !== batchId)
+      }));
+      await get().refreshSilent();
+      return result;
+    } finally {
+      set({ busyId: null });
+    }
+  },
+
+  removeLine: async (batchId, lineId, reason) => {
+    set({ busyId: `remove-line:${lineId}` });
+    try {
+      const result = await removeCollectionBatchLine(batchId, lineId, reason);
+      if (result.batchDeleted) {
+        set((state) => ({
+          batches: state.batches.filter((b) => b.id !== batchId)
+        }));
+      }
       await get().refreshSilent();
       return result;
     } finally {
