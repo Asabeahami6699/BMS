@@ -42,8 +42,14 @@ export function CollectionModal({ open, customer, topUp, priorAmount = 0, onClos
       showToast("This customer is not active yet. Wait for coordinator approval.", "error");
       return;
     }
-    if (!useAgentCollectionStore.getState().canRecordCollections()) {
-      showToast("Collections are locked until the coordinator posts or rejects today's batch.", "error");
+    const collectionState = useAgentCollectionStore.getState();
+    if (!collectionState.canRecordCollections()) {
+      showToast(
+        collectionState.batchStatus === "posted"
+          ? "Today's batch is already posted. Ask your coordinator to allow an extra batch if you need to collect more today."
+          : "Collections are locked until the coordinator posts or rejects today's batch.",
+        "error"
+      );
       return;
     }
     const parsed = Number(amountText);

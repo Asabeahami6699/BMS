@@ -217,9 +217,17 @@ export function AgentCustomersPage({
                 <span aria-hidden>📍</span> {formatCustomerAddress(customer)}
               </p>
               <p className="agent-customer-meta muted">{customer.phone}</p>
-              <p className="agent-customer-amount muted">
-                Daily plan: GHS {formatAccountAmount(customer.dailyContributionAmount)}
-              </p>
+              {customer.accountType !== "savings" && customer.dailyContributionAmount > 0 ? (
+                <p className="agent-customer-amount muted">
+                  Daily plan: GHS {formatAccountAmount(customer.dailyContributionAmount)}
+                </p>
+              ) : customer.accountType === "savings" ? (
+                <p className="agent-customer-amount muted">Savings account</p>
+              ) : (
+                <p className="agent-customer-amount muted">
+                  Daily plan: GHS {formatAccountAmount(customer.dailyContributionAmount)}
+                </p>
+              )}
               {customer.status === "active" && customer.accountType === "susu" ? (
                 <div className="agent-customer-card-actions">
                   <button

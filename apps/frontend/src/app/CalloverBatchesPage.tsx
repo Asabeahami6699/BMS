@@ -5,7 +5,8 @@ import type {
   AppRole,
   CashVarianceCase,
   CashVarianceSettlementMethod,
-  PendingCollectionBatch
+  PendingCollectionBatch,
+  PostedCollectionBatch
 } from "./api";
 import { useToast } from "../components/Toast";
 import { toUserFacingError } from "../lib/networkError";
@@ -89,6 +90,7 @@ export function CalloverBatchesPage({ role }: Props) {
   const branchLocked = useCalloverBatchesStore((s) => s.branchLocked);
   const fieldAgentId = useCalloverBatchesStore((s) => s.fieldAgentId);
   const batches = useCalloverBatchesStore((s) => s.batches);
+  const postedBatches = useCalloverBatchesStore((s) => s.postedBatches);
   const customers = useCalloverBatchesStore((s) => s.customers);
   const branches = useCalloverBatchesStore((s) => s.branches);
   const agents = useCalloverBatchesStore((s) => s.agents);
@@ -108,6 +110,7 @@ export function CalloverBatchesPage({ role }: Props) {
   const rejectBatch = useCalloverBatchesStore((s) => s.rejectBatch);
   const postAll = useCalloverBatchesStore((s) => s.postAll);
   const settleVariance = useCalloverBatchesStore((s) => s.settleVariance);
+  const unlockExtraBatch = useCalloverBatchesStore((s) => s.unlockExtraBatch);
 
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [cashByBatchId, setCashByBatchId] = useState<Record<string, string>>({});
@@ -116,6 +119,8 @@ export function CalloverBatchesPage({ role }: Props) {
   const [settleAmount, setSettleAmount] = useState("");
   const [settleMethod, setSettleMethod] = useState<CashVarianceSettlementMethod>("cash_repayment");
   const [settleNotes, setSettleNotes] = useState("");
+  const [unlockingBatchId, setUnlockingBatchId] = useState<string | null>(null);
+  const [unlockReason, setUnlockReason] = useState("");
 
   usePageLoading(loading || busyId !== null, "callover-batches");
 
@@ -295,6 +300,30 @@ export function CalloverBatchesPage({ role }: Props) {
       setSettleId(null);
     } catch (error) {
       showToast(toUserFacingError(error, "Failed to settle variance"), "error");
+    }
+  }
+
+  function openUnlockExtra(batch: PostedCollectionBatch) {
+    setUnlockingBatchId(batch.id);
+    setUnlockReason("Early call-over submitted by mistake — continuing collections today");
+  }
+
+  async function handleConfirmUnlockExtra(batch: PostedCollectionBatch) {
+    const trimmed = unlockReason.trim();
+    if (trimmed.length < 3) {
+      showToast("Enter a short reason before unlocking an extra batch", "error");
+      return;
+    }
+    try {
+      const result = await unlockExtraBatch(batch.id, trimmed);
+      showToast(
+        `Unlocked Batch #${result.batch.batchSequence ?? 2} for ${result.fieldAgentName}. They can continue collecting today.`,
+        "success"
+      );
+      setUnlockingBatchId(null);
+      setUnlockReason("");
+    } catch (error) {
+      showToast(toUserFacingError(error, "Failed to unlock extra batch"), "error");
     }
   }
 
@@ -560,6 +589,11 @@ export function CalloverBatchesPage({ role }: Props) {
                     <div className="callover-batch-card__identity">
                       <div className="callover-batch-card__title-row">
                         <h2>{batch.fieldAgentName}</h2>
+                        {(batch.batchSequence ?? 1) > 1 ? (
+                          <span className="callover-batch-card__badge callover-batch-card__badge--ready">
+                            Batch #{batch.batchSequence} · Extra
+                          </span>
+                        ) : null}
                         {batch.businessDate < businessDate ? (
                           <span className="callover-batch-card__badge callover-batch-card__badge--shortage">
                             Overdue · {batch.businessDate}
@@ -709,6 +743,12 @@ export function CalloverBatchesPage({ role }: Props) {
                   </div>
                 ) : null}
 
+                {batch.unlockReason ? (
+                  <p className="muted" style={{ margin: "0 0 0.5rem", fontSize: "0.82rem" }}>
+                    <strong>Extra batch reason:</strong> {batch.unlockReason}
+                  </p>
+                ) : null}
+
                 {batch.agentNotes ? (
                   <blockquote className="callover-batch-card__notes">
                     <span className="callover-batch-card__notes-label">Agent notes</span>
@@ -749,6 +789,137 @@ export function CalloverBatchesPage({ role }: Props) {
           })}
         </div>
       )}
+
+      <section className="callover-variance-section">
+        <div className="callover-variance-section__head">
+          <div className="callover-variance-section__title-row">
+            <h2>Posted batches ({postedBatches.length})</h2>
+          </div>
+          <p className="muted">
+            Already posted and credited for this date. If a field agent accidentally submitted call-over early, click{" "}
+            <strong>Allow extra batch</strong> on today&apos;s posted batch to open Batch #2 (Batch #1 stays locked and
+            audited, and today&apos;s totals add up automatically).
+          </p>
+        </div>
+        {postedBatches.length === 0 ? (
+          <article className="card callover-batches-empty">
+            <p className="muted">No posted collection batches yet for this date and filter.</p>
+          </article>
+        ) : (
+          <div className="callover-variance-list">
+            {postedBatches.map((pb) => {
+              const seq = pb.batchSequence ?? 1;
+              const nextSeq = seq + 1;
+              const isUnlocking = unlockingBatchId === pb.id;
+              const unlockBusy = busyId === `unlock:${pb.id}`;
+              const varianceBadgeClass =
+                pb.cashVarianceStatus === "shortage"
+                  ? "callover-batch-card__badge--shortage"
+                  : pb.cashVarianceStatus === "overage"
+                    ? "callover-batch-card__badge--overage"
+                    : "callover-batch-card__badge--ready";
+              const varianceLabel =
+                pb.cashVarianceStatus === "shortage"
+                  ? `Shortage ${formatMoney(Math.abs(pb.cashVariance ?? 0))}`
+                  : pb.cashVarianceStatus === "overage"
+                    ? `Overage ${formatMoney(pb.cashVariance ?? 0)}`
+                    : "Balanced";
+              return (
+                <article key={pb.id} className="card callover-variance-card">
+                  <div className="callover-variance-card__head">
+                    <div>
+                      <div className="callover-variance-card__title-row">
+                        <h3>{pb.fieldAgentName}</h3>
+                        <span className="callover-batch-card__badge callover-batch-card__badge--ready">
+                          Batch #{seq}
+                        </span>
+                        <span className={`callover-batch-card__badge ${varianceBadgeClass}`}>
+                          {varianceLabel}
+                        </span>
+                        {pb.hasOpenNextBatch ? (
+                          <span className="callover-batch-card__badge callover-batch-card__badge--warn">
+                            Batch #{pb.openNextBatchSequence ?? nextSeq}{" "}
+                            {pb.openNextBatchStatus === "pending_approval" ? "pending" : "open"}
+                          </span>
+                        ) : null}
+                      </div>
+                      <p className="muted callover-batch-card__meta">
+                        {branchLabel(pb.branchId)}
+                        <span aria-hidden> · </span>
+                        {pb.lineCount} line{pb.lineCount === 1 ? "" : "s"}
+                        <span aria-hidden> · </span>
+                        Batch {formatMoney(pb.totalAmount)}
+                        {pb.cashReceivedAmount != null ? (
+                          <>
+                            <span aria-hidden> · </span>
+                            Cash {formatMoney(pb.cashReceivedAmount)}
+                          </>
+                        ) : null}
+                        <span aria-hidden> · </span>
+                        Posted {formatSubmittedAt(pb.postedAt)}
+                      </p>
+                      {pb.unlockReason ? (
+                        <p className="muted" style={{ margin: "0.25rem 0 0", fontSize: "0.8rem" }}>
+                          Extra batch reason: {pb.unlockReason}
+                        </p>
+                      ) : null}
+                    </div>
+                    <div className="callover-variance-card__amount">
+                      {pb.canUnlockExtraBatch && !isUnlocking ? (
+                        <button
+                          type="button"
+                          className="button secondary"
+                          disabled={busyId !== null}
+                          onClick={() => openUnlockExtra(pb)}
+                        >
+                          Allow extra batch (Batch #{nextSeq})
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  {isUnlocking ? (
+                    <div className="callover-unlock-form">
+                      <label className="field">
+                        <span>Reason for unlocking Batch #{nextSeq} (recorded in Audit logs)</span>
+                        <input
+                          type="text"
+                          value={unlockReason}
+                          maxLength={240}
+                          placeholder="e.g. Early morning call-over submitted by mistake"
+                          onChange={(e) => setUnlockReason(e.target.value)}
+                          disabled={unlockBusy}
+                        />
+                      </label>
+                      <div className="callover-unlock-form__actions">
+                        <button
+                          type="button"
+                          className="button"
+                          disabled={unlockBusy || unlockReason.trim().length < 3}
+                          onClick={() => void handleConfirmUnlockExtra(pb)}
+                        >
+                          {unlockBusy ? "Unlocking…" : `Unlock Batch #${nextSeq}`}
+                        </button>
+                        <button
+                          type="button"
+                          className="button secondary"
+                          disabled={unlockBusy}
+                          onClick={() => {
+                            setUnlockingBatchId(null);
+                            setUnlockReason("");
+                          }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </section>
 
       <section className="callover-variance-section">
         <div className="callover-variance-section__head">

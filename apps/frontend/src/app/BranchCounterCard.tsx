@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useShallow } from "zustand/react/shallow";
 import {
-  SAVINGS_INITIAL_DEPOSIT_GHS,
   SUSU_COMMISSION_DEBIT_TAG,
   SUSU_COMMISSION_REFUND_TAG,
   bankProductDisplayLabel,
@@ -322,6 +321,8 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
             accountBalance: 0,
             withdrawableBalance: 0,
             lockedAmount: 0,
+            currentLockedAmount: 0,
+            deferredLockOnWithdrawal: false,
             loanReserveAmount: 0,
             isSavings: false,
             hasLoanReserve: false
@@ -750,9 +751,15 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
                 </div>
                 {balances.isSavings ? (
                   <div className="branch-counter__hero-balance">
-                    <span>Locked (savings min)</span>
+                    <span>
+                      {balances.deferredLockOnWithdrawal
+                        ? "Locked (applies on withdrawal)"
+                        : "Locked (savings min)"}
+                    </span>
                     <strong>
-                      GHS {formatAccountAmount((selectedCustomer.lockedBalance ?? SAVINGS_INITIAL_DEPOSIT_GHS))}
+                      {balances.deferredLockOnWithdrawal
+                        ? `GHS ${formatAccountAmount(balances.currentLockedAmount)} (min GHS ${formatAccountAmount(balances.lockedAmount)})`
+                        : `GHS ${formatAccountAmount(balances.lockedAmount)}`}
                     </strong>
                   </div>
                 ) : null}
@@ -1161,7 +1168,7 @@ export function BranchCounterCard({ role, permissions, modules }: Props) {
         accountBalance={balances.accountBalance}
         withdrawableBalance={balances.withdrawableBalance}
         loanReserveAmount={balances.loanReserveAmount}
-        lockedBalance={balances.isSavings ? (selectedCustomer?.lockedBalance ?? SAVINGS_INITIAL_DEPOSIT_GHS) : 0}
+        lockedBalance={balances.isSavings ? balances.lockedAmount : 0}
         verified={isSelectedCustomerVerified}
         requiredReason={withdrawalVerification.reason}
         onMarkVerified={() => {

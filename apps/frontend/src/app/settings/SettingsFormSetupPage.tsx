@@ -5,8 +5,7 @@ import {
   type RegistrationAccountForm,
   type RegistrationFieldRequirement,
   type RegistrationFormFields,
-  type RegistrationFormSetup,
-  type SavingsOpeningFeeHandling
+  type RegistrationFormSetup
 } from "@bms/shared";
 import { useToast } from "../../components/Toast";
 import { useSettingsWorkspaceStore } from "../stores/settingsWorkspaceStore";
@@ -36,8 +35,8 @@ const FIELD_ROWS: { key: keyof RegistrationFormFields; label: string; hint: stri
   { key: "nextOfKin", label: "Next of kin", hint: "Default is required." },
   {
     key: "dailyContribution",
-    label: "Daily contribution",
-    hint: "Required means the amount must be more than zero. Default is optional."
+    label: "Daily savings / contribution",
+    hint: "Susu accounts always show the daily savings amount. Normal Savings accounts have no fixed daily amount."
   }
 ];
 
@@ -452,65 +451,46 @@ export function SettingsFormSetupPage() {
                 onChange={(event) => patchForm(form.id, { hint: event.target.value })}
               />
             </label>
-            <label className="field">
-              <span>Default daily contribution (GHS)</span>
-              <input
-                inputMode="decimal"
-                value={dailyAmounts[form.id] ?? ""}
-                disabled={!form.enabled}
-                onChange={(event) => {
-                  const value = event.target.value;
-                  if (!moneyInput(value)) {
-                    return;
-                  }
-                  setDailyAmounts({ ...dailyAmounts, [form.id]: value });
-                  patchForm(form.id, {
-                    defaultDailyContributionGhs: value === "" || value === "." ? 0 : Number(value)
-                  });
-                }}
-              />
-            </label>
-            {form.id === "savings" ? (
-              <>
-                <label className="field">
-                  <span>Fixed / locked initial opening amount (GHS)</span>
-                  <input
-                    inputMode="decimal"
-                    value={openingFee}
-                    disabled={!form.enabled}
-                    onChange={(event) => {
-                      if (moneyInput(event.target.value)) {
-                        setOpeningFee(event.target.value);
-                      }
-                    }}
-                  />
-                  <p className="muted">
-                    Admin-configured fixed amount credited on approval and kept locked (non-withdrawable).
-                  </p>
-                </label>
-                <label className="field">
-                  <span>Opening fee options shown to field agents</span>
-                  <select
-                    disabled={!form.enabled}
-                    value={setup.savingsOpeningFeeHandling ?? "both"}
-                    onChange={(event) =>
-                      setFormSetup({
-                        ...setup,
-                        savingsOpeningFeeHandling: event.target.value as SavingsOpeningFeeHandling
-                      })
+            {form.id !== "savings" ? (
+              <label className="field">
+                <span>Default daily contribution (GHS)</span>
+                <input
+                  inputMode="decimal"
+                  value={dailyAmounts[form.id] ?? ""}
+                  disabled={!form.enabled}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    if (!moneyInput(value)) {
+                      return;
                     }
-                  >
-                    <option value="both">
-                      Show both (Cash collected now &amp; Deduct later)
-                    </option>
-                    <option value="cash_now">Cash collected now only</option>
-                    <option value="deduct_later">Not collected — deduct later only</option>
-                  </select>
-                  <p className="muted">
-                    Controls whether field agents choose between both options or only see your preferred handling method.
-                  </p>
-                </label>
-              </>
+                    setDailyAmounts({ ...dailyAmounts, [form.id]: value });
+                    patchForm(form.id, {
+                      defaultDailyContributionGhs: value === "" || value === "." ? 0 : Number(value)
+                    });
+                  }}
+                />
+              </label>
+            ) : null}
+            {form.id === "savings" ? (
+              <label className="field">
+                <span>Minimum locked balance / initial deposit floor (GHS)</span>
+                <input
+                  inputMode="decimal"
+                  value={openingFee}
+                  disabled={!form.enabled}
+                  onChange={(event) => {
+                    if (moneyInput(event.target.value)) {
+                      setOpeningFee(event.target.value);
+                    }
+                  }}
+                />
+                <p className="muted">
+                  Admin-configured minimum locked balance. New Savings initial deposits must be at
+                  least this amount; full deposit credits on approval, and Commission Settings
+                  (<em>When to deduct</em>) controls whether the locked minimum applies on approval
+                  or on first withdrawal.
+                </p>
+              </label>
             ) : null}
             <button type="button" className="button secondary" onClick={() => restoreForm(form.id)}>
               Use default

@@ -111,6 +111,16 @@ export function AgentCollectPage({ onQueueChange, onSync, syncing, pendingCount 
 
   const totalAmount = useAgentCollectionStore((s) => s.totalAmount);
 
+  const batchSequence = useAgentCollectionStore((s) => s.batchSequence);
+
+  const batchStatus = useAgentCollectionStore((s) => s.batchStatus);
+
+  const postedTotalToday = useAgentCollectionStore((s) => s.postedTotalToday);
+
+  const combinedTotalToday = useAgentCollectionStore((s) => s.combinedTotalToday);
+
+  const unlockReason = useAgentCollectionStore((s) => s.unlockReason);
+
   const loadingCollections = useAgentCollectionStore((s) => s.loading);
 
   const refreshToday = useAgentCollectionStore((s) => s.refreshToday);
@@ -285,7 +295,10 @@ export function AgentCollectPage({ onQueueChange, onSync, syncing, pendingCount 
         <div>
           <h2>Daily collection</h2>
           <p className="muted agent-page-sub">
-            Today&apos;s total: <strong>{formatTotal(totalAmount)}</strong>
+            Today&apos;s total:{" "}
+            <strong>
+              {formatTotal(postedTotalToday > 0 ? combinedTotalToday : totalAmount)}
+            </strong>
             <span className="agent-page-sub__sep" aria-hidden>
               ·
             </span>
@@ -296,6 +309,27 @@ export function AgentCollectPage({ onQueueChange, onSync, syncing, pendingCount 
         </div>
         <RowActionsMenu items={moreActions} ariaLabel="Collection actions" />
       </div>
+
+      {batchSequence >= 2 ? (
+        <article className="card agent-extra-batch-banner" role="status">
+          <div className="agent-extra-batch-banner__head">
+            <span className="status-pill status-pill--pending">Batch #{batchSequence} · Extra batch</span>
+            {batchStatus === "posted" ? (
+              <span className="status-pill status-pill--active">Posted</span>
+            ) : batchStatus === "pending_approval" ? (
+              <span className="status-pill status-pill--pending">Awaiting approval</span>
+            ) : (
+              <span className="status-pill status-pill--active">Open</span>
+            )}
+          </div>
+          <p className="muted">
+            {batchStatus === "posted"
+              ? `Batch #${batchSequence} has been posted. Combined total for today: ${formatTotal(combinedTotalToday)}.`
+              : `Your coordinator unlocked Batch #${batchSequence} for today. Earlier batch(es) already posted: ${formatTotal(postedTotalToday)}. Current Batch #${batchSequence}: ${formatTotal(totalAmount)}.`}
+          </p>
+          {unlockReason ? <p className="muted">Reason: {unlockReason}</p> : null}
+        </article>
+      ) : null}
 
 
 

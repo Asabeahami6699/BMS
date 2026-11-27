@@ -36,6 +36,7 @@ export type CollectionBatch = {
   tenantId: string;
   fieldAgentId: string;
   businessDate: string;
+  batchSequence: number;
   status: CollectionBatchStatus;
   totalAmount: number;
   lineCount: number;
@@ -49,6 +50,9 @@ export type CollectionBatch = {
   cashVarianceStatus?: CashVarianceStatus;
   cashReceivedAt?: string;
   cashReceivedBy?: string;
+  unlockedBy?: string;
+  unlockReason?: string;
+  unlockedAt?: string;
   lines: CollectionBatchLine[];
 };
 
@@ -87,6 +91,11 @@ export type FieldAgentTodayCollections = {
   items: FieldAgentTodayCollection[];
   batchStatus?: CollectionBatchStatus;
   batchId?: string;
+  batchSequence?: number;
+  postedBatchesTodayCount?: number;
+  postedTotalToday?: number;
+  combinedTotalToday?: number;
+  unlockReason?: string;
   /** Earlier-date draft/rejected batches with recorded lines that were never submitted. */
   priorUnsubmittedBatches?: PriorUnsubmittedBatchSummary[];
 };
@@ -120,8 +129,26 @@ function todayDate(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-function batchKey(tenantId: string, agentId: string, date: string): string {
-  return `${tenantId}:${agentId}:${date}`;
+function isMissingSequenceColumnError(message?: string): boolean {
+  return Boolean(message && /batch_sequence|unlocked_by|unlock_reason|unlocked_at/i.test(message));
+}
+
+function findMemoryBatchesForAgentDate(
+  tenantId: string,
+  agentId: string,
+  date: string
+): CollectionBatch[] {
+  return [...memoryBatches.values()]
+    .filter((b) => b.tenantId === tenantId && b.fieldAgentId === agentId && b.businessDate === date)
+    .sort((a, b) => b.batchSequence - a.batchSequence);
+}
+
+function findLatestMemoryBatch(
+  tenantId: string,
+  agentId: string,
+  date: string
+): CollectionBatch | null {
+  return findMemoryBatchesForAgentDate(tenantId, agentId, date)[0] ?? null;
 }
 
 function aggregateItems(lines: CollectionBatchLine[]): FieldAgentTodayCollection[] {
@@ -160,17 +187,39 @@ function aggregateItems(lines: CollectionBatchLine[]): FieldAgentTodayCollection
     }));
 }
 
-function toTodayCollections(batch: CollectionBatch | null): FieldAgentTodayCollections {
+function toTodayCollections(
+  batch: CollectionBatch | null,
+  postedSummary?: { count: number; totalAmount: number }
+): FieldAgentTodayCollections {
+  const postedCount = postedSummary?.count ?? (batch?.status === "posted" ? 1 : 0);
+  const postedTotal =
+    postedSummary?.totalAmount ?? (batch?.status === "posted" ? batch.totalAmount : 0);
   if (!batch) {
-    return { customerIds: [], totalAmount: 0, items: [] };
+    return {
+      customerIds: [],
+      totalAmount: 0,
+      items: [],
+      postedBatchesTodayCount: postedCount,
+      postedTotalToday: postedTotal,
+      combinedTotalToday: postedTotal
+    };
   }
+  const combinedTotalToday =
+    batch.status === "posted"
+      ? postedTotal
+      : Math.round((postedTotal + batch.totalAmount) * 100) / 100;
   if (batch.lines.length === 0) {
     return {
       customerIds: [],
       totalAmount: batch.totalAmount,
       items: [],
       batchStatus: batch.status,
-      batchId: batch.id
+      batchId: batch.id,
+      batchSequence: batch.batchSequence,
+      postedBatchesTodayCount: postedCount,
+      postedTotalToday: postedTotal,
+      combinedTotalToday,
+      unlockReason: batch.unlockReason
     };
   }
   const items = aggregateItems(batch.lines);
@@ -179,8 +228,92 @@ function toTodayCollections(batch: CollectionBatch | null): FieldAgentTodayColle
     totalAmount: batch.totalAmount,
     items,
     batchStatus: batch.status,
-    batchId: batch.id
+    batchId: batch.id,
+    batchSequence: batch.batchSequence,
+    postedBatchesTodayCount: postedCount,
+    postedTotalToday: postedTotal,
+    combinedTotalToday,
+    unlockReason: batch.unlockReason
   };
+}
+
+async function hydrateBatchFromRow(batchRow: Record<string, unknown>): Promise<CollectionBatch> {
+  const supabase = getSupabaseAdminClient();
+  const lines: CollectionBatchLine[] = [];
+  if (supabase) {
+    const { data: lineRows, error: lineErr } = await supabase
+      .from("field_agent_collection_batch_lines")
+      .select("id, customer_id, amount, notes, client_line_id, transaction_id, created_at")
+      .eq("batch_id", String(batchRow.id))
+      .order("created_at", { ascending: true });
+
+    if (lineErr) {
+      throw new Error(`Failed to load batch lines: ${lineErr.message}`);
+    }
+
+    for (const row of lineRows ?? []) {
+      lines.push({
+        id: String(row.id),
+        customerId: String(row.customer_id),
+        amount: Number(row.amount),
+        notes: row.notes ?? undefined,
+        clientLineId: row.client_line_id ?? undefined,
+        transactionId: row.transaction_id ?? undefined,
+        createdAt: row.created_at
+      });
+    }
+  }
+
+  const computedTotal = Math.round(lines.reduce((sum, l) => sum + l.amount, 0) * 100) / 100;
+
+  return {
+    id: String(batchRow.id),
+    tenantId: String(batchRow.tenant_id),
+    fieldAgentId: String(batchRow.field_agent_id),
+    businessDate: String(batchRow.business_date).slice(0, 10),
+    batchSequence: Math.max(1, Number(batchRow.batch_sequence ?? 1)),
+    status: batchRow.status as CollectionBatchStatus,
+    totalAmount: computedTotal,
+    lineCount: lines.length,
+    calloverReportId: (batchRow.callover_report_id as string | null) ?? undefined,
+    agentNotes: (batchRow.agent_notes as string | null) ?? undefined,
+    submittedAt: (batchRow.submitted_at as string | null) ?? undefined,
+    postedAt: (batchRow.posted_at as string | null) ?? undefined,
+    postedBy: (batchRow.posted_by as string | null) ?? undefined,
+    cashReceivedAmount:
+      batchRow.cash_received_amount != null ? Number(batchRow.cash_received_amount) : undefined,
+    cashVariance: batchRow.cash_variance != null ? Number(batchRow.cash_variance) : undefined,
+    cashVarianceStatus: (batchRow.cash_variance_status as CashVarianceStatus | null) ?? undefined,
+    cashReceivedAt: (batchRow.cash_received_at as string | null) ?? undefined,
+    cashReceivedBy: (batchRow.cash_received_by as string | null) ?? undefined,
+    unlockedBy: (batchRow.unlocked_by as string | null) ?? undefined,
+    unlockReason: (batchRow.unlock_reason as string | null) ?? undefined,
+    unlockedAt: (batchRow.unlocked_at as string | null) ?? undefined,
+    lines
+  };
+}
+
+async function loadBatchById(tenantId: string, batchId: string): Promise<CollectionBatch | null> {
+  const supabase = getSupabaseAdminClient();
+  if (supabase) {
+    const { data: batchRow, error } = await supabase
+      .from("field_agent_collection_batches")
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .eq("id", batchId)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(`Failed to load collection batch: ${error.message}`);
+    }
+    if (!batchRow) {
+      return null;
+    }
+    return hydrateBatchFromRow(batchRow as Record<string, unknown>);
+  }
+
+  const found = memoryBatches.get(batchId);
+  return found && found.tenantId === tenantId ? found : null;
 }
 
 async function loadBatchRow(
@@ -190,67 +323,72 @@ async function loadBatchRow(
 ): Promise<CollectionBatch | null> {
   const supabase = getSupabaseAdminClient();
   if (supabase) {
-    const { data: batchRow, error } = await supabase
+    let { data: rows, error } = await supabase
       .from("field_agent_collection_batches")
       .select("*")
       .eq("tenant_id", tenantId)
       .eq("field_agent_id", fieldAgentId)
       .eq("business_date", businessDate)
-      .maybeSingle();
+      .order("batch_sequence", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    if (error && isMissingSequenceColumnError(error.message)) {
+      const retry = await supabase
+        .from("field_agent_collection_batches")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .eq("field_agent_id", fieldAgentId)
+        .eq("business_date", businessDate)
+        .order("created_at", { ascending: false })
+        .limit(1);
+      rows = retry.data;
+      error = retry.error;
+    }
 
     if (error) {
       throw new Error(`Failed to load collection batch: ${error.message}`);
     }
+    const batchRow = rows?.[0];
     if (!batchRow) {
       return null;
     }
-
-    const { data: lineRows, error: lineErr } = await supabase
-      .from("field_agent_collection_batch_lines")
-      .select("id, customer_id, amount, notes, client_line_id, transaction_id, created_at")
-      .eq("batch_id", batchRow.id)
-      .order("created_at", { ascending: true });
-
-    if (lineErr) {
-      throw new Error(`Failed to load batch lines: ${lineErr.message}`);
-    }
-
-    const lines: CollectionBatchLine[] = (lineRows ?? []).map((row) => ({
-      id: String(row.id),
-      customerId: String(row.customer_id),
-      amount: Number(row.amount),
-      notes: row.notes ?? undefined,
-      clientLineId: row.client_line_id ?? undefined,
-      transactionId: row.transaction_id ?? undefined,
-      createdAt: row.created_at
-    }));
-
-    const computedTotal = Math.round(lines.reduce((sum, l) => sum + l.amount, 0) * 100) / 100;
-
-    return {
-      id: String(batchRow.id),
-      tenantId: batchRow.tenant_id,
-      fieldAgentId: batchRow.field_agent_id,
-      businessDate: String(batchRow.business_date).slice(0, 10),
-      status: batchRow.status as CollectionBatchStatus,
-      totalAmount: computedTotal,
-      lineCount: lines.length,
-      calloverReportId: batchRow.callover_report_id ?? undefined,
-      agentNotes: batchRow.agent_notes ?? undefined,
-      submittedAt: batchRow.submitted_at ?? undefined,
-      postedAt: batchRow.posted_at ?? undefined,
-      postedBy: batchRow.posted_by ?? undefined,
-      cashReceivedAmount:
-        batchRow.cash_received_amount != null ? Number(batchRow.cash_received_amount) : undefined,
-      cashVariance: batchRow.cash_variance != null ? Number(batchRow.cash_variance) : undefined,
-      cashVarianceStatus: (batchRow.cash_variance_status as CashVarianceStatus | null) ?? undefined,
-      cashReceivedAt: batchRow.cash_received_at ?? undefined,
-      cashReceivedBy: batchRow.cash_received_by ?? undefined,
-      lines
-    };
+    return hydrateBatchFromRow(batchRow as Record<string, unknown>);
   }
 
-  return memoryBatches.get(batchKey(tenantId, fieldAgentId, businessDate)) ?? null;
+  return findLatestMemoryBatch(tenantId, fieldAgentId, businessDate);
+}
+
+async function loadPostedSummaryForDay(
+  tenantId: string,
+  fieldAgentId: string,
+  businessDate: string
+): Promise<{ count: number; totalAmount: number }> {
+  const supabase = getSupabaseAdminClient();
+  if (supabase) {
+    const { data, error } = await supabase
+      .from("field_agent_collection_batches")
+      .select("total_amount")
+      .eq("tenant_id", tenantId)
+      .eq("field_agent_id", fieldAgentId)
+      .eq("business_date", businessDate)
+      .eq("status", "posted");
+    if (error) {
+      return { count: 0, totalAmount: 0 };
+    }
+    const rows = data ?? [];
+    const totalAmount =
+      Math.round(rows.reduce((sum, r) => sum + Number(r.total_amount ?? 0), 0) * 100) / 100;
+    return { count: rows.length, totalAmount };
+  }
+
+  const posted = findMemoryBatchesForAgentDate(tenantId, fieldAgentId, businessDate).filter(
+    (b) => b.status === "posted"
+  );
+  return {
+    count: posted.length,
+    totalAmount: Math.round(posted.reduce((sum, b) => sum + b.totalAmount, 0) * 100) / 100
+  };
 }
 
 type BatchHeader = {
@@ -258,6 +396,7 @@ type BatchHeader = {
   tenantId: string;
   fieldAgentId: string;
   businessDate: string;
+  batchSequence: number;
   status: CollectionBatchStatus;
   totalAmount: number;
   lineCount: number;
@@ -270,17 +409,33 @@ async function loadBatchHeader(
 ): Promise<BatchHeader | null> {
   const supabase = getSupabaseAdminClient();
   if (supabase) {
-    const { data: batchRow, error } = await supabase
+    let { data: rows, error } = await supabase
       .from("field_agent_collection_batches")
-      .select("id, tenant_id, field_agent_id, business_date, status, total_amount, line_count")
+      .select("id, tenant_id, field_agent_id, business_date, batch_sequence, status, total_amount, line_count")
       .eq("tenant_id", tenantId)
       .eq("field_agent_id", fieldAgentId)
       .eq("business_date", businessDate)
-      .maybeSingle();
+      .order("batch_sequence", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    if (error && isMissingSequenceColumnError(error.message)) {
+      const retry = await supabase
+        .from("field_agent_collection_batches")
+        .select("id, tenant_id, field_agent_id, business_date, status, total_amount, line_count")
+        .eq("tenant_id", tenantId)
+        .eq("field_agent_id", fieldAgentId)
+        .eq("business_date", businessDate)
+        .order("created_at", { ascending: false })
+        .limit(1);
+      rows = retry.data as typeof rows;
+      error = retry.error;
+    }
 
     if (error) {
       throw new Error(`Failed to load collection batch: ${error.message}`);
     }
+    const batchRow = rows?.[0];
     if (!batchRow) {
       return null;
     }
@@ -290,13 +445,14 @@ async function loadBatchHeader(
       tenantId: batchRow.tenant_id,
       fieldAgentId: batchRow.field_agent_id,
       businessDate: String(batchRow.business_date).slice(0, 10),
+      batchSequence: Math.max(1, Number((batchRow as { batch_sequence?: unknown }).batch_sequence ?? 1)),
       status: batchRow.status as CollectionBatchStatus,
       totalAmount: Number(batchRow.total_amount ?? 0),
       lineCount: Number(batchRow.line_count ?? 0)
     };
   }
 
-  const batch = memoryBatches.get(batchKey(tenantId, fieldAgentId, businessDate));
+  const batch = findLatestMemoryBatch(tenantId, fieldAgentId, businessDate);
   if (!batch) {
     return null;
   }
@@ -305,6 +461,7 @@ async function loadBatchHeader(
     tenantId: batch.tenantId,
     fieldAgentId: batch.fieldAgentId,
     businessDate: batch.businessDate,
+    batchSequence: batch.batchSequence,
     status: batch.status,
     totalAmount: batch.totalAmount,
     lineCount: batch.lineCount
@@ -335,7 +492,7 @@ async function markBatchPendingApproval(
     return;
   }
 
-  const memoryBatch = memoryBatches.get(batchKey(batch.tenantId, batch.fieldAgentId, batch.businessDate));
+  const memoryBatch = memoryBatches.get(batch.id);
   if (memoryBatch) {
     memoryBatch.status = "pending_approval";
     memoryBatch.submittedAt = submittedAt;
@@ -347,35 +504,68 @@ async function markBatchPendingApproval(
 async function persistBatch(batch: CollectionBatch): Promise<void> {
   const supabase = getSupabaseAdminClient();
   if (supabase) {
-    const { error } = await supabase.from("field_agent_collection_batches").upsert(
-      {
-        id: batch.id,
-        tenant_id: batch.tenantId,
-        field_agent_id: batch.fieldAgentId,
-        business_date: batch.businessDate,
-        status: batch.status,
-        total_amount: batch.totalAmount,
-        line_count: batch.lineCount,
-        callover_report_id: batch.calloverReportId ?? null,
-        agent_notes: batch.agentNotes ?? null,
-        submitted_at: batch.submittedAt ?? null,
-        posted_at: batch.postedAt ?? null,
-        posted_by: batch.postedBy ?? null,
-        cash_received_amount: batch.cashReceivedAmount ?? null,
-        cash_variance: batch.cashVariance ?? null,
-        cash_variance_status: batch.cashVarianceStatus ?? null,
-        cash_received_at: batch.cashReceivedAt ?? null,
-        cash_received_by: batch.cashReceivedBy ?? null,
-        updated_at: new Date().toISOString()
-      },
-      { onConflict: "tenant_id,field_agent_id,business_date" }
-    );
+    const fullRow = {
+      id: batch.id,
+      tenant_id: batch.tenantId,
+      field_agent_id: batch.fieldAgentId,
+      business_date: batch.businessDate,
+      batch_sequence: batch.batchSequence,
+      status: batch.status,
+      total_amount: batch.totalAmount,
+      line_count: batch.lineCount,
+      callover_report_id: batch.calloverReportId ?? null,
+      agent_notes: batch.agentNotes ?? null,
+      submitted_at: batch.submittedAt ?? null,
+      posted_at: batch.postedAt ?? null,
+      posted_by: batch.postedBy ?? null,
+      cash_received_amount: batch.cashReceivedAmount ?? null,
+      cash_variance: batch.cashVariance ?? null,
+      cash_variance_status: batch.cashVarianceStatus ?? null,
+      cash_received_at: batch.cashReceivedAt ?? null,
+      cash_received_by: batch.cashReceivedBy ?? null,
+      unlocked_by: batch.unlockedBy ?? null,
+      unlock_reason: batch.unlockReason ?? null,
+      unlocked_at: batch.unlockedAt ?? null,
+      updated_at: new Date().toISOString()
+    };
+
+    let { error } = await supabase
+      .from("field_agent_collection_batches")
+      .upsert(fullRow, { onConflict: "id" });
+
+    if (error && isMissingSequenceColumnError(error.message)) {
+      const legacyRow = {
+        id: fullRow.id,
+        tenant_id: fullRow.tenant_id,
+        field_agent_id: fullRow.field_agent_id,
+        business_date: fullRow.business_date,
+        status: fullRow.status,
+        total_amount: fullRow.total_amount,
+        line_count: fullRow.line_count,
+        callover_report_id: fullRow.callover_report_id,
+        agent_notes: fullRow.agent_notes,
+        submitted_at: fullRow.submitted_at,
+        posted_at: fullRow.posted_at,
+        posted_by: fullRow.posted_by,
+        cash_received_amount: fullRow.cash_received_amount,
+        cash_variance: fullRow.cash_variance,
+        cash_variance_status: fullRow.cash_variance_status,
+        cash_received_at: fullRow.cash_received_at,
+        cash_received_by: fullRow.cash_received_by,
+        updated_at: fullRow.updated_at
+      };
+      const retry = await supabase
+        .from("field_agent_collection_batches")
+        .upsert(legacyRow, { onConflict: "id" });
+      error = retry.error;
+    }
+
     if (error) {
       throw new Error(`Failed to save collection batch: ${error.message}`);
     }
     return;
   }
-  memoryBatches.set(batchKey(batch.tenantId, batch.fieldAgentId, batch.businessDate), batch);
+  memoryBatches.set(batch.id, batch);
 }
 
 async function getOrCreateDraftBatch(
@@ -386,7 +576,9 @@ async function getOrCreateDraftBatch(
   const existing = await loadBatchRow(tenantId, fieldAgentId, businessDate);
   if (existing) {
     if (existing.status === "posted") {
-      throw new Error("Today's collections are already posted. You cannot add more for this date.");
+      throw new Error(
+        "Today's collections are already posted. Ask your coordinator to unlock an extra batch if you need to collect more today."
+      );
     }
     if (existing.status === "pending_approval") {
       throw new Error("Collections are awaiting coordinator approval. Wait for posting before adding more.");
@@ -399,6 +591,7 @@ async function getOrCreateDraftBatch(
     tenantId,
     fieldAgentId,
     businessDate,
+    batchSequence: 1,
     status: "draft",
     totalAmount: 0,
     lineCount: 0,
@@ -460,12 +653,13 @@ async function listAgentPriorUnsubmittedBatches(
 
 export async function getAgentTodayCollections(context: AgentContext): Promise<FieldAgentTodayCollections> {
   const businessDate = todayDate();
-  const [batch, priorUnsubmittedBatches] = await Promise.all([
+  const [batch, postedSummary, priorUnsubmittedBatches] = await Promise.all([
     loadBatchRow(context.tenantId, context.userId, businessDate),
+    loadPostedSummaryForDay(context.tenantId, context.userId, businessDate),
     listAgentPriorUnsubmittedBatches(context.tenantId, context.userId, businessDate)
   ]);
   return {
-    ...toTodayCollections(batch),
+    ...toTodayCollections(batch, postedSummary),
     priorUnsubmittedBatches
   };
 }
@@ -488,11 +682,12 @@ export async function addCollectionBatchLine(
 
   const businessDate = todayDate();
   const batch = await getOrCreateDraftBatch(context.tenantId, context.userId, businessDate);
+  const postedSummary = await loadPostedSummaryForDay(context.tenantId, context.userId, businessDate);
 
   if (payload.clientLineId) {
     const dup = batch.lines.find((l) => l.clientLineId === payload.clientLineId);
     if (dup) {
-      return toTodayCollections(batch);
+      return toTodayCollections(batch, postedSummary);
     }
   }
 
@@ -526,7 +721,7 @@ export async function addCollectionBatchLine(
   batch.lineCount = batch.lines.length;
   await persistBatch(batch);
 
-  return toTodayCollections(batch);
+  return toTodayCollections(batch, postedSummary);
 }
 
 export async function submitCollectionBatchForApproval(
@@ -712,8 +907,7 @@ export async function listPendingCollectionBatches(
     }
 
     for (const row of data ?? []) {
-      const rowDate = String(row.business_date).slice(0, 10);
-      const batch = await loadBatchRow(context.tenantId, row.field_agent_id, rowDate);
+      const batch = await loadBatchById(context.tenantId, String(row.id));
       if (!batch) {
         continue;
       }
@@ -759,27 +953,218 @@ export async function listPendingCollectionBatches(
   return results.sort((a, b) => a.businessDate.localeCompare(b.businessDate));
 }
 
+export type PostedCollectionBatchView = PendingCollectionBatchView & {
+  hasOpenNextBatch: boolean;
+  openNextBatchStatus?: CollectionBatchStatus;
+  openNextBatchSequence?: number;
+  isLatestBatchForAgent: boolean;
+  canUnlockExtraBatch: boolean;
+};
+
+export async function listPostedCollectionBatches(
+  context: CoordinatorContext,
+  options?: { businessDate?: string; fieldAgentId?: string; branchId?: string }
+): Promise<PostedCollectionBatchView[]> {
+  if (context.role !== "admin" && context.role !== "coordinator") {
+    throw new Error("Only admin or coordinator can view posted collection batches");
+  }
+
+  const businessDate = options?.businessDate?.trim() || todayDate();
+  const isToday = businessDate === todayDate();
+  const supabase = getSupabaseAdminClient();
+  const allForDate: CollectionBatch[] = [];
+
+  if (supabase) {
+    let query = supabase
+      .from("field_agent_collection_batches")
+      .select("*")
+      .eq("tenant_id", context.tenantId)
+      .eq("business_date", businessDate);
+
+    if (options?.fieldAgentId) {
+      query = query.eq("field_agent_id", options.fieldAgentId);
+    }
+
+    const { data, error } = await query.order("created_at", { ascending: false });
+    if (error) {
+      throw new Error(`Failed to list posted batches: ${error.message}`);
+    }
+
+    for (const row of data ?? []) {
+      allForDate.push(await hydrateBatchFromRow(row as Record<string, unknown>));
+    }
+  } else {
+    for (const batch of memoryBatches.values()) {
+      if (
+        batch.tenantId === context.tenantId &&
+        batch.businessDate === businessDate &&
+        (!options?.fieldAgentId || batch.fieldAgentId === options.fieldAgentId)
+      ) {
+        allForDate.push(batch);
+      }
+    }
+  }
+
+  const openByAgent = new Map<string, CollectionBatch>();
+  const maxPostedSeqByAgent = new Map<string, number>();
+
+  for (const b of allForDate) {
+    if (b.status === "posted") {
+      const prev = maxPostedSeqByAgent.get(b.fieldAgentId) ?? 0;
+      if (b.batchSequence > prev) {
+        maxPostedSeqByAgent.set(b.fieldAgentId, b.batchSequence);
+      }
+    } else {
+      const existing = openByAgent.get(b.fieldAgentId);
+      if (!existing || b.batchSequence > existing.batchSequence) {
+        openByAgent.set(b.fieldAgentId, b);
+      }
+    }
+  }
+
+  const posted = allForDate
+    .filter((b) => b.status === "posted")
+    .sort((a, b) => {
+      const timeCmp = (b.postedAt ?? "").localeCompare(a.postedAt ?? "");
+      return timeCmp !== 0 ? timeCmp : b.batchSequence - a.batchSequence;
+    });
+
+  const results: PostedCollectionBatchView[] = [];
+  for (const batch of posted) {
+    const agent = await resolveAgentName(context.tenantId, batch.fieldAgentId);
+    if (!agentMatchesBranchFilter(agent.branchId, context, options?.branchId)) {
+      continue;
+    }
+    const openNext = openByAgent.get(batch.fieldAgentId);
+    const maxPostedSeq = maxPostedSeqByAgent.get(batch.fieldAgentId) ?? batch.batchSequence;
+    const isLatestBatchForAgent = batch.batchSequence >= maxPostedSeq;
+    const hasOpenNextBatch = Boolean(openNext);
+    results.push({
+      ...batch,
+      fieldAgentName: agent.name,
+      fieldAgentEmail: agent.email,
+      branchId: agent.branchId,
+      hasOpenNextBatch,
+      openNextBatchStatus: openNext?.status,
+      openNextBatchSequence: openNext?.batchSequence,
+      isLatestBatchForAgent,
+      canUnlockExtraBatch: isToday && isLatestBatchForAgent && !hasOpenNextBatch
+    });
+  }
+  return results;
+}
+
+export async function unlockExtraCollectionBatch(
+  context: CoordinatorContext,
+  input: { batchId?: string; fieldAgentId?: string; reason: string }
+): Promise<{
+  batch: CollectionBatch;
+  priorPostedCount: number;
+  priorPostedTotal: number;
+  fieldAgentName: string;
+}> {
+  if (context.role !== "admin" && context.role !== "coordinator") {
+    throw new Error("Only admin or coordinator can unlock an extra collection batch");
+  }
+
+  const reason = input.reason?.trim() ?? "";
+  if (reason.length < 3) {
+    throw new Error("Enter a short reason (at least 3 characters) for unlocking an extra batch");
+  }
+
+  let fieldAgentId = input.fieldAgentId?.trim() || "";
+  let businessDate = todayDate();
+
+  if (input.batchId) {
+    const sourceBatch = await loadBatchById(context.tenantId, input.batchId);
+    if (!sourceBatch) {
+      throw new Error("Source collection batch not found");
+    }
+    if (sourceBatch.status !== "posted") {
+      throw new Error("Only a posted collection batch can be followed by an extra batch");
+    }
+    fieldAgentId = sourceBatch.fieldAgentId;
+    businessDate = sourceBatch.businessDate;
+  }
+
+  if (!fieldAgentId) {
+    throw new Error("Field agent is required");
+  }
+
+  if (businessDate !== todayDate()) {
+    throw new Error("Extra collection batches can only be unlocked for today's business date");
+  }
+
+  const agent = await resolveAgentName(context.tenantId, fieldAgentId);
+  if (!agentMatchesBranchFilter(agent.branchId, context)) {
+    throw new Error("This field agent belongs to another branch");
+  }
+
+  const latest = await loadBatchRow(context.tenantId, fieldAgentId, businessDate);
+  if (!latest) {
+    throw new Error("This field agent has no posted batch today — they can already collect normally");
+  }
+  if (latest.status !== "posted") {
+    throw new Error(
+      `This field agent already has an open batch (Batch #${latest.batchSequence} · ${latest.status.replace(/_/g, " ")})`
+    );
+  }
+
+  const postedSummary = await loadPostedSummaryForDay(context.tenantId, fieldAgentId, businessDate);
+  const nextSequence = latest.batchSequence + 1;
+  const now = new Date().toISOString();
+  const nextBatch: CollectionBatch = {
+    id: randomUUID(),
+    tenantId: context.tenantId,
+    fieldAgentId,
+    businessDate,
+    batchSequence: nextSequence,
+    status: "draft",
+    totalAmount: 0,
+    lineCount: 0,
+    unlockedBy: context.userId,
+    unlockReason: reason,
+    unlockedAt: now,
+    lines: []
+  };
+
+  try {
+    await persistBatch(nextBatch);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (/duplicate key|unique constraint/i.test(msg)) {
+      throw new Error(
+        "Could not unlock extra batch. Make sure database migration 108_collection_batch_sequence.sql is applied and no extra batch is already open."
+      );
+    }
+    throw error;
+  }
+
+  try {
+    await createAgentNotification({
+      tenantId: context.tenantId,
+      userId: fieldAgentId,
+      kind: "collection_batch_pending",
+      title: `Extra batch unlocked (Batch #${nextSequence})`,
+      body: `Coordinator unlocked Batch #${nextSequence} for today (${reason}). You can continue collecting — at call-over, hand over cash for Batch #${nextSequence} only (earlier posted today: GHS ${formatAccountAmount(postedSummary.totalAmount)}).`
+    });
+  } catch {
+    /* non-blocking */
+  }
+
+  return {
+    batch: nextBatch,
+    priorPostedCount: postedSummary.count,
+    priorPostedTotal: postedSummary.totalAmount,
+    fieldAgentName: agent.name
+  };
+}
+
 export async function getCollectionBatchById(
   context: CoordinatorContext,
   batchId: string
 ): Promise<PendingCollectionBatchView> {
-  const supabase = getSupabaseAdminClient();
-  let batch: CollectionBatch | null = null;
-
-  if (supabase) {
-    const { data, error } = await supabase
-      .from("field_agent_collection_batches")
-      .select("field_agent_id, business_date, tenant_id")
-      .eq("tenant_id", context.tenantId)
-      .eq("id", batchId)
-      .maybeSingle();
-    if (error || !data) {
-      throw new Error("Collection batch not found");
-    }
-    batch = await loadBatchRow(context.tenantId, data.field_agent_id, String(data.business_date).slice(0, 10));
-  } else {
-    batch = [...memoryBatches.values()].find((b) => b.id === batchId && b.tenantId === context.tenantId) ?? null;
-  }
+  const batch = await loadBatchById(context.tenantId, batchId);
 
   if (!batch) {
     throw new Error("Collection batch not found");
@@ -829,7 +1214,7 @@ async function postSingleBatchUnlocked(
   batch: CollectionBatch,
   options?: { cashReceivedAmount?: number; confirmDifferencesReviewed?: boolean }
 ): Promise<CollectionBatch> {
-  const fresh = await loadBatchRow(context.tenantId, batch.fieldAgentId, batch.businessDate);
+  const fresh = await loadBatchById(context.tenantId, batch.id);
   const current = fresh ?? batch;
   if (current.status === "posted") {
     return current;
@@ -944,12 +1329,13 @@ async function postSingleBatchUnlocked(
         : batch.cashVarianceStatus === "overage"
           ? ` Overage GHS ${formatAccountAmount((batch.cashVariance ?? 0))} must be reconciled (missing entries) — it cannot clear a shortage.`
           : "";
+    const seqLabel = batch.batchSequence > 1 ? ` (Batch #${batch.batchSequence})` : "";
     await createAgentNotification({
       tenantId: context.tenantId,
       userId: batch.fieldAgentId,
       kind: "collection_batch_posted",
-      title: "Collections posted",
-      body: `Your batch of GHS ${formatAccountAmount(batch.totalAmount)} for ${batch.businessDate} was posted to customer accounts.${varianceNote}`
+      title: batch.batchSequence > 1 ? `Collections posted · Batch #${batch.batchSequence}` : "Collections posted",
+      body: `Your batch${seqLabel} of GHS ${formatAccountAmount(batch.totalAmount)} for ${batch.businessDate} was posted to customer accounts.${varianceNote}`
     });
   } catch (error) {
     console.warn(

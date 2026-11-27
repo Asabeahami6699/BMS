@@ -328,12 +328,27 @@ export function CustomerDetailsView({
 
   const accountBalance =
     ledger.length > 0 ? ledger[ledger.length - 1]!.balanceAfter : 0;
-  const lockedAmount = isSavings ? (customer.lockedBalance ?? SAVINGS_INITIAL_DEPOSIT_GHS) : 0;
+  const currentLockedAmount = isSavings
+    ? customer.lockedBalance != null ||
+      customer.savingsLockTiming != null ||
+      customer.initialDepositCreditedAt != null
+      ? Math.max(0, customer.lockedBalance ?? 0)
+      : SAVINGS_INITIAL_DEPOSIT_GHS
+    : 0;
+  const effectiveLockedAmount = isSavings
+    ? customer.savingsLockTiming === "withdrawal"
+      ? Math.max(currentLockedAmount, customer.savingsLockTargetAmount ?? 0)
+      : currentLockedAmount
+    : 0;
+  const deferredLockOnWithdrawal =
+    isSavings &&
+    customer.savingsLockTiming === "withdrawal" &&
+    currentLockedAmount < effectiveLockedAmount;
   const loanCollateralLocked = Math.max(0, customer.loanCollateralLocked ?? 0);
   const loanReserveAmount = Math.max(0, customer.loanReserveAmount ?? 0);
   const withdrawableBalance = Math.max(
     0,
-    accountBalance - lockedAmount - loanCollateralLocked - loanReserveAmount
+    accountBalance - effectiveLockedAmount - loanCollateralLocked - loanReserveAmount
   );
   const hasLoanReserve = loanReserveAmount > 0;
   const hasLoanCollateral = loanCollateralLocked > 0;
@@ -441,9 +456,13 @@ export function CustomerDetailsView({
                   ) : null}
                   {isSavings ? (
                     <div className="cif-financial__balance">
-                      <span className="cif-financial__balance-label">Locked (savings min)</span>
+                      <span className="cif-financial__balance-label">
+                        {deferredLockOnWithdrawal ? "Locked (on withdrawal)" : "Locked (savings min)"}
+                      </span>
                       <strong className="cif-financial__balance-value">
-                        GHS {formatAccountAmount(lockedAmount)}
+                        {deferredLockOnWithdrawal
+                          ? `GHS ${formatAccountAmount(currentLockedAmount)} (min GHS ${formatAccountAmount(effectiveLockedAmount)})`
+                          : `GHS ${formatAccountAmount(currentLockedAmount)}`}
                       </strong>
                     </div>
                   ) : null}
@@ -925,22 +944,45 @@ export function CustomerDetailsView({
                 ) : null}
                 {isSavings ? (
                   <>
+                    {customer.initialDepositAmount != null && customer.initialDepositAmount > 0 ? (
+                      <InfoRow
+                        label="Initial deposit"
+                        value={`GHS ${formatAccountAmount(customer.initialDepositAmount)}${
+                          customer.status === "pending_activation"
+                            ? " (credits on approval)"
+                            : customer.initialDepositCreditedAt
+                              ? " (credited)"
+                              : ""
+                        }`}
+                      />
+                    ) : null}
                     <InfoRow
                       label="Locked balance"
-                      value={`GHS ${formatAccountAmount((customer.lockedBalance ?? SAVINGS_INITIAL_DEPOSIT_GHS))}`}
+                      value={
+                        deferredLockOnWithdrawal
+                          ? `GHS ${formatAccountAmount(currentLockedAmount)} (GHS ${formatAccountAmount(effectiveLockedAmount)} locks on withdrawal)`
+                          : `GHS ${formatAccountAmount(currentLockedAmount)}`
+                      }
                     />
                     <InfoRow
-                      label="Opening fee"
+                      label="Lock timing"
                       value={
-                        customer.savingsOpeningFeeCollected === true
-                          ? "Cash collected"
-                          : customer.savingsOpeningFeeCollected === false
-                            ? "Deduct from deposits"
-                            : "—"
+                        customer.savingsLockTiming === "withdrawal"
+                          ? "On customer withdrawal"
+                          : customer.savingsLockTiming === "first_collection" ||
+                              customer.savingsLockTiming === "cycle_maturity"
+                            ? "Locked on approval"
+                            : customer.savingsOpeningFeeCollected === true
+                              ? "Cash collected"
+                              : customer.savingsOpeningFeeCollected === false
+                                ? "Deduct from deposits"
+                                : "—"
                       }
                     />
                     <p className="cif-footnote muted">
-                      Locked amount cannot be withdrawn by the customer.
+                      {deferredLockOnWithdrawal
+                        ? "Minimum locked balance will be held on the customer's first withdrawal."
+                        : "Locked amount cannot be withdrawn by the customer."}
                     </p>
                   </>
                 ) : null}

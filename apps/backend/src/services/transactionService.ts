@@ -21,6 +21,10 @@ import {
   openingFeeNote,
   recordOpeningFeeRecovery
 } from "./savingsOpeningFeeService.js";
+import {
+  enforceSavingsLockOnWithdrawal,
+  resolveSavingsEffectiveLockAmount
+} from "./savingsInitialDepositService.js";
 import { getSavingsOpeningFeeGhs } from "./tenantProfileService.js";
 import { getRegistrationFormSetup } from "./registrationFormService.js";
 import {
@@ -789,8 +793,13 @@ export async function createTransaction(
       } catch {
         /* ignore */
       }
+      const effectiveSavingsLock = resolveSavingsEffectiveLockAmount(customer);
+      const lockHint =
+        customer.accountType === "savings" && effectiveSavingsLock > 0
+          ? ` (GHS ${formatAccountAmount(effectiveSavingsLock)} minimum savings locked balance)`
+          : "";
       throw new Error(
-        `Insufficient withdrawable balance. Available: GHS ${formatAccountAmount(withdrawable)}${reserveHint}`
+        `Insufficient withdrawable balance. Available: GHS ${formatAccountAmount(withdrawable)}${lockHint}${reserveHint}`
       );
     }
   }
@@ -1021,6 +1030,17 @@ export async function createTransaction(
     payload.manualPartnerAccount
   ) {
     return createAgencyPendingDeposit(context, transaction);
+  }
+
+  // When Commission Settings "When to deduct" is `withdrawal`, persist the savings locked_balance
+  // on the first withdrawal right before the atomic ledger debit so Postgres enforces the hold too.
+  if (payload.type === "withdrawal" && customer.accountType === "savings") {
+    await enforceSavingsLockOnWithdrawal({
+      tenantId: context.tenantId,
+      customer,
+      recordedByUserId: context.userId,
+      branchId: payload.transactionBranchId
+    });
   }
 
   const supabase = getSupabaseAdminClient();

@@ -19,6 +19,7 @@ import { toUserFacingError } from "../lib/networkError";
 import { RegistrationModal } from "../agent/RegistrationModal";
 import { CustomerAccountStatementModal } from "./CustomerAccountStatementModal";
 import { CustomerDetailModal } from "./CustomerDetailModal";
+import { EditCustomerModal } from "./EditCustomerModal";
 import { useCustomersLiveSync } from "./hooks/useCustomersLiveSync";
 import { useAgentsStore } from "./stores/agentsStore";
 import { useCustomersStore } from "./stores/customersStore";
@@ -58,6 +59,11 @@ export function CustomerOpsCard({ role }: Props) {
   const { showToast } = useToast();
   const { confirm, dialogProps } = useConfirmDialog();
   const canCreate = role === "admin" || role === "coordinator" || role === "field_agent";
+  const canEdit =
+    role === "admin" ||
+    role === "super_admin" ||
+    role === "coordinator" ||
+    role === "customer_service";
   const canPurge = role === "super_admin";
   const canManageStatus = role === "admin" || role === "super_admin";
   const [searchParams] = useSearchParams();
@@ -72,6 +78,7 @@ export function CustomerOpsCard({ role }: Props) {
   }, [searchParams]);
   const [createOpen, setCreateOpen] = useState(false);
   const [detailCustomerId, setDetailCustomerId] = useState<string | null>(null);
+  const [editCustomerId, setEditCustomerId] = useState<string | null>(null);
   const [statementCustomerId, setStatementCustomerId] = useState<string | null>(null);
   const [dormantExpanded, setDormantExpanded] = useState(false);
 
@@ -149,6 +156,11 @@ export function CustomerOpsCard({ role }: Props) {
   const detailCustomer = useMemo(
     () => (detailCustomerId ? (customers.find((c) => c.id === detailCustomerId) ?? null) : null),
     [customers, detailCustomerId]
+  );
+
+  const editCustomer = useMemo(
+    () => (editCustomerId ? (customers.find((c) => c.id === editCustomerId) ?? null) : null),
+    [customers, editCustomerId]
   );
 
   const statementCustomer = useMemo(
@@ -513,6 +525,14 @@ export function CustomerOpsCard({ role }: Props) {
                     label: "View details",
                     onClick: () => setDetailCustomerId(row.id)
                   },
+                  ...(canEdit
+                    ? [
+                        {
+                          label: "Update details",
+                          onClick: () => setEditCustomerId(row.id)
+                        }
+                      ]
+                    : []),
                   {
                     label: "Account statement",
                     onClick: () => setStatementCustomerId(row.id)
@@ -562,7 +582,15 @@ export function CustomerOpsCard({ role }: Props) {
         customer={detailCustomer}
         branchLabel={detailCustomer ? branchLabel(detailCustomer.homeBranchId, branches) : undefined}
         agentLabel={detailCustomer ? fieldAgentLabel(detailCustomer) : undefined}
+        onEdit={canEdit ? (c) => setEditCustomerId(c.id) : undefined}
         onClose={() => setDetailCustomerId(null)}
+      />
+
+      <EditCustomerModal
+        open={editCustomerId !== null && editCustomer !== null}
+        customer={editCustomer}
+        branches={branches}
+        onClose={() => setEditCustomerId(null)}
       />
 
       <CustomerAccountStatementModal

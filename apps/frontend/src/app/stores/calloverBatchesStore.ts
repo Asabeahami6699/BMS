@@ -4,7 +4,8 @@ import type {
   CashVarianceCase,
   CashVarianceSettlementMethod,
   Customer,
-  PendingCollectionBatch
+  PendingCollectionBatch,
+  PostedCollectionBatch
 } from "../api";
 import {
   getAuthMe,
@@ -14,10 +15,12 @@ import {
   listCustomers,
   listFieldAgents,
   listPendingCollectionBatches,
+  listPostedCollectionBatches,
   postAllCollectionBatches,
   postCollectionBatch,
   rejectCollectionBatch,
-  settleCashVariance
+  settleCashVariance,
+  unlockExtraCollectionBatch
 } from "../api";
 import { toUserFacingError } from "../../lib/networkError";
 import {
@@ -35,6 +38,7 @@ type CalloverBatchesState = {
   branchLocked: boolean;
   fieldAgentId: string;
   batches: PendingCollectionBatch[];
+  postedBatches: PostedCollectionBatch[];
   customers: Customer[];
   branches: Branch[];
   agents: AgentRow[];
@@ -69,6 +73,15 @@ type CalloverBatchesState = {
     varianceId: string,
     input: { amount: number; method: CashVarianceSettlementMethod; notes?: string }
   ) => Promise<CashVarianceCase>;
+  unlockExtraBatch: (
+    batchId: string,
+    reason: string
+  ) => Promise<{
+    batch: PendingCollectionBatch;
+    priorPostedCount: number;
+    priorPostedTotal: number;
+    fieldAgentName: string;
+  }>;
 };
 
 function todayIso(): string {
@@ -85,6 +98,7 @@ export const useCalloverBatchesStore = create<CalloverBatchesState>((set, get) =
   branchLocked: false,
   fieldAgentId: "",
   batches: [],
+  postedBatches: [],
   customers: [],
   branches: [],
   agents: [],
@@ -145,23 +159,30 @@ export const useCalloverBatchesStore = create<CalloverBatchesState>((set, get) =
     fetchInFlight = (async () => {
       try {
         const { businessDate, fieldAgentId, branchId } = get();
-        const [batchRows, customerRows, agentRows, branchRows, varianceRows] = await Promise.all([
-          listPendingCollectionBatches({
-            businessDate,
-            fieldAgentId: fieldAgentId || undefined,
-            branchId: branchId || undefined
-          }),
-          listCustomers(),
-          listFieldAgents(),
-          listBranches(),
-          listCashVariances({
-            status: "open",
-            fieldAgentId: fieldAgentId || undefined,
-            branchId: branchId || undefined
-          })
-        ]);
+        const [batchRows, postedRows, customerRows, agentRows, branchRows, varianceRows] =
+          await Promise.all([
+            listPendingCollectionBatches({
+              businessDate,
+              fieldAgentId: fieldAgentId || undefined,
+              branchId: branchId || undefined
+            }),
+            listPostedCollectionBatches({
+              businessDate,
+              fieldAgentId: fieldAgentId || undefined,
+              branchId: branchId || undefined
+            }),
+            listCustomers(),
+            listFieldAgents(),
+            listBranches(),
+            listCashVariances({
+              status: "open",
+              fieldAgentId: fieldAgentId || undefined,
+              branchId: branchId || undefined
+            })
+          ]);
         set({
           batches: batchRows,
+          postedBatches: postedRows,
           customers: customerRows,
           branches: branchRows.filter((b) => b.status !== "inactive"),
           agents: agentRows.map((a) => ({
@@ -194,8 +215,13 @@ export const useCalloverBatchesStore = create<CalloverBatchesState>((set, get) =
     fetchInFlight = (async () => {
       try {
         const { businessDate, fieldAgentId, branchId } = get();
-        const [batchRows, varianceRows] = await Promise.all([
+        const [batchRows, postedRows, varianceRows] = await Promise.all([
           listPendingCollectionBatches({
+            businessDate,
+            fieldAgentId: fieldAgentId || undefined,
+            branchId: branchId || undefined
+          }),
+          listPostedCollectionBatches({
             businessDate,
             fieldAgentId: fieldAgentId || undefined,
             branchId: branchId || undefined
@@ -208,6 +234,7 @@ export const useCalloverBatchesStore = create<CalloverBatchesState>((set, get) =
         ]);
         set({
           batches: batchRows,
+          postedBatches: postedRows,
           variances: varianceRows,
           lastFetchedAt: Date.now(),
           error: null
@@ -228,7 +255,12 @@ export const useCalloverBatchesStore = create<CalloverBatchesState>((set, get) =
     set({ liveSyncActive: true });
     liveSync.start({
       getTenantId,
-      tables: ["collection_batches", "collection_batch_lines", "field_agent_cash_variances"],
+      tables: [
+        "field_agent_collection_batches",
+        "collection_batches",
+        "collection_batch_lines",
+        "field_agent_cash_variances"
+      ],
       onRefresh: () => void get().refreshSilent(),
       isStale: () => !isFresh(get().lastFetchedAt)
     });
@@ -288,6 +320,17 @@ export const useCalloverBatchesStore = create<CalloverBatchesState>((set, get) =
       const updated = await settleCashVariance(varianceId, input);
       await get().refreshSilent();
       return updated;
+    } finally {
+      set({ busyId: null });
+    }
+  },
+
+  unlockExtraBatch: async (batchId, reason) => {
+    set({ busyId: `unlock:${batchId}` });
+    try {
+      const result = await unlockExtraCollectionBatch(batchId, reason);
+      await get().refreshSilent();
+      return result;
     } finally {
       set({ busyId: null });
     }

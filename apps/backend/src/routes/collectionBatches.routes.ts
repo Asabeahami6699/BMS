@@ -3,9 +3,11 @@ import { requirePermission } from "../middleware/requirePermission.js";
 import {
   getCollectionBatchById,
   listPendingCollectionBatches,
+  listPostedCollectionBatches,
   postAllPendingCollectionBatches,
   postCollectionBatch,
-  rejectCollectionBatch
+  rejectCollectionBatch,
+  unlockExtraCollectionBatch
 } from "../services/collectionBatchService.js";
 import {
   creditCustomerFromOverage,
@@ -64,6 +66,34 @@ collectionBatchesRouter.get("/pending", requirePermission("transactions.read"), 
   } catch (error) {
     res.status(400).json({
       error: error instanceof Error ? error.message : "Failed to list pending batches"
+    });
+  }
+});
+
+collectionBatchesRouter.get("/posted", requirePermission("transactions.read"), async (req, res) => {
+  if (!requireCoordinator(req, res)) {
+    return;
+  }
+  const context = req.userContext!;
+  const businessDate = typeof req.query.businessDate === "string" ? req.query.businessDate : undefined;
+  const fieldAgentId = typeof req.query.fieldAgentId === "string" ? req.query.fieldAgentId : undefined;
+  const branchId = resolveRequestBranchFilter(req);
+
+  try {
+    const batches = await listPostedCollectionBatches(
+      {
+        tenantId: context.tenantId,
+        userId: context.userId,
+        role: context.role,
+        branchId: context.branchId,
+        scopeType: context.scopeType
+      },
+      { businessDate, fieldAgentId, branchId }
+    );
+    res.json(batches);
+  } catch (error) {
+    res.status(400).json({
+      error: error instanceof Error ? error.message : "Failed to list posted batches"
     });
   }
 });
@@ -238,6 +268,60 @@ collectionBatchesRouter.get("/:batchId", requirePermission("transactions.read"),
     });
   }
 });
+
+collectionBatchesRouter.post(
+  "/:batchId/unlock-extra",
+  requirePermission("transactions.create.daily_susu"),
+  async (req, res) => {
+    if (!requireCoordinator(req, res)) {
+      return;
+    }
+    const context = req.userContext!;
+    const batchId = Array.isArray(req.params.batchId) ? req.params.batchId[0] : req.params.batchId;
+    const reason = typeof req.body?.reason === "string" ? req.body.reason : "";
+
+    try {
+      const result = await unlockExtraCollectionBatch(
+        {
+          tenantId: context.tenantId,
+          userId: context.userId,
+          role: context.role,
+          branchId: context.branchId,
+          scopeType: context.scopeType
+        },
+        { batchId, reason }
+      );
+      setRequestAuditContext(req, {
+        entityType: "collection_batch",
+        entityId: result.batch.id,
+        action: `Unlocked extra collection batch (Batch #${result.batch.batchSequence}) for ${result.fieldAgentName}`,
+        before: {
+          sourceBatchId: batchId,
+          priorPostedCount: result.priorPostedCount,
+          priorPostedTotal: result.priorPostedTotal
+        },
+        after: {
+          batchId: result.batch.id,
+          batchSequence: result.batch.batchSequence,
+          fieldAgentId: result.batch.fieldAgentId,
+          businessDate: result.batch.businessDate,
+          status: result.batch.status,
+          unlockReason: result.batch.unlockReason
+        },
+        metadata: {
+          fieldAgentName: result.fieldAgentName,
+          sourceBatchId: batchId,
+          batchSequence: result.batch.batchSequence
+        }
+      });
+      res.status(201).json(result);
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Failed to unlock extra collection batch"
+      });
+    }
+  }
+);
 
 collectionBatchesRouter.post("/:batchId/post", requirePermission("transactions.create.daily_susu"), async (req, res) => {
   const context = req.userContext;

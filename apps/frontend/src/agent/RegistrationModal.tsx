@@ -11,7 +11,8 @@ import {
   formatGhs,
   formatIdCardTypeLabel,
   registrationFormIssue,
-  registrationPayloadForSetup
+  registrationPayloadForSetup,
+  showDailyContributionForAccountType
 } from "@bms/shared";
 import type { Branch, Customer, FieldAgentOption } from "../app/api";
 import { getRegistrationFormSetup, listFieldAgents, submitCustomerRegistration } from "../app/api";
@@ -90,7 +91,8 @@ const EMPTY_FORM = {
   kinUseCustomerAddress: true,
   kinLocation: "",
   kinHouseNumber: "",
-  dailyContributionAmount: "20"
+  dailyContributionAmount: "20",
+  initialDepositAmount: "20"
 };
 
 function parseDailyContribution(raw: string): number {
@@ -143,7 +145,6 @@ function RegistrationPreview({
   form,
   isOffice,
   isSavings,
-  savingsOpeningFeeCollected,
   branchLabel,
   agentLabel,
   photoUrl,
@@ -155,7 +156,6 @@ function RegistrationPreview({
   form: typeof EMPTY_FORM;
   isOffice: boolean;
   isSavings: boolean;
-  savingsOpeningFeeCollected: boolean | null;
   branchLabel: string;
   agentLabel: string;
   photoUrl?: string;
@@ -170,7 +170,13 @@ function RegistrationPreview({
     (form.kinUseCustomerAddress
       ? [form.location, form.houseNumber].filter(Boolean).join(", ")
       : [form.kinLocation, form.kinHouseNumber].filter(Boolean).join(", ")) || "—";
-  const dailyContribution = parseDailyContribution(form.dailyContributionAmount);
+  const showDailyContribution = showDailyContributionForAccountType(
+    form.accountType,
+    fields.dailyContribution
+  );
+  const dailyContribution = showDailyContribution
+    ? parseDailyContribution(form.dailyContributionAmount)
+    : 0;
   const isSimplifiedKyc = form.idCardType === "no_id_simplified_kyc";
   const showIdPhoto = !isSimplifiedKyc && fields.idCardPhoto !== "hidden" && Boolean(idCardPhotoUrl);
   const showCustomerPhoto = (isSimplifiedKyc || fields.customerPhoto !== "hidden") && Boolean(photoUrl);
@@ -201,16 +207,14 @@ function RegistrationPreview({
             ) : null}
           </div>
           <div className="agent-reg-preview__hero-chips">
-            {fields.dailyContribution !== "hidden" ? (
+            {showDailyContribution ? (
               <span className="agent-reg-preview__chip agent-reg-preview__chip--accent">
                 Daily: GHS {formatAccountAmount(dailyContribution)}
               </span>
             ) : null}
-            {isSavings && openingFee > 0 ? (
-              <span className="agent-reg-preview__chip">
-                {savingsOpeningFeeCollected
-                  ? `Opening fee ${money(openingFee)} collected`
-                  : `Opening fee ${money(openingFee)} deferred`}
+            {isSavings ? (
+              <span className="agent-reg-preview__chip agent-reg-preview__chip--accent">
+                Initial deposit: {money(parseDailyContribution(form.initialDepositAmount))}
               </span>
             ) : null}
             {isOffice && branchLabel ? (
@@ -280,7 +284,7 @@ function RegistrationPreview({
               <dt>Account type</dt>
               <dd>{accountLabel}</dd>
             </div>
-            {fields.dailyContribution !== "hidden" ? (
+            {showDailyContribution ? (
               <div>
                 <dt>Daily contribution</dt>
                 <dd>GHS {formatAccountAmount(dailyContribution)}</dd>
@@ -327,13 +331,13 @@ function RegistrationPreview({
                 </>
               )
             ) : null}
-            {isSavings && openingFee > 0 ? (
+            {isSavings ? (
               <div className="agent-reg-preview__span-2">
-                <dt>Opening fee</dt>
+                <dt>Initial deposit</dt>
                 <dd>
-                  {savingsOpeningFeeCollected
-                    ? `${money(openingFee)} collected now`
-                    : `Not collected — deduct up to ${money(openingFee)} later`}
+                  {money(parseDailyContribution(form.initialDepositAmount))} — credits to account on
+                  approval
+                  {openingFee > 0 ? ` (minimum locked balance: ${money(openingFee)})` : ""}
                 </dd>
               </div>
             ) : null}
@@ -414,7 +418,6 @@ export function RegistrationModal({
   const [photoName, setPhotoName] = useState<string | undefined>();
   const [idCardPhotoUrl, setIdCardPhotoUrl] = useState<string | undefined>();
   const [idCardPhotoName, setIdCardPhotoName] = useState<string | undefined>();
-  const [savingsOpeningFeeCollected, setSavingsOpeningFeeCollected] = useState<boolean | null>(null);
   const [formSetup, setFormSetup] = useState<RegistrationFormSetup>(() => defaultRegistrationFormSetup());
   const appliedDailyKey = useRef("");
   const [homeBranchId, setHomeBranchId] = useState("");
@@ -437,26 +440,15 @@ export function RegistrationModal({
   }, [agents, homeBranchId]);
 
   const isSavings = form.accountType === "savings";
+  const showDailyContribution = showDailyContributionForAccountType(
+    form.accountType,
+    formSetup.fields.dailyContribution
+  );
   const openingFee = formSetup.savingsOpeningFeeGhs;
-  const openingFeeHandling = formSetup.savingsOpeningFeeHandling ?? "both";
-  const showCashNowOption = openingFeeHandling === "both" || openingFeeHandling === "cash_now";
-  const showDeductLaterOption =
-    openingFeeHandling === "both" || openingFeeHandling === "deduct_later";
-
-  useEffect(() => {
-    if (!isSavings || openingFee <= 0) {
-      return;
-    }
-    if (openingFeeHandling === "cash_now" && savingsOpeningFeeCollected !== true) {
-      setSavingsOpeningFeeCollected(true);
-    } else if (openingFeeHandling === "deduct_later" && savingsOpeningFeeCollected !== false) {
-      setSavingsOpeningFeeCollected(false);
-    }
-  }, [isSavings, openingFee, openingFeeHandling, savingsOpeningFeeCollected]);
   const activeForm = formSetup.forms.find((item) => item.id === form.accountType);
   const offeredForms = formSetup.forms.filter((item) => item.enabled);
   const accountHint = isSavings
-    ? `${money(openingFee)} opening fee. ${activeForm?.hint ?? ""}`.trim()
+    ? `Minimum initial deposit ${money(openingFee)}. ${activeForm?.hint ?? ""}`.trim()
     : activeForm?.hint;
 
   useEffect(() => {
@@ -499,17 +491,10 @@ export function RegistrationModal({
       setPhotoName(undefined);
       setIdCardPhotoUrl(undefined);
       setIdCardPhotoName(undefined);
-      setSavingsOpeningFeeCollected(null);
       setHomeBranchId("");
       setAssignedFieldAgentId("");
     }
   }, [open]);
-
-  useEffect(() => {
-    if (form.accountType !== "savings") {
-      setSavingsOpeningFeeCollected(null);
-    }
-  }, [form.accountType]);
 
   useEffect(() => {
     if (!formSetup.simplifiedKyc.enabled && form.idCardType === "no_id_simplified_kyc") {
@@ -539,9 +524,23 @@ export function RegistrationModal({
       return;
     }
     appliedDailyKey.current = key;
-    const daily =
-      formSetup.fields.dailyContribution === "hidden" ? "0" : active.defaultDailyContributionGhs.toFixed(2);
-    setForm((prev) => ({ ...prev, accountType: active.id, dailyContributionAmount: daily }));
+    const showDaily = showDailyContributionForAccountType(
+      active.id,
+      formSetup.fields.dailyContribution
+    );
+    const daily = showDaily ? active.defaultDailyContributionGhs.toFixed(2) : "0";
+    const defaultInitDeposit = formSetup.savingsOpeningFeeGhs.toFixed(2);
+    setForm((prev) => ({
+      ...prev,
+      accountType: active.id,
+      dailyContributionAmount: daily,
+      initialDepositAmount:
+        active.id === "savings"
+          ? prev.initialDepositAmount && parseDailyContribution(prev.initialDepositAmount) >= formSetup.savingsOpeningFeeGhs
+            ? prev.initialDepositAmount
+            : defaultInitDeposit
+          : prev.initialDepositAmount
+    }));
   }, [open, form.accountType, formSetup]);
 
   useEffect(() => {
@@ -608,7 +607,9 @@ export function RegistrationModal({
               : form.kinHouseNumber || undefined
           }
         : undefined,
-      dailyContributionAmount: parseDailyContribution(form.dailyContributionAmount)
+      dailyContributionAmount: showDailyContribution
+        ? parseDailyContribution(form.dailyContributionAmount)
+        : 0
     };
   }
 
@@ -620,8 +621,15 @@ export function RegistrationModal({
     if (issue) {
       return issue;
     }
-    if (isSavings && openingFee > 0 && savingsOpeningFeeCollected === null) {
-      return `Choose how the ${money(openingFee)} opening fee was handled.`;
+    if (isSavings) {
+      const initDepText = form.initialDepositAmount.trim();
+      const initDep = parseDailyContribution(initDepText);
+      if (!initDepText || !Number.isFinite(Number(initDepText))) {
+        return `Enter an initial deposit of at least ${money(openingFee)}.`;
+      }
+      if (initDep < openingFee) {
+        return `Initial deposit must be at least ${money(openingFee)} (minimum locked balance).`;
+      }
     }
     if (isOffice) {
       if (activeBranches.length === 0) {
@@ -701,7 +709,10 @@ export function RegistrationModal({
             : undefined,
         photoUrl: cleaned.photoUrl,
         idCardPhotoUrl: cleaned.idCardPhotoUrl,
-        savingsOpeningFeeCollected: isSavings ? openingFee <= 0 || savingsOpeningFeeCollected === true : undefined,
+        savingsOpeningFeeCollected: isSavings ? true : undefined,
+        initialDepositAmount: isSavings
+          ? parseDailyContribution(form.initialDepositAmount)
+          : undefined,
         nextOfKin: cleaned.nextOfKin?.fullName && cleaned.nextOfKin.phone && cleaned.nextOfKin.location
           ? {
               fullName: cleaned.nextOfKin.fullName,
@@ -742,6 +753,10 @@ export function RegistrationModal({
   }
 
   const officeReady = activeBranches.length > 0 && agentsForBranch.length > 0;
+  const parsedInitialDeposit =
+    form.initialDepositAmount.trim() === "" ? NaN : Number(form.initialDepositAmount);
+  const initialDepositBelowMin =
+    isSavings && (!Number.isFinite(parsedInitialDeposit) || parsedInitialDeposit < openingFee);
   const previewBranch = activeBranches.find((branch) => branch.id === homeBranchId);
   const previewAgent = agentsForBranch.find((agent) => agent.userId === assignedFieldAgentId);
 
@@ -767,7 +782,7 @@ export function RegistrationModal({
             type="submit"
             form="agent-registration-form"
             className="button"
-            disabled={submitting || (isOffice && !officeReady)}
+            disabled={submitting || (isOffice && !officeReady) || initialDepositBelowMin}
           >
             Review details
           </button>
@@ -938,66 +953,69 @@ export function RegistrationModal({
           </div>
         </section>
 
-        {isSavings && openingFee > 0 ? (
-          <section className="agent-savings-panel agent-form__span-2" aria-labelledby="savings-opening-fee-title">
-            <h3 id="savings-opening-fee-title" className="agent-savings-panel__title">
-              Savings — {money(openingFee)} opening fee
+        {isSavings ? (
+          <section className="agent-savings-panel agent-form__span-2" aria-labelledby="savings-initial-deposit-title">
+            <h3 id="savings-initial-deposit-title" className="agent-savings-panel__title">
+              Savings — Initial deposit
             </h3>
             <ol className="agent-savings-panel__steps muted">
               <li>
-                <strong>{money(openingFee)} cash from customer</strong> —{" "}
-                {isOffice ? "collect at the branch" : "you collect this fee"} (choose an option below).
+                <strong>Credited after approval</strong> — the full initial deposit is credited to
+                the customer&apos;s account once approved and the account number is ready.
               </li>
-              <li>
-                <strong>{money(openingFee)} on the account</strong> — credited when approved; customer cannot
-                withdraw this amount.
-              </li>
+              {openingFee > 0 ? (
+                <li>
+                  <strong>Minimum locked balance ({money(openingFee)})</strong> — initial deposit
+                  must be at least {money(openingFee)}. The locked minimum is held on the account
+                  according to Commission Settings (<em>When to deduct</em>).
+                </li>
+              ) : null}
             </ol>
 
-            <p className="agent-savings-panel__prompt">
-              How was the <strong>{money(openingFee)} opening fee</strong> handled?
-            </p>
-
-            <div className="agent-fee-choices" role="radiogroup" aria-label="Opening fee collection">
-              {showCashNowOption ? (
-                <label
-                  className={`agent-fee-choice${savingsOpeningFeeCollected === true ? " agent-fee-choice--selected" : ""}`}
-                >
-                  <input
-                    type="radio"
-                    name="savings-opening-fee"
-                    checked={savingsOpeningFeeCollected === true}
-                    onChange={() => setSavingsOpeningFeeCollected(true)}
-                  />
-                  <span className="agent-fee-choice__body">
-                    <span className="agent-fee-choice__title">Cash collected now</span>
-                    <span className="agent-fee-choice__detail muted">
-                      {money(openingFee)} collected from the customer in cash.
-                    </span>
-                  </span>
-                </label>
+            <label className="field">
+              <span>
+                Initial deposit (GHS){openingFee > 0 ? ` — min ${money(openingFee)}` : ""} *
+              </span>
+              <input
+                type="number"
+                inputMode="decimal"
+                min={openingFee}
+                step="0.01"
+                value={form.initialDepositAmount}
+                aria-invalid={initialDepositBelowMin ? "true" : undefined}
+                onKeyDown={(e) => {
+                  if (e.key === "-" || e.key === "+" || e.key === "e" || e.key === "E") {
+                    e.preventDefault();
+                  }
+                }}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  if (isValidDailyContributionInput(next)) {
+                    updateField("initialDepositAmount", next);
+                  }
+                }}
+                onBlur={() => {
+                  const raw = form.initialDepositAmount.trim();
+                  const num = raw === "" ? NaN : Number(raw);
+                  if (!Number.isFinite(num) || num < openingFee) {
+                    updateField("initialDepositAmount", openingFee.toFixed(2));
+                    if (raw !== "" && openingFee > 0) {
+                      showToast(
+                        `Initial deposit cannot be less than ${money(openingFee)} (minimum locked balance).`,
+                        "error"
+                      );
+                    }
+                  }
+                }}
+                placeholder={openingFee > 0 ? openingFee.toFixed(2) : "0.00"}
+                required
+              />
+              {initialDepositBelowMin && openingFee > 0 ? (
+                <p className="field-error" role="alert">
+                  Cannot be less than {money(openingFee)} (minimum locked balance).
+                </p>
               ) : null}
-
-              {showDeductLaterOption ? (
-                <label
-                  className={`agent-fee-choice${savingsOpeningFeeCollected === false ? " agent-fee-choice--selected" : ""}`}
-                >
-                  <input
-                    type="radio"
-                    name="savings-opening-fee"
-                    checked={savingsOpeningFeeCollected === false}
-                    onChange={() => setSavingsOpeningFeeCollected(false)}
-                  />
-                  <span className="agent-fee-choice__body">
-                    <span className="agent-fee-choice__title">Not collected — deduct later</span>
-                    <span className="agent-fee-choice__detail muted">
-                      Customer did not pay now. Up to {money(openingFee)} will be taken from their first
-                      deposit(s) after approval.
-                    </span>
-                  </span>
-                </label>
-              ) : null}
-            </div>
+            </label>
           </section>
         ) : null}
 
@@ -1263,14 +1281,14 @@ export function RegistrationModal({
         </fieldset>
         ) : null}
 
-        {formSetup.fields.dailyContribution !== "hidden" ? (
+        {showDailyContribution ? (
         <section className="agent-form__section">
           <h3 className="agent-form__section-title">Contribution plan</h3>
           <div className="agent-form__grid agent-form__grid--center">
             <label className="field agent-form__field--amount">
               <span>
-                Daily contribution (GHS)
-                {formSetup.fields.dailyContribution === "optional" ? " (optional)" : ""}
+                {form.accountType === "susu" ? "Daily savings amount (GHS)" : "Daily contribution (GHS)"}
+                {formSetup.fields.dailyContribution !== "required" ? " (optional)" : ""}
               </span>
               <input
                 type="text"
@@ -1326,7 +1344,6 @@ export function RegistrationModal({
         form={form}
         isOffice={isOffice}
         isSavings={isSavings}
-        savingsOpeningFeeCollected={savingsOpeningFeeCollected}
         branchLabel={previewBranch ? `${previewBranch.name} (${previewBranch.code})` : ""}
         agentLabel={previewAgent?.fullName?.trim() || previewAgent?.email || ""}
         photoUrl={photoUrl}

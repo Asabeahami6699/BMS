@@ -13,6 +13,11 @@ type AgentCollectionState = {
   totalAmount: number;
   batchStatus?: FieldAgentTodayCollections["batchStatus"];
   batchId?: string;
+  batchSequence: number;
+  postedBatchesTodayCount: number;
+  postedTotalToday: number;
+  combinedTotalToday: number;
+  unlockReason?: string;
   priorUnsubmittedBatches: PriorUnsubmittedBatchSummary[];
   loading: boolean;
   pendingLocalIds: string[];
@@ -57,6 +62,11 @@ function buildState(
   | "pendingLocalIds"
   | "batchStatus"
   | "batchId"
+  | "batchSequence"
+  | "postedBatchesTodayCount"
+  | "postedTotalToday"
+  | "combinedTotalToday"
+  | "unlockReason"
   | "priorUnsubmittedBatches"
 > {
   const serverItems = server.items;
@@ -74,12 +84,27 @@ function buildState(
   }
   // Keep tally-sheet chronological order: first customer collected appears 1st, second appears 2nd.
   const items = [...byCustomer.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const totalAmount =
+    server.totalAmount > 0 ? server.totalAmount : items.reduce((sum, i) => sum + i.amount, 0);
+  const postedBatchesTodayCount =
+    server.postedBatchesTodayCount ?? (server.batchStatus === "posted" ? 1 : 0);
+  const postedTotalToday =
+    server.postedTotalToday ?? (server.batchStatus === "posted" ? totalAmount : 0);
+  const combinedTotalToday =
+    server.batchStatus === "posted"
+      ? postedTotalToday
+      : Math.round((postedTotalToday + totalAmount) * 100) / 100;
   return {
     customerIds: items.map((i) => i.customerId),
     items,
-    totalAmount: server.totalAmount > 0 ? server.totalAmount : items.reduce((sum, i) => sum + i.amount, 0),
+    totalAmount,
     batchStatus: server.batchStatus,
     batchId: server.batchId,
+    batchSequence: Math.max(1, server.batchSequence ?? 1),
+    postedBatchesTodayCount,
+    postedTotalToday,
+    combinedTotalToday,
+    unlockReason: server.unlockReason,
     priorUnsubmittedBatches: server.priorUnsubmittedBatches ?? [],
     pendingLocalIds: pendingLocal
       .map((i) => i.customerId)
@@ -93,6 +118,11 @@ export const useAgentCollectionStore = create<AgentCollectionState>((set, get) =
   totalAmount: 0,
   batchStatus: undefined,
   batchId: undefined,
+  batchSequence: 1,
+  postedBatchesTodayCount: 0,
+  postedTotalToday: 0,
+  combinedTotalToday: 0,
+  unlockReason: undefined,
   priorUnsubmittedBatches: [],
   loading: false,
   pendingLocalIds: [],
@@ -138,7 +168,12 @@ export const useAgentCollectionStore = create<AgentCollectionState>((set, get) =
           customerIds: serverItems.map((i) => i.customerId),
           totalAmount: serverItems.reduce((sum, i) => sum + i.amount, 0),
           batchStatus: get().batchStatus,
-          batchId: get().batchId
+          batchId: get().batchId,
+          batchSequence: get().batchSequence,
+          postedBatchesTodayCount: get().postedBatchesTodayCount,
+          postedTotalToday: get().postedTotalToday,
+          unlockReason: get().unlockReason,
+          priorUnsubmittedBatches: get().priorUnsubmittedBatches
         },
         localPending
       )

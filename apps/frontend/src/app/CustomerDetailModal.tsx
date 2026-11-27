@@ -9,6 +9,7 @@ type Props = {
   customer: Customer | null;
   branchLabel?: string;
   agentLabel?: string;
+  onEdit?: (customer: Customer) => void;
   onClose: () => void;
 };
 
@@ -16,7 +17,14 @@ function canRecordAtCounter(role: AppRole): boolean {
   return role === "admin" || role === "coordinator" || role === "teller" || role === "field_agent";
 }
 
-export function CustomerDetailModal({ open, customer, branchLabel, agentLabel, onClose }: Props) {
+export function CustomerDetailModal({
+  open,
+  customer,
+  branchLabel,
+  agentLabel,
+  onEdit,
+  onClose
+}: Props) {
   const navigate = useNavigate();
   const { user } = useAuth();
   const role = (user?.role ?? "admin") as AppRole;
@@ -44,6 +52,18 @@ export function CustomerDetailModal({ open, customer, branchLabel, agentLabel, o
       panelClassName="modal-panel--70 modal-panel--customer"
       footer={
         <>
+          {onEdit ? (
+            <button
+              type="button"
+              className="button secondary"
+              onClick={() => {
+                onClose();
+                onEdit(customer);
+              }}
+            >
+              Update details
+            </button>
+          ) : null}
           {showCounterLink ? (
             <button
               type="button"

@@ -316,7 +316,10 @@ export function buildRegistrationFormDocumentHtml(options: RegistrationFormDocum
           { label: "ID card number" }
         ]
       : []),
-    ...(fields.dailyContribution !== "hidden" ? [{ label: "Daily contribution (GHS)" }] : [])
+    ...(fields.dailyContribution !== "hidden" ||
+    options.setup.forms.some((form) => form.id === "susu" && form.enabled)
+      ? [{ label: "Daily savings amount (GHS — Susu only)" }]
+      : [])
   ];
 
   // If optional hidden settings produce an odd count, expand Location/Area or the last field cleanly

@@ -5,11 +5,13 @@ import {
   customerSchema,
   CUSTOMER_DORMANT_AFTER_MONTHS,
   CUSTOMER_INACTIVE_AFTER_MONTHS,
+  formatAccountAmount,
   registrationFormIssue,
   registrationPayloadForSetup,
   loanBorrowerRegistrationSchema,
   rejectCustomerSchema,
   scheduleNextCardDailySusuSchema,
+  updateCustomerDetailsSchema,
   updateCustomerStatusSchema,
   upgradeCustomerKycSchema,
   type AdminManagedCustomerStatus,
@@ -31,7 +33,10 @@ import { createAgentNotification, notifyTenantStaff } from "./notificationServic
 import { fetchUserNameMap } from "./userNameResolver.js";
 import { computeCustomerBalance } from "./ledgerService.js";
 import { generateCustomerAccountNumber } from "./accountNumberPolicyService.js";
-import { applySavingsInitialDepositOnApproval } from "./savingsInitialDepositService.js";
+import {
+  applySavingsInitialDepositOnApproval,
+  resolveSavingsEffectiveLockAmount
+} from "./savingsInitialDepositService.js";
 import { getRegistrationFormSetup } from "./registrationFormService.js";
 import { listFieldRoutes } from "./routeService.js";
 
@@ -144,6 +149,38 @@ function stripKycColumns(row: Record<string, unknown>): Record<string, unknown> 
   return copy;
 }
 
+const SAVINGS_INITIAL_DEPOSIT_COLUMNS = [
+  "initial_deposit_amount",
+  "initial_deposit_credited_at",
+  "savings_lock_timing",
+  "savings_lock_target_amount"
+] as const;
+
+function isMissingSavingsInitialDepositColumn(message: string): boolean {
+  return /initial_deposit_amount|initial_deposit_credited_at|savings_lock_timing|savings_lock_target_amount/i.test(
+    message
+  );
+}
+
+function stripSavingsInitialDepositColumns(row: Record<string, unknown>): Record<string, unknown> {
+  const copy = { ...row };
+  for (const col of SAVINGS_INITIAL_DEPOSIT_COLUMNS) {
+    delete copy[col];
+  }
+  return copy;
+}
+
+/** In-memory fallback for savings initial deposit & lock timing if migration 109 is not yet applied. */
+const savingsDepositMetadataFallback = new Map<
+  string,
+  {
+    initialDepositAmount?: number;
+    initialDepositCreditedAt?: string;
+    savingsLockTiming?: Customer["savingsLockTiming"];
+    savingsLockTargetAmount?: number;
+  }
+>();
+
 
 
 function getTenantCustomers(tenantId: string): Customer[] {
@@ -242,6 +279,48 @@ function mapCustomerRow(row: Record<string, unknown>): Customer {
     ...(row.savings_opening_fee_recovered != null
       ? { savingsOpeningFeeRecovered: Number(row.savings_opening_fee_recovered) }
       : {}),
+    ...(row.initial_deposit_amount != null
+      ? { initialDepositAmount: Number(row.initial_deposit_amount) }
+      : savingsDepositMetadataFallback.get(pendingDailyKey(String(row.tenant_id), String(row.id)))
+            ?.initialDepositAmount != null
+        ? {
+            initialDepositAmount: savingsDepositMetadataFallback.get(
+              pendingDailyKey(String(row.tenant_id), String(row.id))
+            )!.initialDepositAmount
+          }
+        : {}),
+    ...(row.initial_deposit_credited_at != null
+      ? { initialDepositCreditedAt: String(row.initial_deposit_credited_at) }
+      : savingsDepositMetadataFallback.get(pendingDailyKey(String(row.tenant_id), String(row.id)))
+            ?.initialDepositCreditedAt != null
+        ? {
+            initialDepositCreditedAt: savingsDepositMetadataFallback.get(
+              pendingDailyKey(String(row.tenant_id), String(row.id))
+            )!.initialDepositCreditedAt
+          }
+        : {}),
+    ...(row.savings_lock_timing === "first_collection" ||
+    row.savings_lock_timing === "cycle_maturity" ||
+    row.savings_lock_timing === "withdrawal"
+      ? { savingsLockTiming: row.savings_lock_timing }
+      : savingsDepositMetadataFallback.get(pendingDailyKey(String(row.tenant_id), String(row.id)))
+            ?.savingsLockTiming != null
+        ? {
+            savingsLockTiming: savingsDepositMetadataFallback.get(
+              pendingDailyKey(String(row.tenant_id), String(row.id))
+            )!.savingsLockTiming
+          }
+        : {}),
+    ...(row.savings_lock_target_amount != null
+      ? { savingsLockTargetAmount: Number(row.savings_lock_target_amount) }
+      : savingsDepositMetadataFallback.get(pendingDailyKey(String(row.tenant_id), String(row.id)))
+            ?.savingsLockTargetAmount != null
+        ? {
+            savingsLockTargetAmount: savingsDepositMetadataFallback.get(
+              pendingDailyKey(String(row.tenant_id), String(row.id))
+            )!.savingsLockTargetAmount
+          }
+        : {}),
     nextOfKin: mapNextOfKinFromRow(row),
     accountNumber: row.account_number ? String(row.account_number) : undefined,
 
@@ -318,6 +397,10 @@ function insertRowFromCustomer(
     id_card_photo_url: customer.idCardPhotoUrl ?? null,
     savings_opening_fee_collected: customer.savingsOpeningFeeCollected ?? false,
     savings_opening_fee_recovered: customer.savingsOpeningFeeRecovered ?? 0,
+    initial_deposit_amount: customer.initialDepositAmount ?? 0,
+    initial_deposit_credited_at: customer.initialDepositCreditedAt ?? null,
+    savings_lock_timing: customer.savingsLockTiming ?? null,
+    savings_lock_target_amount: customer.savingsLockTargetAmount ?? 0,
     next_of_kin_name: customer.nextOfKin?.fullName ?? null,
     next_of_kin_phone: customer.nextOfKin?.phone ?? null,
     next_of_kin_location: customer.nextOfKin?.location ?? null,
@@ -339,6 +422,30 @@ function insertRowFromCustomer(
 
 
 
+export function updateCustomerSavingsLockInMemory(
+  tenantId: string,
+  customerId: string,
+  patch: Partial<
+    Pick<
+      Customer,
+      | "lockedBalance"
+      | "initialDepositAmount"
+      | "initialDepositCreditedAt"
+      | "savingsLockTiming"
+      | "savingsLockTargetAmount"
+      | "savingsOpeningFeeCollected"
+      | "savingsOpeningFeeRecovered"
+    >
+  >
+): void {
+  const customers = getTenantCustomers(tenantId);
+  const target = customers.find((c) => c.id === customerId);
+  if (target) {
+    Object.assign(target, patch);
+    setTenantCustomers(tenantId, customers);
+  }
+}
+
 export async function getCustomerWithdrawableBalance(
   tenantId: string,
   customerId: string,
@@ -349,7 +456,7 @@ export async function getCustomerWithdrawableBalance(
     throw new Error("Customer not found");
   }
   const total = await computeCustomerBalance(tenantId, customerId);
-  const locked = customer.lockedBalance ?? 0;
+  const locked = resolveSavingsEffectiveLockAmount(customer);
   const collateral = customer.loanCollateralLocked ?? 0;
   let loanReserve = 0;
   if (!options?.allowLoanReserve) {
@@ -405,8 +512,13 @@ export async function createCustomer(
   if (supabase) {
     const insertPayload = insertRowFromCustomer(nextCustomer);
     let { error } = await supabase.from("customers").insert(insertPayload);
-    if (error && isMissingIdCardTypeColumn(error.message)) {
-      const retry = await supabase.from("customers").insert(stripKycColumns(insertPayload));
+    if (
+      error &&
+      (isMissingIdCardTypeColumn(error.message) || isMissingSavingsInitialDepositColumn(error.message))
+    ) {
+      const retry = await supabase
+        .from("customers")
+        .insert(stripSavingsInitialDepositColumns(stripKycColumns(insertPayload)));
       error = retry.error;
     }
 
@@ -469,8 +581,13 @@ export async function registerLoanBorrower(
     nextCustomer.accountNumber = accountNumber;
     const insertPayload = insertRowFromCustomer(nextCustomer);
     let { error } = await supabase.from("customers").insert(insertPayload);
-    if (error && isMissingIdCardTypeColumn(error.message)) {
-      const retry = await supabase.from("customers").insert(stripKycColumns(insertPayload));
+    if (
+      error &&
+      (isMissingIdCardTypeColumn(error.message) || isMissingSavingsInitialDepositColumn(error.message))
+    ) {
+      const retry = await supabase
+        .from("customers")
+        .insert(stripSavingsInitialDepositColumns(stripKycColumns(insertPayload)));
       error = retry.error;
     }
     if (error) {
@@ -505,22 +622,46 @@ export async function submitCustomerRegistration(
   if (formIssue) {
     throw new Error(formIssue);
   }
-  if (payload.accountType === "savings" && formSetup.savingsOpeningFeeGhs > 0) {
-    if (
-      formSetup.savingsOpeningFeeHandling === "cash_now" &&
-      payload.savingsOpeningFeeCollected !== true
-    ) {
-      throw new Error(
-        `This company requires the GHS ${formSetup.savingsOpeningFeeGhs.toFixed(2)} savings opening fee to be collected in cash at registration.`
-      );
-    }
-    if (
-      formSetup.savingsOpeningFeeHandling === "deduct_later" &&
-      payload.savingsOpeningFeeCollected !== false
-    ) {
-      throw new Error(
-        `This company is configured to defer the GHS ${formSetup.savingsOpeningFeeGhs.toFixed(2)} savings opening fee to first deposit(s).`
-      );
+  let resolvedInitialDepositAmount: number | undefined;
+  let resolvedSavingsOpeningFeeCollected = false;
+  let resolvedSavingsLockTargetAmount: number | undefined;
+
+  if (payload.accountType === "savings") {
+    const lockedTarget = Math.round(formSetup.savingsOpeningFeeGhs * 100) / 100;
+    if (payload.initialDepositAmount !== undefined) {
+      const initialDeposit = Math.round(payload.initialDepositAmount * 100) / 100;
+      if (initialDeposit < lockedTarget) {
+        throw new Error(
+          `Initial deposit must be at least GHS ${formatAccountAmount(lockedTarget)} (the required locked minimum balance).`
+        );
+      }
+      resolvedInitialDepositAmount = initialDeposit;
+      resolvedSavingsOpeningFeeCollected = true;
+      resolvedSavingsLockTargetAmount = lockedTarget;
+    } else {
+      if (lockedTarget > 0) {
+        if (
+          formSetup.savingsOpeningFeeHandling === "cash_now" &&
+          payload.savingsOpeningFeeCollected !== true
+        ) {
+          throw new Error(
+            `This company requires an initial deposit of at least GHS ${formatAccountAmount(lockedTarget)} at registration.`
+          );
+        }
+        if (
+          formSetup.savingsOpeningFeeHandling === "deduct_later" &&
+          payload.savingsOpeningFeeCollected !== false
+        ) {
+          throw new Error(
+            `This company is configured to defer the GHS ${formatAccountAmount(lockedTarget)} savings opening fee to first deposit(s).`
+          );
+        }
+      }
+      resolvedSavingsOpeningFeeCollected = Boolean(payload.savingsOpeningFeeCollected);
+      if (resolvedSavingsOpeningFeeCollected) {
+        resolvedInitialDepositAmount = lockedTarget;
+        resolvedSavingsLockTargetAmount = lockedTarget;
+      }
     }
   }
   const normalized = registrationPayloadForSetup(payload, formSetup);
@@ -585,9 +726,10 @@ export async function submitCustomerRegistration(
       : undefined,
     photoUrl: normalized.photoUrl,
     idCardPhotoUrl: normalized.idCardPhotoUrl,
-    savingsOpeningFeeCollected:
-      payload.accountType === "savings" ? Boolean(payload.savingsOpeningFeeCollected) : false,
+    savingsOpeningFeeCollected: resolvedSavingsOpeningFeeCollected,
     savingsOpeningFeeRecovered: 0,
+    initialDepositAmount: resolvedInitialDepositAmount,
+    savingsLockTargetAmount: resolvedSavingsLockTargetAmount,
     nextOfKin:
       normalized.nextOfKin?.fullName && normalized.nextOfKin.phone && normalized.nextOfKin.location
         ? {
@@ -610,20 +752,46 @@ export async function submitCustomerRegistration(
   });
 
   if (supabase) {
-    const insertPayload = insertRowFromCustomer(nextCustomer, { offlineClientId });
+    let insertPayload = insertRowFromCustomer(nextCustomer, { offlineClientId });
     let { error } = await supabase.from("customers").insert(insertPayload);
 
-    if (error && isMissingIdCardTypeColumn(error.message)) {
-      const retry = await supabase.from("customers").insert(stripKycColumns(insertPayload));
+    if (
+      error &&
+      (isMissingIdCardTypeColumn(error.message) || isMissingSavingsInitialDepositColumn(error.message))
+    ) {
+      const missingKyc = isMissingIdCardTypeColumn(error.message);
+      const missingSavingsCols = isMissingSavingsInitialDepositColumn(error.message);
+      if (missingKyc) {
+        insertPayload = stripKycColumns(insertPayload);
+      }
+      if (missingSavingsCols) {
+        insertPayload = stripSavingsInitialDepositColumns(insertPayload);
+      }
+      const retry = await supabase.from("customers").insert(insertPayload);
       error = retry.error;
+      if (error && (isMissingIdCardTypeColumn(error.message) || isMissingSavingsInitialDepositColumn(error.message))) {
+        insertPayload = stripSavingsInitialDepositColumns(stripKycColumns(insertPayload));
+        const retry2 = await supabase.from("customers").insert(insertPayload);
+        error = retry2.error;
+      }
       if (!error) {
-        kycMetadataFallback.set(pendingDailyKey(tenantId, nextCustomer.id), {
-          idCardType: nextCustomer.idCardType,
-          kycTier: nextCustomer.kycTier,
-          nationality: nextCustomer.nationality,
-          kycIntroducer: nextCustomer.kycIntroducer,
-          kycUpgradedAt: nextCustomer.kycUpgradedAt
-        });
+        if (missingKyc) {
+          kycMetadataFallback.set(pendingDailyKey(tenantId, nextCustomer.id), {
+            idCardType: nextCustomer.idCardType,
+            kycTier: nextCustomer.kycTier,
+            nationality: nextCustomer.nationality,
+            kycIntroducer: nextCustomer.kycIntroducer,
+            kycUpgradedAt: nextCustomer.kycUpgradedAt
+          });
+        }
+        if (missingSavingsCols && nextCustomer.accountType === "savings") {
+          savingsDepositMetadataFallback.set(pendingDailyKey(tenantId, nextCustomer.id), {
+            initialDepositAmount: nextCustomer.initialDepositAmount,
+            initialDepositCreditedAt: nextCustomer.initialDepositCreditedAt,
+            savingsLockTiming: nextCustomer.savingsLockTiming,
+            savingsLockTargetAmount: nextCustomer.savingsLockTargetAmount
+          });
+        }
       }
     }
 
@@ -754,7 +922,24 @@ export async function approveCustomerRegistration(
 
       body:
         withDeposit.accountType === "savings"
-          ? `${withDeposit.fullName} is active. Account ${accountNumber}. GHS ${withDeposit.lockedBalance ?? 0} initial deposit credited (not withdrawable).`
+          ? (() => {
+              const credited = withDeposit.initialDepositAmount ?? withDeposit.lockedBalance ?? 0;
+              const lockedNow = withDeposit.lockedBalance ?? 0;
+              const deferredLock =
+                withDeposit.savingsLockTiming === "withdrawal" && lockedNow === 0
+                  ? (withDeposit.savingsLockTargetAmount ?? 0)
+                  : 0;
+              if (credited <= 0) {
+                return `${withDeposit.fullName} is active. Account ${accountNumber}.`;
+              }
+              if (lockedNow > 0) {
+                return `${withDeposit.fullName} is active. Account ${accountNumber}. GHS ${formatAccountAmount(credited)} initial deposit credited (GHS ${formatAccountAmount(lockedNow)} locked non-withdrawable).`;
+              }
+              if (deferredLock > 0) {
+                return `${withDeposit.fullName} is active. Account ${accountNumber}. GHS ${formatAccountAmount(credited)} initial deposit credited (GHS ${formatAccountAmount(deferredLock)} locked balance applies on withdrawal).`;
+              }
+              return `${withDeposit.fullName} is active. Account ${accountNumber}. GHS ${formatAccountAmount(credited)} initial deposit credited.`;
+            })()
           : `${withDeposit.fullName} is active. Account number: ${accountNumber}`
 
     });
@@ -797,7 +982,24 @@ export async function approveCustomerRegistration(
 
     body:
       target.accountType === "savings"
-        ? `${target.fullName} is active. Account ${accountNumber}. GHS ${target.lockedBalance ?? 0} initial deposit credited (not withdrawable).`
+        ? (() => {
+            const credited = target.initialDepositAmount ?? target.lockedBalance ?? 0;
+            const lockedNow = target.lockedBalance ?? 0;
+            const deferredLock =
+              target.savingsLockTiming === "withdrawal" && lockedNow === 0
+                ? (target.savingsLockTargetAmount ?? 0)
+                : 0;
+            if (credited <= 0) {
+              return `${target.fullName} is active. Account ${accountNumber}.`;
+            }
+            if (lockedNow > 0) {
+              return `${target.fullName} is active. Account ${accountNumber}. GHS ${formatAccountAmount(credited)} initial deposit credited (GHS ${formatAccountAmount(lockedNow)} locked non-withdrawable).`;
+            }
+            if (deferredLock > 0) {
+              return `${target.fullName} is active. Account ${accountNumber}. GHS ${formatAccountAmount(credited)} initial deposit credited (GHS ${formatAccountAmount(deferredLock)} locked balance applies on withdrawal).`;
+            }
+            return `${target.fullName} is active. Account ${accountNumber}. GHS ${formatAccountAmount(credited)} initial deposit credited.`;
+          })()
         : `${target.fullName} is active. Account number: ${accountNumber}`
 
   });
@@ -972,7 +1174,7 @@ async function enrichCustomersWithAccountBalances(
         return customer;
       }
       const accountBalance = totals.get(customer.id) ?? 0;
-      const locked = customer.lockedBalance ?? 0;
+      const locked = resolveSavingsEffectiveLockAmount(customer);
       const collateral = customer.loanCollateralLocked ?? 0;
       let loanReserveAmount = 0;
       try {
@@ -1020,6 +1222,10 @@ const LIGHT_CUSTOMER_COLUMNS = [
   "kyc_upgraded_at",
   "savings_opening_fee_collected",
   "savings_opening_fee_recovered",
+  "initial_deposit_amount",
+  "initial_deposit_credited_at",
+  "savings_lock_timing",
+  "savings_lock_target_amount",
   "next_of_kin_name",
   "next_of_kin_phone",
   "next_of_kin_location",
@@ -1108,11 +1314,19 @@ export async function listCustomers(
   if (
     error &&
     options?.light &&
-    (isMissingPendingDailyColumn(error.message) || isMissingIdCardTypeColumn(error.message))
+    (isMissingPendingDailyColumn(error.message) ||
+      isMissingIdCardTypeColumn(error.message) ||
+      isMissingSavingsInitialDepositColumn(error.message))
   ) {
     const kycCols = new Set<string>(SIMPLIFIED_KYC_COLUMNS);
+    const savingsCols = new Set<string>(SAVINGS_INITIAL_DEPOSIT_COLUMNS);
     const fallbackCols = LIGHT_CUSTOMER_COLUMNS.split(",")
-      .filter((col) => !col.startsWith("pending_daily_contribution_") && !kycCols.has(col))
+      .filter(
+        (col) =>
+          !col.startsWith("pending_daily_contribution_") &&
+          !kycCols.has(col) &&
+          !savingsCols.has(col)
+      )
       .join(",");
     const retry = await runCustomerListQuery(fallbackCols);
     data = retry.data;
@@ -1576,6 +1790,165 @@ export async function updateCustomerStatus(
   customers[idx] = { ...customers[idx]!, status: nextStatus };
   setTenantCustomers(tenantId, customers);
   return customers[idx]!;
+}
+
+/**
+ * Updates editable customer profile details after creation (personal details, contact info,
+ * KYC identity & photos, next of kin, branch, and assigned field agent).
+ * Preserves immutable accounting fields (accountNumber, accountType, lockedBalance, status, balances).
+ */
+export async function updateCustomerDetails(
+  tenantId: string,
+  customerId: string,
+  input: unknown
+): Promise<Customer> {
+  const payload = updateCustomerDetailsSchema.parse(input);
+  const existing = await getCustomerById(tenantId, customerId);
+  if (!existing) {
+    throw new Error("Customer not found");
+  }
+
+  const cleanOptional = (val: string | null | undefined, current: string | undefined) => {
+    if (val === undefined) return current;
+    if (val === null) return undefined;
+    const trimmed = val.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  };
+
+  const nextHomeBranchId =
+    payload.homeBranchId && payload.homeBranchId !== existing.homeBranchId
+      ? await resolveHomeBranchId(tenantId, undefined, payload.homeBranchId)
+      : existing.homeBranchId;
+
+  const nextIdCardType =
+    payload.idCardType !== undefined ? payload.idCardType : existing.idCardType;
+  const nextIdCardNumber = cleanOptional(payload.idCardNumber, existing.idCardNumber);
+  const nextKycTier: Customer["kycTier"] =
+    nextIdCardType === "no_id_simplified_kyc"
+      ? "simplified"
+      : nextIdCardType || nextIdCardNumber
+        ? "full"
+        : existing.kycTier;
+
+  const nextOfKin =
+    payload.nextOfKin === undefined
+      ? existing.nextOfKin
+      : payload.nextOfKin === null
+        ? undefined
+        : payload.nextOfKin.fullName?.trim() &&
+            payload.nextOfKin.phone?.trim() &&
+            payload.nextOfKin.location?.trim()
+          ? {
+              fullName: payload.nextOfKin.fullName.trim(),
+              phone: payload.nextOfKin.phone.trim(),
+              location: payload.nextOfKin.location.trim(),
+              houseNumber: payload.nextOfKin.houseNumber?.trim() || undefined
+            }
+          : undefined;
+
+  const nextAssignedAgentId =
+    payload.assignedFieldAgentId === undefined
+      ? existing.assignedFieldAgentId
+      : payload.assignedFieldAgentId === null
+        ? undefined
+        : payload.assignedFieldAgentId;
+
+  const nextCustomer: Customer = customerSchema.parse({
+    ...existing,
+    fullName: payload.fullName !== undefined ? payload.fullName.trim() : existing.fullName,
+    phone: payload.phone !== undefined ? payload.phone.trim() : existing.phone,
+    email: cleanOptional(payload.email, existing.email),
+    location: payload.location !== undefined ? payload.location.trim() : existing.location,
+    houseNumber: cleanOptional(payload.houseNumber, existing.houseNumber),
+    dateOfBirth: cleanOptional(payload.dateOfBirth, existing.dateOfBirth),
+    occupation: cleanOptional(payload.occupation, existing.occupation),
+    nationality: cleanOptional(payload.nationality, existing.nationality),
+    idCardType: nextIdCardType,
+    idCardNumber: nextIdCardNumber,
+    kycTier: nextKycTier,
+    photoUrl:
+      payload.photoUrl === undefined
+        ? existing.photoUrl
+        : payload.photoUrl || undefined,
+    idCardPhotoUrl:
+      payload.idCardPhotoUrl === undefined
+        ? existing.idCardPhotoUrl
+        : payload.idCardPhotoUrl || undefined,
+    nextOfKin,
+    homeBranchId: nextHomeBranchId,
+    assignedFieldAgentId: nextAssignedAgentId
+  });
+
+  const supabase = getSupabaseAdminClient();
+  if (supabase) {
+    let dbPatch: Record<string, unknown> = {
+      full_name: nextCustomer.fullName,
+      phone: nextCustomer.phone,
+      email: nextCustomer.email ?? null,
+      location: nextCustomer.location ?? null,
+      house_number: nextCustomer.houseNumber ?? null,
+      date_of_birth: nextCustomer.dateOfBirth ?? null,
+      occupation: nextCustomer.occupation ?? null,
+      nationality: nextCustomer.nationality ?? null,
+      id_card_type: nextCustomer.idCardType ?? null,
+      id_card_number: nextCustomer.idCardNumber ?? null,
+      kyc_tier: nextCustomer.kycTier ?? "full",
+      photo_url: nextCustomer.photoUrl ?? null,
+      id_card_photo_url: nextCustomer.idCardPhotoUrl ?? null,
+      next_of_kin_name: nextCustomer.nextOfKin?.fullName ?? null,
+      next_of_kin_phone: nextCustomer.nextOfKin?.phone ?? null,
+      next_of_kin_location: nextCustomer.nextOfKin?.location ?? null,
+      next_of_kin_house_number: nextCustomer.nextOfKin?.houseNumber ?? null,
+      next_of_kin: kinSummary(nextCustomer.nextOfKin),
+      home_branch_id: nextCustomer.homeBranchId,
+      assigned_field_agent_id: nextCustomer.assignedFieldAgentId ?? null
+    };
+
+    let { data, error } = await supabase
+      .from("customers")
+      .update(dbPatch)
+      .eq("tenant_id", tenantId)
+      .eq("id", customerId)
+      .select("*")
+      .single();
+
+    if (error && isMissingIdCardTypeColumn(error.message)) {
+      dbPatch = stripKycColumns(dbPatch);
+      const retry = await supabase
+        .from("customers")
+        .update(dbPatch)
+        .eq("tenant_id", tenantId)
+        .eq("id", customerId)
+        .select("*")
+        .single();
+      data = retry.data;
+      error = retry.error;
+      if (!error) {
+        kycMetadataFallback.set(pendingDailyKey(tenantId, customerId), {
+          idCardType: nextCustomer.idCardType,
+          kycTier: nextCustomer.kycTier,
+          nationality: nextCustomer.nationality,
+          kycIntroducer: nextCustomer.kycIntroducer,
+          kycUpgradedAt: nextCustomer.kycUpgradedAt
+        });
+      }
+    }
+
+    if (error || !data) {
+      throw new Error(`Failed to update customer details: ${error?.message ?? "unknown"}`);
+    }
+
+    return enrichCustomerWithAgentNames(tenantId, mapCustomerRow(data as Record<string, unknown>));
+  }
+
+  const customers = getTenantCustomers(tenantId);
+  const idx = customers.findIndex((c) => c.id === customerId);
+  if (idx < 0) {
+    throw new Error("Customer not found");
+  }
+  customers[idx] = { ...customers[idx]!, ...nextCustomer };
+  setTenantCustomers(tenantId, customers);
+  return enrichCustomerWithAgentNames(tenantId, customers[idx]!);
 }
 
 function monthsAgoIso(months: number): string {

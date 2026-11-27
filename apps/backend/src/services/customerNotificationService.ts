@@ -90,15 +90,51 @@ export async function notifyCustomerLoanRepaymentFromSusu(input: {
   ]);
 }
 
-/** Tell the customer their account number after registration approval. */
+const INITIAL_DEPOSIT_ALERT_DELAY_MS = 10_000;
+
+/**
+ * Tell the customer their account number after registration approval.
+ * When a Savings initial deposit was credited on approval, sends the deposit credit
+ * notification right after the account-opened message so the account number arrives first.
+ */
 export async function notifyCustomerAccountOpened(input: {
   tenantId: string;
   customerId: string;
+  initialDeposit?: { transactionId: string; amount: number } | null;
+  depositDelayMs?: number;
 }): Promise<void> {
   await Promise.allSettled([
     notifyCustomerAccountOpenedSms(input),
     notifyCustomerAccountOpenedEmail(input)
   ]);
+
+  if (input.initialDeposit && input.initialDeposit.amount > 0) {
+    const { transactionId, amount } = input.initialDeposit;
+    const delay = input.depositDelayMs ?? INITIAL_DEPOSIT_ALERT_DELAY_MS;
+    const sendDepositAlert = () => {
+      void notifyCustomerTransaction({
+        tenantId: input.tenantId,
+        customerId: input.customerId,
+        transactionId,
+        type: "deposit",
+        amount,
+        balanceOverride: amount
+      }).catch((error) => {
+        console.warn(
+          "[notifications] savings initial deposit alert skipped:",
+          error instanceof Error ? error.message : error
+        );
+      });
+    };
+    if (delay <= 0) {
+      sendDepositAlert();
+      return;
+    }
+    const timer = setTimeout(sendDepositAlert, delay);
+    if (typeof timer.unref === "function") {
+      timer.unref();
+    }
+  }
 }
 
 export async function getNotificationPlatformStatus(): Promise<{

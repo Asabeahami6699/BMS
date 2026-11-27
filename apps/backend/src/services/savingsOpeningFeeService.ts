@@ -19,6 +19,12 @@ export function computeOpeningFeeDeduction(
     return null;
   }
 
+  // Accounts using the initial-deposit + locked_balance hold model (including deferred
+  // `withdrawal` timing) must never withhold opening fees from later deposits.
+  if (customer.initialDepositCreditedAt || customer.savingsLockTiming != null) {
+    return null;
+  }
+
   // Locked opening deposit already secured the fee on approval — do not also
   // withhold from later deposits (that would double-count institutional income).
   const locked = customer.lockedBalance ?? 0;

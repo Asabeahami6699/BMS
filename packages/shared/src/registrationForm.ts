@@ -4,6 +4,30 @@ import { SAVINGS_INITIAL_DEPOSIT_GHS } from "./savings.js";
 
 export const REGISTRATION_ACCOUNT_TYPES = ["susu", "savings", "group", "meba_daakye"] as const;
 
+/** Normal Savings accounts do not have a fixed daily contribution amount. */
+export function accountTypeUsesDailyContribution(accountType: AccountType): boolean {
+  return accountType !== "savings";
+}
+
+/**
+ * Whether the daily savings/contribution input is enabled for an account type during registration.
+ * - `susu` always enables the daily contribution amount.
+ * - `savings` (normal savings) has no fixed daily amount and never shows/requires it.
+ * - `group` and `meba_daakye` follow the tenant's `fields.dailyContribution` setting.
+ */
+export function showDailyContributionForAccountType(
+  accountType: AccountType,
+  requirement: RegistrationFieldRequirement
+): boolean {
+  if (accountType === "susu") {
+    return true;
+  }
+  if (!accountTypeUsesDailyContribution(accountType)) {
+    return false;
+  }
+  return requirement !== "hidden";
+}
+
 export const registrationFieldRequirementSchema = z.enum(["required", "optional", "hidden"]);
 export type RegistrationFieldRequirement = z.infer<typeof registrationFieldRequirementSchema>;
 
@@ -85,9 +109,10 @@ export const registrationFormSetupSchema = z
   .transform((data) => ({
     savingsOpeningFeeGhs: data.savingsOpeningFeeGhs,
     savingsOpeningFeeHandling: data.savingsOpeningFeeHandling ?? "both",
-    forms: REGISTRATION_ACCOUNT_TYPES.map(
-      (id) => data.forms.find((form) => form.id === id) as RegistrationAccountForm
-    ),
+    forms: REGISTRATION_ACCOUNT_TYPES.map((id) => {
+      const form = data.forms.find((item) => item.id === id) as RegistrationAccountForm;
+      return id === "savings" ? { ...form, defaultDailyContributionGhs: 0 } : form;
+    }),
     fields: data.fields,
     simplifiedKyc: data.simplifiedKyc ?? DEFAULT_SIMPLIFIED_KYC_POLICY
   }));
@@ -276,9 +301,11 @@ export function registrationFormIssue(draft: RegistrationDraft, setup: Registrat
         : "Complete the next of kin name, phone, and location, or leave them blank.";
     }
   }
-  const daily = draft.dailyContributionAmount ?? 0;
-  if (fields.dailyContribution === "required" && !(daily > 0)) {
-    return "Enter a daily contribution greater than zero.";
+  if (accountTypeUsesDailyContribution(draft.accountType)) {
+    const daily = draft.dailyContributionAmount ?? 0;
+    if (fields.dailyContribution === "required" && !(daily > 0)) {
+      return "Enter a daily contribution greater than zero.";
+    }
   }
   return null;
 }
@@ -342,7 +369,11 @@ export function registrationPayloadForSetup<T extends RegistrationDraft>(draft: 
           }
         : undefined;
   }
-  next.dailyContributionAmount =
-    fields.dailyContribution === "hidden" ? 0 : Math.max(0, draft.dailyContributionAmount ?? 0);
+  next.dailyContributionAmount = showDailyContributionForAccountType(
+    draft.accountType,
+    fields.dailyContribution
+  )
+    ? Math.max(0, draft.dailyContributionAmount ?? 0)
+    : 0;
   return next;
 }

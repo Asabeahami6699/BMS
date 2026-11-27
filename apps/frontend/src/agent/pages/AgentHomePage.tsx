@@ -18,6 +18,9 @@ export function AgentHomePage() {
   const stats = useAgentCustomerStore(useShallow(selectCustomerStats));
   const hydrated = useAgentCustomerStore((s) => s.hydrated);
   const priorUnsubmittedBatches = useAgentCollectionStore((s) => s.priorUnsubmittedBatches);
+  const batchSequence = useAgentCollectionStore((s) => s.batchSequence);
+  const batchStatus = useAgentCollectionStore((s) => s.batchStatus);
+  const unlockReason = useAgentCollectionStore((s) => s.unlockReason);
   const refreshToday = useAgentCollectionStore((s) => s.refreshToday);
   const hasWithdrawalActivity = useAgentWithdrawalActivityStore((s) => s.items.length > 0);
   const [submittingDate, setSubmittingDate] = useState<string | null>(null);
@@ -43,6 +46,18 @@ export function AgentHomePage() {
   return (
     <div className="agent-page">
       <OfflineSyncInspector />
+      {batchSequence >= 2 && (batchStatus === "draft" || batchStatus === "rejected") ? (
+        <article className="card agent-card agent-extra-batch-banner" role="status">
+          <div className="agent-extra-batch-banner__head">
+            <span className="status-pill status-pill--pending">Batch #{batchSequence} unlocked</span>
+          </div>
+          <p className="muted">
+            Your coordinator allowed an extra collection batch (Batch #{batchSequence}) for today. You can record
+            remaining collections and call over Batch #{batchSequence} separately.
+          </p>
+          {unlockReason ? <p className="muted">Reason: {unlockReason}</p> : null}
+        </article>
+      ) : null}
       {priorUnsubmittedBatches.length > 0 ? (
         <article className="card agent-card eod-guard-banner" role="alert">
           <div className="eod-guard-banner__body">

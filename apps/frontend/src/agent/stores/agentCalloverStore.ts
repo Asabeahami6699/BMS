@@ -14,6 +14,7 @@ export type CalloverDiscrepancy = {
 
 type Persisted = {
   date: string;
+  batchId?: string;
   discrepancies: CalloverDiscrepancy[];
   verifiedMatch: boolean;
   checkedCustomerIds: string[];
@@ -43,6 +44,7 @@ function readPersisted(): Persisted {
 }
 
 function writePersisted(state: {
+  batchId?: string;
   discrepancies: CalloverDiscrepancy[];
   verifiedMatch: boolean;
   checkedCustomerIds: string[];
@@ -51,6 +53,7 @@ function writePersisted(state: {
     STORAGE_KEY,
     JSON.stringify({
       date: todayKey(),
+      batchId: state.batchId,
       discrepancies: state.discrepancies,
       verifiedMatch: state.verifiedMatch,
       checkedCustomerIds: state.checkedCustomerIds
@@ -76,10 +79,12 @@ export function computeVariance(
 }
 
 type CalloverState = {
+  batchId?: string;
   discrepancies: CalloverDiscrepancy[];
   verifiedMatch: boolean;
   checkedCustomerIds: string[];
   load: () => void;
+  syncBatchId: (batchId?: string) => void;
   isChecked: (customerId: string) => boolean;
   toggleChecked: (customerId: string) => void;
   markAllChecked: (customerIds: string[]) => void;
@@ -91,6 +96,7 @@ type CalloverState = {
 };
 
 export const useAgentCalloverStore = create<CalloverState>((set, get) => ({
+  batchId: undefined,
   discrepancies: [],
   verifiedMatch: false,
   checkedCustomerIds: [],
@@ -98,10 +104,37 @@ export const useAgentCalloverStore = create<CalloverState>((set, get) => ({
   load: () => {
     const saved = readPersisted();
     set({
+      batchId: saved.batchId,
       discrepancies: saved.discrepancies,
       verifiedMatch: saved.verifiedMatch,
       checkedCustomerIds: saved.checkedCustomerIds
     });
+  },
+
+  syncBatchId: (batchId) => {
+    if (!batchId) {
+      return;
+    }
+    const saved = readPersisted();
+    if (saved.batchId && saved.batchId !== batchId) {
+      writePersisted({
+        batchId,
+        discrepancies: [],
+        verifiedMatch: false,
+        checkedCustomerIds: []
+      });
+      set({ batchId, discrepancies: [], verifiedMatch: false, checkedCustomerIds: [] });
+      return;
+    }
+    if (!saved.batchId) {
+      writePersisted({
+        batchId,
+        discrepancies: saved.discrepancies,
+        verifiedMatch: saved.verifiedMatch,
+        checkedCustomerIds: saved.checkedCustomerIds
+      });
+      set({ batchId });
+    }
   },
 
   isChecked: (customerId) => get().checkedCustomerIds.includes(customerId),
@@ -112,6 +145,7 @@ export const useAgentCalloverStore = create<CalloverState>((set, get) => ({
       ? checked.filter((id) => id !== customerId)
       : [...checked, customerId];
     writePersisted({
+      batchId: get().batchId,
       discrepancies: get().discrepancies,
       verifiedMatch: get().verifiedMatch,
       checkedCustomerIds
@@ -122,6 +156,7 @@ export const useAgentCalloverStore = create<CalloverState>((set, get) => ({
   markAllChecked: (customerIds) => {
     const checkedCustomerIds = [...new Set([...get().checkedCustomerIds, ...customerIds])];
     writePersisted({
+      batchId: get().batchId,
       discrepancies: get().discrepancies,
       verifiedMatch: get().verifiedMatch,
       checkedCustomerIds
@@ -130,7 +165,12 @@ export const useAgentCalloverStore = create<CalloverState>((set, get) => ({
   },
 
   markAllMatch: () => {
-    writePersisted({ discrepancies: [], verifiedMatch: true, checkedCustomerIds: get().checkedCustomerIds });
+    writePersisted({
+      batchId: get().batchId,
+      discrepancies: [],
+      verifiedMatch: true,
+      checkedCustomerIds: get().checkedCustomerIds
+    });
     set({ discrepancies: [], verifiedMatch: true });
   },
 
@@ -146,6 +186,7 @@ export const useAgentCalloverStore = create<CalloverState>((set, get) => ({
     };
     const discrepancies = [...get().discrepancies, entry];
     writePersisted({
+      batchId: get().batchId,
       discrepancies,
       verifiedMatch: false,
       checkedCustomerIds: get().checkedCustomerIds
@@ -157,6 +198,7 @@ export const useAgentCalloverStore = create<CalloverState>((set, get) => ({
   updateDiscrepancy: (id, patch) => {
     const discrepancies = get().discrepancies.map((d) => (d.id === id ? { ...d, ...patch } : d));
     writePersisted({
+      batchId: get().batchId,
       discrepancies,
       verifiedMatch: get().verifiedMatch,
       checkedCustomerIds: get().checkedCustomerIds
@@ -167,6 +209,7 @@ export const useAgentCalloverStore = create<CalloverState>((set, get) => ({
   removeDiscrepancy: (id) => {
     const discrepancies = get().discrepancies.filter((d) => d.id !== id);
     writePersisted({
+      batchId: get().batchId,
       discrepancies,
       verifiedMatch: get().verifiedMatch,
       checkedCustomerIds: get().checkedCustomerIds
@@ -175,7 +218,12 @@ export const useAgentCalloverStore = create<CalloverState>((set, get) => ({
   },
 
   clearDiscrepancies: () => {
-    writePersisted({ discrepancies: [], verifiedMatch: false, checkedCustomerIds: [] });
+    writePersisted({
+      batchId: get().batchId,
+      discrepancies: [],
+      verifiedMatch: false,
+      checkedCustomerIds: []
+    });
     set({ discrepancies: [], verifiedMatch: false, checkedCustomerIds: [] });
   }
 }));

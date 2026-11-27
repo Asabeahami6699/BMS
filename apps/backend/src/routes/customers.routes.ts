@@ -5,6 +5,7 @@ import {
   rejectCustomerSchema,
   roleMayApprove,
   scheduleNextCardDailySusuSchema,
+  updateCustomerDetailsSchema,
   upgradeCustomerKycSchema
 } from "@bms/shared";
 
@@ -39,6 +40,8 @@ import {
   searchActiveCustomers,
 
   submitCustomerRegistration,
+
+  updateCustomerDetails,
 
   updateCustomerStatus,
 
@@ -310,10 +313,19 @@ customersRouter.patch("/:customerId/approve", requireAnyPermission("customers.cr
 
     const approved = await approveCustomerRegistration(context.tenantId, customerId, context.userId);
     if (approved.accountNumber) {
-      const { notifyCustomerAccountOpened } = await import("../services/customerNotificationService.js");
+      const [{ notifyCustomerAccountOpened }, { consumeCreditedInitialDepositForNotification }] =
+        await Promise.all([
+          import("../services/customerNotificationService.js"),
+          import("../services/savingsInitialDepositService.js")
+        ]);
+      const initialDeposit = consumeCreditedInitialDepositForNotification(
+        context.tenantId,
+        approved.id
+      );
       void notifyCustomerAccountOpened({
         tenantId: context.tenantId,
-        customerId: approved.id
+        customerId: approved.id,
+        initialDeposit
       });
     }
     res.json(approved);
@@ -590,6 +602,102 @@ customersRouter.get("/:customerId", requirePermission("customers.read"), async (
     });
   }
 });
+
+const CUSTOMER_EDIT_ROLES = new Set([
+  "admin",
+  "super_admin",
+  "coordinator",
+  "customer_service"
+]);
+
+/** Update editable customer details after creation (logged in immutable audit trail). */
+customersRouter.patch(
+  "/:customerId",
+  requireAnyPermission("customers.create", "customers.read"),
+  validateBody(updateCustomerDetailsSchema),
+  async (req, res) => {
+    const context = req.userContext;
+    if (!context) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    if (!CUSTOMER_EDIT_ROLES.has(context.role)) {
+      res.status(403).json({
+        error: "Only admins, coordinators, or customer service staff can update customer details"
+      });
+      return;
+    }
+    const customerId = Array.isArray(req.params.customerId)
+      ? req.params.customerId[0]
+      : req.params.customerId;
+    try {
+      const before = await getCustomerById(context.tenantId, customerId);
+      if (!before) {
+        res.status(404).json({ error: "Customer not found" });
+        return;
+      }
+      if (
+        context.scopeType === "branch" &&
+        context.branchId &&
+        before.homeBranchId !== context.branchId
+      ) {
+        res.status(403).json({ error: "Not allowed to edit customers outside your branch" });
+        return;
+      }
+      if (
+        context.scopeType === "branch" &&
+        context.branchId &&
+        typeof req.body?.homeBranchId === "string" &&
+        req.body.homeBranchId !== context.branchId
+      ) {
+        res.status(403).json({ error: "Branch-scoped staff cannot move a customer to another branch" });
+        return;
+      }
+
+      const updated = await updateCustomerDetails(context.tenantId, customerId, req.body);
+      setRequestAuditContext(req, {
+        entityType: "customer",
+        entityId: customerId,
+        action: `Updated customer details (${updated.fullName})`,
+        before: {
+          fullName: before.fullName,
+          phone: before.phone,
+          email: before.email ?? null,
+          location: before.location ?? null,
+          houseNumber: before.houseNumber ?? null,
+          dateOfBirth: before.dateOfBirth ?? null,
+          occupation: before.occupation ?? null,
+          nationality: before.nationality ?? null,
+          idCardType: before.idCardType ?? null,
+          idCardNumber: before.idCardNumber ?? null,
+          homeBranchId: before.homeBranchId,
+          assignedFieldAgentId: before.assignedFieldAgentId ?? null,
+          nextOfKin: before.nextOfKin ?? null
+        },
+        after: {
+          fullName: updated.fullName,
+          phone: updated.phone,
+          email: updated.email ?? null,
+          location: updated.location ?? null,
+          houseNumber: updated.houseNumber ?? null,
+          dateOfBirth: updated.dateOfBirth ?? null,
+          occupation: updated.occupation ?? null,
+          nationality: updated.nationality ?? null,
+          idCardType: updated.idCardType ?? null,
+          idCardNumber: updated.idCardNumber ?? null,
+          homeBranchId: updated.homeBranchId,
+          assignedFieldAgentId: updated.assignedFieldAgentId ?? null,
+          nextOfKin: updated.nextOfKin ?? null
+        }
+      });
+      res.json(updated);
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Failed to update customer details"
+      });
+    }
+  }
+);
 
 customersRouter.patch("/:customerId/status", async (req, res) => {
   const context = req.userContext;

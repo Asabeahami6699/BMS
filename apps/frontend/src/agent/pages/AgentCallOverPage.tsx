@@ -33,6 +33,12 @@ export function AgentCallOverPage() {
   const items = useAgentCollectionStore((s) => s.items);
   const totalApp = useAgentCollectionStore((s) => s.totalAmount);
   const batchStatus = useAgentCollectionStore((s) => s.batchStatus);
+  const batchId = useAgentCollectionStore((s) => s.batchId);
+  const batchSequence = useAgentCollectionStore((s) => s.batchSequence);
+  const postedBatchesTodayCount = useAgentCollectionStore((s) => s.postedBatchesTodayCount);
+  const postedTotalToday = useAgentCollectionStore((s) => s.postedTotalToday);
+  const combinedTotalToday = useAgentCollectionStore((s) => s.combinedTotalToday);
+  const unlockReason = useAgentCollectionStore((s) => s.unlockReason);
   const refreshToday = useAgentCollectionStore((s) => s.refreshToday);
   const canSubmitCallover =
     !batchStatus || batchStatus === "draft" || batchStatus === "rejected";
@@ -40,6 +46,7 @@ export function AgentCallOverPage() {
   const verifiedMatch = useAgentCalloverStore((s) => s.verifiedMatch);
   const checkedCustomerIds = useAgentCalloverStore((s) => s.checkedCustomerIds);
   const load = useAgentCalloverStore((s) => s.load);
+  const syncBatchId = useAgentCalloverStore((s) => s.syncBatchId);
   const isChecked = useAgentCalloverStore((s) => s.isChecked);
   const toggleChecked = useAgentCalloverStore((s) => s.toggleChecked);
   const markAllChecked = useAgentCalloverStore((s) => s.markAllChecked);
@@ -59,6 +66,10 @@ export function AgentCallOverPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    syncBatchId(batchId);
+  }, [batchId, syncBatchId]);
 
   useEffect(() => {
     void refreshToday();
@@ -340,6 +351,20 @@ export function AgentCallOverPage() {
         </article>
       ) : null}
 
+      {batchSequence >= 2 ? (
+        <article className="card agent-extra-batch-banner" role="status">
+          <div className="agent-extra-batch-banner__head">
+            <span className="status-pill status-pill--pending">Batch #{batchSequence} · Extra batch</span>
+          </div>
+          <p className="muted">
+            {batchStatus === "posted"
+              ? `Batch #${batchSequence} has been posted along with ${postedBatchesTodayCount > 1 ? `your earlier batch(es)` : `Batch #1`}. Combined total today: ${formatMoney(combinedTotalToday)}.`
+              : `Earlier batch(es) already posted and handed over: ${formatMoney(postedTotalToday)}. Only verify and hand over cash collected in Batch #${batchSequence} (${formatMoney(totalApp)}) below.`}
+          </p>
+          {unlockReason ? <p className="muted">Coordinator note: {unlockReason}</p> : null}
+        </article>
+      ) : null}
+
       {batchStatus === "rejected" ? (
         <article className="card agent-callover-held-notice" role="status">
           <p>
@@ -351,27 +376,38 @@ export function AgentCallOverPage() {
       {batchStatus === "pending_approval" ? (
         <article className="card">
           <p>
-            <strong>Awaiting approval.</strong> Your collections are with the coordinator. Customer accounts will be
-            credited after they post the batch.
+            <strong>Awaiting approval.</strong> Your {batchSequence >= 2 ? `Batch #${batchSequence} ` : ""}collections are
+            with the coordinator. Customer accounts will be credited after they post the batch.
           </p>
         </article>
       ) : null}
       {batchStatus === "posted" ? (
         <article className="card">
           <p>
-            <strong>Posted.</strong> Today&apos;s collections were credited to customer accounts.
+            <strong>Posted.</strong>{" "}
+            {batchSequence >= 2
+              ? `Batch #${batchSequence} collections were credited to customer accounts.`
+              : "Today's collections were credited to customer accounts."}
           </p>
         </article>
       ) : null}
 
       <article className="card agent-callover-check-card">
-        <p className="agent-callover-check-title">In the system today</p>
+        <p className="agent-callover-check-title">
+          {batchSequence >= 2 ? `Batch #${batchSequence} in the system` : "In the system today"}
+        </p>
         <p className="agent-callover-check-total">{formatMoney(totalApp)}</p>
         <p className="muted">
           Checked {checkedCount} of {totalCheckTargets || "—"}
           {verifiedMatch ? " · Sent for approval" : ""}
           {batchStatus === "pending_approval" ? " · Pending coordinator" : ""}
         </p>
+        {batchSequence >= 2 && postedTotalToday > 0 && batchStatus !== "posted" ? (
+          <p className="muted">
+            Earlier posted today: <strong>{formatMoney(postedTotalToday)}</strong> · Combined today:{" "}
+            <strong>{formatMoney(combinedTotalToday)}</strong>
+          </p>
+        ) : null}
       </article>
 
       <section className="agent-callover-checklist">

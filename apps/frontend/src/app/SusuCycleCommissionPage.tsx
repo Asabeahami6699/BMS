@@ -306,7 +306,11 @@ export function SusuCycleCommissionPage({ role }: Props) {
           <div className="cycle-fees-lifecycle__col">
             <header className="cycle-fees-panel__head">
               <h2>When to deduct</h2>
-              <p className="muted">Same fee — pick when it leaves the customer</p>
+              <p className="muted">
+                Same fee — pick when it leaves the customer. Also controls when Savings accounts
+                apply their minimum locked balance (First collection(s) &amp; Cycle maturity lock on
+                approval; Customer withdrawal locks on withdrawal).
+              </p>
             </header>
             <div
               className="cycle-fees-choice-grid cycle-fees-choice-grid--stack"

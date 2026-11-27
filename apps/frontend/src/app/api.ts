@@ -241,6 +241,10 @@ export type Customer = {
   idCardPhotoUrl?: string;
   savingsOpeningFeeCollected?: boolean;
   savingsOpeningFeeRecovered?: number;
+  initialDepositAmount?: number;
+  initialDepositCreditedAt?: string;
+  savingsLockTiming?: "first_collection" | "cycle_maturity" | "withdrawal";
+  savingsLockTargetAmount?: number;
   nextOfKin?: NextOfKinDetails;
   accountNumber?: string;
   rejectionReason?: string;
@@ -505,6 +509,11 @@ export type FieldAgentTodayCollections = {
   items: FieldAgentTodayCollection[];
   batchStatus?: "draft" | "pending_approval" | "posted" | "rejected";
   batchId?: string;
+  batchSequence?: number;
+  postedBatchesTodayCount?: number;
+  postedTotalToday?: number;
+  combinedTotalToday?: number;
+  unlockReason?: string;
   priorUnsubmittedBatches?: PriorUnsubmittedBatchSummary[];
 };
 
@@ -1759,6 +1768,7 @@ export type PendingCollectionBatch = {
   tenantId: string;
   fieldAgentId: string;
   businessDate: string;
+  batchSequence?: number;
   status: "draft" | "pending_approval" | "posted" | "rejected";
   totalAmount: number;
   lineCount: number;
@@ -1772,12 +1782,23 @@ export type PendingCollectionBatch = {
   cashVarianceStatus?: CashVarianceStatus;
   cashReceivedAt?: string;
   cashReceivedBy?: string;
+  unlockedBy?: string;
+  unlockReason?: string;
+  unlockedAt?: string;
   lines: CollectionBatchLine[];
   fieldAgentName: string;
   fieldAgentEmail?: string;
   branchId?: string;
   hasReportedDifferences?: boolean;
   reportedDifferences?: CalloverReportLine[];
+};
+
+export type PostedCollectionBatch = PendingCollectionBatch & {
+  hasOpenNextBatch: boolean;
+  openNextBatchStatus?: "draft" | "pending_approval" | "posted" | "rejected";
+  openNextBatchSequence?: number;
+  isLatestBatchForAgent: boolean;
+  canUnlockExtraBatch: boolean;
 };
 
 export async function listPendingCollectionBatches(params?: {
@@ -1799,6 +1820,47 @@ export async function listPendingCollectionBatches(params?: {
   return fetchJson<PendingCollectionBatch[]>(
     `${API_BASE_URL}/api/v1/collection-batches/pending${suffix}`,
     { headers: authHeaders() }
+  );
+}
+
+export async function listPostedCollectionBatches(params?: {
+  businessDate?: string;
+  fieldAgentId?: string;
+  branchId?: string;
+}): Promise<PostedCollectionBatch[]> {
+  const query = new URLSearchParams();
+  if (params?.businessDate) {
+    query.set("businessDate", params.businessDate);
+  }
+  if (params?.fieldAgentId) {
+    query.set("fieldAgentId", params.fieldAgentId);
+  }
+  if (params?.branchId) {
+    query.set("branchId", params.branchId);
+  }
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  return fetchJson<PostedCollectionBatch[]>(
+    `${API_BASE_URL}/api/v1/collection-batches/posted${suffix}`,
+    { headers: authHeaders() }
+  );
+}
+
+export async function unlockExtraCollectionBatch(
+  batchId: string,
+  reason: string
+): Promise<{
+  batch: PendingCollectionBatch;
+  priorPostedCount: number;
+  priorPostedTotal: number;
+  fieldAgentName: string;
+}> {
+  return fetchJson(
+    `${API_BASE_URL}/api/v1/collection-batches/${batchId}/unlock-extra`,
+    {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ reason })
+    }
   );
 }
 
@@ -2576,6 +2638,20 @@ export async function deleteCustomer(customerId: string): Promise<void> {
     method: "DELETE",
     headers: authHeaders()
   });
+}
+
+export async function updateCustomerDetails(
+  customerId: string,
+  payload: import("@bms/shared").UpdateCustomerDetailsInput
+): Promise<Customer> {
+  return fetchJson<Customer>(
+    `${API_BASE_URL}/api/v1/customers/${encodeURIComponent(customerId)}`,
+    {
+      method: "PATCH",
+      headers: authHeaders(),
+      body: JSON.stringify(payload)
+    }
+  );
 }
 
 export async function updateCustomerStatus(

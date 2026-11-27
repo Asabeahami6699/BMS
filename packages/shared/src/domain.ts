@@ -185,6 +185,14 @@ export const customerSchema = z.object({
   idCardPhotoUrl: z.string().optional(),
   savingsOpeningFeeCollected: z.boolean().optional(),
   savingsOpeningFeeRecovered: z.number().nonnegative().optional(),
+  /** Savings only: initial deposit captured at registration and credited on approval. */
+  initialDepositAmount: z.number().nonnegative().optional(),
+  /** Timestamp when initialDepositAmount was credited on approval. */
+  initialDepositCreditedAt: z.string().optional(),
+  /** Snapshot of Commission Settings "When to deduct" timing for savings locked_balance. */
+  savingsLockTiming: z.enum(["first_collection", "cycle_maturity", "withdrawal"]).optional(),
+  /** Target non-withdrawable minimum locked_balance snapshotted for this savings account. */
+  savingsLockTargetAmount: z.number().nonnegative().optional(),
   nextOfKin: nextOfKinDetailsSchema.optional(),
   accountNumber: z.string().optional(),
 
@@ -286,8 +294,10 @@ export const customerRegistrationInputSchema = z.object({
     .string()
     .max(4_500_000, "ID card photo is too large")
     .optional(),
-  /** Savings only: agent collected GHS opening fee in cash at registration. */
+  /** Savings only: agent collected GHS opening fee in cash at registration (legacy / compatibility). */
   savingsOpeningFeeCollected: z.boolean().optional(),
+  /** Savings only: initial deposit amount (GHS) captured at registration; must be >= locked minimum. */
+  initialDepositAmount: z.number().nonnegative().optional(),
   houseNumber: z.string().optional(),
   nextOfKin: nextOfKinDetailsSchema.optional(),
   dailyContributionAmount: z.number().nonnegative().default(0),
@@ -297,11 +307,15 @@ export const customerRegistrationInputSchema = z.object({
   assignedFieldAgentId: z.string().optional()
 
 }).superRefine((data, ctx) => {
-  if (data.accountType === "savings" && data.savingsOpeningFeeCollected === undefined) {
+  if (
+    data.accountType === "savings" &&
+    data.initialDepositAmount === undefined &&
+    data.savingsOpeningFeeCollected === undefined
+  ) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      message: "Confirm whether you collected the opening fee or will deduct from first deposit",
-      path: ["savingsOpeningFeeCollected"]
+      message: "Enter the initial deposit amount for this savings account",
+      path: ["initialDepositAmount"]
     });
   }
 });
@@ -331,6 +345,32 @@ export const assignCustomerFieldAgentSchema = z.object({
   routeId: z.string().uuid().nullable().optional()
 
 });
+
+export const updateCustomerDetailsSchema = z.object({
+  fullName: z.string().trim().min(1, "Full name is required").max(160).optional(),
+  phone: z.string().trim().min(1, "Phone number is required").max(40).optional(),
+  email: z
+    .union([z.string().trim().email("Enter a valid email address"), z.literal(""), z.null()])
+    .optional(),
+  location: z.string().trim().min(1, "Location is required").max(200).optional(),
+  houseNumber: z.union([z.string().trim().max(80), z.null()]).optional(),
+  dateOfBirth: z.union([z.string().trim().max(40), z.null()]).optional(),
+  occupation: z.union([z.string().trim().max(120), z.null()]).optional(),
+  nationality: z.union([z.string().trim().max(80), z.null()]).optional(),
+  idCardType: customerIdCardTypeSchema.optional(),
+  idCardNumber: z.union([z.string().trim().max(80), z.null()]).optional(),
+  photoUrl: z
+    .union([z.string().max(4_500_000, "Photo data is too large"), z.null()])
+    .optional(),
+  idCardPhotoUrl: z
+    .union([z.string().max(4_500_000, "Photo data is too large"), z.null()])
+    .optional(),
+  nextOfKin: nextOfKinDetailsSchema.nullable().optional(),
+  homeBranchId: z.string().min(1).optional(),
+  assignedFieldAgentId: z.string().min(1).nullable().optional()
+});
+
+export type UpdateCustomerDetailsInput = z.infer<typeof updateCustomerDetailsSchema>;
 
 
 
