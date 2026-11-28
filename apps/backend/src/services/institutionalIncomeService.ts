@@ -792,6 +792,10 @@ export async function getInstitutionalIncomeReport(
   });
 
   const totalAmount = Math.round(active.reduce((sum, e) => sum + e.amount, 0) * 100) / 100;
+  const recentEntries = await enrichEntriesWithCustomerDetails(
+    context.tenantId,
+    entries.slice(0, 100)
+  );
 
   return institutionalIncomeReportSchema.parse({
     period,
@@ -803,8 +807,93 @@ export async function getInstitutionalIncomeReport(
     bySource,
     byBranch,
     accounts: scopedBranchId ? accounts.filter((a) => String(a.branchId) === scopedBranchId) : accounts,
-    recentEntries: entries.slice(0, 100),
+    recentEntries,
     dailyOnly,
     allowedPeriods
+  });
+}
+
+async function enrichEntriesWithCustomerDetails(
+  tenantId: string,
+  entries: InstitutionalIncomeEntry[]
+): Promise<InstitutionalIncomeEntry[]> {
+  if (entries.length === 0) {
+    return entries;
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const txToCustomer = new Map<string, string>();
+  const customerDetails = new Map<string, { fullName: string; accountNumber: string | null }>();
+
+  const missingCustomerTxIds = [
+    ...new Set(
+      entries
+        .filter((e) => !e.customerId && e.transactionId)
+        .map((e) => String(e.transactionId))
+    )
+  ];
+
+  if (supabase) {
+    if (missingCustomerTxIds.length > 0) {
+      const { data: txRows } = await supabase
+        .from("customer_transactions")
+        .select("id, customer_id")
+        .eq("tenant_id", tenantId)
+        .in("id", missingCustomerTxIds);
+      for (const row of txRows ?? []) {
+        if (row.id && row.customer_id) {
+          txToCustomer.set(String(row.id), String(row.customer_id));
+        }
+      }
+    }
+
+    const customerIds = [
+      ...new Set(
+        entries
+          .map((e) => e.customerId ?? (e.transactionId ? txToCustomer.get(e.transactionId) : undefined))
+          .filter((id): id is string => Boolean(id))
+      )
+    ];
+
+    if (customerIds.length > 0) {
+      for (let i = 0; i < customerIds.length; i += 200) {
+        const chunk = customerIds.slice(i, i + 200);
+        const { data: custRows } = await supabase
+          .from("customers")
+          .select("id, full_name, account_number")
+          .eq("tenant_id", tenantId)
+          .in("id", chunk);
+        for (const row of custRows ?? []) {
+          if (row.id) {
+            customerDetails.set(String(row.id), {
+              fullName: String(row.full_name ?? "").trim(),
+              accountNumber: row.account_number ? String(row.account_number).trim() : null
+            });
+          }
+        }
+      }
+    }
+  } else {
+    const { listCustomers } = await import("./customerService.js");
+    const customers = await listCustomers(tenantId).catch(() => []);
+    for (const c of customers) {
+      customerDetails.set(c.id, {
+        fullName: c.fullName.trim(),
+        accountNumber: c.accountNumber?.trim() || null
+      });
+    }
+  }
+
+  return entries.map((entry) => {
+    const resolvedCustomerId =
+      entry.customerId ??
+      (entry.transactionId ? txToCustomer.get(entry.transactionId) ?? null : null);
+    const info = resolvedCustomerId ? customerDetails.get(resolvedCustomerId) : undefined;
+    return {
+      ...entry,
+      customerId: resolvedCustomerId,
+      customerName: info?.fullName || entry.customerName || null,
+      customerAccountNumber: info?.accountNumber || entry.customerAccountNumber || null
+    };
   });
 }

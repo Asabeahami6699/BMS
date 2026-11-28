@@ -44,6 +44,8 @@ export const institutionalIncomeEntrySchema = z.object({
   amount: z.number().positive(),
   businessDate: z.string(),
   customerId: z.string().nullable().optional(),
+  customerName: z.string().nullable().optional(),
+  customerAccountNumber: z.string().nullable().optional(),
   transactionId: z.string().nullable().optional(),
   notes: z.string().nullable().optional(),
   idempotencyKey: z.string().min(1),

@@ -16357,6 +16357,43 @@ button.cif-ledger__row:hover {
   font-size: 0.92rem;
 }
 
+.income-ledger__customer {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.income-ledger__acct {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.1rem 0.45rem;
+  border-radius: 6px;
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.income-panel__search {
+  min-width: 210px;
+  max-width: 100%;
+  padding: 0.45rem 0.7rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 0.82rem;
+}
+
+.income-panel__search:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
 .income-ledger__what .muted {
   font-size: 0.82rem;
   overflow: hidden;

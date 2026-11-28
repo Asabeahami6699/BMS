@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import {
   INSTITUTIONAL_INCOME_SOURCE_LABELS,
@@ -143,16 +143,36 @@ export function InstitutionalIncomePage({ permissions, susuOnly, defaultBranchId
     return [...rows].sort((a, b) => b.amount - a.amount || a.branchName.localeCompare(b.branchName));
   }, [report, branchOptions]);
 
+  const [postingSearch, setPostingSearch] = useState("");
+
   const recentEntries = useMemo(() => {
     if (!report) {
       return [];
     }
-    return report.recentEntries.filter((entry) =>
+    const base = report.recentEntries.filter((entry) =>
       branchOptions.length === 0
         ? true
         : branchOptions.some((b) => String(b.id) === String(entry.branchId))
     );
-  }, [report, branchOptions]);
+    const q = postingSearch.trim().toLowerCase();
+    if (!q) {
+      return base;
+    }
+    return base.filter((entry) => {
+      const branchName =
+        tenantBranchRows.find((b) => b.branchId === entry.branchId)?.branchName ??
+        branchOptions.find((b) => String(b.id) === String(entry.branchId))?.name ??
+        "";
+      const sourceLabel = INSTITUTIONAL_INCOME_SOURCE_LABELS[entry.source] ?? entry.source;
+      return (
+        (entry.customerName ?? "").toLowerCase().includes(q) ||
+        (entry.customerAccountNumber ?? "").toLowerCase().includes(q) ||
+        branchName.toLowerCase().includes(q) ||
+        sourceLabel.toLowerCase().includes(q) ||
+        (entry.notes ?? "").toLowerCase().includes(q)
+      );
+    });
+  }, [report, branchOptions, postingSearch, tenantBranchRows]);
 
   const periodRange = report
     ? report.fromDate === report.toDate
@@ -333,10 +353,22 @@ export function InstitutionalIncomePage({ permissions, susuOnly, defaultBranchId
                   <h2 id="income-ledger-heading">Postings</h2>
                   <p className="muted">Fee credits in this period</p>
                 </div>
+                <input
+                  type="search"
+                  className="income-panel__search"
+                  value={postingSearch}
+                  onChange={(e) => setPostingSearch(e.target.value)}
+                  placeholder="Search customer, account #, branch…"
+                  aria-label="Search fee postings"
+                />
               </header>
 
               {recentEntries.length === 0 ? (
-                <p className="income-empty muted">No postings in this period.</p>
+                <p className="income-empty muted">
+                  {postingSearch.trim()
+                    ? "No postings match your search."
+                    : "No postings in this period."}
+                </p>
               ) : (
                 <ol className="income-ledger">
                   {recentEntries.map((entry) => {
@@ -357,7 +389,19 @@ export function InstitutionalIncomePage({ permissions, susuOnly, defaultBranchId
                           <strong>
                             {INSTITUTIONAL_INCOME_SOURCE_LABELS[entry.source] ?? entry.source}
                           </strong>
-                          <span className="muted">{shortenNote(entry.notes)}</span>
+                          {entry.customerName || entry.customerAccountNumber ? (
+                            <span className="income-ledger__customer">
+                              <span>{entry.customerName ?? "Customer"}</span>
+                              {entry.customerAccountNumber ? (
+                                <code className="income-ledger__acct">
+                                  {entry.customerAccountNumber}
+                                </code>
+                              ) : null}
+                            </span>
+                          ) : null}
+                          <span className="muted" title={entry.notes ?? undefined}>
+                            {shortenNote(entry.notes)}
+                          </span>
                         </div>
                         <div className="income-ledger__amt">
                           <strong>{formatMoney(entry.amount)}</strong>
