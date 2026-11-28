@@ -154,7 +154,6 @@ jobs:
           if-no-files-found: error
 
       - name: Optional off-site upload to S3 / Cloudflare R2 / Backblaze B2
-        if: ${{ secrets.BACKUP_S3_BUCKET != '' }}
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.BACKUP_S3_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_S3_SECRET_ACCESS_KEY }}
@@ -163,6 +162,10 @@ jobs:
           BACKUP_S3_ENDPOINT: ${{ secrets.BACKUP_S3_ENDPOINT }}
         run: |
           set -euo pipefail
+          if [ -z "${BACKUP_S3_BUCKET:-}" ]; then
+            echo "BACKUP_S3_BUCKET not set — skipping optional off-site S3/R2 upload."
+            exit 0
+          fi
           BASE_NAME="${{ steps.dump.outputs.base_name }}"
           ENDPOINT_ARG=""
           if [ -n "$BACKUP_S3_ENDPOINT" ]; then
@@ -183,14 +186,20 @@ jobs:
           fi
 
       - name: Write job summary
+        env:
+          BACKUP_S3_BUCKET: ${{ secrets.BACKUP_S3_BUCKET }}
         run: |
+          OFFSITE_STATUS="GitHub Artifact only"
+          if [ -n "${BACKUP_S3_BUCKET:-}" ]; then
+            OFFSITE_STATUS="Uploaded"
+          fi
           {
             echo "### Encrypted Database Backup Succeeded"
             echo "- **Archive:** \`${{ steps.dump.outputs.base_name }}.dump.gpg\`"
             echo "- **Data tables backed up:** \`${{ steps.dump.outputs.table_count }}\`"
             echo "- **Encrypted size:** \`${{ steps.encrypt.outputs.enc_bytes }}\` bytes"
             echo "- **SHA-256:** \`${{ steps.encrypt.outputs.sha256 }}\`"
-            echo "- **Off-site S3/R2 copy:** \`$([ -n "${{ secrets.BACKUP_S3_BUCKET != '' && 'yes' || '' }}" ] && echo 'Uploaded' || echo 'GitHub Artifact only')\`"
+            echo "- **Off-site S3/R2 copy:** \`${OFFSITE_STATUS}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Clean up temporary workspace
