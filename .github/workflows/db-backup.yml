@@ -71,6 +71,9 @@ jobs:
           echo "dump_file=${DUMP_FILE}" >> "$GITHUB_OUTPUT"
           echo "stamp=${STAMP}" >> "$GITHUB_OUTPUT"
 
+          # Strip accidental leading/trailing whitespace or CR/LF pasted into the GitHub Secret
+          CLEAN_DB_URL=$(printf '%s' "$SUPABASE_DB_BACKUP_URL" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+
           # Dump both public (financial ledgers, customers, audit_logs) and auth (staff accounts)
           pg_dump \
             --format=custom \
@@ -80,7 +83,7 @@ jobs:
             --schema=public \
             --schema=auth \
             --file="$DUMP_FILE" \
-            "$SUPABASE_DB_BACKUP_URL"
+            "$CLEAN_DB_URL"
 
           # Sanity-check the custom archive is readable and non-empty
           TABLE_COUNT=$(pg_restore --list "$DUMP_FILE" | grep -c " TABLE DATA " || true)
