@@ -19,14 +19,14 @@ const STATUS_LABEL: Record<Customer["status"], string> = {
   closed: "Closed"
 };
 
-const STATUS_CLASS: Record<Customer["status"], string> = {
-  pending_activation: "pending",
-  active: "active",
-  rejected: "inactive",
-  suspended: "inactive",
-  inactive: "inactive",
-  dormant: "dormant",
-  closed: "failed"
+const STATUS_TONE: Record<Customer["status"], "success" | "warning" | "muted"> = {
+  pending_activation: "warning",
+  active: "success",
+  rejected: "muted",
+  suspended: "muted",
+  inactive: "muted",
+  dormant: "warning",
+  closed: "muted"
 };
 
 type Props = {
@@ -47,6 +47,13 @@ function formatAccountTypeLabel(accountType?: Customer["accountType"]): string |
     default:
       return accountType ? String(accountType).replace(/_/g, " ") : null;
   }
+}
+
+function initialsFromName(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
+  return `${parts[0]![0] ?? ""}${parts[parts.length - 1]![0] ?? ""}`.toUpperCase();
 }
 
 export function RouteTransfersPanel({ canManage, onTransferred }: Props) {
@@ -77,16 +84,8 @@ export function RouteTransfersPanel({ canManage, onTransferred }: Props) {
   }, [agentsRoster.length]);
 
   const agents = useMemo(() => {
-    if (agentsRoster.length > 0) {
-      return agentsRoster
-        .filter((a) => a.status === "active")
-        .map((a) => ({
-          userId: a.userId,
-          label: a.fullName?.trim() || a.email || a.userId,
-          branchId: a.branchId
-        }));
-    }
-    return agentsFallback
+    const raw = agentsRoster.length > 0 ? agentsRoster : agentsFallback;
+    return raw
       .filter((a) => a.status === "active")
       .map((a) => ({
         userId: a.userId,
@@ -128,6 +127,7 @@ export function RouteTransfersPanel({ canManage, onTransferred }: Props) {
   );
 
   const loading = customersLoading && allCustomers.length === 0;
+  const hasFilters = Boolean(sourceAgentId || sourceRouteId || search);
 
   function routesForAgent(agentId: string, homeBranchId: string): FieldRoute[] {
     return routes.filter(
@@ -207,21 +207,28 @@ export function RouteTransfersPanel({ canManage, onTransferred }: Props) {
   }
 
   return (
-    <section className="card routes-workspace__panel">
-      <header className="routes-workspace__panel-head">
+    <section className="card routes-panel">
+      <header className="routes-panel__head">
         <div>
-          <h3>Transfers</h3>
+          <h3>Individual transfers</h3>
           <p className="muted">
-            Move customers between field agents. Route membership updates with the destination
-            agent so Branch &amp; servicing stays current.
+            Move individual customers between mobilizers. Original account creators and financial
+            history remain untouched, and every change is logged to assignment history.
           </p>
         </div>
+        <span className="route-badge route-badge--muted">
+          {filtered.length} customer{filtered.length === 1 ? "" : "s"}
+        </span>
       </header>
 
-      <div className="routes-workspace__filters">
-        <label className="field">
-          <span>From agent</span>
-          <select value={sourceAgentId} onChange={(e) => setSourceAgentId(e.target.value)}>
+      <div className="routes-filter-bar routes-filter-bar--3">
+        <label className="route-field">
+          <span className="route-field__label">From mobilizer</span>
+          <select
+            className="route-select"
+            value={sourceAgentId}
+            onChange={(e) => setSourceAgentId(e.target.value)}
+          >
             <option value="">All assigned customers</option>
             {agents.map((a) => (
               <option key={a.userId} value={a.userId}>
@@ -230,9 +237,14 @@ export function RouteTransfersPanel({ canManage, onTransferred }: Props) {
             ))}
           </select>
         </label>
-        <label className="field">
-          <span>From route</span>
-          <select value={sourceRouteId} onChange={(e) => setSourceRouteId(e.target.value)}>
+
+        <label className="route-field">
+          <span className="route-field__label">From route</span>
+          <select
+            className="route-select"
+            value={sourceRouteId}
+            onChange={(e) => setSourceRouteId(e.target.value)}
+          >
             <option value="">Any route</option>
             {routes
               .filter((r) => r.status === "active")
@@ -243,21 +255,47 @@ export function RouteTransfersPanel({ canManage, onTransferred }: Props) {
               ))}
           </select>
         </label>
-        <label className="field routes-workspace__search">
-          <span>Search</span>
-          <input
-            type="search"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Name, phone, account…"
-          />
+
+        <label className="route-field">
+          <span className="route-field__label">Search customer</span>
+          <div className="route-search-wrap">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+            <input
+              type="search"
+              className="route-input route-input--search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Name, phone, account #…"
+            />
+          </div>
         </label>
+
+        {hasFilters ? (
+          <button
+            type="button"
+            className="route-btn route-btn--ghost"
+            onClick={() => {
+              setSourceAgentId("");
+              setSourceRouteId("");
+              setSearch("");
+            }}
+          >
+            Reset
+          </button>
+        ) : null}
       </div>
 
       {loading ? (
-        <p className="muted">Loading customers…</p>
+        <div className="routes-empty-state">
+          <p className="muted">Loading customers…</p>
+        </div>
       ) : filtered.length === 0 ? (
-        <p className="muted">No customers match these filters.</p>
+        <div className="routes-empty-state">
+          <p className="muted">No customers match these filters.</p>
+        </div>
       ) : (
         <ul className="routes-transfer-list">
           {filtered.map((customer) => {
@@ -270,47 +308,59 @@ export function RouteTransfersPanel({ canManage, onTransferred }: Props) {
             const accountTypeLabel = formatAccountTypeLabel(customer.accountType);
             return (
               <li key={customer.id} className="routes-transfer-row">
-                <div className="routes-transfer-row__main">
-                  <span
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "0.45rem",
-                      flexWrap: "wrap"
-                    }}
-                  >
-                    <strong>{customer.fullName}</strong>
-                    {accountTypeLabel ? (
-                      <span
-                        className={`status-pill status-pill--${customer.accountType === "savings" ? "pending" : "active"}`}
-                        style={{ fontSize: "0.7rem", padding: "0.1rem 0.45rem" }}
-                      >
-                        {accountTypeLabel}
+                <div className="routes-transfer-row__info">
+                  <span className="route-avatar route-avatar--lg" aria-hidden="true">
+                    {initialsFromName(customer.fullName)}
+                  </span>
+                  <div className="routes-transfer-row__main">
+                    <div className="routes-transfer-row__title">
+                      <strong>{customer.fullName}</strong>
+                      {accountTypeLabel ? (
+                        <span
+                          className={`route-badge route-badge--${
+                            customer.accountType === "savings" ? "warning" : "primary"
+                          }`}
+                        >
+                          {accountTypeLabel}
+                        </span>
+                      ) : null}
+                      <span className={`route-badge route-badge--${STATUS_TONE[customer.status]}`}>
+                        {STATUS_LABEL[customer.status]}
                       </span>
-                    ) : null}
-                  </span>
-                  <span className="muted">
-                    {customer.accountNumber ?? "No account #"}
-                    {accountTypeLabel ? ` · ${accountTypeLabel}` : ""} · {customer.phone}
-                  </span>
-                  <span className="muted">
-                    Agent: {customer.assignedFieldAgentName ?? "—"}
-                    {currentRoute ? ` · Route: ${currentRoute.name}` : " · No route"}
-                  </span>
-                  <span className={`status-pill status-pill--${STATUS_CLASS[customer.status]}`}>
-                    {STATUS_LABEL[customer.status]}
-                  </span>
+                    </div>
+                    <div className="route-cell-meta">
+                      <span>{customer.accountNumber ?? "No account #"}</span>
+                      <span>·</span>
+                      <span>{customer.phone}</span>
+                      {customer.location ? (
+                        <>
+                          <span>·</span>
+                          <span>{customer.location}</span>
+                        </>
+                      ) : null}
+                    </div>
+                    <div className="routes-transfer-row__current">
+                      <span className="route-mini-pill">
+                        Mobilizer: <strong>{customer.assignedFieldAgentName ?? "—"}</strong>
+                      </span>
+                      <span className="route-mini-pill">
+                        Route: <strong>{currentRoute ? currentRoute.name : "Unassigned"}</strong>
+                      </span>
+                    </div>
+                  </div>
                 </div>
+
                 {canManage ? (
                   <div className="routes-transfer-row__actions">
-                    <label className="field">
-                      <span className="sr-only">Transfer to agent</span>
+                    <label className="route-field">
+                      <span className="route-field__label">Destination mobilizer</span>
                       <select
+                        className="route-select"
                         value={target.agentId}
                         disabled={isBusy}
                         onChange={(e) => setTarget(customer.id, { agentId: e.target.value })}
                       >
-                        <option value="">To agent…</option>
+                        <option value="">Choose mobilizer…</option>
                         {agents
                           .filter((a) => a.userId !== customer.assignedFieldAgentId)
                           .map((a) => (
@@ -320,9 +370,10 @@ export function RouteTransfersPanel({ canManage, onTransferred }: Props) {
                           ))}
                       </select>
                     </label>
-                    <label className="field">
-                      <span className="sr-only">Destination route</span>
+                    <label className="route-field">
+                      <span className="route-field__label">Destination route</span>
                       <select
+                        className="route-select"
                         value={target.routeId}
                         disabled={isBusy || !target.agentId || destRoutes.length === 0}
                         onChange={(e) => setTarget(customer.id, { routeId: e.target.value })}
@@ -345,11 +396,11 @@ export function RouteTransfersPanel({ canManage, onTransferred }: Props) {
                     </label>
                     <button
                       type="button"
-                      className="button"
+                      className="route-btn route-btn--primary"
                       disabled={isBusy || !target.agentId}
                       onClick={() => void handleTransfer(customer)}
                     >
-                      {isBusy ? "…" : "Transfer"}
+                      {isBusy ? "Moving…" : "Transfer →"}
                     </button>
                   </div>
                 ) : null}

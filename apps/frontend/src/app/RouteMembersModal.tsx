@@ -53,6 +53,7 @@ export function RouteMembersModal({ route, open, onClose, onUpdated }: Props) {
     if (!open || !route) {
       return;
     }
+    setQuery("");
     useCustomersStore.getState().hydrate();
     setLoadingMembers(true);
     void listRouteMembers(route.id)
@@ -76,15 +77,27 @@ export function RouteMembersModal({ route, open, onClose, onUpdated }: Props) {
         c.fullName.toLowerCase().includes(q) ||
         c.phone.includes(q) ||
         (c.accountNumber?.toLowerCase().includes(q) ?? false) ||
+        (c.location?.toLowerCase().includes(q) ?? false) ||
         typeLabel.includes(q)
       );
     });
   }, [candidates, query]);
 
+  const memberSet = useMemo(() => new Set(members), [members]);
+
   function toggleMember(customerId: string) {
     setMembers((prev) =>
       prev.includes(customerId) ? prev.filter((id) => id !== customerId) : [...prev, customerId]
     );
+  }
+
+  function selectAllVisible() {
+    setMembers((prev) => [...new Set([...prev, ...filtered.map((c) => c.id)])]);
+  }
+
+  function clearVisible() {
+    const visibleIds = new Set(filtered.map((c) => c.id));
+    setMembers((prev) => prev.filter((id) => !visibleIds.has(id)));
   }
 
   async function handleSave() {
@@ -115,78 +128,121 @@ export function RouteMembersModal({ route, open, onClose, onUpdated }: Props) {
       title={`Members — ${route.name}`}
       subtitle={`${route.area} · ${formatBranchLabel(route.branchId, [], route.branchName, route.branchCode)}`}
       onClose={onClose}
-      panelClassName="modal-panel--70"
+      panelClassName="modal-panel--70 route-modal"
       footer={
         <>
-          <button type="button" className="button secondary" onClick={onClose}>
+          <button type="button" className="route-btn route-btn--secondary" onClick={onClose}>
             Cancel
           </button>
-          <button type="button" className="button" onClick={() => void handleSave()} disabled={saving}>
-            {saving ? "Saving…" : `Save (${members.length} members)`}
+          <button
+            type="button"
+            className="route-btn route-btn--primary"
+            onClick={() => void handleSave()}
+            disabled={saving}
+          >
+            {saving ? "Saving…" : `Save members (${members.length})`}
           </button>
         </>
       }
     >
       {loading ? (
-        <p className="muted">Loading customers…</p>
+        <div className="routes-empty-state">
+          <p className="muted">Loading eligible branch customers…</p>
+        </div>
       ) : (
-        <>
-          <p className="muted">
-            Active customers at this branch who are not on another route. Assigning syncs the route
-            agent when one is set.
-          </p>
-          <label className="field">
-            <span>Search</span>
-            <input
-              type="search"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Name, phone, account #, or account type"
-            />
-          </label>
+        <div className="route-members-wrap">
+          <div className="route-members-toolbar">
+            <label className="route-field" style={{ flex: "1 1 240px" }}>
+              <span className="route-field__label">Search eligible customers</span>
+              <div className="route-search-wrap">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                  <circle cx="11" cy="11" r="8" />
+                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+                <input
+                  type="search"
+                  className="route-input route-input--search"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Name, phone, account #, location…"
+                />
+              </div>
+            </label>
+
+            <div className="route-members-toolbar__actions">
+              <span className="route-badge route-badge--primary">
+                {members.length} of {candidates.length} selected
+              </span>
+              <button
+                type="button"
+                className="route-btn route-btn--secondary route-btn--sm"
+                onClick={selectAllVisible}
+                disabled={filtered.length === 0}
+              >
+                Select visible
+              </button>
+              <button
+                type="button"
+                className="route-btn route-btn--ghost route-btn--sm"
+                onClick={clearVisible}
+                disabled={members.length === 0}
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+
           <div className="route-members-list">
             {filtered.length === 0 ? (
-              <p className="muted">No eligible customers.</p>
+              <div className="routes-empty-state">
+                <p className="muted">No eligible unassigned customers match your search.</p>
+              </div>
             ) : (
               filtered.map((c) => {
                 const accountTypeLabel = formatAccountTypeLabel(c.accountType);
+                const checked = memberSet.has(c.id);
                 return (
-                  <label key={c.id} className="route-members-row">
+                  <label
+                    key={c.id}
+                    className={`route-members-row${checked ? " is-checked" : ""}`}
+                  >
                     <input
                       type="checkbox"
-                      checked={members.includes(c.id)}
+                      className="route-checkbox"
+                      checked={checked}
                       onChange={() => toggleMember(c.id)}
                     />
-                    <span>
-                      <span
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: "0.45rem",
-                          flexWrap: "wrap"
-                        }}
-                      >
+                    <span className="route-members-row__body">
+                      <span className="route-members-row__head">
                         <strong>{c.fullName}</strong>
                         {accountTypeLabel ? (
                           <span
-                            className={`status-pill status-pill--${c.accountType === "savings" ? "pending" : "active"}`}
-                            style={{ fontSize: "0.7rem", padding: "0.1rem 0.45rem" }}
+                            className={`route-badge route-badge--${
+                              c.accountType === "savings" ? "warning" : "primary"
+                            }`}
                           >
                             {accountTypeLabel}
                           </span>
                         ) : null}
                       </span>
-                      <small className="muted">
-                        {c.accountNumber ?? "No account #"}
-                        {accountTypeLabel ? ` · ${accountTypeLabel}` : ""} · {c.phone}
-                      </small>
+                      <span className="route-cell-meta">
+                        <span>{c.accountNumber ?? "No account #"}</span>
+                        <span>·</span>
+                        <span>{c.phone}</span>
+                        {c.location ? (
+                          <>
+                            <span>·</span>
+                            <span>{c.location}</span>
+                          </>
+                        ) : null}
+                      </span>
                     </span>
                   </label>
                 );
               })
             )}
           </div>
-        </>
+        </div>
       )}
     </Modal>
   );

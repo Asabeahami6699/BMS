@@ -30,17 +30,28 @@ function isMissingCapitalTable(message: string): boolean {
   );
 }
 
+function mapEntryType(raw: unknown): BranchCapitalEntryType {
+  if (raw === "drawing") {
+    return "drawing";
+  }
+  if (raw === "income_allocation") {
+    return "income_allocation";
+  }
+  return "injection";
+}
+
 function mapRow(row: Record<string, unknown>): BranchCapitalEntry {
   return {
     id: String(row.id),
     tenantId: String(row.tenant_id),
     branchId: String(row.branch_id),
     businessDate: String(row.business_date).slice(0, 10),
-    entryType: (row.entry_type === "drawing" ? "drawing" : "injection") as BranchCapitalEntryType,
+    entryType: mapEntryType(row.entry_type),
     amount: roundMoney(Number(row.amount ?? 0)),
     source: row.source != null ? String(row.source) : undefined,
     reference: row.reference != null ? String(row.reference) : undefined,
     notes: row.notes != null ? String(row.notes) : undefined,
+    incomeAccountId: row.income_account_id != null ? String(row.income_account_id) : undefined,
     recordedBy: String(row.recorded_by ?? ""),
     recordedByName: row.recorded_by_name != null ? String(row.recorded_by_name) : undefined,
     voidedAt: row.voided_at != null ? String(row.voided_at) : undefined,
@@ -48,6 +59,48 @@ function mapRow(row: Record<string, unknown>): BranchCapitalEntry {
     voidReason: row.void_reason != null ? String(row.void_reason) : undefined,
     createdAt: String(row.created_at ?? new Date().toISOString())
   };
+}
+
+/** Internal helper used by institutionalIncomeService when running in-memory (tests/dev without Supabase). */
+export function recordMemoryIncomeAllocationCapitalEntry(entry: BranchCapitalEntry): void {
+  const list = memoryCapitalEntries.get(entry.tenantId) ?? [];
+  memoryCapitalEntries.set(entry.tenantId, [entry, ...list]);
+}
+
+/** Internal helper used by institutionalIncomeService when reversing an allocation in-memory. */
+export function voidMemoryCapitalEntryById(
+  tenantId: string,
+  entryId: string,
+  voidedBy: string,
+  voidedAt: string,
+  reason: string
+): BranchCapitalEntry | null {
+  const list = memoryCapitalEntries.get(tenantId) ?? [];
+  const idx = list.findIndex((e) => e.id === entryId);
+  if (idx < 0) {
+    return null;
+  }
+  const existing = list[idx]!;
+  if (existing.voidedAt) {
+    return existing;
+  }
+  const updated: BranchCapitalEntry = {
+    ...existing,
+    voidedAt,
+    voidedBy,
+    voidReason: reason
+  };
+  list[idx] = updated;
+  memoryCapitalEntries.set(tenantId, list);
+  return updated;
+}
+
+export function clearMemoryCapitalEntries(tenantId?: string): void {
+  if (tenantId) {
+    memoryCapitalEntries.delete(tenantId);
+  } else {
+    memoryCapitalEntries.clear();
+  }
 }
 
 async function loadAllTenantCapitalEntries(
@@ -87,57 +140,86 @@ export async function loadDayBranchCapitalTotals(
   businessDate: string
 ): Promise<{
   storageReady: boolean;
+  /** Physical cash capital injections for the day (adds to vault cash). Excludes non-cash income allocations. */
   dayInjections: number;
+  /** Physical cash owner drawings for the day (removes from vault cash). */
   dayDrawings: number;
+  /** Non-cash commission income allocations for the day (zero physical vault cash impact). */
+  dayIncomeAllocations: number;
+  branchTotalCashInjected: number;
+  branchTotalIncomeAllocated: number;
   branchTotalInjected: number;
   branchTotalDrawings: number;
   branchNetCapital: number;
+  companyTotalCashInjected: number;
+  companyTotalIncomeAllocated: number;
   companyTotalInjected: number;
   companyTotalDrawings: number;
   companyNetCapital: number;
 }> {
   const { storageReady, entries } = await loadAllTenantCapitalEntries(tenantId);
-  let companyTotalInjected = 0;
+  let companyTotalCashInjected = 0;
+  let companyTotalIncomeAllocated = 0;
   let companyTotalDrawings = 0;
-  let branchTotalInjected = 0;
+  let branchTotalCashInjected = 0;
+  let branchTotalIncomeAllocated = 0;
   let branchTotalDrawings = 0;
   let dayInjections = 0;
   let dayDrawings = 0;
+  let dayIncomeAllocations = 0;
 
   for (const entry of entries) {
     if (entry.voidedAt) {
       continue;
     }
-    const isInjection = entry.entryType === "injection";
-    if (isInjection) {
-      companyTotalInjected += entry.amount;
-    } else {
+    const isCashInjection = entry.entryType === "injection";
+    const isIncomeAllocation = entry.entryType === "income_allocation";
+    const isDrawing = entry.entryType === "drawing";
+
+    if (isCashInjection) {
+      companyTotalCashInjected += entry.amount;
+    } else if (isIncomeAllocation) {
+      companyTotalIncomeAllocated += entry.amount;
+    } else if (isDrawing) {
       companyTotalDrawings += entry.amount;
     }
+
     if (entry.branchId === branchId) {
-      if (isInjection) {
-        branchTotalInjected += entry.amount;
-      } else {
+      if (isCashInjection) {
+        branchTotalCashInjected += entry.amount;
+      } else if (isIncomeAllocation) {
+        branchTotalIncomeAllocated += entry.amount;
+      } else if (isDrawing) {
         branchTotalDrawings += entry.amount;
       }
       if (entry.businessDate === businessDate) {
-        if (isInjection) {
+        if (isCashInjection) {
           dayInjections += entry.amount;
-        } else {
+        } else if (isDrawing) {
           dayDrawings += entry.amount;
+        } else if (isIncomeAllocation) {
+          dayIncomeAllocations += entry.amount;
         }
       }
     }
   }
 
+  const branchTotalInjected = roundMoney(branchTotalCashInjected + branchTotalIncomeAllocated);
+  const companyTotalInjected = roundMoney(companyTotalCashInjected + companyTotalIncomeAllocated);
+
   return {
     storageReady,
     dayInjections: roundMoney(dayInjections),
     dayDrawings: roundMoney(dayDrawings),
-    branchTotalInjected: roundMoney(branchTotalInjected),
+    dayIncomeAllocations: roundMoney(dayIncomeAllocations),
+    branchTotalCashInjected: roundMoney(branchTotalCashInjected),
+    branchTotalIncomeAllocated: roundMoney(branchTotalIncomeAllocated),
+    branchTotalInjected,
     branchTotalDrawings: roundMoney(branchTotalDrawings),
     branchNetCapital: roundMoney(branchTotalInjected - branchTotalDrawings),
-    companyTotalInjected: roundMoney(companyTotalInjected),
+    companyTotalCashInjected: roundMoney(companyTotalCashInjected),
+    companyTotalIncomeAllocated: roundMoney(companyTotalIncomeAllocated),
+    companyTotalInjected,
     companyTotalDrawings: roundMoney(companyTotalDrawings),
     companyNetCapital: roundMoney(companyTotalInjected - companyTotalDrawings)
   };
@@ -162,12 +244,15 @@ export async function getBranchCapitalSummary(
   }
 
   const { storageReady, entries } = await loadAllTenantCapitalEntries(tenantId);
-  let companyTotalInjected = 0;
+  let companyTotalCashInjected = 0;
+  let companyTotalIncomeAllocated = 0;
   let companyTotalDrawings = 0;
-  let branchTotalInjected = 0;
+  let branchTotalCashInjected = 0;
+  let branchTotalIncomeAllocated = 0;
   let branchTotalDrawings = 0;
   let dayInjections = 0;
   let dayDrawings = 0;
+  let dayIncomeAllocations = 0;
 
   const visibleEntries = branchId
     ? entries.filter((e) => e.branchId === branchId)
@@ -177,40 +262,58 @@ export async function getBranchCapitalSummary(
     if (entry.voidedAt) {
       continue;
     }
-    const isInjection = entry.entryType === "injection";
-    if (isInjection) {
-      companyTotalInjected += entry.amount;
-    } else {
+    const isCashInjection = entry.entryType === "injection";
+    const isIncomeAllocation = entry.entryType === "income_allocation";
+    const isDrawing = entry.entryType === "drawing";
+
+    if (isCashInjection) {
+      companyTotalCashInjected += entry.amount;
+    } else if (isIncomeAllocation) {
+      companyTotalIncomeAllocated += entry.amount;
+    } else if (isDrawing) {
       companyTotalDrawings += entry.amount;
     }
+
     if (!branchId || entry.branchId === branchId) {
-      if (isInjection) {
-        branchTotalInjected += entry.amount;
-      } else {
+      if (isCashInjection) {
+        branchTotalCashInjected += entry.amount;
+      } else if (isIncomeAllocation) {
+        branchTotalIncomeAllocated += entry.amount;
+      } else if (isDrawing) {
         branchTotalDrawings += entry.amount;
       }
       if (entry.businessDate === businessDate) {
-        if (isInjection) {
+        if (isCashInjection) {
           dayInjections += entry.amount;
-        } else {
+        } else if (isDrawing) {
           dayDrawings += entry.amount;
+        } else if (isIncomeAllocation) {
+          dayIncomeAllocations += entry.amount;
         }
       }
     }
   }
 
+  const companyTotalInjected = roundMoney(companyTotalCashInjected + companyTotalIncomeAllocated);
+  const branchTotalInjected = roundMoney(branchTotalCashInjected + branchTotalIncomeAllocated);
+
   return {
     storageReady,
     branchId,
     businessDate,
-    companyTotalInjected: roundMoney(companyTotalInjected),
+    companyTotalInjected,
+    companyTotalCashInjected: roundMoney(companyTotalCashInjected),
+    companyTotalIncomeAllocated: roundMoney(companyTotalIncomeAllocated),
     companyTotalDrawings: roundMoney(companyTotalDrawings),
     companyNetCapital: roundMoney(companyTotalInjected - companyTotalDrawings),
-    branchTotalInjected: roundMoney(branchTotalInjected),
+    branchTotalInjected,
+    branchTotalCashInjected: roundMoney(branchTotalCashInjected),
+    branchTotalIncomeAllocated: roundMoney(branchTotalIncomeAllocated),
     branchTotalDrawings: roundMoney(branchTotalDrawings),
     branchNetCapital: roundMoney(branchTotalInjected - branchTotalDrawings),
     dayInjections: roundMoney(dayInjections),
     dayDrawings: roundMoney(dayDrawings),
+    dayIncomeAllocations: roundMoney(dayIncomeAllocations),
     entries: visibleEntries.slice(0, 100)
   };
 }
@@ -322,6 +425,26 @@ export async function voidBranchCapitalEntry(
     if (existing.voidedAt) {
       return existing;
     }
+    if (existing.entryType === "income_allocation") {
+      const { reverseInstitutionalIncomeCapitalTransferByCapitalEntryId } = await import(
+        "./institutionalIncomeService.js"
+      );
+      await reverseInstitutionalIncomeCapitalTransferByCapitalEntryId(
+        {
+          userId: context.userId,
+          tenantId,
+          role: context.role,
+          scopeType: context.scopeType,
+          branchId: context.branchId
+        },
+        entryId,
+        { reason }
+      );
+      const updated = (memoryCapitalEntries.get(tenantId) ?? []).find((e) => e.id === entryId);
+      if (updated) {
+        return updated;
+      }
+    }
     const updated: BranchCapitalEntry = {
       ...existing,
       voidedAt,
@@ -352,6 +475,32 @@ export async function voidBranchCapitalEntry(
   }
   if (existing.voidedAt) {
     return existing;
+  }
+
+  if (existing.entryType === "income_allocation") {
+    const { reverseInstitutionalIncomeCapitalTransferByCapitalEntryId } = await import(
+      "./institutionalIncomeService.js"
+    );
+    await reverseInstitutionalIncomeCapitalTransferByCapitalEntryId(
+      {
+        userId: context.userId,
+        tenantId,
+        role: context.role,
+        scopeType: context.scopeType,
+        branchId: context.branchId
+      },
+      entryId,
+      { reason }
+    );
+    const { data: reloaded } = await supabase
+      .from("branch_capital_entries")
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .eq("id", entryId)
+      .maybeSingle();
+    if (reloaded) {
+      return mapRow(reloaded as Record<string, unknown>);
+    }
   }
 
   const { data: updatedRow, error: updErr } = await supabase

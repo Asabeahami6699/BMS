@@ -1,6 +1,18 @@
 import { create } from "zustand";
-import type { IncomeReportPeriod, InstitutionalIncomeReport } from "@bms/shared";
-import { getActiveBranchFilter, getInstitutionalIncomeReport, getTenantId } from "../api";
+import type {
+  IncomeReportPeriod,
+  InstitutionalIncomeReport,
+  TransferInstitutionalIncomeToCapitalInput
+} from "@bms/shared";
+import {
+  getActiveBranchFilter,
+  getInstitutionalIncomeReport,
+  getTenantId,
+  reverseInstitutionalIncomeCapitalTransfer,
+  transferInstitutionalIncomeToCapital,
+  type ReverseIncomeCapitalTransferResponse,
+  type TransferIncomeToCapitalResponse
+} from "../api";
 import { toUserFacingError } from "../../lib/networkError";
 import {
   createLiveSyncManager,
@@ -8,12 +20,15 @@ import {
   isFresh,
   runHydrate
 } from "./storeSync";
+import { useSusuClosingBalancesStore } from "./susuClosingBalancesStore";
 
 type IncomeState = {
   branchId: string | null;
   period: IncomeReportPeriod;
   report: InstitutionalIncomeReport | null;
   loading: boolean;
+  transferring: boolean;
+  reversingTransferId: string | null;
   error: string | null;
   lastFetchedAt: number | null;
   liveSyncActive: boolean;
@@ -23,6 +38,13 @@ type IncomeState = {
   hydrate: (options?: { force?: boolean }) => void;
   refresh: () => Promise<void>;
   refreshSilent: () => Promise<void>;
+  transferToCapital: (
+    input: TransferInstitutionalIncomeToCapitalInput
+  ) => Promise<TransferIncomeToCapitalResponse>;
+  reverseTransfer: (
+    transferId: string,
+    reason: string
+  ) => Promise<ReverseIncomeCapitalTransferResponse>;
   startLiveSync: () => void;
   stopLiveSync: () => void;
 };
@@ -36,6 +58,8 @@ export const useInstitutionalIncomeStore = create<IncomeState>((set, get) => ({
   period: "daily",
   report: null,
   loading: false,
+  transferring: false,
+  reversingTransferId: null,
   error: null,
   lastFetchedAt: null,
   liveSyncActive: false,
@@ -125,6 +149,40 @@ export const useInstitutionalIncomeStore = create<IncomeState>((set, get) => ({
     return fetchInFlight;
   },
 
+  transferToCapital: async (input) => {
+    set({ transferring: true, error: null });
+    try {
+      const result = await transferInstitutionalIncomeToCapital(input);
+      set({ transferring: false });
+      await get().refreshSilent();
+      if (useSusuClosingBalancesStore.getState().lastFetchedAt) {
+        void useSusuClosingBalancesStore.getState().refreshSilent();
+      }
+      return result;
+    } catch (error) {
+      const message = toUserFacingError(error, "Could not transfer commission income to Business Capital");
+      set({ transferring: false, error: message });
+      throw new Error(message);
+    }
+  },
+
+  reverseTransfer: async (transferId, reason) => {
+    set({ reversingTransferId: transferId, error: null });
+    try {
+      const result = await reverseInstitutionalIncomeCapitalTransfer(transferId, { reason });
+      set({ reversingTransferId: null });
+      await get().refreshSilent();
+      if (useSusuClosingBalancesStore.getState().lastFetchedAt) {
+        void useSusuClosingBalancesStore.getState().refreshSilent();
+      }
+      return result;
+    } catch (error) {
+      const message = toUserFacingError(error, "Could not reverse commission capital transfer");
+      set({ reversingTransferId: null, error: message });
+      throw new Error(message);
+    }
+  },
+
   startLiveSync: () => {
     if (get().liveSyncActive) {
       return;
@@ -132,7 +190,11 @@ export const useInstitutionalIncomeStore = create<IncomeState>((set, get) => ({
     set({ liveSyncActive: true });
     liveSync.start({
       getTenantId,
-      tables: ["branch_income_accounts", "institutional_income_entries"],
+      tables: [
+        "branch_income_accounts",
+        "institutional_income_entries",
+        "institutional_income_capital_transfers"
+      ],
       onRefresh: () => void get().refreshSilent(),
       isStale: () => !isFresh(get().lastFetchedAt)
     });

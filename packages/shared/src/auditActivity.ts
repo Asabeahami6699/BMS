@@ -129,6 +129,16 @@ const ACTIVITY_RULES: ActivityRule[] = [
     action: "Published Susu cycle fee policy"
   },
   { methods: ["POST"], pattern: /^\/income\/reverse$/i, action: "Reversed institutional income entry" },
+  {
+    methods: ["POST"],
+    pattern: /^\/income\/transfer-to-capital$/i,
+    action: "Transferred commission income to Business Capital"
+  },
+  {
+    methods: ["POST"],
+    pattern: /^\/income\/capital-transfers\/[^/]+\/reverse$/i,
+    action: "Reversed commission income capital transfer"
+  },
   { methods: ["PUT"], pattern: /^\/tenant\/account-number-policy$/i, action: "Updated account number policy" },
 
   { methods: ["POST"], pattern: /^\/platform\/tenants$/i, action: "Created tenant company" },
@@ -138,6 +148,8 @@ const ACTIVITY_RULES: ActivityRule[] = [
   { methods: ["PATCH"], pattern: /^\/routes\/[^/]+$/i, action: "Updated collection route" },
   { methods: ["PUT"], pattern: /^\/routes\/[^/]+\/members$/i, action: "Updated route members" },
   { methods: ["DELETE"], pattern: /^\/routes\/[^/]+$/i, action: "Deleted collection route" },
+  { methods: ["PUT"], pattern: /^\/routes\/settings$/i, action: "Updated tenant route assignment settings" },
+  { methods: ["POST"], pattern: /^\/routes\/reorganization\/apply$/i, action: "Reorganized customer routes and mobilizers" },
 
   { methods: ["POST"], pattern: /^\/field-agents\/me\/callover\/report$/i, action: "Submitted field callover report" },
   {

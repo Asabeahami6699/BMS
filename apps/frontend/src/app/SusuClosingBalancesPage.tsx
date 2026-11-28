@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import type { AppRole, BranchCapitalEntry, BranchCapitalEntryType } from "./api";
+import type { AppRole, BranchCapitalEntry } from "./api";
 import {
   AccountingAmountInput,
   formatAccountingInput,
@@ -22,10 +22,12 @@ function formatMoney(amount: number): string {
 
 const CAPITAL_INJECTION_TOOLTIP =
   "Cash put INTO the business by the owner (e.g. Day 1 starting cash or liquidity top-up). Adds to Net Owner Capital and today's Expected Closing Vault.";
+const CAPITAL_ALLOCATION_TOOLTIP =
+  "Internal allocation of earned commission income from Institutional Income into Business Capital. Adds to Net Business Capital without adding new physical vault cash (fee cash is already in the safe).";
 const CAPITAL_DRAWING_TOOLTIP =
   "Cash taken OUT of the vault by the owner for personal use or profit withdrawal. Reduces Net Owner Capital and today's Expected Closing Vault (do not use for branch expenses or customer payouts).";
 const NET_CAPITAL_TOOLTIP =
-  "Net owner capital = Total capital added minus Total owner drawings across all branches.";
+  "Net business capital = Owner cash capital added + Commission income allocated minus Owner drawings across all branches.";
 
 const UNSAVED_CHANGES_TOOLTIP =
   "You have edited fields in this closing form that have not been saved yet. Click Save closing to record them for this date.";
@@ -72,7 +74,7 @@ export function SusuClosingBalancesPage({ role }: Props) {
   const voidCapitalEntry = useSusuClosingBalancesStore((s) => s.voidCapitalEntry);
 
   const [capitalModalOpen, setCapitalModalOpen] = useState(false);
-  const [capitalType, setCapitalType] = useState<BranchCapitalEntryType>("injection");
+  const [capitalType, setCapitalType] = useState<"injection" | "drawing">("injection");
   const [capitalAmount, setCapitalAmount] = useState("");
   const [capitalSource, setCapitalSource] = useState("Owner cash");
   const [capitalReference, setCapitalReference] = useState("");
@@ -206,7 +208,7 @@ export function SusuClosingBalancesPage({ role }: Props) {
     }
   }
 
-  function openCapitalModal(type: BranchCapitalEntryType) {
+  function openCapitalModal(type: "injection" | "drawing") {
     setCapitalType(type);
     setCapitalAmount("");
     setCapitalSource(type === "injection" ? "Owner cash" : "Owner drawing");
@@ -724,21 +726,27 @@ export function SusuClosingBalancesPage({ role }: Props) {
                                       ? "susu-capital-badge--voided"
                                       : entry.entryType === "injection"
                                         ? "susu-capital-badge--in"
-                                        : "susu-capital-badge--out"
+                                        : entry.entryType === "income_allocation"
+                                          ? "susu-capital-badge--alloc"
+                                          : "susu-capital-badge--out"
                                   }`}
                                   title={
                                     isVoided
                                       ? `Voided entry${entry.voidReason ? `: ${entry.voidReason}` : ""}`
                                       : entry.entryType === "injection"
                                         ? CAPITAL_INJECTION_TOOLTIP
-                                        : CAPITAL_DRAWING_TOOLTIP
+                                        : entry.entryType === "income_allocation"
+                                          ? CAPITAL_ALLOCATION_TOOLTIP
+                                          : CAPITAL_DRAWING_TOOLTIP
                                   }
                                 >
                                   {isVoided
                                     ? "Voided"
                                     : entry.entryType === "injection"
                                       ? "Capital added"
-                                      : "Owner drawing"}
+                                      : entry.entryType === "income_allocation"
+                                        ? "Commission allocation"
+                                        : "Owner drawing"}
                                 </span>
                                 <span className="susu-capital-entry__source">
                                   {entry.source || "Business capital"}
@@ -757,12 +765,12 @@ export function SusuClosingBalancesPage({ role }: Props) {
                               className={`susu-capital-col--num ${
                                 isVoided
                                   ? ""
-                                  : entry.entryType === "injection"
-                                    ? "susu-capital-amount--in"
-                                    : "susu-capital-amount--out"
+                                  : entry.entryType === "drawing"
+                                    ? "susu-capital-amount--out"
+                                    : "susu-capital-amount--in"
                               }`}
                             >
-                              {entry.entryType === "injection" ? "+" : "−"}{" "}
+                              {entry.entryType === "drawing" ? "−" : "+"}{" "}
                               {formatMoney(entry.amount)}
                             </td>
                             <td className="susu-capital-col--by">
@@ -1186,11 +1194,19 @@ export function SusuClosingBalancesPage({ role }: Props) {
 
       <Modal
         open={voidTarget != null}
-        title="Void capital entry"
+        title={
+          voidTarget?.entryType === "income_allocation"
+            ? "Reverse commission allocation"
+            : "Void capital entry"
+        }
         subtitle={
           voidTarget
             ? `${voidTarget.businessDate} · ${formatMoney(voidTarget.amount)} (${
-                voidTarget.entryType === "injection" ? "Capital added" : "Owner drawing"
+                voidTarget.entryType === "injection"
+                  ? "Capital added"
+                  : voidTarget.entryType === "income_allocation"
+                    ? "Commission allocation"
+                    : "Owner drawing"
               })`
             : undefined
         }
@@ -1198,8 +1214,9 @@ export function SusuClosingBalancesPage({ role }: Props) {
       >
         <form className="form-stack" onSubmit={(e) => void handleVoidSubmit(e)}>
           <p className="muted">
-            Voiding removes this entry from total business capital and today&apos;s Expected Closing
-            Vault while keeping it visible in the audit log.
+            {voidTarget?.entryType === "income_allocation"
+              ? "Voiding this commission allocation reverses the linked transfer and restores the amount back to the branch's available Institutional Income balance (vault cash is unchanged)."
+              : "Voiding removes this entry from total business capital and today's Expected Closing Vault while keeping it visible in the audit log."}
           </p>
           <label className="field">
             <span>Reason for voiding</span>

@@ -28,10 +28,29 @@ function branchLabelForRoute(route: FieldRoute, branches: Branch[]): string {
   return formatBranchLabel(route.branchId, branches, route.branchName, route.branchCode);
 }
 
+function parseCommunitiesList(raw: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const part of raw.split(/[,;\n]+/)) {
+    const trimmed = part.trim();
+    if (!trimmed) {
+      continue;
+    }
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    out.push(trimmed);
+  }
+  return out;
+}
+
 export function RouteFormModal({ open, mode, route, branches, onClose, onSaved }: Props) {
   const { showToast } = useToast();
   const [name, setName] = useState("");
   const [area, setArea] = useState("");
+  const [communitiesInput, setCommunitiesInput] = useState("");
   const [branchId, setBranchId] = useState("");
   const [agentId, setAgentId] = useState("");
   const [status, setStatus] = useState<"active" | "inactive">("active");
@@ -46,6 +65,11 @@ export function RouteFormModal({ open, mode, route, branches, onClose, onSaved }
     const source = branches.length > 0 ? branches : loadedBranches;
     return source.filter((b) => b.status !== "inactive");
   }, [branches, loadedBranches]);
+
+  const parsedCommunities = useMemo(
+    () => parseCommunitiesList(communitiesInput),
+    [communitiesInput]
+  );
 
   const assignBranchId = createdRoute?.branchId ?? branchId;
 
@@ -116,6 +140,7 @@ export function RouteFormModal({ open, mode, route, branches, onClose, onSaved }
     if (mode === "edit" && route) {
       setName(route.name);
       setArea(route.area);
+      setCommunitiesInput((route.communities ?? []).join(", "));
       setBranchId(route.branchId);
       setAgentId(route.assignedFieldAgentId ?? "");
       setStatus(route.status);
@@ -124,6 +149,7 @@ export function RouteFormModal({ open, mode, route, branches, onClose, onSaved }
 
     setName("");
     setArea("");
+    setCommunitiesInput("");
     setBranchId(activeBranches[0]?.id ?? "");
     setAgentId("");
     setStatus("active");
@@ -150,6 +176,7 @@ export function RouteFormModal({ open, mode, route, branches, onClose, onSaved }
       const created = await createFieldRoute({
         name: name.trim(),
         area: area.trim(),
+        communities: parsedCommunities,
         branchId,
         assignedFieldAgentId: null,
         status
@@ -207,6 +234,7 @@ export function RouteFormModal({ open, mode, route, branches, onClose, onSaved }
       await updateFieldRoute(route.id, {
         name: name.trim(),
         area: area.trim(),
+        communities: parsedCommunities,
         branchId,
         assignedFieldAgentId: agentId.trim() || null,
         status,
@@ -227,14 +255,14 @@ export function RouteFormModal({ open, mode, route, branches, onClose, onSaved }
   const modalTitle = isAssignStep
     ? "Assign field agent"
     : mode === "create"
-      ? "Add route"
+      ? "Create new route"
       : "Edit route";
 
   const modalSubtitle = isAssignStep
-    ? `${createdRoute!.name} was created. Choose who will collect on this route.`
+    ? `${createdRoute!.name} is ready. Choose the responsible mobilizer.`
     : mode === "create"
-      ? "Step 1 — route details. You will assign an agent next."
-      : "Collection route for a branch and field agent.";
+      ? "Define the territory, covered communities, and branch for this collection route."
+      : "Update route details, covered communities, mobilizer, or active status.";
 
   return (
     <Modal
@@ -242,139 +270,172 @@ export function RouteFormModal({ open, mode, route, branches, onClose, onSaved }
       title={modalTitle}
       subtitle={modalSubtitle}
       onClose={handleClose}
+      panelClassName="route-modal"
       footer={
         isAssignStep ? (
           <>
-            <button type="button" className="button secondary" onClick={handleSkipAssign}>
+            <button type="button" className="route-btn route-btn--secondary" onClick={handleSkipAssign}>
               Skip for now
             </button>
             <button
               type="submit"
               form="route-assign-form"
-              className="button"
+              className="route-btn route-btn--primary"
               disabled={submitting || !agentId.trim() || agentsForBranch.length === 0}
             >
-              {submitting ? "Assigning…" : "Assign agent"}
+              {submitting ? "Assigning…" : "Assign mobilizer"}
             </button>
           </>
         ) : (
           <>
-            <button type="button" className="button secondary" onClick={handleClose}>
+            <button type="button" className="route-btn route-btn--secondary" onClick={handleClose}>
               Cancel
             </button>
             <button
               type="submit"
               form="route-form"
-              className="button"
+              className="route-btn route-btn--primary"
               disabled={submitting || activeBranches.length === 0}
             >
               {submitting
                 ? "Saving…"
                 : mode === "create"
-                  ? "Create & assign agent"
+                  ? "Create & next step →"
                   : "Save changes"}
             </button>
           </>
         )
       }
     >
+      {mode === "create" ? (
+        <div className="route-stepper" aria-label="Route creation progress">
+          <div className={`route-stepper__item${!isAssignStep ? " is-active" : " is-done"}`}>
+            <span className="route-stepper__num">{isAssignStep ? "✓" : "1"}</span>
+            <span>Route details</span>
+          </div>
+          <div className="route-stepper__line" />
+          <div className={`route-stepper__item${isAssignStep ? " is-active" : ""}`}>
+            <span className="route-stepper__num">2</span>
+            <span>Assign mobilizer</span>
+          </div>
+        </div>
+      ) : null}
+
       {isAssignStep && createdRoute ? (
-        <form id="route-assign-form" className="stack-form" onSubmit={handleAssignAgent}>
+        <form id="route-assign-form" className="route-form" onSubmit={handleAssignAgent}>
           <div className="route-form-summary" role="status">
-            <p>
+            <div className="route-form-summary__head">
               <strong>{createdRoute.name}</strong>
-              <span className="muted"> · {createdRoute.area}</span>
-            </p>
-            <p className="muted" style={{ margin: "0.35rem 0 0", fontSize: "0.85rem" }}>
-              {branchLabelForRoute(createdRoute, branches)}
+              <span className="route-badge route-badge--success">Created</span>
+            </div>
+            <p className="route-cell-meta">
+              {createdRoute.area} · {branchLabelForRoute(createdRoute, branches)}
             </p>
           </div>
-          <label className="field">
-            <span>Assigned field agent</span>
+          <label className="route-field">
+            <span className="route-field__label">Responsible field mobilizer</span>
             <select
+              className="route-select"
               value={agentId}
               onChange={(e) => setAgentId(e.target.value)}
               required
               autoFocus
             >
-              <option value="">Select agent</option>
+              <option value="">Choose a mobilizer…</option>
               {agentsForBranch.map((a) => (
                 <option key={a.userId} value={a.userId}>
                   {a.label}
                 </option>
               ))}
             </select>
-            {agentsForBranch.length === 0 ? (
-              <p className="muted" style={{ margin: "0.25rem 0 0", fontSize: "0.85rem" }}>
-                No active field agents for this branch. Add one under Field agents, or skip and
-                assign later via Edit route.
-              </p>
-            ) : (
-              <p className="muted" style={{ margin: "0.25rem 0 0", fontSize: "0.85rem" }}>
-                Customers added to this route will be synced to this agent.
-              </p>
-            )}
+            <span className="route-field__hint">
+              {agentsForBranch.length === 0
+                ? "No active field agents for this branch yet. Add one under Field agents, or skip and assign later."
+                : "Customers assigned to this route will sync to this mobilizer automatically."}
+            </span>
           </label>
         </form>
       ) : (
         <form
           id="route-form"
-          className="stack-form"
+          className="route-form"
           onSubmit={mode === "create" ? handleCreateDetails : handleEditSubmit}
         >
-          <label className="field">
-            <span>Route name</span>
+          <div className="route-form__grid">
+            <label className="route-field">
+              <span className="route-field__label">Route name</span>
+              <input
+                className="route-input"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
+                placeholder="e.g. Market Circle"
+              />
+            </label>
+            <label className="route-field">
+              <span className="route-field__label">Primary area / locality</span>
+              <input
+                className="route-input"
+                value={area}
+                onChange={(e) => setArea(e.target.value)}
+                required
+                placeholder="e.g. Osu, Oxford Street"
+              />
+            </label>
+          </div>
+
+          <label className="route-field">
+            <span className="route-field__label">
+              Covered communities / areas (comma-separated, optional)
+            </span>
             <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-              placeholder="e.g. Market Circle"
+              className="route-input"
+              value={communitiesInput}
+              onChange={(e) => setCommunitiesInput(e.target.value)}
+              placeholder="e.g. Bondaye, Bondaye Market, Old Town"
             />
-          </label>
-          <label className="field">
-            <span>Area / locality</span>
-            <input
-              value={area}
-              onChange={(e) => setArea(e.target.value)}
-              required
-              placeholder="e.g. Osu, Oxford Street"
-            />
-          </label>
-          <label className="field">
-            <span>Branch</span>
-            <select value={branchId} onChange={(e) => setBranchId(e.target.value)} required>
-              <option value="">Select branch</option>
-              {activeBranches.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.name} ({b.code})
-                </option>
-              ))}
-            </select>
-            {activeBranches.length === 0 ? (
-              <p className="muted" style={{ margin: "0.25rem 0 0", fontSize: "0.85rem" }}>
-                No active branches loaded. Add a branch under Settings → Branches, then try again.
-              </p>
+            {parsedCommunities.length > 0 ? (
+              <div className="route-community-chips" style={{ marginTop: "0.4rem" }}>
+                {parsedCommunities.map((c) => (
+                  <span key={c} className="route-community-chip route-community-chip--primary">
+                    {c}
+                  </span>
+                ))}
+              </div>
             ) : null}
+            <span className="route-field__hint">
+              Matched against customer locations for Location-Based suggestions and Route Reorganization.
+            </span>
           </label>
-          {mode === "edit" ? (
-            <>
-              <label className="field">
-                <span>Assigned field agent</span>
-                <select value={agentId} onChange={(e) => setAgentId(e.target.value)}>
-                  <option value="">Unassigned</option>
-                  {editAgents.map((a) => (
-                    <option key={a.userId} value={a.userId}>
-                      {a.label}
-                    </option>
-                  ))}
-                </select>
-                <p className="muted" style={{ margin: "0.25rem 0 0", fontSize: "0.85rem" }}>
-                  When saved, members on this route can be synced to this agent.
-                </p>
-              </label>
-              <label className="field">
-                <span>Status</span>
+
+          <div className={mode === "edit" ? "route-form__grid" : undefined}>
+            <label className="route-field">
+              <span className="route-field__label">Branch</span>
+              <select
+                className="route-select"
+                value={branchId}
+                onChange={(e) => setBranchId(e.target.value)}
+                required
+              >
+                <option value="">Select branch…</option>
+                {activeBranches.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name} ({b.code})
+                  </option>
+                ))}
+              </select>
+              {activeBranches.length === 0 ? (
+                <span className="route-field__hint">
+                  No active branches loaded. Add a branch under Settings → Branches first.
+                </span>
+              ) : null}
+            </label>
+
+            {mode === "edit" ? (
+              <label className="route-field">
+                <span className="route-field__label">Status</span>
                 <select
+                  className="route-select"
                   value={status}
                   onChange={(e) => setStatus(e.target.value as "active" | "inactive")}
                 >
@@ -382,12 +443,29 @@ export function RouteFormModal({ open, mode, route, branches, onClose, onSaved }
                   <option value="inactive">Inactive</option>
                 </select>
               </label>
-            </>
-          ) : (
-            <p className="muted" style={{ margin: 0, fontSize: "0.85rem" }}>
-              After you create the route, you will choose a field agent on the next step.
-            </p>
-          )}
+            ) : null}
+          </div>
+
+          {mode === "edit" ? (
+            <label className="route-field">
+              <span className="route-field__label">Responsible field mobilizer</span>
+              <select
+                className="route-select"
+                value={agentId}
+                onChange={(e) => setAgentId(e.target.value)}
+              >
+                <option value="">Unassigned</option>
+                {editAgents.map((a) => (
+                  <option key={a.userId} value={a.userId}>
+                    {a.label}
+                  </option>
+                ))}
+              </select>
+              <span className="route-field__hint">
+                When saved, route members sync to this mobilizer according to your tenant strategy.
+              </span>
+            </label>
+          ) : null}
         </form>
       )}
     </Modal>

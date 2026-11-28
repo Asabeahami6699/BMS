@@ -1,12 +1,19 @@
 import { z } from "zod";
 
-export const branchCapitalEntryTypeSchema = z.enum(["injection", "drawing"]);
+export const branchCapitalEntryTypeSchema = z.enum([
+  "injection",
+  "drawing",
+  "income_allocation"
+]);
 export type BranchCapitalEntryType = z.infer<typeof branchCapitalEntryTypeSchema>;
+
+export const manualBranchCapitalEntryTypeSchema = z.enum(["injection", "drawing"]);
+export type ManualBranchCapitalEntryType = z.infer<typeof manualBranchCapitalEntryTypeSchema>;
 
 export const createBranchCapitalEntrySchema = z.object({
   branchId: z.string().trim().min(1, "Select a branch"),
   businessDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD date"),
-  entryType: branchCapitalEntryTypeSchema,
+  entryType: manualBranchCapitalEntryTypeSchema,
   amount: z.coerce
     .number()
     .finite()
@@ -33,6 +40,7 @@ export type BranchCapitalEntry = {
   source?: string;
   reference?: string;
   notes?: string;
+  incomeAccountId?: string;
   recordedBy: string;
   recordedByName?: string;
   voidedAt?: string;
@@ -47,15 +55,21 @@ export type BranchCapitalSummary = {
   businessDate: string;
   /** Company-wide cumulative totals across all branches (non-voided). */
   companyTotalInjected: number;
+  companyTotalCashInjected?: number;
+  companyTotalIncomeAllocated?: number;
   companyTotalDrawings: number;
   companyNetCapital: number;
   /** Selected branch cumulative totals (non-voided). */
   branchTotalInjected: number;
+  branchTotalCashInjected?: number;
+  branchTotalIncomeAllocated?: number;
   branchTotalDrawings: number;
   branchNetCapital: number;
-  /** Selected branch + businessDate totals (non-voided). */
+  /** Selected branch + businessDate physical cash totals (non-voided; excludes non-cash income allocations). */
   dayInjections: number;
   dayDrawings: number;
+  /** Selected branch + businessDate non-cash commission income allocations (informational only; zero vault cash impact). */
+  dayIncomeAllocations?: number;
   /** Recent entries (newest first) for the selected branch (or all branches if branchId omitted). */
   entries: BranchCapitalEntry[];
 };

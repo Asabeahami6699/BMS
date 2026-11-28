@@ -429,6 +429,7 @@ export function TenantApp() {
               susuNavVisibility={user?.susuNavVisibility}
             >
               <InstitutionalIncomePage
+                role={role}
                 permissions={permissions}
                 susuOnly
                 defaultBranchId={activeBranchFilter}
@@ -916,6 +917,7 @@ export function TenantApp() {
             ) : (
               <TenantIncomeRoute permissions={permissions}>
                 <InstitutionalIncomePage
+                  role={role}
                   permissions={permissions}
                   susuOnly={false}
                   defaultBranchId={activeBranchFilter}

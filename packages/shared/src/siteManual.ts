@@ -280,8 +280,8 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
   {
     id: "susu-income",
     department: "susu",
-    title: "Susu income (company fee revenue by branch)",
-    howTo: "How to track Susu fee income",
+    title: "Susu income & transferring commission income to Business Capital",
+    howTo: "How to track Susu fee income and allocate commission revenue to Business Capital",
     keywords: [
       "susu income",
       "institutional income",
@@ -291,6 +291,12 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
       "savings opening fee",
       "cycle commission",
       "branch income",
+      "transfer to capital",
+      "business capital",
+      "capital allocation",
+      "income allocation",
+      "equity",
+      "reverse transfer",
       "backfill"
     ],
     modules: ["susu_management"],
@@ -298,7 +304,10 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
       "Go to Susu → Susu income to view institutional fee revenue earned by your company (strictly isolated to your tenant’s branches and never mixed with customer deposits).",
       "Two automatic income streams are tracked: Susu cycle fees (earned from customer Susu cycles) and Savings opening fees (recorded for the branch when new savings accounts activate).",
       "Home-branch attribution on inter-branch payouts: if a customer registered at Branch A makes a walk-in withdrawal at Branch B, physical cash leaves Branch B’s till while any Susu withdrawal commission income is automatically credited to Branch A (the customer’s home branch).",
-      "Filter by branch, date range, and income source to review daily or period totals, branch breakdowns, and any reversed fee entries.",
+      "Filter by branch, date range, and income source — or search by customer name or account number — to review daily or period totals, branch breakdowns, and any reversed fee entries.",
+      "Transferring commission income to Business Capital: authorized Admins and Accountants can open the Transfers to Capital section on Susu → Susu income and click Transfer to Capital to reclassify available branch commission income into Branch Business Capital (with a required reason and optional reference).",
+      "Zero vault cash double-counting: because commission cash is already physically inside the branch vault from customer collections, transferring income to Business Capital is recorded as a non-cash equity reclassification (entry type: Income allocation). It atomically debits the branch’s commission income balance and credits Branch Capital while adding GHS 0.00 to physical vault cash — protecting closing vault reconciliation.",
+      "Safety, idempotency & reversal: transfers cannot exceed a branch’s available commission income balance, duplicate clicks are protected by idempotency keys, and every transfer can be reversed cleanly with a required audit reason (restoring the branch’s income balance and marking the linked capital entry void, with full Audit Logs tracking).",
       "Note: Susu income tracks revenue earned by the institution from customer fees. Staff payroll commissions paid to field agents are managed separately under Susu → Agent commissions."
     ]
   },
@@ -472,7 +481,7 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
       "Tills: cash issued = initial + extra cash (not float). Closed tills return to vault; open tills show as still in drawers.",
       "Field deposits increase the vault; field withdrawals decrease it. Walk-in activity stays inside till cash.",
       "Enter cash to bank (Susu worksheet only — Banking Treasury post comes later), optional vault count, and save.",
-      "Expected closing vault = opening − issued to tills + field deposits − field withdrawals + returned closed tills − cash to bank − extra branch expenses.",
+      "Expected closing vault = opening − issued to tills + field deposits − field withdrawals + returned closed tills − cash to bank − extra branch expenses. Commission-to-capital allocations (Income allocation entries) appear on Branch Capital without altering physical vault cash.",
       "Print Daily EOD Summary: click Print Daily EOD Summary at the top of Susu → Closing balances to generate a signed 1-page branch vault sheet with Coordinator, Branch Manager, and Internal Audit sign-off lines.",
       "Teller drawer OS remains on Overages/Shortages → Branch till."
     ]
@@ -493,12 +502,38 @@ export const SITE_MANUAL_ARTICLES: SiteManualArticle[] = [
   {
     id: "susu-routes-team",
     department: "susu",
-    title: "Routes, field agents, and coordinators",
-    howTo: "How to organize Susu routes and staff",
-    keywords: ["routes", "agents", "field agents", "coordinators", "territory", "assign"],
+    title: "Routes, Route Reorganization, tenant assignment strategies, field agents & coordinators",
+    howTo: "How to configure route strategies, reorganize customers, and manage field agents",
+    keywords: [
+      "routes",
+      "route reorganization",
+      "reorganize",
+      "strategy",
+      "registration-based",
+      "location-based",
+      "manual assignment",
+      "communities",
+      "geographical area",
+      "location match",
+      "bulk reassign",
+      "original creator",
+      "assignment history",
+      "transfers",
+      "agents",
+      "field agents",
+      "mobilizer",
+      "coordinators",
+      "territory",
+      "assign"
+    ],
     modules: ["susu_management"],
     body: [
-      "Go to Susu → Routes to define collection routes/zones and assign field agents to territories.",
+      "Go to Susu → Routes to create and manage collection routes per branch, define each route’s primary area and covered communities, assign responsible field mobilizers, manage route members, and transfer individual customers.",
+      "Tenant-specific route assignment strategies (Susu → Routes → Route Reorganization): each company independently selects its own strategy without affecting other tenants — Registration-Based (keeps the registering mobilizer and optionally auto-attaches their sole active branch route on approval), Location-Based (matches a customer’s recorded location against branch routes’ areas and covered communities to suggest or auto-assign unambiguous routes), or Manual (full administrator control with no automatic location or registration reassignment).",
+      "Approval-time route assignment: when approving a pending customer in Review registration, the system displays the company’s active strategy and any matching branch route recommendation. Ambiguous multi-route matches or incomplete locations are never guessed — the approver selects the route explicitly or leaves the customer unassigned for later organization.",
+      "Original creator vs operational assignment: a customer’s Original creator (who registered the account) is permanently preserved and never overwritten when routes or mobilizers change. Reassigning a customer’s route or mobilizer never alters their savings, Susu passbook, contributions, loans, or financial history.",
+      "Route Reorganization workspace (Susu → Routes → Route Reorganization): authorized administrators and coordinators can view all active customers in a branch, filter by community/location, current route, customers without a route, or mobilizer, run Review location matches to stage unambiguous location suggestions, select individual or multiple customers, preview every previous → new route and mobilizer change in a confirmation modal, and apply bulk updates atomically.",
+      "Immutable Assignment History: every route or mobilizer change (approval, transfer, bulk reorganization, route-agent sync, route member update, or route deletion) is permanently recorded with previous/new route, previous/new mobilizer, actor, timestamp, and reason. View full branch history under Route Reorganization or per-customer history under Customer Details → Branch & servicing.",
       "Use Susu → Agents to view your field agent roster, branch assignment, active customers, and collection activity.",
       "Use Susu → Coordinators (admin) to oversee coordinator accounts and branch approval workloads."
     ]

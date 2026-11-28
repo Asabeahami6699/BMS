@@ -1,15 +1,21 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
+  ASSIGNMENT_CHANGE_SOURCE_LABELS,
   CUSTOMER_ID_CARD_TYPE_OPTIONS,
   SAVINGS_INITIAL_DEPOSIT_GHS,
   SUSU_COMMISSION_DEBIT_TAG,
   SUSU_COMMISSION_REFUND_TAG,
   formatAccountAmount,
   formatIdCardTypeLabel,
-  ledgerDisplayReason
+  ledgerDisplayReason,
+  type CustomerAssignmentHistory
 } from "@bms/shared";
 import type { AccountType, Customer } from "../app/api";
-import { scheduleCustomerNextCardDailySusu, upgradeCustomerKyc } from "../app/api";
+import {
+  listCustomerAssignmentHistory,
+  scheduleCustomerNextCardDailySusu,
+  upgradeCustomerKyc
+} from "../app/api";
 import { SusuReversalDialog } from "../app/SusuReversalDialog";
 import { printCustomerAccountStatement } from "../app/customerAccountStatement";
 import {
@@ -154,6 +160,7 @@ export function CustomerDetailsView({
   >("non_citizen_ghana_card");
   const [upgradeIdNumber, setUpgradeIdNumber] = useState("");
   const [savingKycUpgrade, setSavingKycUpgrade] = useState(false);
+  const [assignmentHistory, setAssignmentHistory] = useState<CustomerAssignmentHistory[]>([]);
 
   const liveCustomer = useCustomersStore((s) =>
     s.customers.find((c) => c.id === customerProp.id)
@@ -185,7 +192,22 @@ export function CustomerDetailsView({
 
   useEffect(() => {
     void useCustomerLedgerStore.getState().ensureDetail(customerProp.id, { force: true });
-  }, [customerProp.id]);
+    let cancelled = false;
+    void listCustomerAssignmentHistory(customerProp.id)
+      .then((rows) => {
+        if (!cancelled) {
+          setAssignmentHistory(rows);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAssignmentHistory([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [customerProp.id, liveCustomer?.routeId, liveCustomer?.assignedFieldAgentId]);
 
   useEffect(() => {
     if (!showFinancials) {
@@ -1029,13 +1051,59 @@ export function CustomerDetailsView({
             >
               <div className="cif-grid">
                 <InfoRow label="Home branch" value={branchLabel ?? "—"} fullWidth />
-                <InfoRow label="Assigned agent" value={liveAgentLabel} fullWidth />
+                <InfoRow label="Assigned mobilizer" value={liveAgentLabel} fullWidth />
                 <InfoRow label="Collection route" value={routeLabel} fullWidth />
-                {customer.createdByFieldAgentName &&
-                customer.createdByFieldAgentName !== customer.assignedFieldAgentName ? (
-                  <InfoRow label="Registered by" value={customer.createdByFieldAgentName} fullWidth />
+                {customer.createdByFieldAgentName || customer.createdByFieldAgentId ? (
+                  <InfoRow
+                    label="Original creator"
+                    value={customer.createdByFieldAgentName ?? customer.createdByFieldAgentId ?? "—"}
+                    fullWidth
+                  />
                 ) : null}
               </div>
+              {assignmentHistory.length > 0 ? (
+                <div className="cif-history">
+                  <h4 className="cif-history__title">Assignment history</h4>
+                  <ul className="cif-history__list">
+                    {assignmentHistory.slice(0, 8).map((item) => (
+                      <li key={item.id} className="cif-history__item">
+                        <div className="cif-history__row">
+                          <strong>
+                            {ASSIGNMENT_CHANGE_SOURCE_LABELS[item.changeSource] ?? item.changeSource}
+                          </strong>
+                          <span className="muted">
+                            {new Date(item.createdAt).toLocaleDateString("en-GB", {
+                              day: "numeric",
+                              month: "short",
+                              year: "numeric"
+                            })}
+                          </span>
+                        </div>
+                        <div className="cif-history__detail">
+                          Route: <span className="muted">{item.previousRouteName ?? "Unassigned"}</span>
+                          {" → "}
+                          <strong>{item.newRouteName ?? "Unassigned"}</strong>
+                        </div>
+                        <div className="cif-history__detail">
+                          Mobilizer:{" "}
+                          <span className="muted">
+                            {item.previousFieldAgentName ?? item.previousFieldAgentId ?? "Unassigned"}
+                          </span>
+                          {" → "}
+                          <strong>
+                            {item.newFieldAgentName ?? item.newFieldAgentId ?? "Unassigned"}
+                          </strong>
+                        </div>
+                        {item.reason ? (
+                          <div className="muted cif-history__reason">
+                            {item.reason} · by {item.changedByName ?? item.changedByUserId}
+                          </div>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
             </Section>
           </div>
         </main>

@@ -281,6 +281,7 @@ export type FieldRoute = {
   tenantId: string;
   name: string;
   area: string;
+  communities?: string[];
   branchId: string;
   assignedFieldAgentId?: string;
   status: "active" | "inactive";
@@ -2522,6 +2523,7 @@ export async function listFieldRoutes(): Promise<FieldRoute[]> {
 export async function createFieldRoute(payload: {
   name: string;
   area: string;
+  communities?: string[];
   branchId: string;
   assignedFieldAgentId?: string | null;
   status?: "active" | "inactive";
@@ -2538,6 +2540,7 @@ export async function updateFieldRoute(
   payload: {
     name?: string;
     area?: string;
+    communities?: string[];
     branchId?: string;
     assignedFieldAgentId?: string | null;
     status?: "active" | "inactive";
@@ -2548,6 +2551,64 @@ export async function updateFieldRoute(
     method: "PATCH",
     headers: authHeaders(),
     body: JSON.stringify(payload)
+  });
+}
+
+export async function getTenantRouteSettings(): Promise<
+  import("@bms/shared").TenantRouteSettings
+> {
+  return fetchJson(`${API_BASE_URL}/api/v1/routes/settings`, {
+    headers: authHeaders()
+  });
+}
+
+export async function updateTenantRouteSettings(
+  payload: import("@bms/shared").UpdateTenantRouteSettingsInput
+): Promise<import("@bms/shared").TenantRouteSettings> {
+  return fetchJson(`${API_BASE_URL}/api/v1/routes/settings`, {
+    method: "PUT",
+    headers: authHeaders(),
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function getRouteReorganizationSuggestions(
+  branchId: string
+): Promise<import("@bms/shared").RouteLocationSuggestion[]> {
+  return fetchJson(
+    `${API_BASE_URL}/api/v1/routes/reorganization/suggestions?branchId=${encodeURIComponent(branchId)}`,
+    { headers: authHeaders() }
+  );
+}
+
+export async function applyRouteReorganization(
+  payload: import("@bms/shared").BulkReorganizeCustomersInput
+): Promise<import("@bms/shared").BulkReorganizeResult> {
+  return fetchJson(`${API_BASE_URL}/api/v1/routes/reorganization/apply`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function listRouteAssignmentHistory(options?: {
+  customerId?: string;
+  branchId?: string;
+  limit?: number;
+}): Promise<import("@bms/shared").CustomerAssignmentHistory[]> {
+  const params = new URLSearchParams();
+  if (options?.customerId) {
+    params.set("customerId", options.customerId);
+  }
+  if (options?.branchId) {
+    params.set("branchId", options.branchId);
+  }
+  if (options?.limit) {
+    params.set("limit", String(options.limit));
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return fetchJson(`${API_BASE_URL}/api/v1/routes/assignment-history${suffix}`, {
+    headers: authHeaders()
   });
 }
 
@@ -2847,6 +2908,7 @@ export async function getCoordinatorsBootstrap(): Promise<CoordinatorsBootstrapR
 export type RoutesBootstrapResponse = {
   routes: FieldRoute[];
   branches: Branch[];
+  settings?: import("@bms/shared").TenantRouteSettings;
 };
 
 export async function getRoutesBootstrap(): Promise<RoutesBootstrapResponse> {
@@ -3472,7 +3534,7 @@ export type SusuClosingBalanceSnapshot = {
   };
 };
 
-export type BranchCapitalEntryType = "injection" | "drawing";
+export type BranchCapitalEntryType = "injection" | "drawing" | "income_allocation";
 
 export type BranchCapitalEntry = {
   id: string;
@@ -3484,6 +3546,7 @@ export type BranchCapitalEntry = {
   source?: string;
   reference?: string;
   notes?: string;
+  incomeAccountId?: string;
   recordedBy: string;
   recordedByName?: string;
   voidedAt?: string;
@@ -3497,13 +3560,18 @@ export type BranchCapitalSummary = {
   branchId?: string;
   businessDate: string;
   companyTotalInjected: number;
+  companyTotalCashInjected?: number;
+  companyTotalIncomeAllocated?: number;
   companyTotalDrawings: number;
   companyNetCapital: number;
   branchTotalInjected: number;
+  branchTotalCashInjected?: number;
+  branchTotalIncomeAllocated?: number;
   branchTotalDrawings: number;
   branchNetCapital: number;
   dayInjections: number;
   dayDrawings: number;
+  dayIncomeAllocations?: number;
   entries: BranchCapitalEntry[];
 };
 
@@ -4047,10 +4115,36 @@ export async function markAgentNotificationRead(notificationId: string): Promise
   });
 }
 
-export async function approveCustomer(customerId: string): Promise<Customer> {
+export async function getApprovalRouteRecommendation(
+  customerId: string
+): Promise<import("@bms/shared").ApprovalRouteRecommendation> {
+  return fetchJson(
+    `${API_BASE_URL}/api/v1/customers/${encodeURIComponent(customerId)}/approval-route-recommendation`,
+    { headers: authHeaders() }
+  );
+}
+
+export async function listCustomerAssignmentHistory(
+  customerId: string
+): Promise<import("@bms/shared").CustomerAssignmentHistory[]> {
+  return fetchJson(
+    `${API_BASE_URL}/api/v1/customers/${encodeURIComponent(customerId)}/assignment-history`,
+    { headers: authHeaders() }
+  );
+}
+
+export async function approveCustomer(
+  customerId: string,
+  options?: { routeId?: string | null; assignedFieldAgentId?: string | null; reason?: string }
+): Promise<Customer> {
+  const hasOptions = Boolean(
+    options &&
+      ("routeId" in options || "assignedFieldAgentId" in options || "reason" in options)
+  );
   return fetchJson<Customer>(`${API_BASE_URL}/api/v1/customers/${customerId}/approve`, {
     method: "PATCH",
-    headers: authHeaders()
+    headers: authHeaders(),
+    ...(hasOptions ? { body: JSON.stringify(options) } : {})
   });
 }
 
@@ -4105,13 +4199,20 @@ export async function discardRejectedCustomerRegistration(
 export async function assignCustomerFieldAgent(
   customerId: string,
   assignedFieldAgentId: string | null,
-  options?: { routeId?: string | null }
+  options?: { routeId?: string | null; reason?: string }
 ): Promise<Customer> {
-  const body: { assignedFieldAgentId: string | null; routeId?: string | null } = {
+  const body: {
+    assignedFieldAgentId: string | null;
+    routeId?: string | null;
+    reason?: string;
+  } = {
     assignedFieldAgentId
   };
   if (options && "routeId" in options) {
     body.routeId = options.routeId ?? null;
+  }
+  if (options?.reason?.trim()) {
+    body.reason = options.reason.trim();
   }
   return fetchJson<Customer>(`${API_BASE_URL}/api/v1/customers/${customerId}/assignment`, {
     method: "PATCH",
@@ -4508,6 +4609,46 @@ export async function getInstitutionalIncomeReport(options?: {
   return fetchJson(`${API_BASE_URL}/api/v1/income/report${suffix}`, {
     headers: authHeaders()
   });
+}
+
+export type TransferIncomeToCapitalResponse = {
+  idempotent: boolean;
+  transfer: import("@bms/shared").InstitutionalIncomeCapitalTransfer;
+  previousBalance: number;
+  newBalance: number;
+};
+
+export async function transferInstitutionalIncomeToCapital(
+  input: import("@bms/shared").TransferInstitutionalIncomeToCapitalInput
+): Promise<TransferIncomeToCapitalResponse> {
+  return fetchJson<TransferIncomeToCapitalResponse>(
+    `${API_BASE_URL}/api/v1/income/transfer-to-capital`,
+    {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify(input)
+    }
+  );
+}
+
+export type ReverseIncomeCapitalTransferResponse = {
+  transfer: import("@bms/shared").InstitutionalIncomeCapitalTransfer;
+  previousBalance: number;
+  newBalance: number;
+};
+
+export async function reverseInstitutionalIncomeCapitalTransfer(
+  transferId: string,
+  input: import("@bms/shared").ReverseInstitutionalIncomeCapitalTransferInput
+): Promise<ReverseIncomeCapitalTransferResponse> {
+  return fetchJson<ReverseIncomeCapitalTransferResponse>(
+    `${API_BASE_URL}/api/v1/income/capital-transfers/${encodeURIComponent(transferId)}/reverse`,
+    {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify(input)
+    }
+  );
 }
 
 export async function getAgencyBootstrap(branchId?: string): Promise<import("@bms/shared").AgencyBootstrap> {

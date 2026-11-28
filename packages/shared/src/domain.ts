@@ -339,11 +339,14 @@ export const assignCustomerFieldAgentSchema = z.object({
 
   /**
    * Route membership for the customer.
-   * - omit: auto-sync (attach to the target agent's sole active route on the home branch, or clear)
+   * - omit: strategy-aware sync (registration/location modes attach sole active route; manual keeps current)
    * - null: clear route membership
    * - uuid: set that route (must match home branch; agent should own it when assigning)
    */
-  routeId: z.string().uuid().nullable().optional()
+  routeId: z.string().uuid().nullable().optional(),
+
+  /** Optional audit reason recorded in customer assignment history. */
+  reason: z.string().trim().max(300).optional()
 
 });
 
@@ -694,6 +697,7 @@ export const fieldRouteSchema = z.object({
   tenantId: z.string().min(1),
   name: z.string().min(1),
   area: z.string().min(1),
+  communities: z.array(z.string().trim().min(1).max(120)).default([]),
   branchId: z.string().uuid(),
   assignedFieldAgentId: z.string().min(1).optional(),
   status: fieldRouteStatusSchema,
@@ -707,6 +711,7 @@ export const fieldRouteSchema = z.object({
 export const createFieldRouteSchema = z.object({
   name: z.string().min(1),
   area: z.string().min(1),
+  communities: z.array(z.string().trim().min(1).max(120)).max(50).optional(),
   branchId: z.string().uuid(),
   assignedFieldAgentId: z.string().min(1).optional().nullable(),
   status: fieldRouteStatusSchema.default("active")
@@ -715,6 +720,7 @@ export const createFieldRouteSchema = z.object({
 export const updateFieldRouteSchema = z.object({
   name: z.string().min(1).optional(),
   area: z.string().min(1).optional(),
+  communities: z.array(z.string().trim().min(1).max(120)).max(50).optional(),
   branchId: z.string().uuid().optional(),
   assignedFieldAgentId: z.string().min(1).nullable().optional(),
   status: fieldRouteStatusSchema.optional(),
@@ -722,7 +728,8 @@ export const updateFieldRouteSchema = z.object({
 });
 
 export const setRouteMembersSchema = z.object({
-  customerIds: z.array(z.string().uuid())
+  customerIds: z.array(z.string().uuid()),
+  reason: z.string().trim().max(300).optional()
 });
 
 export type FieldRoute = z.infer<typeof fieldRouteSchema>;

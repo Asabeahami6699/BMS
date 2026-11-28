@@ -1,11 +1,16 @@
 import { randomUUID } from "node:crypto";
 import {
   INSTITUTIONAL_INCOME_SOURCE_LABELS,
+  formatAccountAmount,
   incomePeriodDateRange,
+  institutionalIncomeCapitalTransferSchema,
   institutionalIncomeEntrySchema,
   institutionalIncomeReportSchema,
+  reverseInstitutionalIncomeCapitalTransferSchema,
+  transferInstitutionalIncomeToCapitalSchema,
   type BranchIncomeAccount,
   type IncomeReportPeriod,
+  type InstitutionalIncomeCapitalTransfer,
   type InstitutionalIncomeEntry,
   type InstitutionalIncomeReport,
   type InstitutionalIncomeSource,
@@ -13,7 +18,13 @@ import {
   type ReverseInstitutionalIncomeInput
 } from "@bms/shared";
 import { getSupabaseAdminClient } from "../config/supabaseClient.js";
-import { listBranches } from "./branchService.js";
+import { branchDisplayLabel, listBranches } from "./branchService.js";
+import {
+  recordMemoryIncomeAllocationCapitalEntry,
+  voidMemoryCapitalEntryById
+} from "./branchCapitalService.js";
+import { notifyTenantStaff } from "./notificationService.js";
+import { fetchTenantUserNameMap } from "./userNameResolver.js";
 
 type RequestContext = {
   userId: string;
@@ -26,6 +37,58 @@ type RequestContext = {
 
 const memoryAccounts = new Map<string, BranchIncomeAccount[]>();
 const memoryEntries = new Map<string, InstitutionalIncomeEntry[]>();
+const memoryCapitalTransfers = new Map<string, InstitutionalIncomeCapitalTransfer[]>();
+
+function roundMoney(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+function isMissingCapitalTransferStorage(message: string): boolean {
+  return /institutional_income_capital_transfers|transfer_institutional_income_to_capital_atomic|reverse_institutional_income_capital_transfer_atomic|does not exist|schema cache|could not find the (table|function)/i.test(
+    message
+  );
+}
+
+export function clearMemoryInstitutionalIncome(tenantId?: string): void {
+  if (tenantId) {
+    memoryAccounts.delete(tenantId);
+    memoryEntries.delete(tenantId);
+    memoryCapitalTransfers.delete(tenantId);
+  } else {
+    memoryAccounts.clear();
+    memoryEntries.clear();
+    memoryCapitalTransfers.clear();
+  }
+}
+
+function mapTransfer(
+  row: Record<string, unknown>,
+  meta?: { branchName?: string | null; incomeAccountLabel?: string | null }
+): InstitutionalIncomeCapitalTransfer {
+  return institutionalIncomeCapitalTransferSchema.parse({
+    id: row.id,
+    tenantId: row.tenant_id,
+    branchId: row.branch_id,
+    branchName: meta?.branchName ?? (row.branch_name != null ? String(row.branch_name) : null),
+    incomeAccountId: row.income_account_id,
+    incomeAccountLabel:
+      meta?.incomeAccountLabel ??
+      (row.income_account_label != null ? String(row.income_account_label) : null),
+    capitalEntryId: row.capital_entry_id,
+    amount: roundMoney(Number(row.amount ?? 0)),
+    businessDate: String(row.business_date).slice(0, 10),
+    reference: String(row.reference),
+    idempotencyKey: String(row.idempotency_key),
+    notes: row.notes != null ? String(row.notes) : null,
+    authorizedByUserId: String(row.authorized_by_user_id),
+    authorizedByName: row.authorized_by_name != null ? String(row.authorized_by_name) : null,
+    reversedAt: row.reversed_at != null ? String(row.reversed_at) : null,
+    reversedByUserId: row.reversed_by_user_id != null ? String(row.reversed_by_user_id) : null,
+    reversedByName: row.reversed_by_name != null ? String(row.reversed_by_name) : null,
+    reversalReason: row.reversal_reason != null ? String(row.reversal_reason) : null,
+    createdAt: String(row.created_at ?? new Date().toISOString())
+  });
+}
 
 function accountsKey(tenantId: string): string {
   return tenantId;
@@ -330,6 +393,14 @@ export async function reverseInstitutionalIncome(
     if (original.reversedAt || original.reversesEntryId) {
       throw new Error("This income entry is already reversed or is a reversal");
     }
+    const accounts = memoryAccounts.get(accountsKey(context.tenantId)) ?? [];
+    const targetAccount = accounts.find((a) => a.id === original.incomeAccountId);
+    const currentBal = roundMoney(targetAccount?.balance ?? 0);
+    if (currentBal + 0.0001 < original.amount) {
+      throw new Error(
+        `Cannot reverse GHS ${formatAccountAmount(original.amount)} because only GHS ${formatAccountAmount(currentBal)} remains available in the branch income account. Reverse a commission capital transfer first.`
+      );
+    }
     const reversal: InstitutionalIncomeEntry = {
       id: randomUUID(),
       tenantId: context.tenantId,
@@ -359,12 +430,11 @@ export async function reverseInstitutionalIncome(
       context.tenantId,
       [reversal, ...list.map((e) => (e.id === original.id ? patchedOriginal : e))]
     );
-    const accounts = memoryAccounts.get(accountsKey(context.tenantId)) ?? [];
     memoryAccounts.set(
       accountsKey(context.tenantId),
       accounts.map((a) =>
         a.id === original.incomeAccountId
-          ? { ...a, balance: Math.max(0, a.balance - original.amount), updatedAt: now }
+          ? { ...a, balance: roundMoney(Math.max(0, a.balance - original.amount)), updatedAt: now }
           : a
       )
     );
@@ -393,6 +463,19 @@ export async function reverseInstitutionalIncome(
   const original = mapEntry(originalRow as Record<string, unknown>);
   if (original.reversedAt || original.reversesEntryId) {
     throw new Error("This income entry is already reversed or is a reversal");
+  }
+
+  const { data: accountRowBefore } = await supabase
+    .from("branch_income_accounts")
+    .select("balance")
+    .eq("id", original.incomeAccountId)
+    .eq("tenant_id", context.tenantId)
+    .maybeSingle();
+  const availableBefore = roundMoney(Number(accountRowBefore?.balance ?? 0));
+  if (availableBefore + 0.0001 < original.amount) {
+    throw new Error(
+      `Cannot reverse GHS ${formatAccountAmount(original.amount)} because only GHS ${formatAccountAmount(availableBefore)} remains available in the branch income account. Reverse a commission capital transfer first.`
+    );
   }
 
   const reversalId = randomUUID();
@@ -448,17 +531,401 @@ export async function reverseInstitutionalIncome(
     .eq("id", original.incomeAccountId)
     .eq("tenant_id", context.tenantId)
     .maybeSingle();
-  const currentBal = Number(accountRow?.balance ?? 0);
+  const currentBal = roundMoney(Number(accountRow?.balance ?? 0));
   await supabase
     .from("branch_income_accounts")
     .update({
-      balance: Math.max(0, currentBal - original.amount),
+      balance: roundMoney(Math.max(0, currentBal - original.amount)),
       updated_at: now
     })
     .eq("id", original.incomeAccountId)
     .eq("tenant_id", context.tenantId);
 
   return mapEntry(inserted as Record<string, unknown>);
+}
+
+export type TransferIncomeToCapitalResult = {
+  idempotent: boolean;
+  transfer: InstitutionalIncomeCapitalTransfer;
+  previousBalance: number;
+  newBalance: number;
+};
+
+function assertCanManageIncomeCapitalTransfer(context: RequestContext): void {
+  if (context.role !== "admin" && context.role !== "accountant") {
+    throw new Error(
+      "Only authorized administrators or accountants can transfer commission income to Business Capital."
+    );
+  }
+}
+
+export async function transferInstitutionalIncomeToCapital(
+  context: RequestContext,
+  rawInput: unknown,
+  options?: { subscribedModules?: string[] }
+): Promise<TransferIncomeToCapitalResult> {
+  assertCanManageIncomeCapitalTransfer(context);
+  const input = transferInstitutionalIncomeToCapitalSchema.parse(rawInput);
+
+  if (context.scopeType === "branch" && context.branchId && context.branchId !== input.branchId) {
+    throw new Error("Cannot transfer institutional income for another branch.");
+  }
+
+  const tenantBranches = await listBranches(context.tenantId).catch(() => []);
+  const tenantBranch = tenantBranches.find((b) => String(b.id) === String(input.branchId));
+  if (tenantBranches.length > 0 && !tenantBranch) {
+    throw new Error("Branch does not belong to this company.");
+  }
+
+  const susuOnly =
+    Boolean(options?.subscribedModules?.includes("susu_management")) &&
+    !(options?.subscribedModules ?? []).some(
+      (m) => m === "banking" || m === "treasury" || m === "loans_credit"
+    );
+  const branchName = tenantBranch?.name ?? "Branch";
+  const account = await ensureBranchIncomeAccount(
+    context.tenantId,
+    input.branchId,
+    branchName,
+    susuOnly
+  );
+
+  const amount = roundMoney(input.amount);
+  const businessDate = input.businessDate ?? new Date().toISOString().slice(0, 10);
+  const transferId = randomUUID();
+  const capitalEntryId = randomUUID();
+  const reference =
+    input.reference?.trim() ||
+    `INC-CAP-${businessDate.replace(/-/g, "")}-${transferId.replace(/-/g, "").slice(0, 6).toUpperCase()}`;
+  const notes = input.notes?.trim() || undefined;
+  const nameMap = await fetchTenantUserNameMap(context.tenantId).catch(() => new Map<string, string>());
+  const authorizedByName = nameMap.get(context.userId) ?? context.userId;
+
+  const supabase = getSupabaseAdminClient();
+  if (!supabase) {
+    const existingList = memoryCapitalTransfers.get(context.tenantId) ?? [];
+    const existing = existingList.find((t) => t.idempotencyKey === input.idempotencyKey);
+    if (existing) {
+      return {
+        idempotent: true,
+        transfer: existing,
+        previousBalance: roundMoney(account.balance),
+        newBalance: roundMoney(account.balance)
+      };
+    }
+
+    const prevBalance = roundMoney(account.balance);
+    if (amount > prevBalance + 0.0001) {
+      throw new Error(
+        `Transfer amount (GHS ${formatAccountAmount(amount)}) exceeds available institutional income balance (GHS ${formatAccountAmount(prevBalance)}).`
+      );
+    }
+
+    const now = new Date().toISOString();
+    const newBalance = roundMoney(prevBalance - amount);
+    const accounts = memoryAccounts.get(accountsKey(context.tenantId)) ?? [];
+    memoryAccounts.set(
+      accountsKey(context.tenantId),
+      accounts.map((a) => (a.id === account.id ? { ...a, balance: newBalance, updatedAt: now } : a))
+    );
+
+    recordMemoryIncomeAllocationCapitalEntry({
+      id: capitalEntryId,
+      tenantId: context.tenantId,
+      branchId: input.branchId,
+      businessDate,
+      entryType: "income_allocation",
+      amount,
+      source: `Commission income allocation (${account.label})`,
+      reference,
+      notes:
+        notes ??
+        "Internal allocation from institutional commission income to Business Capital (non-cash)",
+      incomeAccountId: account.id,
+      recordedBy: context.userId,
+      recordedByName: authorizedByName,
+      createdAt: now
+    });
+
+    const transfer: InstitutionalIncomeCapitalTransfer = {
+      id: transferId,
+      tenantId: context.tenantId,
+      branchId: input.branchId,
+      branchName,
+      incomeAccountId: account.id,
+      incomeAccountLabel: account.label,
+      capitalEntryId,
+      amount,
+      businessDate,
+      reference,
+      idempotencyKey: input.idempotencyKey,
+      notes: notes ?? null,
+      authorizedByUserId: context.userId,
+      authorizedByName,
+      reversedAt: null,
+      reversedByUserId: null,
+      reversedByName: null,
+      reversalReason: null,
+      createdAt: now
+    };
+    memoryCapitalTransfers.set(context.tenantId, [transfer, ...existingList]);
+
+    return {
+      idempotent: false,
+      transfer,
+      previousBalance: prevBalance,
+      newBalance
+    };
+  }
+
+  const { data: rpcResult, error: rpcError } = await supabase.rpc(
+    "transfer_institutional_income_to_capital_atomic",
+    {
+      p_transfer_id: transferId,
+      p_capital_entry_id: capitalEntryId,
+      p_tenant_id: context.tenantId,
+      p_branch_id: input.branchId,
+      p_amount: amount,
+      p_business_date: businessDate,
+      p_reference: reference,
+      p_notes: notes ?? null,
+      p_idempotency_key: input.idempotencyKey,
+      p_authorized_by_user_id: context.userId,
+      p_authorized_by_name: authorizedByName
+    }
+  );
+
+  if (rpcError) {
+    if (isMissingCapitalTransferStorage(rpcError.message)) {
+      throw new Error(
+        "Commission-to-capital transfer storage is not ready. Apply migration 110_commission_income_capital_transfers.sql in Supabase, then try again."
+      );
+    }
+    throw new Error(rpcError.message);
+  }
+
+  const payload = (rpcResult ?? {}) as Record<string, unknown>;
+  const idempotent = payload.idempotent === true;
+  const transferRow = (payload.transfer ?? {}) as Record<string, unknown>;
+  const transfer = mapTransfer(transferRow, {
+    branchName,
+    incomeAccountLabel:
+      typeof payload.income_account_label === "string" && payload.income_account_label.trim()
+        ? payload.income_account_label
+        : account.label
+  });
+  const previousBalance = roundMoney(Number(payload.previous_balance ?? account.balance));
+  const newBalance = roundMoney(Number(payload.new_balance ?? account.balance));
+
+  if (!idempotent) {
+    const branchLabel = await branchDisplayLabel(context.tenantId, input.branchId).catch(
+      () => branchName
+    );
+    try {
+      await notifyTenantStaff({
+        tenantId: context.tenantId,
+        roles: ["admin", "accountant", "coordinator"],
+        kind: "business_capital_recorded",
+        title: "Commission income allocated to Business Capital",
+        body: `${branchLabel} · ${transfer.businessDate}: GHS ${formatAccountAmount(transfer.amount)} allocated from ${transfer.incomeAccountLabel || "Institutional income"} to Business Capital (Ref ${transfer.reference}) by ${authorizedByName}.`
+      });
+    } catch {
+      // Non-blocking
+    }
+  }
+
+  return {
+    idempotent,
+    transfer,
+    previousBalance,
+    newBalance
+  };
+}
+
+export type ReverseIncomeCapitalTransferResult = {
+  transfer: InstitutionalIncomeCapitalTransfer;
+  previousBalance: number;
+  newBalance: number;
+};
+
+export async function reverseInstitutionalIncomeCapitalTransfer(
+  context: RequestContext,
+  transferId: string,
+  rawInput: unknown
+): Promise<ReverseIncomeCapitalTransferResult> {
+  assertCanManageIncomeCapitalTransfer(context);
+  const { reason } = reverseInstitutionalIncomeCapitalTransferSchema.parse(rawInput);
+  const nameMap = await fetchTenantUserNameMap(context.tenantId).catch(() => new Map<string, string>());
+  const actorName = nameMap.get(context.userId) ?? context.userId;
+
+  const supabase = getSupabaseAdminClient();
+  if (!supabase) {
+    const list = memoryCapitalTransfers.get(context.tenantId) ?? [];
+    const idx = list.findIndex((t) => t.id === transferId);
+    if (idx < 0) {
+      throw new Error("Commission capital transfer not found");
+    }
+    const existing = list[idx]!;
+    if (context.scopeType === "branch" && context.branchId && context.branchId !== existing.branchId) {
+      throw new Error("Cannot reverse a commission capital transfer for another branch.");
+    }
+    if (existing.reversedAt) {
+      throw new Error("This commission capital transfer has already been reversed");
+    }
+
+    const accounts = memoryAccounts.get(accountsKey(context.tenantId)) ?? [];
+    const targetAccount = accounts.find((a) => a.id === existing.incomeAccountId);
+    if (!targetAccount) {
+      throw new Error("Linked branch income account not found");
+    }
+    const now = new Date().toISOString();
+    const previousBalance = roundMoney(targetAccount.balance);
+    const newBalance = roundMoney(previousBalance + existing.amount);
+
+    memoryAccounts.set(
+      accountsKey(context.tenantId),
+      accounts.map((a) => (a.id === targetAccount.id ? { ...a, balance: newBalance, updatedAt: now } : a))
+    );
+    voidMemoryCapitalEntryById(
+      context.tenantId,
+      existing.capitalEntryId,
+      context.userId,
+      now,
+      `Commission transfer reversed: ${reason}`
+    );
+
+    const updated: InstitutionalIncomeCapitalTransfer = {
+      ...existing,
+      reversedAt: now,
+      reversedByUserId: context.userId,
+      reversedByName: actorName,
+      reversalReason: reason
+    };
+    const nextList = [...list];
+    nextList[idx] = updated;
+    memoryCapitalTransfers.set(context.tenantId, nextList);
+
+    return {
+      transfer: updated,
+      previousBalance,
+      newBalance
+    };
+  }
+
+  const { data: existingRow, error: findError } = await supabase
+    .from("institutional_income_capital_transfers")
+    .select("id, branch_id")
+    .eq("tenant_id", context.tenantId)
+    .eq("id", transferId)
+    .maybeSingle();
+
+  if (findError) {
+    if (isMissingCapitalTransferStorage(findError.message)) {
+      throw new Error(
+        "Commission-to-capital transfer storage is not ready. Apply migration 110_commission_income_capital_transfers.sql in Supabase, then try again."
+      );
+    }
+    throw new Error(`Failed to load commission capital transfer: ${findError.message}`);
+  }
+  if (!existingRow) {
+    throw new Error("Commission capital transfer not found");
+  }
+  if (
+    context.scopeType === "branch" &&
+    context.branchId &&
+    context.branchId !== String(existingRow.branch_id)
+  ) {
+    throw new Error("Cannot reverse a commission capital transfer for another branch.");
+  }
+
+  const { data: rpcResult, error: rpcError } = await supabase.rpc(
+    "reverse_institutional_income_capital_transfer_atomic",
+    {
+      p_tenant_id: context.tenantId,
+      p_transfer_id: transferId,
+      p_actor_user_id: context.userId,
+      p_actor_name: actorName,
+      p_reason: reason
+    }
+  );
+
+  if (rpcError) {
+    if (isMissingCapitalTransferStorage(rpcError.message)) {
+      throw new Error(
+        "Commission-to-capital transfer storage is not ready. Apply migration 110_commission_income_capital_transfers.sql in Supabase, then try again."
+      );
+    }
+    throw new Error(rpcError.message);
+  }
+
+  const payload = (rpcResult ?? {}) as Record<string, unknown>;
+  const transferRow = (payload.transfer ?? {}) as Record<string, unknown>;
+  const branchLabel = await branchDisplayLabel(
+    context.tenantId,
+    String(transferRow.branch_id ?? existingRow.branch_id)
+  ).catch(() => "Branch");
+
+  const transfer = mapTransfer(transferRow, {
+    branchName: branchLabel,
+    incomeAccountLabel:
+      typeof payload.income_account_label === "string" ? payload.income_account_label : null
+  });
+  const previousBalance = roundMoney(Number(payload.previous_balance ?? 0));
+  const newBalance = roundMoney(Number(payload.new_balance ?? 0));
+
+  try {
+    await notifyTenantStaff({
+      tenantId: context.tenantId,
+      roles: ["admin", "accountant", "coordinator"],
+      kind: "business_capital_recorded",
+      title: "Commission capital allocation reversed",
+      body: `${branchLabel} · Ref ${transfer.reference}: GHS ${formatAccountAmount(transfer.amount)} restored to ${transfer.incomeAccountLabel || "Institutional income"} (${reason}) by ${actorName}.`
+    });
+  } catch {
+    // Non-blocking
+  }
+
+  return {
+    transfer,
+    previousBalance,
+    newBalance
+  };
+}
+
+export async function reverseInstitutionalIncomeCapitalTransferByCapitalEntryId(
+  context: RequestContext,
+  capitalEntryId: string,
+  rawInput: unknown
+): Promise<ReverseIncomeCapitalTransferResult> {
+  const supabase = getSupabaseAdminClient();
+  if (!supabase) {
+    const list = memoryCapitalTransfers.get(context.tenantId) ?? [];
+    const match = list.find((t) => t.capitalEntryId === capitalEntryId);
+    if (!match) {
+      throw new Error("Linked commission capital transfer not found");
+    }
+    return reverseInstitutionalIncomeCapitalTransfer(context, match.id, rawInput);
+  }
+
+  const { data: row, error } = await supabase
+    .from("institutional_income_capital_transfers")
+    .select("id")
+    .eq("tenant_id", context.tenantId)
+    .eq("capital_entry_id", capitalEntryId)
+    .maybeSingle();
+
+  if (error) {
+    if (isMissingCapitalTransferStorage(error.message)) {
+      throw new Error(
+        "Commission-to-capital transfer storage is not ready. Apply migration 110_commission_income_capital_transfers.sql in Supabase, then try again."
+      );
+    }
+    throw new Error(`Failed to locate linked commission transfer: ${error.message}`);
+  }
+  if (!row?.id) {
+    throw new Error("Linked commission capital transfer not found");
+  }
+  return reverseInstitutionalIncomeCapitalTransfer(context, String(row.id), rawInput);
 }
 
 function isActiveIncomeEntry(entry: InstitutionalIncomeEntry): boolean {
@@ -754,12 +1221,121 @@ export async function getInstitutionalIncomeReport(
       .filter((a) => tenantBranchIds.size === 0 || tenantBranchIds.has(String(a.branchId)))
       .map((a) => [String(a.branchId), a])
   );
+  const accountById = new Map(accounts.map((a) => [String(a.id), a]));
+
+  // Load cumulative all-time earned income and commission-to-capital transfer history
+  // for the scoped branch(es) so available + transferred reconciles against total earned.
+  const earnedAllTimeByBranch = new Map<string, number>();
+  const transferredByBranch = new Map<string, number>();
+  let capitalStorageReady = true;
+  let capitalTransfers: InstitutionalIncomeCapitalTransfer[] = [];
+
+  if (!supabase) {
+    const allMemoryEntries = (memoryEntries.get(context.tenantId) ?? []).filter(
+      (e) =>
+        isActiveIncomeEntry(e) &&
+        (!scopedBranchId || String(e.branchId) === scopedBranchId) &&
+        (tenantBranchIds.size === 0 || tenantBranchIds.has(String(e.branchId)))
+    );
+    for (const entry of allMemoryEntries) {
+      const bId = String(entry.branchId);
+      earnedAllTimeByBranch.set(bId, roundMoney((earnedAllTimeByBranch.get(bId) ?? 0) + entry.amount));
+    }
+
+    capitalTransfers = (memoryCapitalTransfers.get(context.tenantId) ?? [])
+      .filter(
+        (t) =>
+          (!scopedBranchId || String(t.branchId) === scopedBranchId) &&
+          (tenantBranchIds.size === 0 || tenantBranchIds.has(String(t.branchId)))
+      )
+      .map((t) => ({
+        ...t,
+        branchName: t.branchName ?? branchNameById.get(String(t.branchId)) ?? "Branch",
+        incomeAccountLabel:
+          t.incomeAccountLabel ?? accountById.get(String(t.incomeAccountId))?.label ?? null
+      }));
+  } else {
+    let earnedQuery = supabase
+      .from("institutional_income_entries")
+      .select("branch_id, amount")
+      .eq("tenant_id", context.tenantId)
+      .is("reversed_at", null)
+      .is("reverses_entry_id", null)
+      .limit(20000);
+    if (scopedBranchId) {
+      earnedQuery = earnedQuery.eq("branch_id", scopedBranchId);
+    } else if (tenantBranchIds.size > 0) {
+      earnedQuery = earnedQuery.in("branch_id", [...tenantBranchIds]);
+    }
+    const { data: earnedRows } = await earnedQuery;
+    for (const row of earnedRows ?? []) {
+      const bId = String(row.branch_id ?? "");
+      if (!bId || (tenantBranchIds.size > 0 && !tenantBranchIds.has(bId))) {
+        continue;
+      }
+      earnedAllTimeByBranch.set(
+        bId,
+        roundMoney((earnedAllTimeByBranch.get(bId) ?? 0) + Number(row.amount ?? 0))
+      );
+    }
+
+    let transfersQuery = supabase
+      .from("institutional_income_capital_transfers")
+      .select("*")
+      .eq("tenant_id", context.tenantId)
+      .order("business_date", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(10000);
+    if (scopedBranchId) {
+      transfersQuery = transfersQuery.eq("branch_id", scopedBranchId);
+    } else if (tenantBranchIds.size > 0) {
+      transfersQuery = transfersQuery.in("branch_id", [...tenantBranchIds]);
+    }
+    const { data: transferRows, error: transferErr } = await transfersQuery;
+    if (transferErr) {
+      if (isMissingCapitalTransferStorage(transferErr.message)) {
+        capitalStorageReady = false;
+        capitalTransfers = [];
+      } else {
+        throw new Error(`Failed to load commission capital transfers: ${transferErr.message}`);
+      }
+    } else {
+      capitalTransfers = (transferRows ?? [])
+        .map((row) => {
+          const r = row as Record<string, unknown>;
+          const bId = String(r.branch_id ?? "");
+          const acctId = String(r.income_account_id ?? "");
+          return mapTransfer(r, {
+            branchName: branchNameById.get(bId) ?? "Branch",
+            incomeAccountLabel: accountById.get(acctId)?.label ?? null
+          });
+        })
+        .filter((t) => tenantBranchIds.size === 0 || tenantBranchIds.has(String(t.branchId)));
+    }
+  }
+
+  for (const transfer of capitalTransfers) {
+    if (transfer.reversedAt) {
+      continue;
+    }
+    const bId = String(transfer.branchId);
+    transferredByBranch.set(
+      bId,
+      roundMoney((transferredByBranch.get(bId) ?? 0) + transfer.amount)
+    );
+  }
+
+  const scopedAccounts = scopedBranchId
+    ? accounts.filter((a) => String(a.branchId) === scopedBranchId)
+    : accounts.filter((a) => tenantBranchIds.size === 0 || tenantBranchIds.has(String(a.branchId)));
 
   // Only this tenant's branches — never mix in foreign branch ids from orphan rows.
   const branchIds =
     scopedBranchId != null
       ? [scopedBranchId]
-      : branches.map((b) => String(b.id));
+      : branches.length > 0
+        ? branches.map((b) => String(b.id))
+        : [...new Set(scopedAccounts.map((a) => String(a.branchId)))];
 
   const byBranch = branchIds.map((branchId) => {
     const stats = branchTotals.get(branchId) ?? {
@@ -773,7 +1349,9 @@ export async function getInstitutionalIncomeReport(
       branchName: named && named.trim() ? named : "Branch",
       amount: Math.round(stats.amount * 100) / 100,
       entryCount: stats.entryCount,
-      accountBalance: accountByBranch.get(branchId)?.balance ?? 0,
+      accountBalance: roundMoney(accountByBranch.get(branchId)?.balance ?? 0),
+      totalEarnedAllTime: roundMoney(earnedAllTimeByBranch.get(branchId) ?? 0),
+      totalTransferredToCapital: roundMoney(transferredByBranch.get(branchId) ?? 0),
       bySource: [...stats.bySource.entries()].map(([source, s]) => ({
         source,
         label: INSTITUTIONAL_INCOME_SOURCE_LABELS[source],
@@ -792,6 +1370,16 @@ export async function getInstitutionalIncomeReport(
   });
 
   const totalAmount = Math.round(active.reduce((sum, e) => sum + e.amount, 0) * 100) / 100;
+  const totalEarnedAllTime = roundMoney(
+    [...earnedAllTimeByBranch.values()].reduce((sum, v) => sum + v, 0)
+  );
+  const totalTransferredToCapital = roundMoney(
+    [...transferredByBranch.values()].reduce((sum, v) => sum + v, 0)
+  );
+  const availableBalance = roundMoney(
+    scopedAccounts.reduce((sum, a) => sum + Number(a.balance ?? 0), 0)
+  );
+
   const recentEntries = await enrichEntriesWithCustomerDetails(
     context.tenantId,
     entries.slice(0, 100)
@@ -806,8 +1394,15 @@ export async function getInstitutionalIncomeReport(
     entryCount: active.length,
     bySource,
     byBranch,
-    accounts: scopedBranchId ? accounts.filter((a) => String(a.branchId) === scopedBranchId) : accounts,
+    accounts: scopedAccounts,
     recentEntries,
+    capitalAllocation: {
+      storageReady: capitalStorageReady,
+      totalEarnedAllTime,
+      availableBalance,
+      totalTransferredToCapital,
+      transfers: capitalTransfers.slice(0, 100)
+    },
     dailyOnly,
     allowedPeriods
   });

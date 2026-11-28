@@ -95,65 +95,67 @@ export function RouteAssignAgentModal({ open, route, onClose, onSaved }: Props) 
   return (
     <Modal
       open={open}
-      title={isReassign ? "Reassign field agent" : "Assign field agent"}
+      title={isReassign ? "Reassign field mobilizer" : "Assign field mobilizer"}
       subtitle={
         isReassign
-          ? `Replace the agent on ${route.name}. Members can be synced to the new agent.`
+          ? `Replace the responsible mobilizer on ${route.name}.`
           : `Choose who will collect on ${route.name}.`
       }
       onClose={onClose}
+      panelClassName="route-modal"
       footer={
         <>
-          <button type="button" className="button secondary" onClick={onClose}>
+          <button type="button" className="route-btn route-btn--secondary" onClick={onClose}>
             Cancel
           </button>
           <button
             type="submit"
             form="route-assign-agent-form"
-            className="button"
+            className="route-btn route-btn--primary"
             disabled={submitting || !agentId.trim() || agentsForBranch.length === 0}
           >
-            {submitting ? "Saving…" : isReassign ? "Reassign agent" : "Assign agent"}
+            {submitting ? "Saving…" : isReassign ? "Reassign mobilizer" : "Assign mobilizer"}
           </button>
         </>
       }
     >
-      <form id="route-assign-agent-form" className="stack-form" onSubmit={handleSubmit}>
+      <form id="route-assign-agent-form" className="route-form" onSubmit={handleSubmit}>
         <div className="route-form-summary" role="status">
-          <p>
+          <div className="route-form-summary__head">
             <strong>{route.name}</strong>
-            <span className="muted"> · {route.area}</span>
-          </p>
+            <span className="route-badge route-badge--muted">{route.memberCount ?? 0} members</span>
+          </div>
+          <p className="route-cell-meta">{route.area}</p>
           {isReassign ? (
-            <p className="muted" style={{ margin: "0.35rem 0 0", fontSize: "0.85rem" }}>
-              Current agent: {route.assignedFieldAgentName ?? route.assignedFieldAgentId}
+            <p className="route-cell-meta" style={{ marginTop: "0.35rem" }}>
+              Current mobilizer:{" "}
+              <strong>{route.assignedFieldAgentName ?? route.assignedFieldAgentId}</strong>
             </p>
           ) : null}
         </div>
-        <label className="field">
-          <span>{isReassign ? "New field agent" : "Field agent"}</span>
+        <label className="route-field">
+          <span className="route-field__label">
+            {isReassign ? "New field mobilizer" : "Field mobilizer"}
+          </span>
           <select
+            className="route-select"
             value={agentId}
             onChange={(e) => setAgentId(e.target.value)}
             required
             autoFocus
           >
-            <option value="">Select agent</option>
+            <option value="">Choose a mobilizer…</option>
             {agentsForBranch.map((a) => (
               <option key={a.userId} value={a.userId}>
                 {a.label}
               </option>
             ))}
           </select>
-          {agentsForBranch.length === 0 ? (
-            <p className="muted" style={{ margin: "0.25rem 0 0", fontSize: "0.85rem" }}>
-              No active field agents for this branch. Add one under Field agents first.
-            </p>
-          ) : (
-            <p className="muted" style={{ margin: "0.25rem 0 0", fontSize: "0.85rem" }}>
-              Customers on this route will be synced to the selected agent when saved.
-            </p>
-          )}
+          <span className="route-field__hint">
+            {agentsForBranch.length === 0
+              ? "No active field agents for this branch. Add one under Field agents first."
+              : "Customers on this route sync to the selected mobilizer according to your tenant strategy."}
+          </span>
         </label>
       </form>
     </Modal>

@@ -293,6 +293,67 @@ customersRouter.get("/search", requirePermission("customers.read"), async (req, 
 
 });
 
+customersRouter.get(
+  "/:customerId/approval-route-recommendation",
+  requireAnyPermission("customers.create", "customers.read"),
+  async (req, res) => {
+    const context = req.userContext;
+    if (!context) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    const customerId = Array.isArray(req.params.customerId)
+      ? req.params.customerId[0]
+      : req.params.customerId;
+    try {
+      const customer = await getCustomerById(context.tenantId, customerId);
+      if (!customer) {
+        res.status(404).json({ error: "Customer not found" });
+        return;
+      }
+      const { getApprovalRouteRecommendation } = await import(
+        "../services/routeManagementService.js"
+      );
+      res.json(await getApprovalRouteRecommendation(context.tenantId, customer));
+    } catch (error) {
+      res.status(400).json({
+        error:
+          error instanceof Error ? error.message : "Failed to load approval route recommendation"
+      });
+    }
+  }
+);
+
+customersRouter.get(
+  "/:customerId/assignment-history",
+  requirePermission("customers.read"),
+  async (req, res) => {
+    const context = req.userContext;
+    if (!context) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    const customerId = Array.isArray(req.params.customerId)
+      ? req.params.customerId[0]
+      : req.params.customerId;
+    try {
+      const { listCustomerAssignmentHistory } = await import(
+        "../services/routeManagementService.js"
+      );
+      res.json(
+        await listCustomerAssignmentHistory(context.tenantId, {
+          customerId,
+          limit: 100
+        })
+      );
+    } catch (error) {
+      res.status(500).json({
+        error: error instanceof Error ? error.message : "Failed to load assignment history"
+      });
+    }
+  }
+);
+
 customersRouter.patch("/:customerId/approve", requireAnyPermission("customers.create", "customers.read"), async (req, res) => {
 
   const context = req.userContext;
@@ -311,13 +372,24 @@ customersRouter.patch("/:customerId/approve", requireAnyPermission("customers.cr
     return;
   }
 
-
-
   const customerId = Array.isArray(req.params.customerId) ? req.params.customerId[0] : req.params.customerId;
 
   try {
+    const { approveCustomerRegistrationInputSchema } = await import("@bms/shared");
+    const hasOverrideBody =
+      req.body &&
+      typeof req.body === "object" &&
+      ("routeId" in req.body || "assignedFieldAgentId" in req.body || "reason" in req.body);
+    const approveOptions = hasOverrideBody
+      ? approveCustomerRegistrationInputSchema.parse(req.body)
+      : undefined;
 
-    const approved = await approveCustomerRegistration(context.tenantId, customerId, context.userId);
+    const approved = await approveCustomerRegistration(
+      context.tenantId,
+      customerId,
+      context.userId,
+      approveOptions
+    );
     if (approved.accountNumber) {
       const [{ notifyCustomerAccountOpened }, { consumeCreditedInitialDepositForNotification }] =
         await Promise.all([
@@ -571,7 +643,31 @@ customersRouter.patch(
       : req.params.customerId;
 
     try {
-      res.json(await assignCustomerFieldAgent(context.tenantId, customerId, req.body));
+      const before = await getCustomerById(context.tenantId, customerId);
+      const updated = await assignCustomerFieldAgent(
+        context.tenantId,
+        customerId,
+        req.body,
+        context.userId
+      );
+      setRequestAuditContext(req, {
+        entityType: "customer_assignment",
+        entityId: customerId,
+        before: before
+          ? {
+              routeId: before.routeId ?? null,
+              assignedFieldAgentId: before.assignedFieldAgentId ?? null
+            }
+          : null,
+        after: {
+          routeId: updated.routeId ?? null,
+          assignedFieldAgentId: updated.assignedFieldAgentId ?? null
+        },
+        metadata: {
+          reason: typeof req.body?.reason === "string" ? req.body.reason : null
+        }
+      });
+      res.json(updated);
     } catch (error) {
       res.status(400).json({
         error: error instanceof Error ? error.message : "Failed to update assignment"

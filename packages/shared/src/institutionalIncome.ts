@@ -79,6 +79,72 @@ export const reverseInstitutionalIncomeSchema = z.object({
 
 export type ReverseInstitutionalIncomeInput = z.infer<typeof reverseInstitutionalIncomeSchema>;
 
+export const institutionalIncomeCapitalTransferSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().min(1),
+  branchId: z.string().min(1),
+  branchName: z.string().nullable().optional(),
+  incomeAccountId: z.string().uuid(),
+  incomeAccountLabel: z.string().nullable().optional(),
+  capitalEntryId: z.string().uuid(),
+  amount: z.number().positive(),
+  businessDate: z.string(),
+  reference: z.string().min(1),
+  idempotencyKey: z.string().min(1),
+  notes: z.string().nullable().optional(),
+  authorizedByUserId: z.string().min(1),
+  authorizedByName: z.string().nullable().optional(),
+  reversedAt: z.string().nullable().optional(),
+  reversedByUserId: z.string().nullable().optional(),
+  reversedByName: z.string().nullable().optional(),
+  reversalReason: z.string().nullable().optional(),
+  createdAt: z.string()
+});
+
+export type InstitutionalIncomeCapitalTransfer = z.infer<
+  typeof institutionalIncomeCapitalTransferSchema
+>;
+
+export const transferInstitutionalIncomeToCapitalSchema = z.object({
+  branchId: z.string().trim().min(1, "Select a branch"),
+  amount: z.coerce
+    .number()
+    .finite()
+    .positive("Amount must be greater than zero")
+    .max(1_000_000_000, "Amount is too large"),
+  businessDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD date")
+    .optional(),
+  reference: z.string().trim().max(120).optional(),
+  notes: z.string().trim().max(500).optional(),
+  idempotencyKey: z.string().trim().min(1).max(200)
+});
+
+export type TransferInstitutionalIncomeToCapitalInput = z.infer<
+  typeof transferInstitutionalIncomeToCapitalSchema
+>;
+
+export const reverseInstitutionalIncomeCapitalTransferSchema = z.object({
+  reason: z.string().trim().min(3, "Enter a reason (at least 3 characters)").max(500)
+});
+
+export type ReverseInstitutionalIncomeCapitalTransferInput = z.infer<
+  typeof reverseInstitutionalIncomeCapitalTransferSchema
+>;
+
+export const incomeCapitalAllocationSummarySchema = z.object({
+  storageReady: z.boolean(),
+  totalEarnedAllTime: z.number().nonnegative(),
+  availableBalance: z.number().nonnegative(),
+  totalTransferredToCapital: z.number().nonnegative(),
+  transfers: z.array(institutionalIncomeCapitalTransferSchema)
+});
+
+export type IncomeCapitalAllocationSummary = z.infer<
+  typeof incomeCapitalAllocationSummarySchema
+>;
+
 export const incomeSourceBreakdownSchema = z.object({
   source: institutionalIncomeSourceSchema,
   label: z.string(),
@@ -92,6 +158,8 @@ export const incomeBranchBreakdownSchema = z.object({
   amount: z.number(),
   entryCount: z.number().int().nonnegative(),
   accountBalance: z.number().nonnegative(),
+  totalEarnedAllTime: z.number().nonnegative().optional(),
+  totalTransferredToCapital: z.number().nonnegative().optional(),
   bySource: z.array(incomeSourceBreakdownSchema)
 });
 
@@ -106,6 +174,7 @@ export const institutionalIncomeReportSchema = z.object({
   byBranch: z.array(incomeBranchBreakdownSchema),
   accounts: z.array(branchIncomeAccountSchema),
   recentEntries: z.array(institutionalIncomeEntrySchema),
+  capitalAllocation: incomeCapitalAllocationSummarySchema.optional(),
   /** True when caller may only see the daily period. */
   dailyOnly: z.boolean(),
   allowedPeriods: z.array(incomeReportPeriodSchema)

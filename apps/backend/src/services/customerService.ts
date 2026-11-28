@@ -932,7 +932,13 @@ export async function approveCustomerRegistration(
 
   customerId: string,
 
-  approvedByUserId: string
+  approvedByUserId: string,
+
+  options?: {
+    routeId?: string | null;
+    assignedFieldAgentId?: string | null;
+    reason?: string;
+  }
 
 ): Promise<Customer> {
 
@@ -950,7 +956,10 @@ export async function approveCustomerRegistration(
 
   }
 
-
+  const { resolveApprovalAssignment, recordCustomerAssignmentHistory } = await import(
+    "./routeManagementService.js"
+  );
+  const resolvedAssignment = await resolveApprovalAssignment(tenantId, existing, options);
 
   const accountNumber = await generateCustomerAccountNumber(tenantId);
 
@@ -958,21 +967,20 @@ export async function approveCustomerRegistration(
 
   if (supabase) {
 
+    const updatePayload: Record<string, unknown> = {
+      status: "active",
+      account_number: accountNumber,
+      rejection_reason: null,
+      last_qualifying_activity_at: new Date().toISOString(),
+      route_id: resolvedAssignment.routeId,
+      assigned_field_agent_id: resolvedAssignment.assignedFieldAgentId
+    };
+
     const { data, error } = await supabase
 
       .from("customers")
 
-      .update({
-
-        status: "active",
-
-        account_number: accountNumber,
-
-        rejection_reason: null,
-
-        last_qualifying_activity_at: new Date().toISOString()
-
-      })
+      .update(updatePayload)
 
       .eq("tenant_id", tenantId)
 
@@ -989,6 +997,23 @@ export async function approveCustomerRegistration(
     }
 
     const approved = mapCustomerRow(data as Record<string, unknown>);
+
+    if (resolvedAssignment.changeSource) {
+      await recordCustomerAssignmentHistory([
+        {
+          tenantId,
+          customerId: approved.id,
+          branchId: approved.homeBranchId,
+          previousRouteId: existing.routeId ?? null,
+          newRouteId: resolvedAssignment.routeId,
+          previousFieldAgentId: existing.assignedFieldAgentId ?? null,
+          newFieldAgentId: resolvedAssignment.assignedFieldAgentId,
+          changedByUserId: approvedByUserId,
+          changeSource: resolvedAssignment.changeSource,
+          reason: resolvedAssignment.reason
+        }
+      ]).catch(() => undefined);
+    }
 
     await applySavingsInitialDepositOnApproval(tenantId, approved, approvedByUserId);
 
@@ -1046,11 +1071,35 @@ export async function approveCustomerRegistration(
 
   }
 
+  const prevRouteId = existing.routeId ?? null;
+  const prevAgentId = existing.assignedFieldAgentId ?? null;
+
   target.status = "active";
 
   target.accountNumber = accountNumber;
 
+  target.routeId = resolvedAssignment.routeId ?? undefined;
+
+  target.assignedFieldAgentId = resolvedAssignment.assignedFieldAgentId ?? undefined;
+
   setTenantCustomers(tenantId, customers);
+
+  if (resolvedAssignment.changeSource) {
+    await recordCustomerAssignmentHistory([
+      {
+        tenantId,
+        customerId: target.id,
+        branchId: target.homeBranchId,
+        previousRouteId: prevRouteId,
+        newRouteId: resolvedAssignment.routeId,
+        previousFieldAgentId: prevAgentId,
+        newFieldAgentId: resolvedAssignment.assignedFieldAgentId,
+        changedByUserId: approvedByUserId,
+        changeSource: resolvedAssignment.changeSource,
+        reason: resolvedAssignment.reason
+      }
+    ]);
+  }
 
   await applySavingsInitialDepositOnApproval(tenantId, target, approvedByUserId);
 
@@ -1997,6 +2046,13 @@ async function resolveAssignmentRouteId(
     return null;
   }
 
+  const { getTenantRouteSettings } = await import("./routeManagementService.js");
+  const settings = await getTenantRouteSettings(tenantId);
+  // In manual strategy, omitting routeId preserves the customer's current route without auto-switching.
+  if (settings.strategy === "manual") {
+    return customer.routeId ?? null;
+  }
+
   const routes = await listFieldRoutes(tenantId);
   const matches = routes.filter(
     (r) =>
@@ -2017,12 +2073,59 @@ async function resolveAssignmentRouteId(
   return null;
 }
 
+/**
+ * Low-level operational assignment updater used by bulk Route Reorganization and route sync.
+ * Strictly updates ONLY `assigned_field_agent_id` and `route_id` — NEVER alters
+ * `created_by_field_agent_id` or any financial / ledger fields.
+ */
+export async function setCustomerAssignmentDirect(
+  tenantId: string,
+  customerId: string,
+  assignedFieldAgentId: string | null,
+  routeId: string | null
+): Promise<void> {
+  const supabase = getSupabaseAdminClient();
+  if (supabase) {
+    const { error } = await supabase
+      .from("customers")
+      .update({
+        assigned_field_agent_id: assignedFieldAgentId,
+        route_id: routeId
+      })
+      .eq("tenant_id", tenantId)
+      .eq("id", customerId);
+    if (error) {
+      throw new Error(`Failed to update customer assignment: ${error.message}`);
+    }
+    return;
+  }
+
+  const customers = getTenantCustomers(tenantId);
+  const idx = customers.findIndex((c) => c.id === customerId);
+  if (idx < 0) {
+    throw new Error("Customer not found");
+  }
+  customers[idx] = customerSchema.parse({
+    ...customers[idx]!,
+    assignedFieldAgentId: assignedFieldAgentId ?? undefined,
+    routeId: routeId ?? undefined
+  });
+  setTenantCustomers(tenantId, customers);
+}
+
+export function clearMemoryCustomers(tenantId?: string): void {
+  if (tenantId) {
+    setTenantCustomers(tenantId, []);
+  }
+}
+
 export async function assignCustomerFieldAgent(
   tenantId: string,
   customerId: string,
-  input: unknown
+  input: unknown,
+  actorUserId?: string
 ): Promise<Customer> {
-  const { assignedFieldAgentId, routeId: explicitRouteId } =
+  const { assignedFieldAgentId, routeId: explicitRouteId, reason } =
     assignCustomerFieldAgentSchema.parse(input);
 
   const customer = await getCustomerById(tenantId, customerId);
@@ -2053,29 +2156,23 @@ export async function assignCustomerFieldAgent(
     routeId: nextRouteId ?? undefined
   });
 
-  const supabase = getSupabaseAdminClient();
-  if (supabase) {
-    const { error } = await supabase
-      .from("customers")
-      .update({
-        assigned_field_agent_id: assignedFieldAgentId,
-        route_id: nextRouteId
-      })
-      .eq("tenant_id", tenantId)
-      .eq("id", customerId);
+  await setCustomerAssignmentDirect(tenantId, customerId, assignedFieldAgentId, nextRouteId);
 
-    if (error) {
-      throw new Error(`Failed to update customer assignment: ${error.message}`);
+  const { recordCustomerAssignmentHistory } = await import("./routeManagementService.js");
+  await recordCustomerAssignmentHistory([
+    {
+      tenantId,
+      customerId,
+      branchId: customer.homeBranchId,
+      previousRouteId: customer.routeId ?? null,
+      newRouteId: nextRouteId,
+      previousFieldAgentId: customer.assignedFieldAgentId ?? null,
+      newFieldAgentId: assignedFieldAgentId ?? null,
+      changedByUserId: actorUserId ?? "system",
+      changeSource: "transfer",
+      reason: reason?.trim() || "Customer reassigned"
     }
-  } else {
-    const customers = getTenantCustomers(tenantId);
-    const idx = customers.findIndex((c) => c.id === customerId);
-    if (idx < 0) {
-      throw new Error("Customer not found");
-    }
-    customers[idx] = updated;
-    setTenantCustomers(tenantId, customers);
-  }
+  ]).catch(() => undefined);
 
   return enrichCustomerWithAgentNames(tenantId, updated);
 }
