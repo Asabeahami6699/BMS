@@ -145,7 +145,8 @@ export const transactionTypeSchema = z.enum([
   "daily_susu",
   "deposit",
   "withdrawal",
-  "susu_reversal"
+  "susu_reversal",
+  "opening_balance"
 ]);
 
 /** Posted susu credits that still count toward collection totals. */

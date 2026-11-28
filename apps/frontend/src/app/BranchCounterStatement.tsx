@@ -10,7 +10,8 @@ const TX_LABELS: Record<string, string> = {
   deposit: "Deposit",
   withdrawal: "Withdrawal",
   daily_susu: "Daily Susu",
-  susu_reversal: "Susu reversal"
+  susu_reversal: "Susu reversal",
+  opening_balance: "Opening balance (BBF)"
 };
 
 const ROLE_LABELS: Record<string, string> = {

@@ -850,6 +850,7 @@ function isNonCashSystemEntry(notes: string | undefined): boolean {
   return (
     notes.includes(SUSU_COMMISSION_DEBIT_TAG) ||
     notes.includes(SUSU_COMMISSION_REFUND_TAG) ||
+    lower.includes("[opening-balance]") ||
     lower.includes("sms_charge:") ||
     lower.includes("loan_disburse:") ||
     lower.includes("loan_repay:") ||

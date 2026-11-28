@@ -23,6 +23,7 @@ import { useLoanCustomersStore } from "./stores/loanCustomersStore";
 import { useAuditLogsStore } from "./stores/auditLogsStore";
 import { usePlatformAdminStore } from "./stores/platformAdminStore";
 import { usePlatformBackupsStore } from "./stores/platformBackupsStore";
+import { usePlatformMigrationStore } from "./stores/platformMigrationStore";
 import { useRoleManagementStore } from "./stores/roleManagementStore";
 import { useSettingsWorkspaceStore } from "./stores/settingsWorkspaceStore";
 import { useBranchesStore } from "./stores/branchesStore";
@@ -440,6 +441,16 @@ export function computeDashboardPageLoading(pathname: string): boolean {
     return bk.loading || bk.downloadingKey !== null || bk.verifyingTenantId !== null;
   }
 
+  if (path === "migrations") {
+    const mg = usePlatformMigrationStore.getState();
+    return (
+      usePlatformAdminStore.getState().loading ||
+      mg.loadingContext ||
+      mg.previewing ||
+      mg.committing
+    );
+  }
+
   if (path === "announcements") {
     const ann = useSiteAnnouncementsStore.getState();
     return ann.managedLoading || ann.saving || ann.busyId !== null;
@@ -496,6 +507,7 @@ const WATCHED_STORES: StoreLike[] = [
   useAuditLogsStore,
   usePlatformAdminStore,
   usePlatformBackupsStore,
+  usePlatformMigrationStore,
   useSettingsWorkspaceStore,
   useSubscriptionBillingStore,
   useSiteAnnouncementsStore,

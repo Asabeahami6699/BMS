@@ -38,6 +38,11 @@ import {
   getPlatformBackupOverview,
   verifyTenantAuditIntegrity
 } from "../services/platformBackupService.js";
+import {
+  commitTenantMigration,
+  getTenantMigrationContext,
+  previewTenantMigration
+} from "../services/tenantMigrationService.js";
 import { setRequestAuditContext } from "../services/auditService.js";
 import { requirePermission } from "../middleware/requirePermission.js";
 
@@ -568,6 +573,105 @@ platformRouter.get(
     } catch (error) {
       res.status(500).json({
         error: error instanceof Error ? error.message : "Failed to build platform snapshot"
+      });
+    }
+  }
+);
+
+const migrationPreviewBodySchema = z.object({
+  csvText: z.string().min(1, "CSV content is required"),
+  cutoverDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Cutover date must be YYYY-MM-DD"),
+  defaultBranchCode: z.string().optional(),
+  defaultKycTier: z.enum(["simplified", "full"]).optional(),
+  skipDuplicatePhones: z.boolean().optional()
+});
+
+const migrationCommitBodySchema = migrationPreviewBodySchema.extend({
+  expectedTotalBalance: z.number().finite().nonnegative().optional()
+});
+
+platformRouter.get(
+  "/migrations/:tenantId/context",
+  requirePermission("platform.tenants.read"),
+  async (req, res) => {
+    const tenantId = String(req.params.tenantId);
+    try {
+      const context = await getTenantMigrationContext(tenantId);
+      res.json(context);
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Failed to load migration context"
+      });
+    }
+  }
+);
+
+platformRouter.post(
+  "/migrations/:tenantId/preview",
+  requirePermission("platform.tenants.update"),
+  async (req, res) => {
+    const tenantId = String(req.params.tenantId);
+    const parsed = migrationPreviewBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid migration payload" });
+      return;
+    }
+    try {
+      const preview = await previewTenantMigration(
+        tenantId,
+        parsed.data,
+        req.userContext!.userId
+      );
+      res.json(preview);
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Failed to validate migration CSV"
+      });
+    }
+  }
+);
+
+platformRouter.post(
+  "/migrations/:tenantId/commit",
+  requirePermission("platform.tenants.update"),
+  async (req, res) => {
+    const tenantId = String(req.params.tenantId);
+    const parsed = migrationCommitBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid migration payload" });
+      return;
+    }
+    try {
+      const result = await commitTenantMigration(tenantId, parsed.data, {
+        userId: req.userContext!.userId,
+        role: req.userContext!.role
+      });
+
+      setRequestAuditContext(req, {
+        entityType: "tenant_migration",
+        entityId: tenantId,
+        action: `Migrated ${result.importedCount} customers with GHS ${result.totalOpeningBalance.toFixed(2)} opening balances`,
+        after: {
+          tenantId: result.tenantId,
+          tenantName: result.tenantName,
+          cutoverDate: result.cutoverDate,
+          csvSha256: result.csvSha256,
+          importedCount: result.importedCount,
+          duplicateSkippedCount: result.duplicateSkippedCount,
+          susuCount: result.susuCount,
+          savingsCount: result.savingsCount,
+          totalOpeningBalance: result.totalOpeningBalance,
+          susuOpeningBalance: result.susuOpeningBalance,
+          savingsOpeningBalance: result.savingsOpeningBalance,
+          totalLockedBalance: result.totalLockedBalance,
+          branchTotals: result.branchTotals
+        }
+      });
+
+      res.status(201).json(result);
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Failed to commit migration"
       });
     }
   }

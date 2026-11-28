@@ -495,6 +495,26 @@ async function openCycle(options: {
 }
 
 /**
+ * Seeds Cycle #1 with Balance Brought Forward (BBF) for a migrated Susu customer.
+ * Keeps Page #1 at 0/31 boxes checked so FIFO withdrawals spend BBF first at GHS 0 fee.
+ */
+export async function seedOpeningBalanceSusuCycle(options: {
+  context: Ctx;
+  customerId: string;
+  branchId: string;
+  dailyContributionAmount: number;
+  balanceBroughtForward: number;
+}): Promise<SusuCustomerCycle> {
+  return openCycle({
+    context: options.context,
+    customerId: options.customerId,
+    branchId: options.branchId,
+    dailyContributionAmount: options.dailyContributionAmount,
+    balanceBroughtForward: options.balanceBroughtForward
+  });
+}
+
+/**
  * Persist a cycle snapshot for an in-progress open card that predates persisted cycles,
  * locking its original daily rate before a scheduled next-card rate activates later.
  */

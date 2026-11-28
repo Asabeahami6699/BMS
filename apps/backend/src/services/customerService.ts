@@ -542,6 +542,92 @@ export async function createCustomer(
 
 }
 
+/**
+ * Directly creates an active customer during an audited tenant data migration.
+ * Generates a unique account number, preserves optional locked savings minimum,
+ * and skips pending-approval queues and customer SMS/email notifications.
+ */
+export async function createMigratedActiveCustomer(input: {
+  tenantId: string;
+  createdByUserId: string;
+  fullName: string;
+  phone: string;
+  homeBranchId: string;
+  assignedFieldAgentId: string;
+  accountType: "susu" | "savings";
+  dailyContributionAmount: number;
+  kycTier: "full" | "simplified";
+  lockedBalance?: number;
+  location?: string;
+  houseNumber?: string;
+  occupation?: string;
+  idCardNumber?: string;
+  email?: string;
+  nextOfKin?: NextOfKinDetails;
+}): Promise<Customer> {
+  const accountNumber = await generateCustomerAccountNumber(input.tenantId);
+  const locked =
+    input.accountType === "savings" && input.lockedBalance && input.lockedBalance > 0
+      ? Math.round(input.lockedBalance * 100) / 100
+      : 0;
+
+  const nextCustomer: Customer = customerSchema.parse({
+    id: randomUUID(),
+    tenantId: input.tenantId,
+    fullName: input.fullName,
+    email: input.email || undefined,
+    phone: input.phone,
+    location: input.location || undefined,
+    houseNumber: input.houseNumber || undefined,
+    occupation: input.occupation || undefined,
+    accountType: input.accountType,
+    idCardNumber: input.idCardNumber || undefined,
+    kycTier: input.kycTier,
+    accountNumber,
+    lockedBalance: locked > 0 ? locked : undefined,
+    savingsOpeningFeeCollected: input.accountType === "savings",
+    savingsOpeningFeeRecovered: 0,
+    nextOfKin: input.nextOfKin,
+    homeBranchId: input.homeBranchId,
+    assignedFieldAgentId: input.assignedFieldAgentId,
+    createdByFieldAgentId: input.createdByUserId,
+    dailyContributionAmount:
+      input.accountType === "susu" ? Math.round(Math.max(0, input.dailyContributionAmount) * 100) / 100 : 0,
+    status: "active"
+  });
+
+  const supabase = getSupabaseAdminClient();
+  if (supabase) {
+    const insertPayload: Record<string, unknown> = {
+      ...insertRowFromCustomer(nextCustomer),
+      last_qualifying_activity_at: new Date().toISOString()
+    };
+    if (locked > 0) {
+      insertPayload.locked_balance = locked;
+    }
+    let { error } = await supabase.from("customers").insert(insertPayload);
+    if (
+      error &&
+      (isMissingIdCardTypeColumn(error.message) ||
+        isMissingSavingsInitialDepositColumn(error.message) ||
+        /last_qualifying_activity_at/i.test(error.message))
+    ) {
+      const stripped = stripSavingsInitialDepositColumns(stripKycColumns(insertPayload));
+      delete stripped.last_qualifying_activity_at;
+      const retry = await supabase.from("customers").insert(stripped);
+      error = retry.error;
+    }
+    if (error) {
+      throw new Error(`Failed to create migrated customer ${input.fullName}: ${error.message}`);
+    }
+  } else {
+    const customers = getTenantCustomers(input.tenantId);
+    setTenantCustomers(input.tenantId, [...customers, nextCustomer]);
+  }
+
+  return nextCustomer;
+}
+
 export async function registerLoanBorrower(
   tenantId: string,
   createdByUserId: string,

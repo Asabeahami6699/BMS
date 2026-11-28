@@ -233,7 +233,7 @@ export function TellerCalloverPage({ role }: Props) {
       if (cashierFilter && line.recordedByUserId !== cashierFilter) {
         continue;
       }
-      if (line.type === "susu_reversal" || line.reversedAt) {
+      if (line.type === "susu_reversal" || line.type === "opening_balance" || line.reversedAt) {
         continue;
       }
       if (

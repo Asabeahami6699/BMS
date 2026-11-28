@@ -448,7 +448,7 @@ export type AuditChainVerification = {
 export type Transaction = {
   id: string;
   customerId: string;
-  type: "daily_susu" | "deposit" | "withdrawal" | "susu_reversal";
+  type: "daily_susu" | "deposit" | "withdrawal" | "susu_reversal" | "opening_balance";
   amount: number;
   transactionBranchId: string;
   createdAt: string;
@@ -5536,5 +5536,181 @@ export async function downloadPlatformAllTenantsSnapshot(options?: {
   return fetchPlatformDownloadBlob(
     `${API_BASE_URL}/api/v1/platform/backups/snapshot-all${qs}`,
     `bms-platform-snapshot-${new Date().toISOString().slice(0, 10)}.json`
+  );
+}
+
+// ── Platform Tenant Data Migration (Opening Balances) ────────────────────────
+
+export type PlatformMigrationBranch = {
+  id: string;
+  code: string;
+  name: string;
+};
+
+export type PlatformMigrationStaff = {
+  id: string;
+  fullName: string;
+  email: string;
+  role: string;
+  branchId: string | null;
+};
+
+export type PlatformTenantMigrationContext = {
+  tenant: {
+    id: string;
+    name: string;
+    subdomain: string;
+    subscriptionStatus: string;
+  };
+  existingCustomerCount: number;
+  branches: PlatformMigrationBranch[];
+  staff: PlatformMigrationStaff[];
+  templateCsv: string;
+  templateFilename: string;
+};
+
+export type PlatformMigrationPreviewRow = {
+  rowNumber: number;
+  status: "ready" | "duplicate_skipped" | "error";
+  fullName: string;
+  phone: string;
+  branchCode: string;
+  branchId: string | null;
+  branchName: string | null;
+  assignedAgentLabel: string;
+  assignedAgentId: string | null;
+  accountType: "susu" | "savings";
+  dailyContributionAmount: number;
+  openingBalance: number;
+  lockedBalance: number;
+  kycTier: "full" | "simplified";
+  legacyAccountNumber: string;
+  idCardNumber: string;
+  location: string;
+  occupation: string;
+  email: string;
+  nextOfKinName: string;
+  nextOfKinPhone: string;
+  issues: string[];
+};
+
+export type PlatformMigrationBranchTotal = {
+  branchId: string;
+  branchCode: string;
+  branchName: string;
+  customerCount: number;
+  susuCount: number;
+  savingsCount: number;
+  totalOpeningBalance: number;
+  totalLockedBalance: number;
+};
+
+export type PlatformTenantMigrationPreview = {
+  tenantId: string;
+  tenantName: string;
+  cutoverDate: string;
+  csvSha256: string;
+  totalRows: number;
+  readyCount: number;
+  duplicateSkippedCount: number;
+  errorCount: number;
+  susuCount: number;
+  savingsCount: number;
+  simplifiedKycCount: number;
+  fullKycCount: number;
+  totalOpeningBalance: number;
+  susuOpeningBalance: number;
+  savingsOpeningBalance: number;
+  totalLockedBalance: number;
+  branchTotals: PlatformMigrationBranchTotal[];
+  rows: PlatformMigrationPreviewRow[];
+  canCommit: boolean;
+};
+
+export type PlatformMigrationCommittedCustomer = {
+  rowNumber: number;
+  customerId: string;
+  accountNumber: string;
+  legacyAccountNumber: string;
+  fullName: string;
+  phone: string;
+  branchCode: string;
+  branchName: string;
+  assignedAgentLabel: string;
+  accountType: "susu" | "savings";
+  dailyContributionAmount: number;
+  openingBalance: number;
+  lockedBalance: number;
+  kycTier: "full" | "simplified";
+  openingTransactionId: string | null;
+};
+
+export type PlatformTenantMigrationCommitResult = {
+  tenantId: string;
+  tenantName: string;
+  cutoverDate: string;
+  committedAt: string;
+  csvSha256: string;
+  importedCount: number;
+  duplicateSkippedCount: number;
+  susuCount: number;
+  savingsCount: number;
+  totalOpeningBalance: number;
+  susuOpeningBalance: number;
+  savingsOpeningBalance: number;
+  totalLockedBalance: number;
+  branchTotals: PlatformMigrationBranchTotal[];
+  customers: PlatformMigrationCommittedCustomer[];
+  certificateCsv: string;
+  certificateFilename: string;
+};
+
+export async function getPlatformTenantMigrationContext(
+  tenantId: string
+): Promise<PlatformTenantMigrationContext> {
+  return fetchJson<PlatformTenantMigrationContext>(
+    `${API_BASE_URL}/api/v1/platform/migrations/${encodeURIComponent(tenantId)}/context`,
+    { headers: authHeaders() }
+  );
+}
+
+export async function previewPlatformTenantMigration(
+  tenantId: string,
+  payload: {
+    csvText: string;
+    cutoverDate: string;
+    defaultBranchCode?: string;
+    defaultKycTier?: "simplified" | "full";
+    skipDuplicatePhones?: boolean;
+  }
+): Promise<PlatformTenantMigrationPreview> {
+  return fetchJson<PlatformTenantMigrationPreview>(
+    `${API_BASE_URL}/api/v1/platform/migrations/${encodeURIComponent(tenantId)}/preview`,
+    {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    }
+  );
+}
+
+export async function commitPlatformTenantMigration(
+  tenantId: string,
+  payload: {
+    csvText: string;
+    cutoverDate: string;
+    defaultBranchCode?: string;
+    defaultKycTier?: "simplified" | "full";
+    skipDuplicatePhones?: boolean;
+    expectedTotalBalance?: number;
+  }
+): Promise<PlatformTenantMigrationCommitResult> {
+  return fetchJson<PlatformTenantMigrationCommitResult>(
+    `${API_BASE_URL}/api/v1/platform/migrations/${encodeURIComponent(tenantId)}/commit`,
+    {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    }
   );
 }

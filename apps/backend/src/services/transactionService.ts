@@ -692,6 +692,10 @@ export async function createTransaction(
     throw new Error("Susu reversals are created only with Reverse collection.");
   }
 
+  if (payload.type === "opening_balance") {
+    throw new Error("Opening balances can only be posted via the audited Tenant Data Migration tool.");
+  }
+
   if (context.role === "field_agent") {
     if (
       payload.type === "daily_susu" ||
@@ -1269,4 +1273,78 @@ export async function listTransactions(
   }
 
   return (data ?? []).map((row) => mapTransactionRow(row as Record<string, unknown>));
+}
+
+/**
+ * Posts a cutover opening balance (Balance Brought Forward) for a migrated customer.
+ * Strictly bypasses teller tills, daily EOD cash inflows, Susu cycle commissions, and customer SMS.
+ */
+export async function recordOpeningBalanceTransaction(input: {
+  tenantId: string;
+  customerId: string;
+  branchId: string;
+  amount: number;
+  recordedByUserId: string;
+  fieldAgentId: string;
+  cutoverDate: string;
+  legacyAccountNumber?: string;
+}): Promise<Transaction> {
+  const amount = Math.round(input.amount * 100) / 100;
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error("Opening balance amount must be greater than 0");
+  }
+  const refSuffix = input.legacyAccountNumber?.trim()
+    ? ` · Ref: ${input.legacyAccountNumber.trim()}`
+    : "";
+  const notes = `[opening-balance] Balance Brought Forward (Cutover ${input.cutoverDate})${refSuffix}`;
+  const now = new Date().toISOString();
+  const txId = randomUUID();
+
+  const transaction = transactionSchema.parse({
+    id: txId,
+    tenantId: input.tenantId,
+    customerId: input.customerId,
+    type: "opening_balance",
+    amount,
+    transactionBranchId: input.branchId,
+    homeBranchId: input.branchId,
+    recordedByUserId: input.recordedByUserId,
+    fieldAgentId: input.fieldAgentId,
+    notes,
+    createdAt: now
+  });
+
+  const supabase = getSupabaseAdminClient();
+  if (supabase) {
+    const { error } = await supabase.from("customer_transactions").insert({
+      id: transaction.id,
+      tenant_id: transaction.tenantId,
+      customer_id: transaction.customerId,
+      type: transaction.type,
+      amount: transaction.amount,
+      transaction_branch_id: transaction.transactionBranchId,
+      home_branch_id: transaction.homeBranchId,
+      recorded_by_user_id: transaction.recordedByUserId,
+      field_agent_id: transaction.fieldAgentId,
+      notes: transaction.notes,
+      created_at: transaction.createdAt
+    });
+    if (error) {
+      throw new Error(`Failed to record opening balance transaction: ${error.message}`);
+    }
+  } else {
+    const existing = getTenantTransactions(input.tenantId);
+    setTenantTransactions(input.tenantId, [...existing, transaction]);
+  }
+
+  await addLedgerEntry({
+    tenantId: input.tenantId,
+    customerId: input.customerId,
+    transactionId: transaction.id,
+    entryType: "credit",
+    amount: transaction.amount,
+    transactionBranchId: transaction.transactionBranchId
+  });
+
+  return transaction;
 }

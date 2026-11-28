@@ -167,7 +167,7 @@ export function BranchCounterFloatPanel({
       if (cashierId && line.recordedByUserId !== cashierId) {
         continue;
       }
-      if (line.type === "susu_reversal" || line.reversedAt) {
+      if (line.type === "susu_reversal" || line.type === "opening_balance" || line.reversedAt) {
         continue;
       }
       if (

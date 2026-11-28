@@ -143,7 +143,7 @@ function computeTxStatsFromTransactions(
     if (tx.type === "withdrawal" || tx.type === "susu_reversal") {
       entry.withdrawals = round2(entry.withdrawals + amt);
       entry.net = round2(entry.net - amt);
-    } else if (tx.type === "deposit" || tx.type === "daily_susu") {
+    } else if (tx.type === "deposit" || tx.type === "daily_susu" || tx.type === "opening_balance") {
       entry.deposits = round2(entry.deposits + amt);
       entry.net = round2(entry.net + amt);
     }

@@ -32,6 +32,7 @@ export const PLATFORM_NAV: DashboardNavItem[] = [
     ]
   },
   { kind: "link", to: "backups", label: "Backups & Snapshots" },
+  { kind: "link", to: "migrations", label: "Data Migration" },
   { kind: "link", to: "announcements", label: "Announcements" },
   { kind: "link", to: "live-chat", label: "Live chat" }
 ];

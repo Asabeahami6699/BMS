@@ -61,6 +61,9 @@ function entryTypeLabel(entry: LedgerEntry): string {
   if (entry.transactionType === "susu_reversal") {
     return "Reversal";
   }
+  if (entry.transactionType === "opening_balance") {
+    return "Opening balance (BBF)";
+  }
   const reasonOrNotes = `${entry.reason ?? ""} ${entry.notes ?? ""}`.toLowerCase();
   if (reasonOrNotes.includes(SUSU_COMMISSION_DEBIT_TAG)) {
     return "Debit (commission)";
