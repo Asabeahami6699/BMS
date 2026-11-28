@@ -698,7 +698,7 @@ function loadStoredBranchContext(): string {
 }
 
 const runtimeContext = {
-  tenantId: "tenant-demo",
+  tenantId: "",
   branchId: loadStoredBranchContext()
 };
 

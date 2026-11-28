@@ -1,21 +1,16 @@
-import type { TenantProductModule } from "@bms/shared";
 import { getSupabaseAdminClient } from "../config/supabaseClient.js";
-import { disableSupabaseRuntime, env, getSuperAdminCredentials, hasSupabaseConfig } from "../config/env.js";
+import { disableSupabaseRuntime, getSuperAdminCredentials, hasSupabaseConfig } from "../config/env.js";
 import { resetSupabaseClients } from "../config/supabaseClient.js";
 import { isSupabaseConnectivityError } from "../lib/networkError.js";
 import { hashPassword } from "./password.js";
 import {
-  findUserByEmail,
   saveAuthUser,
   upsertTenantInStore,
   type StoredAuthUser,
   type StoredTenant
 } from "./authStore.js";
-import { setTenantModulesInStore } from "./tenantModuleService.js";
 
 const SUPER_ADMIN_ID = "user-super-admin";
-const DEMO_ADMIN_ID = "user-demo-admin";
-const DEMO_MODULES: TenantProductModule[] = ["banking", "susu_management"];
 
 type SeedUser = {
   id: string;
@@ -26,40 +21,6 @@ type SeedUser = {
   scopeType: StoredAuthUser["scopeType"];
   fullName: string;
 };
-
-async function ensureTenantDefaultBranch(
-  supabase: NonNullable<ReturnType<typeof getSupabaseAdminClient>>,
-  tenantId: string,
-  code: string,
-  name: string
-): Promise<void> {
-  const { data: existing, error: listError } = await supabase
-    .from("branches")
-    .select("id")
-    .eq("tenant_id", tenantId)
-    .limit(1);
-  if (listError) {
-    throw new Error(`Failed to check branches for ${tenantId}: ${listError.message}`);
-  }
-  if (existing && existing.length > 0) {
-    return;
-  }
-
-  const row: Record<string, unknown> = {
-    tenant_id: tenantId,
-    code,
-    name,
-    status: "active"
-  };
-  let { error } = await supabase.from("branches").insert(row);
-  if (error?.message.includes("status")) {
-    delete row.status;
-    ({ error } = await supabase.from("branches").insert(row));
-  }
-  if (error) {
-    throw new Error(`Failed to seed default branch for ${tenantId}: ${error.message}`);
-  }
-}
 
 async function ensureAuthUser(
   supabase: NonNullable<ReturnType<typeof getSupabaseAdminClient>>,
@@ -166,7 +127,7 @@ function syncLocalUser(seed: SeedUser): void {
 
 export async function bootstrapSupabaseSeed(options: { resetPassword?: boolean } = {}): Promise<void> {
   if (!hasSupabaseConfig()) {
-    console.info("[bootstrap] Supabase not configured — using in-memory demo users only");
+    console.info("[bootstrap] Supabase not configured — using in-memory super admin only");
     seedLocalOnly();
     return;
   }
@@ -213,17 +174,6 @@ async function bootstrapSupabaseSeedRemote(
     }
   ];
 
-  if (env.BOOTSTRAP_DEMO_ADMIN) {
-    seedTenants.push({
-      id: "tenant-demo",
-      name: "Demo Cooperative",
-      subscriptionStatus: "active",
-      accountNumberPrefix: "233000",
-      subscribedModules: DEMO_MODULES,
-      createdAt: new Date().toISOString()
-    });
-  }
-
   for (const tenant of seedTenants) {
     const { error } = await supabase.from("tenants").upsert(
       {
@@ -252,30 +202,6 @@ async function bootstrapSupabaseSeedRemote(
     }
   ];
 
-  if (env.BOOTSTRAP_DEMO_ADMIN) {
-    for (const module_key of DEMO_MODULES) {
-      const { error: modError } = await supabase.from("tenant_modules").upsert(
-        { tenant_id: "tenant-demo", module_key },
-        { onConflict: "tenant_id,module_key" }
-      );
-      if (modError) {
-        throw new Error(`Failed to seed demo modules: ${modError.message}`);
-      }
-    }
-    setTenantModulesInStore("tenant-demo", DEMO_MODULES);
-    await ensureTenantDefaultBranch(supabase, "tenant-demo", "MAIN", "Main Branch");
-
-    seedUsers.push({
-      id: DEMO_ADMIN_ID,
-      email: "admin@demo.com",
-      password: superAdmin.password,
-      role: "admin",
-      tenantId: "tenant-demo",
-      scopeType: "head_office",
-      fullName: "Demo Company Admin"
-    });
-  }
-
   for (const seed of seedUsers) {
     syncLocalUser(seed);
     await ensureAuthUser(supabase, seed, { resetPassword: options.resetPassword });
@@ -288,9 +214,6 @@ function logBootstrapReady(superAdmin: ReturnType<typeof getSuperAdminCredential
   console.info(
     `[bootstrap] Platform super admin ready: ${superAdmin.email} (password from SUPER_ADMIN_PASSWORD in .env)`
   );
-  if (env.BOOTSTRAP_DEMO_ADMIN) {
-    console.info("[bootstrap] Demo company admin ready: admin@demo.com (same password as super admin)");
-  }
 }
 
 function seedLocalOnly(): void {
@@ -305,24 +228,6 @@ function seedLocalOnly(): void {
     fullName: superAdmin.fullName
   });
 
-  if (env.BOOTSTRAP_DEMO_ADMIN) {
-    upsertTenantInStore({
-      id: "tenant-demo",
-      name: "Demo Cooperative",
-      subscriptionStatus: "active",
-      subscribedModules: DEMO_MODULES,
-      createdAt: new Date().toISOString()
-    });
-    syncLocalUser({
-      id: DEMO_ADMIN_ID,
-      email: "admin@demo.com",
-      password: superAdmin.password,
-      role: "admin",
-      tenantId: "tenant-demo",
-      scopeType: "head_office",
-      fullName: "Demo Company Admin"
-    });
-  }
   upsertTenantInStore({
     id: "platform",
     name: "aabanker Platform",

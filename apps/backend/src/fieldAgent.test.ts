@@ -2,6 +2,7 @@ import request from "supertest";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { SAVINGS_INITIAL_DEPOSIT_GHS } from "@bms/shared";
 import { createApp } from "./app.js";
+import { upsertTenantInStore } from "./services/authStore.js";
 import { resolveTestBranchId, fundCustomerViaCollection } from "./testHelpers.js";
 
 const app = createApp();
@@ -43,6 +44,14 @@ function adminBranchHeaders() {
 
 describe("field agent flows", () => {
   beforeAll(async () => {
+    upsertTenantInStore({
+      id: "tenant-demo",
+      name: "Test Tenant",
+      subscriptionStatus: "active",
+      accountNumberPrefix: "233000",
+      subscribedModules: ["banking", "susu_management"],
+      createdAt: new Date().toISOString()
+    });
     branchId = await resolveTestBranchId(app, coordinatorHeaders());
   });
 

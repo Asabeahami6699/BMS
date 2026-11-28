@@ -42,17 +42,6 @@ function seedIfEmpty(): void {
     return;
   }
 
-  const demoTenant: StoredTenant = {
-    id: "tenant-demo",
-    name: "Demo Cooperative",
-    subscriptionStatus: "active",
-    accountNumberPrefix: "233000",
-    subscribedModules: ["banking", "susu_management"],
-    subdomain: "tenant-demo",
-    createdAt: new Date().toISOString()
-  };
-  tenants.set(demoTenant.id, demoTenant);
-
   const superAdmin: StoredAuthUser = {
     id: "user-super-admin",
     email: "super@bms.com",
@@ -63,20 +52,8 @@ function seedIfEmpty(): void {
     fullName: "Platform Super Admin"
   };
 
-  const companyAdmin: StoredAuthUser = {
-    id: "user-demo-admin",
-    email: "admin@demo.com",
-    passwordHash: hashPassword("ChangeMe123!"),
-    role: "admin",
-    tenantId: "tenant-demo",
-    scopeType: "head_office",
-    fullName: "Demo Company Admin"
-  };
-
-  for (const user of [superAdmin, companyAdmin]) {
-    usersByEmail.set(user.email.toLowerCase(), user);
-    usersById.set(user.id, user);
-  }
+  usersByEmail.set(superAdmin.email.toLowerCase(), superAdmin);
+  usersById.set(superAdmin.id, superAdmin);
 }
 
 seedIfEmpty();

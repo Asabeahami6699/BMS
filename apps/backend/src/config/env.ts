@@ -22,7 +22,7 @@ const envSchema = z.object({
   SUPER_ADMIN_FULL_NAME: z.string().min(1).default("Platform Super Admin"),
   BOOTSTRAP_DEMO_ADMIN: z
     .enum(["true", "false"])
-    .default(process.env.NODE_ENV === "production" ? "false" : "true")
+    .default("false")
     .transform((v) => v === "true"),
   /** Primary frontend origin (e.g. https://aabanker.com or Vercel URL). */
   FRONTEND_URL: z.string().url().optional(),
@@ -69,7 +69,7 @@ const fallbackEnv: Env = {
   SUPER_ADMIN_EMAIL: "super@bms.com",
   SUPER_ADMIN_PASSWORD: "ChangeMe123!",
   SUPER_ADMIN_FULL_NAME: "Platform Super Admin",
-  BOOTSTRAP_DEMO_ADMIN: process.env.NODE_ENV !== "production",
+  BOOTSTRAP_DEMO_ADMIN: false,
   OLLAMA_BASE_URL: "http://127.0.0.1:11434",
   OLLAMA_MODEL: "llama3.2:3b",
   ARKESEL_SMS_BASE_URL: "https://sms.arkesel.com",

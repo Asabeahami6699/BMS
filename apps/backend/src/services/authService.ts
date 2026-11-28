@@ -610,12 +610,13 @@ export async function listPlatformTenants() {
     result.push(toTenantRecord(tenant));
   }
 
+  const remoteIds = new Set(result.map((t) => t.id));
   for (const local of listTenantsFromStore()) {
     if (local.id === "platform") {
       continue;
     }
-    if (!result.some((t) => t.id === local.id)) {
-      result.push(local);
+    if (!remoteIds.has(local.id)) {
+      removeTenantFromStore(local.id);
     }
   }
 
