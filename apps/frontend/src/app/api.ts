@@ -4090,6 +4090,18 @@ export async function resubmitCustomerRegistration(
   );
 }
 
+export async function discardRejectedCustomerRegistration(
+  customerId: string
+): Promise<{ ok: boolean; deletedId: string }> {
+  return fetchJson<{ ok: boolean; deletedId: string }>(
+    `${API_BASE_URL}/api/v1/customers/${encodeURIComponent(customerId)}/rejected`,
+    {
+      method: "DELETE",
+      headers: authHeaders()
+    }
+  );
+}
+
 export async function assignCustomerFieldAgent(
   customerId: string,
   assignedFieldAgentId: string | null,

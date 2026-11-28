@@ -125,7 +125,7 @@ export function AgentHomePage() {
           </div>
           <p className="muted">
             Your coordinator returned {stats.rejected === 1 ? "an account" : `${stats.rejected} accounts`} so you can
-            fix the details and resubmit for approval.
+            fix the details and resubmit, or delete it and start fresh.
           </p>
           <Link to="/app/agent/customers" className="button btn-sm">
             Review &amp; fix now

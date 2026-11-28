@@ -27,6 +27,8 @@ import {
 
   deleteCustomer,
 
+  discardRejectedRegistration,
+
   getCustomerById,
 
   listCustomers,
@@ -501,6 +503,49 @@ customersRouter.put(
     } catch (error) {
       const msg = error instanceof Error ? error.message : "Failed to resubmit registration";
       const statusCode = /not allowed|only resubmit registrations assigned/i.test(msg) ? 403 : 400;
+      res.status(statusCode).json({ error: msg });
+    }
+  }
+);
+
+customersRouter.delete(
+  "/:customerId/rejected",
+  requireAnyPermission("customers.create", "customers.read"),
+  async (req, res) => {
+    const context = req.userContext;
+    if (!context) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    const customerId = Array.isArray(req.params.customerId)
+      ? req.params.customerId[0]
+      : req.params.customerId;
+
+    try {
+      const discarded = await discardRejectedRegistration(
+        context.tenantId,
+        context.userId,
+        context.role,
+        customerId
+      );
+      setRequestAuditContext(req, {
+        entityType: "customer",
+        entityId: customerId,
+        action: "Discarded rejected registration",
+        before: {
+          status: discarded.status,
+          fullName: discarded.fullName,
+          phone: discarded.phone,
+          rejectionReason: discarded.rejectionReason ?? null
+        },
+        after: null
+      });
+      res.json({ ok: true, deletedId: customerId });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "Failed to delete rejected registration";
+      const statusCode = /not allowed|only delete rejected registrations assigned/i.test(msg)
+        ? 403
+        : 400;
       res.status(statusCode).json({ error: msg });
     }
   }

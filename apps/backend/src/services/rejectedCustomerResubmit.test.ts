@@ -197,4 +197,89 @@ describe("rejected registration: send back to mobilizer & resubmit", () => {
     );
     expect(gladysRows).toHaveLength(1);
   });
+
+  it("allows the owning field agent to delete a rejected registration and start fresh, while blocking other agents and non-rejected accounts", async () => {
+    // 1. Mobilizer registers a customer
+    const regRes = await request(app)
+      .post("/api/v1/customers/registrations")
+      .set(agentHeaders())
+      .send({
+        fullName: "Kofi Abandoned",
+        phone: "0542297699",
+        location: "Bondaye",
+        houseNumber: "8",
+        dateOfBirth: "1990-07-02",
+        occupation: "Driver",
+        accountType: "susu",
+        idCardNumber: "GHA-999888777-1",
+        idCardPhotoUrl: FAKE_ID_PHOTO,
+        nextOfKin: {
+          fullName: "Ama Abandoned",
+          phone: "0244000099",
+          location: "Bondaye",
+          houseNumber: "8"
+        },
+        dailyContributionAmount: 30
+      });
+    expect(regRes.status, JSON.stringify(regRes.body)).toBe(201);
+    const customerId = String(regRes.body.id);
+
+    // Guard: cannot discard while still pending_activation
+    const deletePending = await request(app)
+      .delete(`/api/v1/customers/${customerId}/rejected`)
+      .set(agentHeaders());
+    expect(deletePending.status).toBe(400);
+
+    // 2. Coordinator rejects the registration
+    const rejectRes = await request(app)
+      .patch(`/api/v1/customers/${customerId}/reject`)
+      .set(coordinatorHeaders())
+      .send({ reason: "Wrong person details — please discard or redo" });
+    expect(rejectRes.status, JSON.stringify(rejectRes.body)).toBe(200);
+
+    // Guard: another field agent cannot delete someone else's rejected registration
+    const otherAgentDelete = await request(app)
+      .delete(`/api/v1/customers/${customerId}/rejected`)
+      .set(agentHeaders(OTHER_AGENT_ID));
+    expect(otherAgentDelete.status).toBe(403);
+
+    // 3. Owning field agent deletes the rejected registration
+    const deleteRes = await request(app)
+      .delete(`/api/v1/customers/${customerId}/rejected`)
+      .set(agentHeaders());
+    expect(deleteRes.status, JSON.stringify(deleteRes.body)).toBe(200);
+    expect(deleteRes.body).toEqual({ ok: true, deletedId: customerId });
+
+    // 4. Verify the discarded form is completely gone from the list
+    const listAfter = await request(app).get("/api/v1/customers").set(agentHeaders());
+    expect(listAfter.status).toBe(200);
+    expect(
+      (listAfter.body as Array<{ id: string }>).some((c) => c.id === customerId)
+    ).toBe(false);
+
+    // 5. Field agent can start a fresh registration right away
+    const freshRes = await request(app)
+      .post("/api/v1/customers/registrations")
+      .set(agentHeaders())
+      .send({
+        fullName: "Kofi Fresh Start",
+        phone: "0542297699",
+        location: "Bondaye",
+        houseNumber: "8A",
+        dateOfBirth: "1990-07-02",
+        occupation: "Driver",
+        accountType: "susu",
+        idCardNumber: "GHA-999888777-1",
+        idCardPhotoUrl: FAKE_ID_PHOTO,
+        nextOfKin: {
+          fullName: "Ama Fresh",
+          phone: "0244000099",
+          location: "Bondaye",
+          houseNumber: "8A"
+        },
+        dailyContributionAmount: 30
+      });
+    expect(freshRes.status, JSON.stringify(freshRes.body)).toBe(201);
+    expect(freshRes.body.status).toBe("pending_activation");
+  });
 });

@@ -1,10 +1,12 @@
 import { useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { formatAccountAmount } from "@bms/shared";
-import type { Customer } from "../../app/api";
+import { discardRejectedCustomerRegistration, type Customer } from "../../app/api";
 import { Modal } from "../../components/Modal";
 import { RowActionsMenu } from "../../components/RowActionsMenu";
 import { SusuPassbookCard } from "../../components/SusuPassbookCard";
+import { useToast } from "../../components/Toast";
+import { toUserFacingError } from "../../lib/networkError";
 import { CustomerRequestsRow } from "../components/CustomerRequestsRow";
 import { RegistrationModal } from "../RegistrationModal";
 import { useFieldAgentCapabilities } from "../hooks/useFieldAgentCapabilities";
@@ -70,12 +72,39 @@ export function AgentCustomersPage({
   const setFilter = useAgentCustomerStore((s) => s.setFilter);
   const refresh = useAgentCustomerStore((s) => s.refresh);
   const mergeCustomer = useAgentCustomerStore((s) => s.mergeCustomer);
+  const removeCustomer = useAgentCustomerStore((s) => s.removeCustomer);
   const refreshSilent = useAgentCustomerStore((s) => s.refreshSilent);
   const requestsUpdatedAt = useAgentBalanceStore((s) => s.lastFetchedAt);
+  const { showToast } = useToast();
 
   const [registerOpenLocal, setRegisterOpenLocal] = useState(false);
   const [passbookCustomer, setPassbookCustomer] = useState<Customer | null>(null);
   const [resubmitCustomer, setResubmitCustomer] = useState<Customer | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Customer | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  async function handleConfirmDelete(startFresh: boolean) {
+    if (!deleteTarget || deleting) return;
+    setDeleting(true);
+    try {
+      await discardRejectedCustomerRegistration(deleteTarget.id);
+      removeCustomer(deleteTarget.id);
+      showToast(
+        startFresh
+          ? `Deleted ${deleteTarget.fullName}'s rejected form — ready for a fresh registration.`
+          : `Deleted ${deleteTarget.fullName}'s rejected registration.`,
+        "success"
+      );
+      setDeleteTarget(null);
+      if (startFresh && canRegisterCustomers) {
+        setRegisterOpen(true);
+      }
+    } catch (err) {
+      showToast(toUserFacingError(err, "Failed to delete rejected registration"), "error");
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   const filters = useMemo(
     () =>
@@ -159,13 +188,20 @@ export function AgentCustomersPage({
                   </p>
                 ) : null}
                 {c.status === "rejected" ? (
-                  <div className="agent-customer-card-actions">
+                  <div className="agent-customer-card-actions" style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
                     <button
                       type="button"
                       className="button btn-sm"
                       onClick={() => setResubmitCustomer(c)}
                     >
                       Fix &amp; resubmit
+                    </button>
+                    <button
+                      type="button"
+                      className="button button--danger btn-sm"
+                      onClick={() => setDeleteTarget(c)}
+                    >
+                      Delete
                     </button>
                   </div>
                 ) : null}
@@ -265,13 +301,20 @@ export function AgentCustomersPage({
                 </p>
               ) : null}
               {customer.status === "rejected" ? (
-                <div className="agent-customer-card-actions">
+                <div className="agent-customer-card-actions" style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
                   <button
                     type="button"
                     className="button btn-sm"
                     onClick={() => setResubmitCustomer(customer)}
                   >
                     Fix &amp; resubmit
+                  </button>
+                  <button
+                    type="button"
+                    className="button button--danger btn-sm"
+                    onClick={() => setDeleteTarget(customer)}
+                  >
+                    Delete
                   </button>
                 </div>
               ) : null}
@@ -290,6 +333,55 @@ export function AgentCustomersPage({
           ))
         )}
       </div>
+
+      <Modal
+        open={deleteTarget !== null}
+        title="Delete rejected registration?"
+        subtitle={deleteTarget ? `${deleteTarget.fullName} · ${deleteTarget.phone}` : undefined}
+        onClose={() => {
+          if (!deleting) setDeleteTarget(null);
+        }}
+        footer={
+          <>
+            <button
+              type="button"
+              className="button secondary"
+              disabled={deleting}
+              onClick={() => setDeleteTarget(null)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="button button--danger"
+              disabled={deleting}
+              onClick={() => void handleConfirmDelete(false)}
+            >
+              {deleting ? "Deleting…" : "Delete"}
+            </button>
+            {canRegisterCustomers ? (
+              <button
+                type="button"
+                className="button"
+                disabled={deleting}
+                onClick={() => void handleConfirmDelete(true)}
+              >
+                {deleting ? "Deleting…" : "Delete & start fresh"}
+              </button>
+            ) : null}
+          </>
+        }
+      >
+        <p style={{ marginTop: 0 }}>
+          This permanently removes <strong>{deleteTarget?.fullName}</strong>&apos;s rejected
+          registration so it will not remain stuck in your list.
+        </p>
+        {deleteTarget?.rejectionReason ? (
+          <p className="muted" style={{ marginBottom: 0 }}>
+            <strong>Coordinator note:</strong> {deleteTarget.rejectionReason}
+          </p>
+        ) : null}
+      </Modal>
 
       <Modal
         open={passbookCustomer !== null}

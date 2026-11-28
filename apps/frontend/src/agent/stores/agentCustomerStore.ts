@@ -25,6 +25,7 @@ type AgentCustomerState = {
   loadFromPersistence: () => void;
   setCustomers: (customers: Customer[]) => void;
   mergeCustomer: (customer: Customer) => void;
+  removeCustomer: (customerId: string) => void;
   ensureHydrated: () => Promise<void>;
   refreshSilent: () => Promise<void>;
   refresh: () => Promise<void>;
@@ -122,6 +123,14 @@ export const useAgentCustomerStore = create<AgentCustomerState>((set, get) => ({
         ? existing.map((c, i) => (i === idx ? customer : c))
         : [customer, ...existing];
     get().setCustomers(next);
+  },
+
+  removeCustomer: (customerId) => {
+    const next = get().customers.filter((c) => c.id !== customerId);
+    get().setCustomers(next);
+    if (get().filter === "rejected" && !next.some((c) => c.status === "rejected")) {
+      set({ filter: "all" });
+    }
   },
 
   ensureHydrated: async () => {

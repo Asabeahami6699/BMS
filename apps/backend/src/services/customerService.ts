@@ -1532,6 +1532,77 @@ export async function resubmitCustomerRegistration(
   return enrichCustomerWithAgentNames(tenantId, updatedCustomer);
 }
 
+/**
+ * Allows the owning field agent (or coordinator/admin) to permanently discard
+ * an unapproved, rejected registration that has no account number and zero ledger activity,
+ * so incomplete rejected forms do not hang on the system forever.
+ */
+export async function discardRejectedRegistration(
+  tenantId: string,
+  actorUserId: string,
+  actorRole: string,
+  customerId: string
+): Promise<Customer> {
+  const existing = await getCustomerById(tenantId, customerId);
+  if (!existing) {
+    throw new Error("Customer not found");
+  }
+  if (existing.status !== "rejected") {
+    throw new Error("Only rejected registrations can be discarded");
+  }
+  if (existing.accountNumber) {
+    throw new Error("Cannot discard a customer with an assigned account number");
+  }
+
+  const isOwner =
+    existing.createdByFieldAgentId === actorUserId ||
+    existing.assignedFieldAgentId === actorUserId;
+  const isStaff =
+    actorRole === "admin" || actorRole === "super_admin" || actorRole === "coordinator";
+  if (actorRole === "field_agent" && !isOwner) {
+    throw new Error("You can only delete rejected registrations assigned to you");
+  }
+  if (!isOwner && !isStaff) {
+    throw new Error("Not allowed to delete this rejected registration");
+  }
+
+  // Defensive accounting guard: never discard a record that has any ledger/transaction history.
+  const supabase = getSupabaseAdminClient();
+  if (supabase) {
+    const [txCheck, ledgerCheck] = await Promise.all([
+      supabase
+        .from("customer_transactions")
+        .select("id")
+        .eq("tenant_id", tenantId)
+        .eq("customer_id", customerId)
+        .limit(1),
+      supabase
+        .from("ledger_entries")
+        .select("id")
+        .eq("tenant_id", tenantId)
+        .eq("customer_id", customerId)
+        .limit(1)
+    ]);
+    if (txCheck.error) {
+      throw new Error(`Failed to verify customer transactions: ${txCheck.error.message}`);
+    }
+    if (ledgerCheck.error) {
+      throw new Error(`Failed to verify customer ledger: ${ledgerCheck.error.message}`);
+    }
+    if ((txCheck.data?.length ?? 0) > 0 || (ledgerCheck.data?.length ?? 0) > 0) {
+      throw new Error("Cannot delete a customer record that already has financial transactions");
+    }
+  } else {
+    const balance = await computeCustomerBalance(tenantId, customerId);
+    if (balance !== 0) {
+      throw new Error("Cannot delete a customer record that already has a non-zero balance");
+    }
+  }
+
+  await deleteCustomer(tenantId, customerId);
+  return existing;
+}
+
 
 
 async function enrichCustomersWithAccountBalances(
